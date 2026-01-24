@@ -1,1403 +1,1265 @@
-<!doctype html>
-<html>
-<head>
-  <base target="_top">
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
+/***************************************
+ * CCF Staff Portal (stable + upgrades)
+ * File: Code.gs
+ * v2026-01-23.staff2
+ *
+ * Includes:
+ * - Router: default Staff Portal; ?mode=reg -> Reg portal (handled in Reg.gs via doGetReg_)
+ * - Staff login: STAFF/ADMIN (and optional HELPER/TEMP with expiry) + SUPERUSER via BYPASS_CODE
+ * - Check-in (scan/manual), Live page, VRM search (as before)
+ * - Pending Staff Portal changes implemented in backend:
+ *   (1) Privilege authorisation endpoints (2-step scan in UI; server-side enforcement)
+ *       - TEMP expiry = 2 days
+ *       - HELPER expiry = 7 days
+ *       - HELPER/TEMP cannot authorise anyone
+ *       - Commit-only logging (no button-click logging)
+ *   (2) Live "tap name" details endpoint (STAFF/ADMIN/SUPERUSER only)
+ *       - shows member info + VRM + today's sign-in + last 4 EventKeys
+ *   (3) Delete today's attendance endpoint
+ *       - STAFF/ADMIN: requires re-scan of SAME logged-in staff QR
+ *       - SUPERUSER: requires ADMIN QR (ADMIN only; STAFF rejected) and logs SUPERUSER (ADMIN:CCFxxxx)
+ *       - sends email if eligible + logs action
+ ***************************************/
 
-  <title>CCF Staff Portal</title>
+const APP_VERSION = '2026-01-23.staff2';
+const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
-  <!-- ============================================================
-   * index.html (PART 1/2)
-   * Works with Code.gs v2026-01-24.staff4.fullsplit
-   * ============================================================ -->
+const TZ = 'Europe/London';
+const BYPASS_CODE = '@9413';
+const SESSION_TTL_SECONDS = 4 * 60 * 60;
 
-  <style>
-    :root{
-      --bg:#f5f7ff; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
-      --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e; --warn:#c88400;
-      --shadow: 0 10px 24px rgba(10,30,80,0.10);
-      --pad: clamp(10px, 3.2vw, 16px);
-      --radius: 18px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
-      --sans: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
-    }
-    html,body{ height:100%; }
-    body{
-      margin:0; font-family:var(--sans); color:var(--text);
-      background: radial-gradient(1200px 600px at 20% 0%, #e9eeff 0%, transparent 60%),
-                  radial-gradient(1000px 600px at 90% 20%, #eef9ff 0%, transparent 55%),
-                  var(--bg);
-    }
-    .wrap{ max-width:980px; margin:0 auto; padding:16px; }
-    .topbar{
-      display:flex; align-items:center; justify-content:space-between; gap:12px;
-      padding:12px 14px; border-radius:var(--radius);
-      background:rgba(255,255,255,0.75); backdrop-filter: blur(10px);
-      border:1px solid var(--border); box-shadow: var(--shadow);
-    }
-    .brand{ display:flex; flex-direction:column; gap:2px; }
-    .brand b{ font-size:16px; }
-    .brand small{ color:var(--muted); }
-    .pill{
-      display:inline-flex; align-items:center; gap:8px;
-      border:1px solid var(--border); border-radius:999px;
-      padding:6px 10px; background:#fff;
-      font-size:13px; color:var(--muted);
-    }
-    .mono{ font-family:var(--mono); }
+// Sheets
+const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
+const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
+const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
 
-    .grid{ display:grid; gap:12px; margin-top:12px; }
-    @media(min-width:860px){
-      .grid{ grid-template-columns: 1.08fr 0.92fr; }
-    }
-    .card{
-      background:rgba(255,255,255,0.92); border:1px solid var(--border);
-      border-radius:var(--radius); box-shadow: var(--shadow);
-      padding: var(--pad);
-    }
-    .card h2{ margin:0 0 8px 0; font-size:16px; }
-    .muted{ color:var(--muted); }
-    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .row > * { flex: 0 0 auto; }
-    .spacer{ flex: 1 1 auto; }
+// Members schema
+const MEMBERS_HEADERS_REQUIRED = [
+  'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
+];
 
-    input, select, button, textarea{
-      font-family:inherit;
-      border-radius:12px;
-      border:1px solid var(--border);
-      padding:10px 12px;
-      font-size:14px;
-      background:#fff;
-      outline:none;
-    }
-    textarea{ width:100%; min-height:72px; resize:vertical; }
-    input[type="text"], input[type="password"]{ width: min(520px, 100%); }
-    button{
-      cursor:pointer; border:1px solid rgba(10,30,80,0.16);
-      background:#fff; font-weight:600;
-    }
-    button.primary{
-      background: linear-gradient(135deg, rgba(26,168,108,0.18), rgba(26,168,108,0.05));
-      border-color: rgba(26,168,108,0.28);
-    }
-    button.danger{
-      background: linear-gradient(135deg, rgba(217,60,94,0.16), rgba(217,60,94,0.05));
-      border-color: rgba(217,60,94,0.28);
-    }
-    button:disabled{ opacity:0.55; cursor:not-allowed; }
+// Statuses
+const STATUS_DISABLED = 'DISABLED';
+const STATUS_ACTIVE = 'ACTIVE';
+const STATUS_PENDING = 'PENDING';
+const STATUS_PROVISIONAL = 'PROVISIONAL';
+const STATUS_STAFF = 'STAFF';
+const STATUS_ADMIN = 'ADMIN';
+const STATUS_HELPER = 'HELPER';
+const STATUS_TEMP = 'TEMP';
 
-    .tabs{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-    .tab{
-      padding:9px 12px; border-radius:999px;
-      border:1px solid var(--border); background:#fff; color:var(--muted);
-      font-weight:700; font-size:13px;
-    }
-    .tab.active{ color:var(--text); border-color: rgba(10,30,80,0.22); }
+// check-in allowed (include ADMIN/HELPER/TEMP so they can still be checked-in if scanned)
+const ALLOWED_STATUSES_FOR_CHECKIN = [
+  STATUS_ACTIVE, STATUS_PENDING, STATUS_PROVISIONAL,
+  STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP
+];
 
-    .banner{
-      margin-top:12px;
-      padding:10px 12px;
-      border-radius: 14px;
-      border:1px solid var(--border);
-      background:#fff;
-      display:none;
-    }
-    .banner.good{ display:block; border-color: rgba(26,168,108,0.25); background: rgba(26,168,108,0.06); }
-    .banner.bad{ display:block; border-color: rgba(217,60,94,0.25); background: rgba(217,60,94,0.06); }
-    .banner.warn{ display:block; border-color: rgba(200,132,0,0.25); background: rgba(200,132,0,0.06); }
+// staff-portal login allowed
+const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP];
 
-    .kv{
-      display:grid; grid-template-columns: 140px 1fr;
-      gap:6px 10px;
-      font-size:14px;
-      align-items:center;
-      margin-top:8px;
-    }
-    .kv .k{ color:var(--muted); }
-    .hr{ height:1px; background:rgba(10,30,80,0.10); margin:12px 0; }
+// privilege expiry configuration
+const HELPER_EXPIRY_DAYS = 7;
+const TEMP_EXPIRY_DAYS = 2;
 
-    .list{
-      margin:10px 0 0 0; padding:0; list-style:none;
-      display:flex; flex-direction:column; gap:8px;
-    }
-    .li{
-      border:1px solid var(--border);
-      border-radius: 14px;
-      padding:10px 12px;
-      background:#fff;
-    }
-    .li .top{ display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-    .li .name{ font-weight:800; }
-    .chip{
-      display:inline-flex; align-items:center; gap:6px;
-      padding:4px 8px; border-radius:999px;
-      border:1px solid var(--border);
-      font-size:12px; color:var(--muted);
-      background:rgba(255,255,255,0.9);
-    }
-    .chip.good{ border-color: rgba(26,168,108,0.35); color: var(--good); }
-    .chip.bad{ border-color: rgba(217,60,94,0.35); color: var(--bad); }
-    .chip.warn{ border-color: rgba(200,132,0,0.35); color: var(--warn); }
+// Optional Members columns
+const MEMBERS_OPTIONAL_HEADERS = [
+  'VRM','VRM2',
+  'RoleExpires' // Date/time when HELPER/TEMP expires (blank for STAFF/ADMIN/ACTIVE/etc.)
+];
 
-    /* Scanner modal (PART 2 will implement logic) */
-    .modalBack{
-      position:fixed; inset:0;
-      background: rgba(0,0,0,0.42);
-      display:none; align-items:center; justify-content:center;
-      padding:16px; z-index:50;
-    }
-    .modal{
-      width:min(720px, 100%);
-      border-radius: 20px;
-      border:1px solid rgba(255,255,255,0.18);
-      background: rgba(255,255,255,0.96);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.22);
-      overflow:hidden;
-    }
-    .modalHeader{
-      padding:12px 14px; display:flex; align-items:center; justify-content:space-between;
-      border-bottom: 1px solid var(--border);
-    }
-    .modalHeader b{ font-size:14px; }
-    .modalBody{ padding:12px 14px; }
-    .videoBox{
-      width:100%; aspect-ratio: 16 / 10;
-      border-radius:16px; border:1px solid var(--border);
-      overflow:hidden; background:#000;
-      display:flex; align-items:center; justify-content:center;
-    }
-    video{ width:100%; height:100%; object-fit:cover; }
-    .hint{ font-size:13px; color:var(--muted); margin-top:8px; line-height:1.35; }
-  </style>
-</head>
+/******** Web App Router ********/
+function doGet(e) {
+  const mode = String((e && e.parameter && e.parameter.mode) || '').toLowerCase();
 
-<body>
-  <div class="wrap">
-    <!-- ============================================================
-     * SECTION: TOP BAR
-     * ============================================================ -->
-    <div class="topbar">
-      <div class="brand">
-        <b>CCF Staff Portal</b>
-        <small class="muted">Version: <span class="mono" id="ver"></span></small>
-      </div>
+  // Registration portal (public, no sign-in)
+  if (mode === 'reg') {
+    return doGetReg_(e); // lives in Reg.gs
+  }
 
-      <div class="row">
-        <div class="pill" id="whoPill">
-          <span>👤</span>
-          <span id="whoText" class="muted">Not logged in</span>
-        </div>
-        <button id="btnLogout" style="display:none;">Logout</button>
-      </div>
-    </div>
+  // Default: staff portal
+  const t = HtmlService.createTemplateFromFile('index');
+  t.APP_VERSION = APP_VERSION;
+  return t.evaluate()
+    .setTitle('CCF Staff Portal')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
 
-    <div id="banner" class="banner"></div>
+/******** Helpers ********/
+function openSs_(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
+function nowUk_(){ return new Date(); }
+function fmtUk_(d, p){ return Utilities.formatDate(d, TZ, p); }
+function getDefaultEventKey_(){ return 'SundayService_' + fmtUk_(nowUk_(), 'yyyy-MM-dd'); }
 
-    <!-- ============================================================
-     * SECTION: MAIN GRID (login + portal)
-     * ============================================================ -->
-    <div class="grid">
-      <!-- LEFT: Login / Check-in -->
-      <div class="card" id="cardLeft">
-        <h2 id="leftTitle">Login</h2>
+function normalizeStatus_(s){ return String(s || '').trim().toUpperCase(); }
+function normalizeVrm_(s){ return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 
-        <!-- ================= LOGIN PANEL ================= -->
-        <div id="loginPanel">
-          <div class="muted" style="margin-bottom:10px; line-height:1.4;">
-            Scan your staff QR to login. If camera scanning is not supported, paste the QR text (format <span class="mono">CCF0000|k...</span>).
-          </div>
+function isOptedOut_(optOutRaw){
+  const v = String(optOutRaw || '').trim().toUpperCase();
+  if (!v) return false;
+  if (v === '0' || v === 'N' || v === 'NO' || v === 'FALSE') return false;
+  return ['1','Y','YES','TRUE','OPTOUT'].includes(v) || v.length > 0;
+}
 
-          <div class="row" style="gap:8px;">
-            <button class="primary" id="btnOpenLoginScan">📷 Scan QR (login)</button>
-            <button id="btnUseInternal">🔒 Internal code</button>
-          </div>
+function isPrivilegedStaff_(st){
+  st = normalizeStatus_(st);
+  return (st === STATUS_STAFF || st === STATUS_ADMIN);
+}
+function isPortalUserAllowed_(st){
+  st = normalizeStatus_(st);
+  return ALLOWED_STATUSES_FOR_PORTAL.includes(st);
+}
+function isHelperOrTemp_(st){
+  st = normalizeStatus_(st);
+  return (st === STATUS_HELPER || st === STATUS_TEMP);
+}
 
-          <div class="hr"></div>
+function addDays_(d, days){
+  const x = new Date(d.getTime());
+  x.setDate(x.getDate() + Number(days || 0));
+  return x;
+}
+function isExpired_(expiry){
+  if (!expiry) return true;
+  const dt = (expiry instanceof Date) ? expiry : new Date(expiry);
+  return dt.getTime() < nowUk_().getTime();
+}
 
-          <div class="muted" style="margin-bottom:6px;">Paste QR payload (login):</div>
-          <input id="loginQr" type="text" placeholder="CCF1234|kxxxx..." autocomplete="off" />
-          <div class="row" style="margin-top:8px;">
-            <button class="primary" id="btnLogin">Login</button>
-            <span class="muted" id="loginHint"></span>
-          </div>
+function safeToDate_(v){
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
 
-          <div class="hr"></div>
+function maskEmail_(email){
+  const s = String(email||'').trim();
+  const at = s.indexOf('@');
+  if (at <= 0) return '';
+  const local = s.slice(0, at);
+  const dom = s.slice(at+1);
+  if (!dom) return '';
+  const L = local.length;
+  const head = local.slice(0, Math.min(5, L));
+  const tail = (L >= 3) ? local.slice(-2) : '';
+  const stars = '*'.repeat(Math.max(3, L - head.length - tail.length));
+  return head + stars + tail + '@' + dom;
+}
 
-          <div id="internalPanel" style="display:none;">
-            <div class="muted" style="margin-bottom:6px;">Internal code (SUPERUSER):</div>
-            <input id="internalCode" type="password" placeholder="Enter internal code" autocomplete="off" />
-            <div class="row" style="margin-top:8px;">
-              <button class="primary" id="btnLoginInternal">Login (internal)</button>
-              <button id="btnInternalBack">Back</button>
-            </div>
-            <div class="hint">SUPERUSER still requires ADMIN QR for sensitive actions (delete / authorise), per Code.gs.</div>
-          </div>
-        </div>
+function maskMobile_(mobile){
+  const raw = String(mobile||'').trim();
+  if (!raw) return '';
+  const digits = String(raw).replace(/\D/g,'');
+  if (digits.length < 7) return raw;
+  const head = digits.slice(0,4);
+  const tail = digits.slice(-3);
+  const stars = '*'.repeat(Math.max(3, digits.length - 7));
+  const plus = raw.startsWith('+') ? '+' : '';
+  return plus + head + stars + tail;
+}
 
-        <!-- ================= PORTAL PANEL (tabs appear after login) ================= -->
-        <div id="portalPanel" style="display:none;">
-          <div class="row">
-            <div class="muted">EventKey</div>
-            <input id="eventKey" type="text" class="mono" style="width:min(420px,100%);" />
-            <button id="btnSetToday">Today</button>
-            <span class="spacer"></span>
-            <button id="btnPing">Ping</button>
-            <button id="btnSelfTest">Self-test</button>
-          </div>
+function maskVrm_(vrm){
+  const v = normalizeVrm_(vrm||'');
+  if (!v) return '';
+  return v.slice(0,4) + ' ***';
+}
 
-          <div class="tabs" id="tabs">
-            <button class="tab active" data-tab="checkin">✅ Check-in</button>
-            <button class="tab" data-tab="live">📺 Live</button>
-            <button class="tab" data-tab="vrm">🚗 VRM</button>
-            <button class="tab" data-tab="auth">🪪 Authorise</button>
-            <button class="tab" data-tab="admin">🗑️ Admin</button>
-          </div>
+/******** Members sheet + optional columns ********/
+function getMembersSheet_() {
+  const ss = openSs_();
+  const sheets = ss.getSheets();
 
-          <!-- PART 2 will insert the tab contents here -->
-          <div id="tabHost"></div>
-        </div>
-      </div>
+  for (const sh of sheets) {
+    const lastCol = sh.getLastColumn();
+    if (lastCol < MEMBERS_HEADERS_REQUIRED.length) continue;
 
-      <!-- RIGHT: Result / Details -->
-      <div class="card" id="cardRight">
-        <h2>Result</h2>
-        <div class="muted">Check-in status, receipts, “already checked-in” info, and live/admin details will show here.</div>
+    const header = sh.getRange(1, 1, 1, MEMBERS_HEADERS_REQUIRED.length).getValues()[0]
+      .map(v => String(v || '').trim());
 
-        <!-- SECTION: RESULT BOX -->
-        <div id="resultBox" class="kv" style="margin-top:10px;">
-          <div class="k">Status</div><div class="v" id="r_status">—</div>
-          <div class="k">Member</div><div class="v" id="r_member">—</div>
-          <div class="k">Time</div><div class="v" id="r_time">—</div>
-          <div class="k">Receipt</div><div class="v" id="r_receipt">—</div>
-          <div class="k">Email</div><div class="v" id="r_email">—</div>
-          <div class="k">Notes</div><div class="v" id="r_notes">—</div>
-        </div>
+    const matches = MEMBERS_HEADERS_REQUIRED.every((h, i) => header[i] === h);
+    if (matches) return sh;
+  }
+  throw new Error('Members sheet not found (first 11 headers do not match expected schema).');
+}
 
-        <div class="hr"></div>
+function ensureMembersOptionalColumns_(){
+  const sh = getMembersSheet_();
+  let lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
+  const col = {};
+  headers.forEach((h,i)=>{ if(h) col[h]=i; });
 
-        <div class="muted">Logs</div>
-        <ul class="list" id="logList"></ul>
-      </div>
-    </div>
-  </div>
+  let cur = lastCol;
+  for (const h of MEMBERS_OPTIONAL_HEADERS){
+    if (col[h] !== undefined) continue;
+    sh.insertColumnAfter(cur);
+    cur++;
+    sh.getRange(1, cur).setValue(h).setFontWeight('bold');
+  }
+}
 
-  <!-- ============================================================
-   * SECTION: SCANNER MODAL (UI only; logic in PART 2)
-   * ============================================================ -->
-  <div class="modalBack" id="scanBack">
-    <div class="modal">
-      <div class="modalHeader">
-        <b id="scanTitle">Scan QR</b>
-        <div class="row">
-          <button id="btnTorch" style="display:none;">🔦</button>
-          <button id="btnCloseScan">Close</button>
-        </div>
-      </div>
-      <div class="modalBody">
-        <div class="videoBox">
-          <video id="scanVideo" playsinline></video>
-        </div>
-        <div class="hint" id="scanHint">
-          If scanning fails: increase brightness, move slightly back, or use paste mode.
-        </div>
-        <div class="hr"></div>
-        <div class="muted" style="margin-bottom:6px;">Or paste QR payload:</div>
-        <input id="scanPaste" type="text" placeholder="CCF1234|kxxxx..." autocomplete="off" />
-        <div class="row" style="margin-top:8px;">
-          <button class="primary" id="btnUsePaste">Use pasted value</button>
-        </div>
-      </div>
-    </div>
-  </div>
+function getMembersIndex_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'membersIndex_staff_v1';
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
 
-  <script>
-    // ============================================================
-    // SECTION: CONFIG / STATE
-    // ============================================================
-    const APP_VERSION = '<?= APP_VERSION ?>';
-    const LS_TOKEN_KEY = 'ccf_staff_token_v4';
-    const LS_STAFF_KEY = 'ccf_staff_staff_v4';
-    const LS_DEVICE_ID = 'ccf_staff_device_id_v2';
+  ensureMembersOptionalColumns_();
 
-    const state = {
-      token: '',
-      staff: null,
-      activeTab: 'checkin',
-      lastScanPurpose: null, // 'login' | 'checkin' | 'auth_approver' | 'auth_target' | 'reauth_delete' | 'admin_qr'
-      deviceId: '',
-      ua: navigator.userAgent || ''
+  const sh = getMembersSheet_();
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2) return { byId: {}, sheetName: sh.getName(), cols: {}, hasVRM: false };
+
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim());
+  const col = {};
+  headers.forEach((h, i) => col[h] = i);
+
+  const hasVRM = ('VRM' in col) || ('VRM2' in col);
+
+  const data = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const byId = {};
+
+  for (let r = 0; r < data.length; r++) {
+    const row = data[r];
+    const id = String(row[col['ID']] || '').trim().toUpperCase();
+    if (!id) continue;
+
+    const vrm1 = hasVRM && ('VRM' in col) ? normalizeVrm_(row[col['VRM']]) : '';
+    const vrm2 = hasVRM && ('VRM2' in col) ? normalizeVrm_(row[col['VRM2']]) : '';
+
+    const roleExpires = ('RoleExpires' in col) ? safeToDate_(row[col['RoleExpires']]) : null;
+
+    // If duplicate IDs exist in test data, later rows will overwrite in byId (acceptable for portal operations)
+    byId[id] = {
+      rowNumber: r + 2,
+      id,
+      key: String(row[col['Key']] || '').trim(),
+      nameZh: String(row[col['NameZh']] || '').trim(),
+      nameEn: String(row[col['NameEn']] || '').trim(),
+      email: String(row[col['Email']] || '').trim(),
+      mobile: String(row[col['Mobile']] || '').trim(),
+      status: String(row[col['Status']] || '').trim(),
+      optOutEmail: String(row[col['OptOutEmail']] || '').trim(),
+      notes: String(row[col['Notes']] || '').trim(),
+      vrm: vrm1,
+      vrm2: vrm2,
+      roleExpires: roleExpires ? roleExpires.toISOString() : '' // store as ISO string for cache
     };
-
-    // ============================================================
-    // SECTION: DOM HELPERS
-    // ============================================================
-    const $ = (id) => document.getElementById(id);
-    function escapeHtml(s){
-      return String(s ?? '')
-        .replaceAll('&','&amp;')
-        .replaceAll('<','&lt;')
-        .replaceAll('>','&gt;')
-        .replaceAll('"','&quot;')
-        .replaceAll("'","&#39;");
-    }
-    function setBanner(kind, html){
-      const b = $('banner');
-      b.className = 'banner ' + (kind || '');
-      b.innerHTML = html || '';
-      b.style.display = html ? 'block' : 'none';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-    function showErr(res){
-      // robust renderer: accepts either backend error object or thrown Error
-      if (!res) { setBanner('bad', 'Unknown error.'); return; }
-      const code = res.code ? `<span class="mono">${escapeHtml(res.code)}</span>` : '';
-      const msg = res.zh || res.en || res.message || String(res);
-      setBanner('bad', `<b>Error</b> ${code}${code ? ' — ' : ''}${escapeHtml(msg)}`);
-    }
-    function logLine(title, detail){
-      const ul = $('logList');
-      const li = document.createElement('li');
-      li.className = 'li';
-      li.innerHTML = `
-        <div class="top">
-          <div class="name">${escapeHtml(title)}</div>
-          <div class="chip">${new Date().toLocaleTimeString()}</div>
-        </div>
-        ${detail ? `<div class="muted" style="margin-top:6px; white-space:pre-wrap;">${escapeHtml(detail)}</div>` : ''}
-      `;
-      ul.prepend(li);
-      while (ul.children.length > 12) ul.removeChild(ul.lastChild);
-    }
-    function setWho(){
-      const t = $('whoText');
-      const p = $('whoPill');
-      if (!state.staff){
-        t.textContent = 'Not logged in';
-        p.style.opacity = '0.9';
-        $('btnLogout').style.display = 'none';
-        return;
-      }
-      const nm = [state.staff.nameZh, state.staff.nameEn].filter(Boolean).join(' ');
-      t.textContent = `${state.staff.id} · ${state.staff.status}${nm ? ' · ' + nm : ''}`;
-      $('btnLogout').style.display = 'inline-block';
-    }
-    function setResult(obj){
-      $('r_status').innerHTML = obj.statusHtml || '—';
-      $('r_member').innerHTML = obj.memberHtml || '—';
-      $('r_time').innerHTML = obj.timeHtml || '—';
-      $('r_receipt').innerHTML = obj.receiptHtml || '—';
-      $('r_email').innerHTML = obj.emailHtml || '—';
-      $('r_notes').innerHTML = obj.notesHtml || '—';
-    }
-
-    // ============================================================
-    // SECTION: STORAGE (token persistence)
-    // ============================================================
-    function ensureDeviceId(){
-      let id = localStorage.getItem(LS_DEVICE_ID);
-      if (!id){
-        id = 'D-' + Math.random().toString(36).slice(2, 10).toUpperCase();
-        localStorage.setItem(LS_DEVICE_ID, id);
-      }
-      state.deviceId = id;
-    }
-    function saveSession(){
-      if (state.token) localStorage.setItem(LS_TOKEN_KEY, state.token);
-      if (state.staff) localStorage.setItem(LS_STAFF_KEY, JSON.stringify(state.staff));
-    }
-    function loadSession(){
-      state.token = localStorage.getItem(LS_TOKEN_KEY) || '';
-      try{
-        state.staff = JSON.parse(localStorage.getItem(LS_STAFF_KEY) || 'null');
-      }catch(e){ state.staff = null; }
-    }
-    function clearSession(){
-      state.token = '';
-      state.staff = null;
-      localStorage.removeItem(LS_TOKEN_KEY);
-      localStorage.removeItem(LS_STAFF_KEY);
-    }
-
-    // ============================================================
-    // SECTION: APPS SCRIPT RPC WRAPPER
-    // ============================================================
-    function callApi(fnName, ...args){
-      return new Promise((resolve, reject) => {
-        google.script.run
-          .withSuccessHandler((res) => resolve(res))
-          .withFailureHandler((err) => reject(err))
-          [fnName](...args);
-      });
-    }
-
-    // ============================================================
-    // SECTION: LOGIN FLOW
-    // ============================================================
-    async function doLoginWithQr(payload){
-      $('btnLogin').disabled = true;
-      try{
-        const res = await callApi('api_login', payload);
-        if (!res || !res.ok) { showErr(res); return; }
-        state.token = res.token;
-        state.staff = res.staff;
-        saveSession();
-        setBanner('good', `✅ Logged in as <span class="mono">${escapeHtml(state.staff.id)}</span> (${escapeHtml(state.staff.status)})`);
-        logLine('Login', `${state.staff.id} · ${state.staff.status}`);
-        await afterLoginInit();
-      }catch(e){
-        showErr(e);
-      }finally{
-        $('btnLogin').disabled = false;
-      }
-    }
-
-    async function doLoginInternal(code){
-      $('btnLoginInternal').disabled = true;
-      try{
-        const res = await callApi('api_login_internal', code);
-        if (!res || !res.ok) { showErr(res); return; }
-        state.token = res.token;
-        state.staff = res.staff;
-        saveSession();
-        setBanner('warn', `🔒 Internal login: <span class="mono">SUPERUSER</span> (ADMIN QR required for sensitive actions)`);
-        logLine('Login (internal)', 'SUPERUSER');
-        await afterLoginInit();
-      }catch(e){
-        showErr(e);
-      }finally{
-        $('btnLoginInternal').disabled = false;
-      }
-    }
-
-    async function pingSession(){
-      if (!state.token) return;
-      try{
-        const res = await callApi('api_ping', state.token);
-        if (!res || !res.ok){
-          clearSession();
-          setWho();
-          showLoggedOutUi();
-          showErr(res);
-          return;
-        }
-        state.staff = res.staff;
-        saveSession();
-        setWho();
-      }catch(e){
-        // ignore transient
-      }
-    }
-
-    async function logout(){
-      try{ if (state.token) await callApi('api_logout', state.token); }catch(e){}
-      clearSession();
-      setWho();
-      showLoggedOutUi();
-      setBanner('warn', 'Logged out.');
-      setResult({ statusHtml:'—', memberHtml:'—', timeHtml:'—', receiptHtml:'—', emailHtml:'—', notesHtml:'—' });
-    }
-
-    function showLoggedOutUi(){
-      $('loginPanel').style.display = 'block';
-      $('portalPanel').style.display = 'none';
-      $('leftTitle').textContent = 'Login';
-    }
-
-    // PART 2 will define:
-    // - afterLoginInit()
-    // - tab renderers + actions
-    // - scanner logic and openScanModal(purpose, onValue)
-
-    // ============================================================
-    // SECTION: INIT
-    // ============================================================
-    (function init(){
-      $('ver').textContent = APP_VERSION;
-      ensureDeviceId();
-      loadSession();
-      setWho();
-
-      // login panel buttons
-      $('btnLogin').addEventListener('click', () => doLoginWithQr(($('loginQr').value || '').trim()));
-      $('btnUseInternal').addEventListener('click', () => {
-        $('internalPanel').style.display = 'block';
-        $('btnUseInternal').style.display = 'none';
-      });
-      $('btnInternalBack').addEventListener('click', () => {
-        $('internalPanel').style.display = 'none';
-        $('btnUseInternal').style.display = 'inline-block';
-      });
-      $('btnLoginInternal').addEventListener('click', () => doLoginInternal(($('internalCode').value || '').trim()));
-
-      // scan modal controls (logic in PART 2)
-      $('btnCloseScan').addEventListener('click', () => {
-        // PART 2 will override close behaviour safely; keep no-op here
-        $('scanBack').style.display = 'none';
-      });
-
-      $('btnLogout').addEventListener('click', logout);
-
-      // if we have a stored token, attempt ping then let PART 2 finish init
-      if (state.token){
-        pingSession().finally(() => {
-          // PART 2 will call afterLoginInit if still logged in
-          // (we leave it to PART 2 to avoid undefined reference)
-        });
-      }
-    })();
-  </script>
-
-<!-- PART 2/2 will continue from here -->
-<!-- ============================================================
- * index.html (PART 2/2)
- * Fixes:
- * - Defines afterLoginInit() (PART 1 calls it)
- * - Wires btnOpenLoginScan click handler
- * - Fixes duplicate IDs (Admin tab)
- * - Fixes $('log') -> logList
- * - Wires portal top buttons (btnPing / btnSelfTest / btnSetToday)
- * ============================================================ -->
-
-<script>
-  // ============================================================
-  // SECTION: SCANNER (Camera / Paste)
-  // ============================================================
-  let scanStream = null;
-  let scanTrack = null;
-  let scanTimer = null;
-  let scanOnValue = null;
-
-  function canUseBarcodeDetector(){
-    return ('BarcodeDetector' in window);
   }
 
-  async function openScanModal(purpose, title, hint, onValue){
-    state.lastScanPurpose = purpose;
-    scanOnValue = onValue;
+  const payload = { byId, sheetName: sh.getName(), cols: col, hasVRM };
+  cache.put(cacheKey, JSON.stringify(payload), 300);
+  return payload;
+}
 
-    $('scanTitle').textContent = title || 'Scan QR';
-    $('scanHint').textContent = hint || 'If scanning fails: increase brightness, move slightly back, or use paste mode.';
-    $('scanPaste').value = '';
-    $('scanBack').style.display = 'flex';
+function clearMembersIndexCache_(){
+  try{ CacheService.getScriptCache().remove('membersIndex_staff_v1'); }catch(e){}
+}
 
-    // reset torch button
-    $('btnTorch').style.display = 'none';
-    $('btnTorch').disabled = true;
+/******** System sheets ********/
+function ensureCheckinsSheetColumns_(sh) {
+  const needCols = 14;
+  const lastCol = sh.getLastColumn();
+  if (lastCol < needCols) sh.insertColumnsAfter(lastCol, needCols - lastCol);
 
-    // Prefer camera scanning; fall back gracefully
-    try{
-      await startScanner_();
-    }catch(e){
-      // camera might be blocked; still allow paste
-      logLine('Scanner', 'Camera unavailable; paste mode only.');
-    }
+  const hdr = sh.getRange(1, 1, 1, needCols).getValues()[0];
+  const wanted = [
+    'Timestamp','EventKey',
+    'MemberId','MemberNameZh','MemberNameEn',
+    'Method',
+    'StaffId','StaffNameZh','StaffNameEn',
+    'ReceiptId',
+    'EmailTo','EmailStatus',
+    'DeviceId','UserAgent'
+  ];
+  for (let i = 0; i < wanted.length; i++) {
+    const v = String(hdr[i] || '').trim();
+    if (!v) sh.getRange(1, i + 1).setValue(wanted[i]);
+  }
+}
+
+function getCheckinsSheet_() {
+  const ss = openSs_();
+  let sh = ss.getSheetByName(CHECKINS_SHEET_NAME_PRIMARY);
+  if (!sh) sh = ss.getSheetByName(CHECKINS_SHEET_NAME_LEGACY);
+
+  if (!sh) {
+    sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
+    sh.getRange(1, 1, 1, 14).setValues([[
+      'Timestamp','EventKey',
+      'MemberId','MemberNameZh','MemberNameEn',
+      'Method',
+      'StaffId','StaffNameZh','StaffNameEn',
+      'ReceiptId',
+      'EmailTo','EmailStatus',
+      'DeviceId','UserAgent'
+    ]]);
+    sh.getRange(1, 1, 1, 14).setFontWeight('bold');
+  } else {
+    ensureCheckinsSheetColumns_(sh);
+  }
+  return sh;
+}
+
+function ensureActivityLogSheet_() {
+  const ss = openSs_();
+  let sh = ss.getSheetByName(ACTIVITY_LOG_SHEET_NAME);
+  if (!sh) {
+    sh = ss.insertSheet(ACTIVITY_LOG_SHEET_NAME);
+    sh.appendRow(['Timestamp','StaffId','StaffNameZh','StaffNameEn','Action','Details','EventKey']);
+    sh.getRange(1, 1, 1, 7).setFontWeight('bold');
+  }
+  return sh;
+}
+
+/******** Sessions ********/
+function createSession_(staff) {
+  const token = Utilities.getUuid();
+  CacheService.getScriptCache().put('sess_' + token, JSON.stringify({ staff, createdAt: Date.now() }), SESSION_TTL_SECONDS);
+  return token;
+}
+
+function getSession_(token) {
+  if (!token) return null;
+  const cache = CacheService.getScriptCache();
+  const k = 'sess_' + token;
+  const raw = cache.get(k);
+  if (!raw) return null;
+  cache.put(k, raw, SESSION_TTL_SECONDS); // sliding
+  try { return JSON.parse(raw); } catch (e) { cache.remove(k); return null; }
+}
+
+function requireSession_(token) {
+  const sess = getSession_(token);
+  if (!sess) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  return { ok:true, sess };
+}
+
+function api_ping(token){
+  const sess = getSession_(token);
+  if (!sess) return { ok:false };
+  return { ok:true, staff: sess.staff };
+}
+
+function api_logout(token){
+  if (token) CacheService.getScriptCache().remove('sess_' + token);
+  return { ok:true };
+}
+
+/******** QR parsing ********/
+function parseQrPayloadStrict_(raw) {
+  const s = String(raw || '').trim();
+  const parts = s.split('|');
+  if (parts.length !== 2) {
+    return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
+  }
+  const id = String(parts[0] || '').trim().toUpperCase();
+  const key = String(parts[1] || '').trim();
+
+  if (!id || !key) {
+    return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
+  }
+  if (!/^CCF\d{4,}$/.test(id)) {
+    return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
+  }
+  if (!/^k.+/.test(key)) {
+    return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
+  }
+  return { ok:true, id, key };
+}
+
+function makeReceiptId_(ts) {
+  const stamp = fmtUk_(ts, 'yyMMddHHmmss');
+  const tail = Utilities.getUuid().slice(0,6).toUpperCase();
+  return 'R' + stamp + '-' + tail;
+}
+
+/******** Login ********/
+function api_login(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return { ok:false, code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.' };
+
+  if (raw === BYPASS_CODE) {
+    const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
+    const token = createSession_(staff);
+    return { ok:true, token, staff };
   }
 
-  async function closeScanModal(){
-    $('scanBack').style.display = 'none';
-    await stopScanner_();
-    scanOnValue = null;
-    state.lastScanPurpose = null;
+  const parsed = parseQrPayloadStrict_(raw);
+  if (!parsed.ok) return parsed;
+
+  const mi = getMembersIndex_();
+  const m = mi.byId[parsed.id];
+  if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
+
+  const st = normalizeStatus_(m.status);
+
+  if (!st) return { ok:false, code:'E413', zh:'此會員狀態未設定，請聯絡影音同工', en:'Status not set. Please contact Media team.' };
+  if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用，請聯絡接待同工', en:'Account is disabled. Please contact Welcome team.' };
+
+  if (!isPortalUserAllowed_(st)) {
+    return { ok:false, code:'E415', zh:'此帳號沒有權限登入同工專頁，請聯絡影音同工', en:'No permission for staff portal. Please contact Media team.' };
   }
 
-  async function startScanner_(){
-    await stopScanner_();
+  if (!m.key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
+  if (m.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符，可能是舊 QR 卡，請聯絡影音同工', en:'Key mismatch (possibly old QR badge). Please contact Media team.' };
 
-    const video = $('scanVideo');
-    video.srcObject = null;
-
-    // Request back camera if possible
-    const constraints = {
-      audio:false,
-      video:{
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    };
-
-    scanStream = await navigator.mediaDevices.getUserMedia(constraints);
-    video.srcObject = scanStream;
-    await video.play();
-
-    // Torch support (best effort)
-    scanTrack = scanStream.getVideoTracks()[0] || null;
-    setupTorchButton_();
-
-    // Start decode loop
-    if (canUseBarcodeDetector()){
-      const detector = new BarcodeDetector({ formats: ['qr_code'] });
-      scanTimer = setInterval(async () => {
-        try{
-          if (!$('scanBack') || $('scanBack').style.display === 'none') return;
-          const barcodes = await detector.detect(video);
-          if (barcodes && barcodes.length){
-            const v = String(barcodes[0].rawValue || '').trim();
-            if (v) return acceptScannedValue_(v);
-          }
-        }catch(e){
-          // ignore transient
-        }
-      }, 250);
-    } else {
-      // iOS Safari often lacks BarcodeDetector; we provide paste fallback
-      $('scanHint').textContent =
-        'Your browser may not support live QR detection. Please use paste mode, or open in a browser that supports QR scanning (newer Chrome/Edge).';
-    }
+  // HELPER/TEMP expiry enforcement
+  if (isHelperOrTemp_(st)) {
+    const exp = m.roleExpires ? safeToDate_(m.roleExpires) : null;
+    if (!exp) return { ok:false, code:'E419', zh:'此臨時權限缺少到期日，請聯絡影音同工', en:'Expiry missing. Please contact Media team.' };
+    if (isExpired_(exp)) return { ok:false, code:'E420', zh:'此臨時權限已到期，請聯絡影音同工', en:'Temporary privilege expired. Please contact Media team.' };
   }
 
-  async function stopScanner_(){
-    if (scanTimer){ clearInterval(scanTimer); scanTimer = null; }
-    try{
-      const video = $('scanVideo');
-      if (video) { video.pause(); video.srcObject = null; }
-    }catch(e){}
-    try{
-      if (scanStream){
-        scanStream.getTracks().forEach(t => t.stop());
-      }
-    }catch(e){}
-    scanStream = null;
-    scanTrack = null;
-    $('btnTorch').style.display = 'none';
+  const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:st, isSuper:false };
+  const token = createSession_(staff);
+  return { ok:true, token, staff };
+}
+
+function api_login_internal(input) {
+  const raw = String(input || '').trim();
+  if (raw === BYPASS_CODE) {
+    const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
+    const token = createSession_(staff);
+    return { ok:true, token, staff };
   }
+  return { ok:false, code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.' };
+}
 
-  function setupTorchButton_(){
-    try{
-      if (!scanTrack) return;
-      const caps = scanTrack.getCapabilities ? scanTrack.getCapabilities() : null;
-      if (!caps || !caps.torch) return;
+/******** Activity log (commit-only logging elsewhere uses this) ********/
+function api_log_activity(token, action, details) {
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
 
-      $('btnTorch').style.display = 'inline-block';
-      $('btnTorch').disabled = false;
+  const staff = auth.sess.staff;
+  const sh = ensureActivityLogSheet_();
+  const ts = nowUk_();
+  const eventKey = getDefaultEventKey_();
 
-      let torchOn = false;
-      $('btnTorch').onclick = async () => {
-        torchOn = !torchOn;
-        try{
-          await scanTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-        }catch(e){
-          torchOn = false;
-        }
+  sh.appendRow([ts, staff.id, staff.nameZh || '', staff.nameEn || '', String(action||'').trim(), String(details||'').trim(), eventKey]);
+  return { ok:true };
+}
+
+/******** Check-in: dedupe lookup ********/
+function findExistingCheckin_(sh, eventKey, memberId) {
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    const ev = String(row[1] || '').trim();
+    const mid = String(row[2] || '').trim();
+    if (ev === eventKey && mid === memberId) {
+      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+      return {
+        timeUk: fmtUk_(ts, 'HH:mm:ss'),
+        eventKey: ev,
+        handledBy: { staffId: String(row[6] || ''), nameZh: String(row[7] || ''), nameEn: String(row[8] || '') },
+        receiptId: String(row[9] || ''),
+        method: String(row[5] || '')
       };
-    }catch(e){}
+    }
+  }
+  return null;
+}
+
+function validateMemberForCheckin_(m, parsedKeyOrNull) {
+  const st = normalizeStatus_(m.status);
+  if (!st) return { ok:false, code:'E413', zh:'此會員狀態未設定，請聯絡影音同工', en:'Status not set. Please contact Media team.' };
+  if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用，請聯絡接待同工', en:'Account is disabled. Please contact Welcome team.' };
+  if (!ALLOWED_STATUSES_FOR_CHECKIN.includes(st)) return { ok:false, code:'E413', zh:'此會員狀態不正確，請聯絡影音同工', en:'Invalid status. Please contact Media team.' };
+
+  if (parsedKeyOrNull !== null) {
+    if (!m.key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
+    if (m.key !== parsedKeyOrNull) return { ok:false, code:'E418', zh:'Key 不相符，可能是舊 QR 卡，請聯絡影音同工', en:'Key mismatch (possibly old QR badge). Please contact Media team.' };
+  }
+  return { ok:true, status: st };
+}
+
+/******** Email proof (check-in) ********/
+function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
+  const emailTo = String(member.email || '').trim();
+
+  if (!emailTo) {
+    return { status:'NO_EMAIL', to:'', ui:{ zh:'未有電郵資料。若下次需要電郵簽到證明，請聯絡影音同工。', en:'No email on file. If you want email proof next time, please speak to our Media team.' } };
+  }
+  if (isOptedOut_(member.optOutEmail)) {
+    return { status:'OPTOUT', to:emailTo, ui:{ zh:'此會員已選擇不接收電郵。若下次需要電郵簽到證明，請聯絡影音同工。', en:'Email is opted out. If you want email proof next time, please speak to our Media team.' } };
+  }
+  const quota = MailApp.getRemainingDailyQuota();
+  if (quota <= 0) {
+    return { status:'QUOTA', to:emailTo, ui:{ zh:'今日電郵額度已用完。若下次需要電郵簽到證明，請聯絡影音同工。', en:'Daily email quota exceeded. If you want email proof next time, please speak to our Media team.' } };
   }
 
-  async function acceptScannedValue_(val){
-    const v = String(val || '').trim();
-    if (!v) return;
-    await closeScanModal();
-    if (typeof scanOnValue === 'function') scanOnValue(v);
+  const nameEn = String(member.nameEn || '').trim();
+  const nameZh = String(member.nameZh || '').trim();
+  const greetName = nameEn || nameZh || 'there';
+  const dtLine = fmtUk_(ts, 'yyyy-MM-dd HH:mm:ss');
+
+  const subject = `CCF Check-in proof / 簽到證明: ${eventKey} (Receipt ${receiptId})`;
+  const body =
+`Hi ${greetName},
+
+This is your proof of check-in:
+Event: ${eventKey}
+Time (UK): ${dtLine}
+Receipt ID: ${receiptId}
+
+${nameZh ? nameZh + '，' : ''}你好：
+
+以下為你的簽到證明：
+活動：${eventKey}
+時間（英國）：${dtLine}
+Receipt ID：${receiptId}
+`;
+
+  try {
+    MailApp.sendEmail(emailTo, subject, body);
+    return { status:'SENT', to:emailTo, ui:{ zh:'已發送電郵簽到證明。', en:'Email proof of check-in sent.' } };
+  } catch (e) {
+    return { status:'ERROR', to:emailTo, ui:{ zh:'電郵發送失敗。若需要協助，請聯絡影音同工。', en:'Failed to send email. Please contact Media team for help.' } };
+  }
+}
+
+/******** Check-in APIs ********/
+function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+  const staff = auth.sess.staff;
+
+  const parsed = parseQrPayloadStrict_(qrPayload);
+  if (!parsed.ok) return parsed;
+
+  const m = getMembersIndex_().byId[parsed.id];
+  if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
+
+  const v = validateMemberForCheckin_(m, parsed.key);
+  if (!v.ok) return v;
+
+  const eventKey = String(eventKeyOptional || '').trim() || getDefaultEventKey_();
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const sh = getCheckinsSheet_();
+
+    const existing = findExistingCheckin_(sh, eventKey, m.id);
+    if (existing) {
+      return {
+        ok:true,
+        result:'ALREADY',
+        eventKey,
+        status: v.status,
+        member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+        already: existing
+      };
+    }
+
+    const ts = nowUk_();
+    const receiptId = makeReceiptId_(ts);
+    const selfCheckin = (m.id === staff.id);
+
+    const email = maybeSendProofEmail_(m, eventKey, receiptId, ts);
+
+    sh.appendRow([
+      ts, eventKey,
+      m.id, m.nameZh || '', m.nameEn || '',
+      'scan',
+      staff.id, staff.nameZh || '', staff.nameEn || '',
+      receiptId,
+      email.to || '',
+      email.status,
+      String(deviceId || ''),
+      String(ua || '')
+    ]);
+
+    CacheService.getScriptCache().remove('liveNames_' + eventKey);
+
+    return {
+      ok:true,
+      result:'OK',
+      eventKey,
+      timeUk: fmtUk_(ts, 'HH:mm:ss'),
+      status: v.status,
+      member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+      staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
+      receiptId,
+      selfCheckin,
+      emailUi: email.ui
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+  const staff = auth.sess.staff;
+
+  const id = String(memberId || '').trim().toUpperCase();
+  if (!id) return { ok:false, code:'E416', zh:'請輸入 ID', en:'Please enter an ID' };
+
+  const m = getMembersIndex_().byId[id];
+  if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
+
+  const v = validateMemberForCheckin_(m, null);
+  if (!v.ok) return v;
+
+  const eventKey = String(eventKeyOptional || '').trim() || getDefaultEventKey_();
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const sh = getCheckinsSheet_();
+
+    const existing = findExistingCheckin_(sh, eventKey, m.id);
+    if (existing) {
+      return {
+        ok:true,
+        result:'ALREADY',
+        eventKey,
+        status: v.status,
+        member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+        already: existing
+      };
+    }
+
+    const ts = nowUk_();
+    const receiptId = makeReceiptId_(ts);
+
+    const email = maybeSendProofEmail_(m, eventKey, receiptId, ts);
+
+    sh.appendRow([
+      ts, eventKey,
+      m.id, m.nameZh || '', m.nameEn || '',
+      'manual',
+      staff.id, staff.nameZh || '', staff.nameEn || '',
+      receiptId,
+      email.to || '',
+      email.status,
+      String(deviceId || ''),
+      String(ua || '')
+    ]);
+
+    CacheService.getScriptCache().remove('liveNames_' + eventKey);
+
+    return {
+      ok:true,
+      result:'OK',
+      eventKey,
+      timeUk: fmtUk_(ts, 'HH:mm:ss'),
+      status: v.status,
+      member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+      staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
+      receiptId,
+      emailUi: email.ui
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function api_search_members(token, query) {
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const q = String(query || '').trim();
+  if (!q) return { ok:true, results:[] };
+
+  const byId = getMembersIndex_().byId;
+
+  if (/^CCF\d{4,}$/i.test(q)) {
+    const id = q.toUpperCase();
+    const m = byId[id];
+    if (!m) return { ok:true, results:[] };
+    if (normalizeStatus_(m.status) === STATUS_DISABLED) return { ok:true, results:[] };
+    return { ok:true, results:[ { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' } ] };
   }
 
-  // Bind modal buttons (override PART 1 no-op safely)
-  $('btnCloseScan').onclick = closeScanModal;
-  $('btnUsePaste').onclick = async () => {
-    const v = ($('scanPaste').value || '').trim();
-    if (!v) return setBanner('warn', 'Please paste a QR payload.');
-    await acceptScannedValue_(v);
+  const qLower = q.toLowerCase();
+  const out = [];
+
+  for (const id in byId) {
+    const m = byId[id];
+    if (normalizeStatus_(m.status) === STATUS_DISABLED) continue;
+
+    const hay = [m.id, m.nameZh, m.nameEn, m.email, m.mobile]
+      .map(x => String(x || '').toLowerCase())
+      .join(' | ');
+
+    if (hay.includes(qLower)) out.push({ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' });
+    if (out.length >= 12) break;
+  }
+
+  return { ok:true, results: out };
+}
+
+/******** Live page (names) ********/
+function api_get_live_page(token, eventKeyOptional) {
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const eventKey = String(eventKeyOptional || '').trim() || getDefaultEventKey_();
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'liveNames_' + eventKey;
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const sh = getCheckinsSheet_();
+  const lastRow = sh.getLastRow();
+  const members = getMembersIndex_().byId;
+
+  const latestById = {};
+  let lastSignIn = null;
+
+  if (lastRow >= 2) {
+    const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const ev = String(row[1] || '').trim();
+      if (ev !== eventKey) continue;
+
+      const mid = String(row[2] || '').trim();
+      if (!mid) continue;
+
+      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+      const t = ts.getTime();
+
+      const nameZh = String(row[3] || '') || (members[mid] ? (members[mid].nameZh || '') : '');
+      const nameEn = String(row[4] || '') || (members[mid] ? (members[mid].nameEn || '') : '');
+
+      const prev = latestById[mid];
+      if (!prev || t > prev.t) latestById[mid] = { t, nameZh, nameEn };
+    }
+
+    for (let i = data.length - 1; i >= 0; i--) {
+      const row = data[i];
+      const ev = String(row[1] || '').trim();
+      if (ev !== eventKey) continue;
+
+      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+      lastSignIn = { timeUk: fmtUk_(ts, 'HH:mm:ss'), nameZh: String(row[3] || ''), nameEn: String(row[4] || '') };
+      break;
+    }
+  }
+
+  const ids = Object.keys(latestById);
+  ids.sort((a,b) => latestById[b].t - latestById[a].t);
+
+  const names = [];
+  for (const id of ids) {
+    const n = latestById[id];
+    names.push({ nameZh: n.nameZh || '', nameEn: n.nameEn || '', id: id });
+  }
+
+  const payload = {
+    ok:true,
+    eventKey,
+    checkedInCount: names.length,
+    lastSignIn,
+    names
   };
 
-  // ============================================================
-  // SECTION: TABS (renderers)
-  // ============================================================
-  function setActiveTab(tab){
-    state.activeTab = tab;
-    document.querySelectorAll('#tabs .tab').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === tab);
-    });
-    renderActiveTab();
+  cache.put(cacheKey, JSON.stringify(payload), 15);
+  return payload;
+}
+
+/******** VRM search ********/
+function api_search_vrm(token, query, eventKeyOptional) {
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const q = normalizeVrm_(query);
+  const mi = getMembersIndex_();
+  if (!q) return { ok:true, results:[], hasVRM: mi.hasVRM };
+
+  const eventKey = String(eventKeyOptional || '').trim() || getDefaultEventKey_();
+
+  // checked set
+  const sh = getCheckinsSheet_();
+  const lastRow = sh.getLastRow();
+  const checkedSet = new Set();
+
+  if (lastRow >= 2) {
+    const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (String(row[1] || '').trim() !== eventKey) continue;
+      const mid = String(row[2] || '').trim();
+      if (mid) checkedSet.add(mid);
+    }
   }
 
-  function renderActiveTab(){
-    const host = $('tabHost');
-    host.innerHTML = '';
-
-    if (state.activeTab === 'checkin') host.appendChild(renderTabCheckin_());
-    else if (state.activeTab === 'live') host.appendChild(renderTabLive_());
-    else if (state.activeTab === 'vrm') host.appendChild(renderTabVrm_());
-    else if (state.activeTab === 'auth') host.appendChild(renderTabAuth_());
-    else if (state.activeTab === 'admin') host.appendChild(renderTabAdmin_());
-  }
-
-  // ============================================================
-  // TAB - CHECKIN
-  // ============================================================
-  function renderTabCheckin_(){
-    const box = document.createElement('div');
-    box.innerHTML = `
-      <div class="muted" style="line-height:1.4;">
-        Scan member QR to check-in. If needed, search by name / ID and use manual check-in.
-      </div>
-
-      <div class="hr"></div>
-
-      <div class="row" style="gap:8px;">
-        <button class="primary" id="btnOpenCheckinScan">📷 Scan member QR</button>
-        <input id="manualId" type="text" class="mono" placeholder="CCF1234" style="width:180px;" />
-        <button id="btnManualCheckin">Manual check-in</button>
-      </div>
-
-      <div class="hr"></div>
-
-      <div class="muted" style="margin-bottom:6px;">Search members (name / email / mobile / ID):</div>
-      <div class="row" style="gap:8px;">
-        <input id="searchQ" type="text" placeholder="e.g. Chan / CCF0123 / 9123..." />
-        <button id="btnSearch">Search</button>
-      </div>
-      <div id="searchResults" style="margin-top:10px;"></div>
-    `;
-
-    box.querySelector('#btnOpenCheckinScan').onclick = () => {
-      openScanModal(
-        'checkin',
-        'Scan member QR (check-in)',
-        'Aim at member QR. If it does not detect, use paste mode below.',
-        (payload) => doCheckinScan(payload)
-      );
-    };
-
-    box.querySelector('#btnManualCheckin').onclick = () => {
-      const id = (box.querySelector('#manualId').value || '').trim().toUpperCase();
-      doCheckinManual(id);
-    };
-
-    box.querySelector('#btnSearch').onclick = () => doSearchMembers_((box.querySelector('#searchQ').value || '').trim(), box);
-
-    return box;
-  }
-
-  async function doSearchMembers_(q, root){
-    const out = root.querySelector('#searchResults');
-    out.innerHTML = '';
-    if (!q) return;
-
-    try{
-      const res = await callApi('api_search_members', state.token, q);
-      if (!res || !res.ok) return showErr(res);
-
-      if (!res.results || !res.results.length){
-        out.innerHTML = `<div class="muted">No results.</div>`;
-        return;
-      }
-
-      const ul = document.createElement('ul');
-      ul.className = 'list';
-      res.results.forEach(m => {
-        const li = document.createElement('li');
-        li.className = 'li';
-        li.innerHTML = `
-          <div class="top">
-            <div class="name">${escapeHtml(m.id)} · ${escapeHtml([m.nameZh,m.nameEn].filter(Boolean).join(' '))}</div>
-            <button data-id="${escapeHtml(m.id)}">Manual check-in</button>
-          </div>
-        `;
-        li.querySelector('button').onclick = () => doCheckinManual(m.id);
-        ul.appendChild(li);
+  const out = [];
+  for (const id in mi.byId) {
+    const m = mi.byId[id];
+    const v1 = m.vrm || '';
+    const v2 = m.vrm2 || '';
+    if ((v1 && v1.includes(q)) || (v2 && v2.includes(q))) {
+      out.push({
+        id: m.id,
+        nameZh: m.nameZh || '',
+        nameEn: m.nameEn || '',
+        vrm: v1,
+        vrm2: v2,
+        checkedInToday: checkedSet.has(m.id)
       });
-      out.appendChild(ul);
-    }catch(e){
-      showErr(e);
+      if (out.length >= 12) break;
     }
   }
 
-  async function doCheckinScan(qrPayload){
-    setBanner('', '');
-    setResult({ statusHtml:'⏳ Checking in...', memberHtml:'—', timeHtml:'—', receiptHtml:'—', emailHtml:'—', notesHtml:'' });
+  return { ok:true, results: out, hasVRM: mi.hasVRM, eventKey };
+}
 
-    try{
-      const ek = ($('eventKey').value || '').trim();
-      const res = await callApi('api_checkin_scan', state.token, qrPayload, ek, state.deviceId, state.ua);
-      if (!res || !res.ok) return showErr(res);
+/*****************************************************************
+ * PENDING STAFF PORTAL FEATURES: backend endpoints
+ *****************************************************************/
 
-      if (res.result === 'ALREADY'){
-        setBanner('warn', `Already checked-in for <span class="mono">${escapeHtml(res.eventKey)}</span>.`);
-        setResult({
-          statusHtml: `<span class="chip warn">ALREADY</span>`,
-          memberHtml: `<span class="mono">${escapeHtml(res.member.id)}</span> · ${escapeHtml([res.member.nameZh,res.member.nameEn].filter(Boolean).join(' '))}`,
-          timeHtml: escapeHtml(res.already.timeUk || '—'),
-          receiptHtml: `<span class="mono">${escapeHtml(res.already.receiptId || '')}</span>`,
-          emailHtml: '—',
-          notesHtml: `Handled by: <span class="mono">${escapeHtml(res.already.handledBy?.id || '')}</span> (${escapeHtml(res.already.method || '')})`
-        });
-        logLine('Check-in', `ALREADY · ${res.member.id}`);
-        return;
+/******** Authorisation endpoints (UI will do scanning; backend enforces) ********/
+
+/**
+ * Validate an approver QR payload (must be STAFF/ADMIN)
+ */
+function api_auth_validate_approver(token, approverQrPayload){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const sessStaff = auth.sess.staff;
+  // HELPER/TEMP cannot authorise
+  if (!sessStaff.isSuper && !isPrivilegedStaff_(sessStaff.status)) {
+    return { ok:false, code:'E403', zh:'此帳號沒有授權權限', en:'No authorisation permission.' };
+  }
+
+  const parsed = parseQrPayloadStrict_(approverQrPayload);
+  if (!parsed.ok) return parsed;
+
+  const mi = getMembersIndex_();
+  const m = mi.byId[parsed.id];
+  if (!m) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+  const st = normalizeStatus_(m.status);
+  if (!(st === STATUS_STAFF || st === STATUS_ADMIN)) {
+    return { ok:false, code:'E415', zh:'此 QR 並非同工/管理員，不能授權', en:'Not STAFF/ADMIN. Cannot authorise.' };
+  }
+  if (!m.key || m.key !== parsed.key) {
+    return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
+  }
+
+  return { ok:true, approver:{ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', status:st } };
+}
+
+/**
+ * Validate a target QR payload (must exist, not disabled)
+ */
+function api_auth_validate_target(token, targetQrPayload){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const sessStaff = auth.sess.staff;
+  if (!sessStaff.isSuper && !isPrivilegedStaff_(sessStaff.status)) {
+    return { ok:false, code:'E403', zh:'此帳號沒有授權權限', en:'No authorisation permission.' };
+  }
+
+  const parsed = parseQrPayloadStrict_(targetQrPayload);
+  if (!parsed.ok) return parsed;
+
+  const mi = getMembersIndex_();
+  const m = mi.byId[parsed.id];
+  if (!m) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+  const st = normalizeStatus_(m.status);
+  if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
+
+  // Key mismatch should be shown in UI as target error (e.g., old QR)
+  if (!m.key || m.key !== parsed.key) {
+    return { ok:false, code:'E418', zh:'Key 不相符（可能是舊 QR）', en:'Key mismatch (possibly old QR).' };
+  }
+
+  return {
+    ok:true,
+    target:{
+      id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', status:normalizeStatus_(m.status),
+      roleExpires: m.roleExpires || ''
+    }
+  };
+}
+
+/**
+ * Commit privilege change
+ * newStatus: 'HELPER' or 'TEMP'
+ * Requires: approverId must be STAFF/ADMIN.
+ * TEMP expiry = 2 days, HELPER expiry = 7 days.
+ */
+function api_auth_commit(token, approverId, targetId, newStatus){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const sessStaff = auth.sess.staff;
+
+  // HELPER/TEMP cannot authorise
+  if (!sessStaff.isSuper && !isPrivilegedStaff_(sessStaff.status)) {
+    return { ok:false, code:'E403', zh:'此帳號沒有授權權限', en:'No authorisation permission.' };
+  }
+
+  const stNew = normalizeStatus_(newStatus);
+  if (![STATUS_HELPER, STATUS_TEMP].includes(stNew)) {
+    return { ok:false, code:'E422', zh:'授權類別不正確', en:'Invalid authorisation role.' };
+  }
+
+  // Approver must exist and be STAFF/ADMIN (even if SUPERUSER session)
+  const mi = getMembersIndex_();
+  const ap = mi.byId[String(approverId||'').trim().toUpperCase()];
+  if (!ap) return { ok:false, code:'E412', zh:'找不到授權者', en:'Approver not found.' };
+  const apSt = normalizeStatus_(ap.status);
+  if (!(apSt === STATUS_STAFF || apSt === STATUS_ADMIN)) {
+    return { ok:false, code:'E415', zh:'授權者必須為同工/管理員', en:'Approver must be STAFF/ADMIN.' };
+  }
+
+  const tgtId = String(targetId||'').trim().toUpperCase();
+  const tgt = mi.byId[tgtId];
+  if (!tgt) return { ok:false, code:'E412', zh:'找不到目標會員', en:'Target not found.' };
+  const oldSt = normalizeStatus_(tgt.status);
+  if (oldSt === STATUS_DISABLED) return { ok:false, code:'E414', zh:'目標帳號已停用', en:'Target disabled.' };
+
+  // Update Members sheet: Status + RoleExpires
+  const sh = getMembersSheet_();
+  const cols = mi.cols; // header->index
+  const rowNumber = tgt.rowNumber || findMemberRowById_(sh, cols, tgtId);
+  if (!rowNumber) return { ok:false, code:'E500', zh:'找不到目標記錄行', en:'Target row not found.' };
+
+  const expDays = (stNew === STATUS_TEMP) ? TEMP_EXPIRY_DAYS : HELPER_EXPIRY_DAYS;
+  const expiry = addDays_(nowUk_(), expDays);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try{
+    setMemberCell_(sh, cols, rowNumber, 'Status', stNew);
+    setMemberCell_(sh, cols, rowNumber, 'RoleExpires', expiry);
+
+    clearMembersIndexCache_();
+
+    // Log commit-only
+    const shLog = ensureActivityLogSheet_();
+    shLog.appendRow([
+      nowUk_(),
+      sessStaff.id,
+      sessStaff.nameZh||'',
+      sessStaff.nameEn||'',
+      'AUTHORISE_PRIVILEGE',
+      JSON.stringify({
+        bySession: { id:sessStaff.id, status:sessStaff.status },
+        approver: { id: ap.id, status: apSt },
+        target: { id: tgtId, oldStatus: oldSt, newStatus: stNew },
+        expiryIso: expiry.toISOString()
+      }),
+      getDefaultEventKey_()
+    ]);
+
+    return { ok:true, target:{ id:tgtId, oldStatus: oldSt, newStatus: stNew, roleExpires: expiry.toISOString() } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/******** Live: member detail (tap name) ********/
+function api_live_get_member_detail(token, memberId, eventKeyOptional){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const staff = auth.sess.staff;
+  const st = normalizeStatus_(staff.status);
+
+  // TEMP/HELPER cannot access
+  if (!staff.isSuper && !(st === STATUS_STAFF || st === STATUS_ADMIN)) {
+    return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  }
+
+  const id = String(memberId||'').trim().toUpperCase();
+  const mi = getMembersIndex_().byId;
+  const m = mi[id];
+  if (!m) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
+  if (normalizeStatus_(m.status) === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
+
+  const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
+  const sh = getCheckinsSheet_();
+  const lastRow = sh.getLastRow();
+
+  let today = null;
+  const eventKeys = []; // last 4 distinct event keys
+
+  if (lastRow >= 2){
+    const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
+    // Walk backwards for speed
+    const seenEv = new Set();
+    for (let i = data.length-1; i>=0; i--){
+      const row = data[i];
+      const ev = String(row[1]||'').trim();
+      const mid = String(row[2]||'').trim();
+      if (mid !== id) continue;
+
+      if (!today && ev === eventKey){
+        const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+        today = {
+          eventKey: ev,
+          timeUk: fmtUk_(ts,'HH:mm:ss'),
+          method: String(row[5]||''),
+          handledBy: { id:String(row[6]||''), nameZh:String(row[7]||''), nameEn:String(row[8]||'') },
+          receiptId: String(row[9]||'')
+        };
       }
 
-      const newTag = res.isNewMember ? `<span class="chip good">🆕 New</span>` : '';
-      const emailTag = res.emailUi?.status ? `<span class="chip">${escapeHtml(res.emailUi.status)}</span> ${escapeHtml(res.emailUi.toMasked||'')}` : '—';
-
-      setBanner('good', `✅ Checked in: <span class="mono">${escapeHtml(res.member.id)}</span> ${newTag}`);
-      setResult({
-        statusHtml: `<span class="chip good">OK</span> ${newTag}`,
-        memberHtml: `<span class="mono">${escapeHtml(res.member.id)}</span> · ${escapeHtml([res.member.nameZh,res.member.nameEn].filter(Boolean).join(' '))}`,
-        timeHtml: escapeHtml(res.timeUk || '—'),
-        receiptHtml: `<span class="mono">${escapeHtml(res.receiptId || '')}</span>`,
-        emailHtml: emailTag,
-        notesHtml: `<span class="mono">${escapeHtml(res.eventKey || '')}</span>`
-      });
-      logLine('Check-in', `OK · ${res.member.id} · ${res.timeUk} · ${res.receiptId}`);
-    }catch(e){
-      showErr(e);
-    }
-  }
-
-  async function doCheckinManual(memberId){
-    const id = String(memberId||'').trim().toUpperCase();
-    if (!id) return setBanner('warn', 'Please enter a member ID.');
-    setBanner('', '');
-    setResult({ statusHtml:'⏳ Manual check-in...', memberHtml:'—', timeHtml:'—', receiptHtml:'—', emailHtml:'—', notesHtml:'' });
-
-    try{
-      const ek = ($('eventKey').value || '').trim();
-      const res = await callApi('api_checkin_manual', state.token, id, ek, state.deviceId, state.ua);
-      if (!res || !res.ok) return showErr(res);
-
-      if (res.result === 'ALREADY'){
-        setBanner('warn', `Already checked-in for <span class="mono">${escapeHtml(res.eventKey)}</span>.`);
-        setResult({
-          statusHtml: `<span class="chip warn">ALREADY</span>`,
-          memberHtml: `<span class="mono">${escapeHtml(res.member.id)}</span> · ${escapeHtml([res.member.nameZh,res.member.nameEn].filter(Boolean).join(' '))}`,
-          timeHtml: escapeHtml(res.already.timeUk || '—'),
-          receiptHtml: `<span class="mono">${escapeHtml(res.already.receiptId || '')}</span>`,
-          emailHtml: '—',
-          notesHtml: `Handled by: <span class="mono">${escapeHtml(res.already.handledBy?.id || '')}</span> (${escapeHtml(res.already.method || '')})`
-        });
-        logLine('Manual check-in', `ALREADY · ${res.member.id}`);
-        return;
+      if (ev && !seenEv.has(ev)){
+        seenEv.add(ev);
+        eventKeys.push(ev);
+        if (eventKeys.length >= 4) break;
       }
-
-      const newTag = res.isNewMember ? `<span class="chip good">🆕 New</span>` : '';
-      const emailTag = res.emailUi?.status ? `<span class="chip">${escapeHtml(res.emailUi.status)}</span> ${escapeHtml(res.emailUi.toMasked||'')}` : '—';
-
-      setBanner('good', `✅ Checked in: <span class="mono">${escapeHtml(res.member.id)}</span> ${newTag}`);
-      setResult({
-        statusHtml: `<span class="chip good">OK</span> ${newTag}`,
-        memberHtml: `<span class="mono">${escapeHtml(res.member.id)}</span> · ${escapeHtml([res.member.nameZh,res.member.nameEn].filter(Boolean).join(' '))}`,
-        timeHtml: escapeHtml(res.timeUk || '—'),
-        receiptHtml: `<span class="mono">${escapeHtml(res.receiptId || '')}</span>`,
-        emailHtml: emailTag,
-        notesHtml: `<span class="mono">${escapeHtml(res.eventKey || '')}</span>`
-      });
-      logLine('Manual check-in', `OK · ${res.member.id} · ${res.timeUk} · ${res.receiptId}`);
-    }catch(e){
-      showErr(e);
     }
   }
 
-  // ============================================================
-  // TAB - LIVE (your existing working code kept, with no change)
-  // ============================================================
-  function renderTabLive_(){
-    const box = document.createElement('div');
-    box.innerHTML = `
-      <div class="row">
-        <button class="primary" id="btnRefreshLive">🔄 Refresh</button>
-        <span class="muted" id="liveMeta"></span>
-      </div>
-      <div class="hr"></div>
-      <div id="liveSummary" class="kv"></div>
-      <div class="hr"></div>
-      <div class="muted">Latest check-ins</div>
-      <ul class="list" id="liveList"></ul>
-    `;
+  return {
+    ok:true,
+    member:{
+      id: m.id,
+      nameZh: m.nameZh||'',
+      nameEn: m.nameEn||'',
+      vrm: m.vrm||'',
+      vrm2: m.vrm2||'',
+      status: normalizeStatus_(m.status)
+    },
+    today: today,
+    last4EventKeys: eventKeys
+  };
+}
 
-    box.querySelector('#btnRefreshLive').onclick = () => refreshLive_(box);
-    setTimeout(() => refreshLive_(box), 50);
-    return box;
-  }
+/******** Delete today's attendance (💣) ********/
+function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQrPayloadOptional){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
 
-  async function refreshLive_(root){
-    const meta = root.querySelector('#liveMeta');
-    const summary = root.querySelector('#liveSummary');
-    const ul = root.querySelector('#liveList');
-    meta.textContent = 'Loading...';
-    summary.innerHTML = '';
-    ul.innerHTML = '';
+  const staff = auth.sess.staff;
+  const st = normalizeStatus_(staff.status);
+  const eventKey = getDefaultEventKey_();
+  const mi = getMembersIndex_();
 
-    try{
-      const ek = ($('eventKey').value || '').trim();
-      const res = await callApi('api_get_live_page', state.token, ek);
-      if (!res || !res.ok) return showErr(res);
+  // Only STAFF/ADMIN/SUPERUSER can request delete
+  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
 
-      meta.textContent = `Event: ${res.eventKey} · Count: ${res.checkedInCount} · New: ${res.newCount}`;
-      const last = res.lastSignIn
-        ? `${escapeHtml([res.lastSignIn.nameZh,res.lastSignIn.nameEn].filter(Boolean).join(' '))} @ ${escapeHtml(res.lastSignIn.timeUk)}`
-        : '—';
+  // Determine who is the "audit approver" for this delete
+  let auditLabel = staff.id;
+  let auditNameZh = staff.nameZh||'';
+  let auditNameEn = staff.nameEn||'';
 
-      summary.innerHTML = `
-        <div class="k">Event</div><div>${escapeHtml(res.eventKey)}</div>
-        <div class="k">Checked in</div><div>${escapeHtml(res.checkedInCount)}</div>
-        <div class="k">🆕 New</div><div>${escapeHtml(res.newCount)}</div>
-        <div class="k">Last</div><div>${last}</div>
-      `;
+  if (staff.isSuper){
+    // SUPERUSER requires ADMIN QR only
+    const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
+    if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
 
-      (res.names || []).slice(0, 60).forEach(n => {
-        const li = document.createElement('li');
-        li.className = 'li';
-        const nm = [n.nameZh, n.nameEn].filter(Boolean).join(' ');
-        const tag = n.isNew ? `<span class="chip good">🆕</span>` : `<span class="chip">✓</span>`;
+    const admin = mi.byId[parsed.id];
+    if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
-        li.innerHTML = `
-          <div class="top">
-            <div class="name">${escapeHtml(n.id)} · ${escapeHtml(nm)}</div>
-            ${tag}
-          </div>
-          <div class="row" style="margin-top:8px; gap:8px;">
-            <button data-id="${escapeHtml(n.id)}" class="mini">Details</button>
-            <button data-del="${escapeHtml(n.id)}" class="mini danger">Delete today</button>
-          </div>
-          <div class="muted" data-detail style="display:none; margin-top:8px;"></div>
-        `;
-
-        li.querySelector('button[data-id]').onclick = () => liveLoadDetail_(n.id, li);
-        li.querySelector('button[data-del]').onclick = () => liveDeleteToday_(n.id, li);
-
-        ul.appendChild(li);
-      });
-
-    }catch(e){
-      showErr(e);
+    const admSt = normalizeStatus_(admin.status);
+    if (admSt !== STATUS_ADMIN){
+      // If STAFF scanned, instruct log out/back in as per your rule
+      return {
+        ok:false,
+        code:'E491',
+        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
+        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+      };
     }
-  }
-
-  async function liveLoadDetail_(memberId, li){
-    const box = li.querySelector('[data-detail]');
-    box.style.display = 'block';
-    box.textContent = 'Loading...';
-
-    try{
-      const ek = ($('eventKey').value || '').trim();
-      const res = await callApi('api_live_get_member_detail', state.token, memberId, ek);
-      if (!res || !res.ok) return showErr(res);
-
-      const m = res.member || {};
-      const today = res.today;
-      const last4 = (res.last4EventKeys || []).map(x => `<span class="mono">${escapeHtml(x)}</span>`).join(', ') || '—';
-
-      const todayHtml = today
-        ? `Today: ${escapeHtml(today.timeUk)} (${escapeHtml(today.method)}) · Receipt <span class="mono">${escapeHtml(today.receiptId||'')}</span> · By <span class="mono">${escapeHtml(today.handledBy?.id||'')}</span>`
-        : 'Today: —';
-
-      box.innerHTML = `
-        <div><b>${escapeHtml(m.id)}</b> · ${escapeHtml([m.nameZh,m.nameEn].filter(Boolean).join(' '))}</div>
-        <div>Status: <span class="mono">${escapeHtml(m.status||'')}</span></div>
-        <div>VRM: <span class="mono">${escapeHtml(m.vrm||'')}</span> ${m.vrm2 ? ` / <span class="mono">${escapeHtml(m.vrm2||'')}</span>` : ''}</div>
-        <div>${todayHtml}</div>
-        <div>Last events: ${last4}</div>
-      `;
-    }catch(e){
-      showErr(e);
+    if (!admin.key || admin.key !== parsed.key){
+      return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
     }
-  }
 
-  async function liveDeleteToday_(memberId, li){
-    setBanner('', '');
-    const detail = li.querySelector('[data-detail]');
-    detail.style.display = 'block';
-    detail.textContent = 'Authorisation required...';
+    auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
+    auditNameZh = admin.nameZh || 'ADMIN';
+    auditNameEn = admin.nameEn || 'ADMIN';
 
-    const meIsSuper = (state.staff && state.staff.id === 'SUPERUSER');
+  } else {
+    // Normal STAFF/ADMIN must rescan THEIR OWN QR and it must match current session staff id
+    const parsed = parseQrPayloadStrict_(reauthQrPayload);
+    if (!parsed.ok) return parsed;
 
-    if (meIsSuper){
-      openScanModal(
-        'delete_admin',
-        'Delete today — scan ADMIN QR',
-        'This action requires an ADMIN badge.',
-        async (adminQr) => {
-          try{
-            const res = await callApi('api_live_delete_today_checkin', state.token, memberId, '', adminQr);
-            if (!res || !res.ok) return showErr(res);
-            setBanner('good', `Deleted today check-in for <span class="mono">${escapeHtml(memberId)}</span>.`);
-            await refreshLive_($('tabHost').firstElementChild || document.body);
-          }catch(e){ showErr(e); }
-        }
-      );
-    } else {
-      openScanModal(
-        'delete_self',
-        'Delete today — scan your own badge',
-        'Please scan your own STAFF/ADMIN badge to confirm.',
-        async (myQr) => {
-          try{
-            const res = await callApi('api_live_delete_today_checkin', state.token, memberId, myQr, '');
-            if (!res || !res.ok) return showErr(res);
-            setBanner('good', `Deleted today check-in for <span class="mono">${escapeHtml(memberId)}</span>.`);
-            await refreshLive_($('tabHost').firstElementChild || document.body);
-          }catch(e){ showErr(e); }
-        }
-      );
+    if (parsed.id !== staff.id){
+      return {
+        ok:false,
+        code:'E492',
+        zh:'你掃描嘅並非你本人同工卡。請先登出，再用你自己嘅同工卡登入。',
+        en:'You did not scan your own staff badge. Log out and log in with your own ID.'
+      };
     }
+
+    const staffRec = mi.byId[staff.id];
+    if (!staffRec) return { ok:false, code:'E412', zh:'找不到同工記錄', en:'Staff record not found.' };
+
+    const sst = normalizeStatus_(staffRec.status);
+    if (!(sst === STATUS_STAFF || sst === STATUS_ADMIN)){
+      return { ok:false, code:'E493', zh:'此帳號不是同工/管理員', en:'Not staff/admin.' };
+    }
+    if (!staffRec.key || staffRec.key !== parsed.key){
+      return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
+    }
+
+    auditLabel = staff.id;
+    auditNameZh = staff.nameZh||'';
+    auditNameEn = staff.nameEn||'';
   }
 
-  // ============================================================
-  // TAB - VRM
-  // ============================================================
-  function renderTabVrm_(){
-    const box = document.createElement('div');
-    box.innerHTML = `
-      <div class="muted" style="line-height:1.4;">
-        Search members by vehicle registration (VRM / VRM2). Shows whether they are checked-in today.
-      </div>
+  const targetId = String(memberId||'').trim().toUpperCase();
+  const target = mi.byId[targetId];
+  if (!target) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
 
-      <div class="hr"></div>
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-      <div class="row" style="gap:8px;">
-        <input id="vrmQ" class="mono" type="text" placeholder="VRM (e.g. AB12CDE)" />
-        <button class="primary" id="btnVrmSearch">Search</button>
-        <span class="muted" id="vrmMeta"></span>
-      </div>
+  try{
+    const sh = getCheckinsSheet_();
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok:false, code:'E404', zh:'今日暫無簽到記錄', en:'No check-ins today.' };
 
-      <div id="vrmResults" style="margin-top:12px;"></div>
-    `;
-
-    box.querySelector('#btnVrmSearch').onclick = () => doVrmSearch_(box);
-    box.querySelector('#vrmQ').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doVrmSearch_(box);
-    });
-
-    return box;
-  }
-
-  async function doVrmSearch_(root){
-    const q = (root.querySelector('#vrmQ').value || '').trim();
-    const meta = root.querySelector('#vrmMeta');
-    const out = root.querySelector('#vrmResults');
-    meta.textContent = '';
-    out.innerHTML = '';
-    if (!q) return;
-
-    try{
-      const ek = ($('eventKey').value || '').trim();
-      const res = await callApi('api_search_vrm', state.token, q, ek);
-      if (!res || !res.ok) return showErr(res);
-
-      if (!res.hasVRM){
-        out.innerHTML = `<div class="muted">VRM columns not enabled in Members sheet.</div>`;
-        return;
+    // Find last row matching (eventKey + memberId)
+    const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
+    let hitIdx = -1;
+    let hitRow = null;
+    for (let i=data.length-1; i>=0; i--){
+      const ev = String(data[i][1]||'').trim();
+      const mid = String(data[i][2]||'').trim();
+      if (ev === eventKey && mid === targetId){
+        hitIdx = i;
+        hitRow = data[i];
+        break;
       }
-
-      meta.textContent = `Event: ${res.eventKey || ek || '—'}`;
-
-      if (!res.results || !res.results.length){
-        out.innerHTML = `<div class="muted">No results.</div>`;
-        return;
-      }
-
-      const ul = document.createElement('ul');
-      ul.className = 'list';
-
-      res.results.forEach(m => {
-        const li = document.createElement('li');
-        li.className = 'li';
-
-        const nm = [m.nameZh, m.nameEn].filter(Boolean).join(' ');
-        const checkedTag = m.checkedInToday
-          ? `<span class="chip good">Checked-in</span>`
-          : `<span class="chip warn">Not checked-in</span>`;
-
-        li.innerHTML = `
-          <div class="top">
-            <div class="name">${escapeHtml(m.id)} · ${escapeHtml(nm)}</div>
-            ${checkedTag}
-          </div>
-          <div class="muted" style="margin-top:6px;">
-            VRM: <span class="mono">${escapeHtml(m.vrm || '')}</span>
-            ${m.vrm2 ? ` / <span class="mono">${escapeHtml(m.vrm2 || '')}</span>` : ''}
-          </div>
-          <div class="row" style="margin-top:10px; gap:8px;">
-            <button data-check="${escapeHtml(m.id)}">Manual check-in</button>
-          </div>
-        `;
-        li.querySelector('button[data-check]').onclick = () => doCheckinManual(m.id);
-        ul.appendChild(li);
-      });
-
-      out.appendChild(ul);
-
-    }catch(e){
-      showErr(e);
     }
+    if (hitIdx < 0) return { ok:false, code:'E404', zh:'找不到此會員今日簽到記錄', en:'Today check-in not found.' };
+
+    const deleteRowNumber = hitIdx + 2; // offset for header
+    sh.deleteRow(deleteRowNumber);
+
+    CacheService.getScriptCache().remove('liveNames_' + eventKey);
+
+    // Email member if eligible
+    const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel, auditNameZh, auditNameEn);
+
+    // Log
+    const logSh = ensureActivityLogSheet_();
+    logSh.appendRow([
+      nowUk_(),
+      auditLabel,
+      auditNameZh,
+      auditNameEn,
+      'DELETE_TODAY_CHECKIN',
+      JSON.stringify({
+        eventKey: eventKey,
+        memberId: targetId,
+        memberNameZh: target.nameZh||'',
+        memberNameEn: target.nameEn||'',
+        emailStatus: emailRes.status,
+        emailToMasked: emailRes.toMasked
+      }),
+      eventKey
+    ]);
+
+    return {
+      ok:true,
+      deleted:{
+        eventKey: eventKey,
+        memberId: targetId,
+        memberNameZh: target.nameZh||'',
+        memberNameEn: target.nameEn||'',
+        by: auditLabel
+      },
+      email: emailRes
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function maybeSendDeleteNoticeEmail_(member, eventKey, byLabel, byNameZh, byNameEn){
+  const to = String(member.email||'').trim();
+  const opted = isOptedOut_(member.optOutEmail);
+  const quota = MailApp.getRemainingDailyQuota();
+
+  const out = { status:'', toMasked:'', sent:false };
+
+  if (!to){
+    out.status = 'NO_EMAIL';
+    return out;
+  }
+  out.toMasked = maskEmail_(to);
+
+  if (opted){
+    out.status = 'OPTOUT';
+    return out;
+  }
+  if (quota <= 0){
+    out.status = 'QUOTA';
+    return out;
   }
 
-  // ============================================================
-  // TAB - AUTHORISE (TEMP/HELPER)
-  // ============================================================
-  function renderTabAuth_(){
-    const box = document.createElement('div');
-    box.innerHTML = `
-      <div class="muted" style="line-height:1.4;">
-        Grant temporary access: <b>TEMP (2 days)</b> or <b>HELPER (7 days)</b>.
-        Requires <b>TWO scans</b>: approver badge, then target badge.
-      </div>
+  const nameEn = String(member.nameEn||'').trim();
+  const nameZh = String(member.nameZh||'').trim();
+  const greet = nameEn || nameZh || 'there';
+  const subject = 'CCF Attendance Update / 出席記錄更新'; // no CCF ID
+  const body =
+`Hi ${greet},
 
-      <div class="hr"></div>
+Your attendance record for:
+Event: ${eventKey}
+has been updated by our staff (${byLabel}).
 
-      <div class="row" style="gap:8px; flex-wrap:wrap;">
-        <button class="primary" id="btnAuthStart">Start authorisation</button>
+If you have any questions, please contact us as soon as possible.
 
-        <select id="authRole">
-          <option value="TEMP">TEMP (2 days)</option>
-          <option value="HELPER">HELPER (7 days)</option>
-        </select>
+${nameZh ? nameZh + '，' : ''}你好：
+你於以下聚會的出席記錄已被同工更新：
+活動：${eventKey}
+經手：${byLabel}
 
-        <span class="muted" id="authState"></span>
-      </div>
+如有任何疑問，請盡快聯絡同工。`;
 
-      <div class="hr"></div>
-
-      <div id="authCard" class="card" style="display:none;">
-        <div class="kv">
-          <div class="k">Approver</div><div id="authApprover">—</div>
-          <div class="k">Target</div><div id="authTarget">—</div>
-          <div class="k">Role</div><div id="authRoleShow">—</div>
-        </div>
-
-        <div class="hr"></div>
-        <div class="row" style="gap:8px;">
-          <button id="btnAuthCommit" class="primary" disabled>Commit</button>
-          <button id="btnAuthReset">Reset</button>
-        </div>
-
-        <div class="muted" style="margin-top:10px;" id="authHint"></div>
-      </div>
-    `;
-
-    const auth = { approver: null, target: null };
-
-    const setUi = () => {
-      const role = (box.querySelector('#authRole').value || 'TEMP').toUpperCase();
-      box.querySelector('#authRoleShow').textContent = role;
-
-      box.querySelector('#authApprover').innerHTML = auth.approver
-        ? `<span class="mono">${escapeHtml(auth.approver.id)}</span> · ${escapeHtml([auth.approver.nameZh,auth.approver.nameEn].filter(Boolean).join(' '))} (${escapeHtml(auth.approver.status)})`
-        : '—';
-
-      box.querySelector('#authTarget').innerHTML = auth.target
-        ? `<span class="mono">${escapeHtml(auth.target.id)}</span> · ${escapeHtml([auth.target.nameZh,auth.target.nameEn].filter(Boolean).join(' '))} (current: ${escapeHtml(auth.target.status)})`
-        : '—';
-
-      box.querySelector('#btnAuthCommit').disabled = !(auth.approver && auth.target);
-    };
-
-    const reset = () => {
-      auth.approver = null;
-      auth.target = null;
-      box.querySelector('#authCard').style.display = 'none';
-      box.querySelector('#authState').textContent = '';
-      box.querySelector('#authHint').textContent = '';
-      setUi();
-    };
-
-    box.querySelector('#btnAuthReset').onclick = reset;
-
-    box.querySelector('#btnAuthStart').onclick = async () => {
-      reset();
-      box.querySelector('#authCard').style.display = 'block';
-      box.querySelector('#authState').textContent = 'Step 1: Scan approver badge';
-      box.querySelector('#authHint').textContent = 'Scan your own STAFF/ADMIN badge (or ADMIN badge if logged in as SUPERUSER).';
-
-      openScanModal(
-        'auth_approver',
-        'Authorise — Scan approver badge',
-        'Approver must be STAFF/ADMIN. If SUPERUSER, scan ADMIN badge.',
-        async (approverQr) => {
-          try{
-            const res = await callApi('api_auth_validate_approver', state.token, approverQr);
-            if (!res || !res.ok) return showErr(res);
-
-            auth.approver = res.approver;
-            setUi();
-
-            box.querySelector('#authState').textContent = 'Step 2: Scan target badge';
-            box.querySelector('#authHint').textContent = 'Now scan the target member badge to grant TEMP/HELPER.';
-
-            openScanModal(
-              'auth_target',
-              'Authorise — Scan target badge',
-              'Scan the target member badge (must NOT be STAFF/ADMIN).',
-              async (targetQr) => {
-                try{
-                  const res2 = await callApi('api_auth_validate_target', state.token, targetQr);
-                  if (!res2 || !res2.ok) return showErr(res2);
-
-                  auth.target = res2.target;
-                  setUi();
-                  box.querySelector('#authState').textContent = 'Ready to commit';
-                  box.querySelector('#authHint').textContent = 'Press Commit to apply role + expiry.';
-                }catch(e){ showErr(e); }
-              }
-            );
-
-          }catch(e){
-            showErr(e);
-          }
-        }
-      );
-    };
-
-    box.querySelector('#btnAuthCommit').onclick = async () => {
-      const role = (box.querySelector('#authRole').value || 'TEMP').toUpperCase();
-      if (!auth.approver || !auth.target) return;
-
-      setBanner('', '');
-      box.querySelector('#authState').textContent = 'Committing...';
-
-      try{
-        const res = await callApi('api_auth_commit', state.token, auth.approver.id, auth.target.id, role);
-        if (!res || !res.ok) return showErr(res);
-
-        setBanner('good',
-          `✅ Granted <b>${escapeHtml(role)}</b> to <span class="mono">${escapeHtml(res.target.id)}</span> until <span class="mono">${escapeHtml(res.target.expiryIso || '')}</span>.`
-        );
-        box.querySelector('#authState').textContent = 'Done';
-        box.querySelector('#authHint').textContent = 'You can Reset and authorise another person.';
-        pingSession().catch(()=>{});
-      }catch(e){
-        showErr(e);
-      }
-    };
-
-    setUi();
-    reset();
-    return box;
+  try{
+    MailApp.sendEmail(to, subject, body);
+    out.status = 'SENT';
+    out.sent = true;
+    return out;
+  }catch(e){
+    out.status = 'ERROR';
+    return out;
   }
+}
 
-  // ============================================================
-  // TAB - ADMIN (Selftest / Diagnostics)  (IDs fixed)
-  // ============================================================
-  function renderTabAdmin_(){
-    const box = document.createElement('div');
-    box.innerHTML = `
-      <div class="muted" style="line-height:1.4;">
-        Diagnostics / tools.
-      </div>
+/******** Members sheet row helpers for authorisation ********/
+function findMemberRowById_(sh, cols, id){
+  const idx = cols['ID'];
+  if (idx === undefined) return null;
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
 
-      <div class="hr"></div>
-
-      <div class="row" style="gap:8px; flex-wrap:wrap;">
-        <button class="primary" id="btnAdminSelfTest">Run self-test</button>
-        <button id="btnAdminPing">Ping session</button>
-        <button id="btnAdminClearLog">Clear log</button>
-      </div>
-
-      <div class="hr"></div>
-      <pre id="adminOut" style="white-space:pre-wrap;"></pre>
-    `;
-
-    box.querySelector('#btnAdminSelfTest').onclick = async () => {
-      setBanner('', '');
-      box.querySelector('#adminOut').textContent = 'Running...';
-      try{
-        const res = await callApi('api_selftest');
-        box.querySelector('#adminOut').textContent = JSON.stringify(res, null, 2);
-        if (!res || !res.ok) setBanner('warn', 'Self-test returned errors. See output.');
-        else setBanner('good', 'Self-test OK.');
-      }catch(e){
-        showErr(e);
-      }
-    };
-
-    box.querySelector('#btnAdminPing').onclick = async () => {
-      try{
-        await pingSession();
-        box.querySelector('#adminOut').textContent = 'Ping OK.';
-      }catch(e){
-        showErr(e);
-      }
-    };
-
-    box.querySelector('#btnAdminClearLog').onclick = () => {
-      $('logList').innerHTML = '';
-      box.querySelector('#adminOut').textContent = '';
-    };
-
-    return box;
+  const data = sh.getRange(2, idx+1, lastRow-1, 1).getValues();
+  for (let i=0;i<data.length;i++){
+    const v = String(data[i][0]||'').trim().toUpperCase();
+    if (v === id) return i+2;
   }
+  return null;
+}
 
-  // ============================================================
-  // AFTER LOGIN INIT (this is the real function PART 1 expects)
-  // ============================================================
-  async function afterLoginInit(){
-    // swap left panel to portal
-    $('loginPanel').style.display = 'none';
-    $('portalPanel').style.display = 'block';
-    $('leftTitle').textContent = 'Portal';
-
-    setWho();
-
-    // Wire portal top-row buttons once
-    $('btnSetToday').onclick = () => {
-      const today = new Date();
-      const yyyy = String(today.getFullYear());
-      const mm = String(today.getMonth()+1).padStart(2,'0');
-      const dd = String(today.getDate()).padStart(2,'0');
-      $('eventKey').value = `SundayService_${yyyy}-${mm}-${dd}`;
-      setBanner('good', `EventKey set to <span class="mono">${escapeHtml($('eventKey').value)}</span>.`);
-    };
-
-    $('btnPing').onclick = async () => {
-      await pingSession();
-      setBanner('good', 'Ping OK.');
-    };
-
-    $('btnSelfTest').onclick = async () => {
-      setBanner('', '');
-      try{
-        const res = await callApi('api_selftest');
-        if (!res || !res.ok) return showErr(res);
-        setBanner('good', 'Self-test OK.');
-        logLine('Self-test', 'OK');
-      }catch(e){
-        showErr(e);
-      }
-    };
-
-    // Wire tab buttons
-    document.querySelectorAll('#tabs .tab').forEach(b => {
-      b.onclick = () => setActiveTab(b.dataset.tab);
-    });
-
-    // Default event key if empty
-    const ek = ($('eventKey').value || '').trim();
-    if (!ek){
-      const today = new Date();
-      const yyyy = String(today.getFullYear());
-      const mm = String(today.getMonth()+1).padStart(2,'0');
-      const dd = String(today.getDate()).padStart(2,'0');
-      $('eventKey').value = `SundayService_${yyyy}-${mm}-${dd}`;
-    }
-
-    // Default tab
-    if (!state.activeTab) state.activeTab = 'checkin';
-    setActiveTab(state.activeTab);
+function setMemberCell_(sh, cols, rowNumber, headerName, value){
+  // ensure optional columns exist if needed
+  if (!(headerName in cols)) {
+    ensureMembersOptionalColumns_();
+    // refresh cache/cols
+    clearMembersIndexCache_();
+    const mi = getMembersIndex_();
+    cols = mi.cols;
   }
-
-  // ============================================================
-  // EXTRA: wire login scan button (was missing)
-  // ============================================================
-  $('btnOpenLoginScan').onclick = () => openScanModal(
-    'login',
-    'Scan QR (login)',
-    'Scan your staff QR. If it fails, use paste mode below.',
-    (payload) => { $('loginQr').value = payload; doLoginWithQr(payload); }
-  );
-
-  // If already logged in (token restored), bring up portal
-  (function finishInitPart2(){
-    try{ $('btnCloseScan').onclick = closeScanModal; }catch(e){}
-
-    if (state.token){
-      pingSession().finally(() => {
-        if (state.token) afterLoginInit();
-      });
-    }
-  })();
-
-</script>
-</body>
-</html>
+  const idx = cols[headerName];
+  if (idx === undefined) return;
+  sh.getRange(rowNumber, idx+1).setValue(value);
+}
