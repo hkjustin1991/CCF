@@ -12,24 +12,31 @@
   <!--
   ============================================================
   FILE: index.html (Staff Portal UI)
-  UI VERSION TAG: staff3-ui1
+  UI VERSION TAG: staff5-ui2
   ============================================================
 
-  CHANGELOG (staff3-ui1) — requested UI-only changes:
-  [1] Live page: show 🆕 New friends list immediately (not behind Names button),
-      while keeping Names list toggle available.
-  [2] Scan check-in: camera panel collapses AFTER successful check-in (OK/ALREADY),
-      Scan again cleanly restarts camera.
-  [3] Manual check-in: rich result output consistent with scan (ID, names, time,
-      handled-by, receiptId, already-checked details).
-  [4] Email proof status shown on UI after check-in (SENT/OPTOUT/NO_EMAIL/QUOTA/ERROR),
-      bilingual, and supports ALREADY records (if backend returns emailStatus/emailUi).
-  [5] Camera switch: if device has multiple cameras, provide “Switch camera” button
-      on scan panels (login, check-in, auth, delete reauth). Selected camera persists.
-  [6] Manual search UI gate: if input looks like partial CCF ID (e.g., CCF12),
-      do NOT call backend; ask user to enter full CCF ID (e.g., CCF0123).
+  Key behaviour highlights (staff5-ui2):
+  - Main menu: equal-sized buttons; green=Check-in, blue=Live/VRM, orange=Authorise.
+  - Manual search: supports Preferred name; partial CCF ID is blocked (bilingual warning).
+  - Live: New friends warn box shows zh/en and highlights preferredName; no "auto-shown".
+  - Live Names list: shows preferredName only (fallback to names if empty); tap shows full detail.
+  - Check-in UI:
+      * shows 🆕 New friend badge (PENDING/PROVISIONAL) + welcome block
+      * shows under-18 notice (with “if under 16…” reminder) when member.isUnder18
+      * email status bilingual; for ALREADY+SENT: “sent at last sign-in”
+      * scan camera collapses AFTER result (success OR error) and Scan again reopens cleanly
+  - Member detail modal:
+      * NO status shown
+      * Last 4 events are bullet list (each on its own line)
+  - Authorise flow:
+      * scan screens collapse on capture and show result + rescan/back buttons
+      * after successful commit, flow resets to Step 1 AND camera stays collapsed (needs rescan)
+  - Delete flow:
+      * scan screen collapses on capture and shows comprehensive bilingual result
+      * timestamps formatted friendly when ISO appears (yyyy/MM/dd HH:mm, UK time)
+  - Camera switch: available when multiple cameras exist; persists chosen device.
 
-  PATCH BOUNDARIES: search for "PATCH_BOUNDARY:" blocks for easy future edits.
+  PATCH BOUNDARIES: search "PATCH_BOUNDARY:" for later patch/search/copy.
   ============================================================
   -->
 
@@ -38,13 +45,12 @@
       --bg:#f5f7ff; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
       --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e; --warn:#c88400;
       --shadow: 0 10px 24px rgba(10,30,80,0.10);
-      /* Adaptive sizing */
       --pad: clamp(10px, 3.2vw, 16px);
       --radius: clamp(14px, 3.2vw, 18px);
       --fs-title: clamp(20px, 4.8vw, 26px);
       --fs-big: clamp(18px, 4.2vw, 22px);
       --fs-body: clamp(13px, 3.4vw, 16px);
-      --fs-input: clamp(16px, 4vw, 18px); /* >=16 prevents iOS zoom */
+      --fs-input: clamp(16px, 4vw, 18px);
     }
     *{box-sizing:border-box}
     html{-webkit-text-size-adjust:100%}
@@ -64,6 +70,14 @@
     button.primary{background:#e9fff4;border-color:rgba(26,168,108,0.25)}
     button.alt{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
     button.danger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}
+
+    /* PATCH_BOUNDARY: MENU_BUTTON_STYLES_BEGIN */
+    button.blue{ background:#eef4ff; border-color:rgba(40,90,200,0.18); }
+    button.orange{ background:#fff6e6; border-color:rgba(200,132,0,0.35); }
+    .menuGrid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+    .menuGrid button{ min-height: 62px; }
+    /* PATCH_BOUNDARY: MENU_BUTTON_STYLES_END */
+
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
     .divider{height:1px;background:var(--border);margin:12px 0}
@@ -90,7 +104,6 @@
       padding:14px;max-height:85vh;overflow:auto;
     }
 
-    /* list items */
     .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
     .nameItem{
       padding:10px;border:1px solid var(--border);border-radius:12px;margin-top:8px;
@@ -120,7 +133,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff3-ui1</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff5-ui2</span></div>
     </header>
 
     <main id="app"></main>
@@ -139,18 +152,19 @@
       view:'login', // login | menu | checkinMenu | scanCheckin | manualCheckin | realtime | vrm | auth
       stream:null, raf:null, scanning:false, detector:null,
       debounceT:null, intervalId:null, clockTimer:null,
-      selectedMember:null,
+
       liveNamesOpen:false,
       liveData:null,
+
       stable:{ value:null, count:0, firstTs:0 },
 
-      // auth flow
-      authApprover:null, // {id,nameZh,nameEn,status}
-      authTarget:null,   // {id,nameZh,nameEn,status,roleExpiresIso}
-      authRole:null      // 'HELPER' | 'TEMP'
+      // auth flow state
+      authApprover:null,
+      authTarget:null,
+      authRole:null,
+      authFlash:null // {kind:'ok'|'err'|'warn', zh,en, detailHtml}
     };
 
-    // Stability gate (preserved)
     var STABLE_REQUIRED_COUNT = 2;
     var STABLE_REQUIRED_MS = 250;
 
@@ -243,6 +257,32 @@
       try{ return navigator.userAgent || ''; }catch(e){ return ''; }
     }
 
+    /* PATCH_BOUNDARY: FORMATTERS_BEGIN */
+    function fmtIsoToUkYmdHm(iso){
+      if(!iso) return '';
+      var d = new Date(iso);
+      if(isNaN(d.getTime())) return String(iso);
+      try{
+        var parts = new Intl.DateTimeFormat('en-GB', {
+          timeZone:'Europe/London',
+          year:'numeric', month:'2-digit', day:'2-digit',
+          hour:'2-digit', minute:'2-digit',
+          hour12:false
+        }).formatToParts(d);
+        var m = {};
+        parts.forEach(function(p){ m[p.type]=p.value; });
+        return (m.year||'') + '/' + (m.month||'') + '/' + (m.day||'') + ' ' + (m.hour||'') + ':' + (m.minute||'');
+      }catch(e){
+        var yy = d.getFullYear();
+        var mm = ('0'+(d.getMonth()+1)).slice(-2);
+        var dd = ('0'+d.getDate()).slice(-2);
+        var hh = ('0'+d.getHours()).slice(-2);
+        var mi = ('0'+d.getMinutes()).slice(-2);
+        return yy + '/' + mm + '/' + dd + ' ' + hh + ':' + mi;
+      }
+    }
+    /* PATCH_BOUNDARY: FORMATTERS_END */
+
     function resetStability(){
       App.stable.value = null;
       App.stable.count = 0;
@@ -297,20 +337,14 @@
           el.textContent = fmt.format(new Date());
         }catch(e){
           var d = new Date();
-          var hh = ('0'+d.getHours()).slice(-2);
-          var mm = ('0'+d.getMinutes()).slice(-2);
-          var ss = ('0'+d.getSeconds()).slice(-2);
-          el.textContent = hh+':'+mm+':'+ss;
+          el.textContent = ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
         }
       }
       tick();
       App.clockTimer = setInterval(tick, 1000);
     }
 
-    /* ============================================================
-     * PATCH_BOUNDARY: CAMERA_SWITCH_BEGIN
-     * Camera switcher (multi-camera), persists selected deviceId
-     * ============================================================ */
+    /* PATCH_BOUNDARY: CAMERA_SWITCH_BEGIN */
     function camGetSelectedId_(){
       try{ return localStorage.getItem('ccf_cam_deviceId') || ''; }catch(e){ return ''; }
     }
@@ -320,17 +354,14 @@
         else localStorage.removeItem('ccf_cam_deviceId');
       }catch(e){}
     }
-
     function camListVideoInputs_(){
       if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve([]);
       return navigator.mediaDevices.enumerateDevices().then(function(devs){
         var cams = (devs||[]).filter(function(d){ return d && d.kind === 'videoinput'; });
-        // stable ordering by deviceId (labels may be blank on iOS)
         cams.sort(function(a,b){ return String(a.deviceId||'').localeCompare(String(b.deviceId||'')); });
         return cams;
       }).catch(function(){ return []; });
     }
-
     function camBindSwitchButton_(btnId, restartFn){
       var btn = $(btnId);
       if(!btn) return;
@@ -341,7 +372,6 @@
           return;
         }
         btn.classList.remove('hide');
-
         btn.onclick = function(){
           camListVideoInputs_().then(function(cams2){
             if(!cams2 || cams2.length < 2) return;
@@ -354,7 +384,6 @@
         };
       });
     }
-
     function camBuildPreferredConstraints_(){
       var sel = camGetSelectedId_();
       if(sel){
@@ -362,9 +391,7 @@
       }
       return { video: { facingMode: { ideal:'environment' } }, audio:false };
     }
-    /* ============================================================
-     * PATCH_BOUNDARY: CAMERA_SWITCH_END
-     * ============================================================ */
+    /* PATCH_BOUNDARY: CAMERA_SWITCH_END */
 
     function startScan(videoId, onCaptured, msgTarget){
       stopScan();
@@ -388,7 +415,6 @@
             scanLoop(v, onCaptured, msgTarget);
           });
         }).catch(function(err){
-          // If selected deviceId fails, clear and fallback once
           var sel = camGetSelectedId_();
           var usingExact = !!(sel && constraints && constraints.video && constraints.video.deviceId && constraints.video.deviceId.exact);
           if(usingExact){
@@ -416,7 +442,6 @@
         return;
       }
 
-      // BarcodeDetector
       try{
         if('BarcodeDetector' in window){
           App.detector = App.detector || new BarcodeDetector({ formats:['qr_code'] });
@@ -436,7 +461,6 @@
         }
       }catch(e){}
 
-      // jsQR fallback
       var text = null;
       try{
         if(window.jsQR){
@@ -492,15 +516,14 @@
     function render(){
       stopScan(); stopIntervals();
       clearTimeout(App.debounceT);
-      App.selectedMember=null;
       App.liveNamesOpen=false;
       App.liveData=null;
 
-      // reset auth state on render changes
       if(App.view !== 'auth'){
         App.authApprover=null;
         App.authTarget=null;
         App.authRole=null;
+        App.authFlash=null;
       }
 
       var root = $('app');
@@ -513,6 +536,61 @@
       if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); return; }
       if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); return; }
     }
+
+    /* PATCH_BOUNDARY: UI_HELPERS_BEGIN */
+    function isNewFriendByStatus(st){
+      st = String(st||'').toUpperCase();
+      return (st === 'PENDING' || st === 'PROVISIONAL');
+    }
+
+    function displayNameFromMember(m){
+      m = m || {};
+      var pref = (m.preferredName||'').trim();
+      var zh = (m.nameZh||'').trim();
+      var en = (m.nameEn||'').trim();
+      return pref || zh || en || (m.id||'');
+    }
+
+    function under18NoticeHtml(isUnder18){
+      if(!isUnder18) return '';
+      return ''+
+        '<div class="msgBox warn" style="margin-top:10px;">'+
+          '<div class="big warn">⚠️ 未滿 18 歲提示</div>'+
+          '<div style="margin-top:4px;font-size:16px;">⚠️ Under-18 notice</div>'+
+          '<div class="small" style="margin-top:8px;">'+
+            '請留意同行安排及監護需要。<br/>'+
+            '如屬未滿 16 歲，請按教會/同工指引採取相應行動（例如確保監護人同在、必要時通知負責同工）。'+
+            '<div class="divider"></div>'+
+            'Please be mindful of supervision/guardian arrangements.<br/>'+
+            'If they are under 16, take appropriate actions per safeguarding guidance (e.g., ensure a guardian is present; escalate if needed).'+
+          '</div>'+
+        '</div>';
+    }
+
+    function emailUiFromStatus(status){
+      status = String(status||'').trim().toUpperCase();
+      if(status === 'SENT') return { zh:'📧 已發送電郵簽到證明。', en:'📧 Email proof sent.' };
+      if(status === 'OPTOUT') return { zh:'📧 已選擇不接收電郵。', en:'📧 Opted out of email.' };
+      if(status === 'NO_EMAIL') return { zh:'📧 未有電郵資料。', en:'📧 No email on file.' };
+      if(status === 'QUOTA') return { zh:'📧 今日電郵額度已用完。', en:'📧 Daily quota exceeded.' };
+      if(status === 'ERROR') return { zh:'📧 電郵發送失敗。', en:'📧 Failed to send email.' };
+      if(!status) return { zh:'📧 未有電郵狀態。', en:'📧 No email status.' };
+      return { zh:'📧 電郵狀態：' + status, en:'📧 Email status: ' + status };
+    }
+
+    function newFriendWelcomeHtml(isNew){
+      if(!isNew) return '';
+      return ''+
+        '<div class="msgBox warn" style="margin-top:10px;">'+
+          '<div class="big warn">🆕 新朋友 / New friend</div>'+
+          '<div style="margin-top:4px;font-size:16px;">🎉 歡迎第一次到訪 / Welcome</div>'+
+          '<div class="small" style="margin-top:8px;">'+
+            '歡迎你！如需要加入社群或有任何問題，請聯絡接待/影音同工。<br/>'+
+            'Welcome! If you need help or want to join the community, please speak to the Welcome/Media team.'+
+          '</div>'+
+        '</div>';
+    }
+    /* PATCH_BOUNDARY: UI_HELPERS_END */
 
     /******** Views ********/
     function viewLogin(){
@@ -547,12 +625,7 @@
     function viewMenu(){
       var st = App.staff ? String(App.staff.status||'').toUpperCase() : '';
       var isSuper = App.staff && App.staff.id === 'SUPERUSER';
-
-      var authBtn = (canUseAuth())
-        ? '<div class="miniBtnRow">'+
-            '<button id="goAuth" class="alt">🔐 授權 / Authorise</button>'+
-          '</div>'
-        : '';
+      var showAuth = canUseAuth();
 
       return ''+
         '<div class="card">'+
@@ -564,14 +637,16 @@
         '</div>'+
         '<div class="card">'+
           '<div class="big">📌 主選單 / Main menu</div>'+
-          '<div class="miniBtnRow">'+
+
+          /* PATCH_BOUNDARY: MENU_EQUAL_BUTTONS_BEGIN */
+          '<div class="menuGrid">'+
             '<button id="goCheckin" class="primary">✅ 簽到 / Check-in</button>'+
+            '<button id="goRealtime" class="blue">📊 即時情況 / Live</button>'+
+            '<button id="goVrm" class="blue">🚗 車牌搜尋 / Car reg</button>'+
+            (showAuth ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button>' : '<div></div>')+
           '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="goRealtime" class="alt">📊 即時情況 / Live</button>'+
-            '<button id="goVrm" class="alt">🚗 車牌搜尋 / Car reg</button>'+
-          '</div>'+
-          authBtn+
+          /* PATCH_BOUNDARY: MENU_EQUAL_BUTTONS_END */
+
           '<div class="divider"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnLogout" class="danger">🚪 登出 / Logout</button>'+
@@ -664,13 +739,22 @@
     function viewAuth(){
       var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
 
+      var flash = '';
+      if(App.authFlash){
+        flash = '<div class="msgBox '+App.authFlash.kind+'">'+
+                  '<div class="big '+(App.authFlash.kind==='ok'?'ok':(App.authFlash.kind==='err'?'err':'warn'))+'">'+escapeHtml(App.authFlash.zh||'')+'</div>'+
+                  '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(App.authFlash.en||'')+'</div>'+
+                  (App.authFlash.detailHtml ? ('<div style="margin-top:10px;">'+App.authFlash.detailHtml+'</div>') : '')+
+                '</div>';
+      }
+
       var approverCard = App.authApprover
         ? ('<div class="msgBox ok">'+
             '<div class="big ok">授權者 / Approver</div>'+
             '<div class="kv">'+
               '<div>CCF ID</div><div>'+escapeHtml(App.authApprover.id)+'</div>'+
-              '<div>姓名</div><div>'+escapeHtml((App.authApprover.nameZh+' '+App.authApprover.nameEn).trim())+'</div>'+
-              '<div>身份</div><div>'+escapeHtml(App.authApprover.status)+'</div>'+
+              '<div>姓名 / Name</div><div>'+escapeHtml((App.authApprover.nameZh+' '+App.authApprover.nameEn).trim())+'</div>'+
+              '<div>身份 / Role</div><div>'+escapeHtml(App.authApprover.status)+'</div>'+
             '</div>'+
           '</div>')
         : '';
@@ -680,49 +764,54 @@
             '<div class="big warn">目標 / Target</div>'+
             '<div class="kv">'+
               '<div>CCF ID</div><div>'+escapeHtml(App.authTarget.id)+'</div>'+
-              '<div>姓名</div><div>'+escapeHtml((App.authTarget.nameZh+' '+App.authTarget.nameEn).trim())+'</div>'+
-              '<div>目前身份</div><div>'+escapeHtml(App.authTarget.status)+'</div>'+
+              '<div>姓名 / Name</div><div>'+escapeHtml((App.authTarget.nameZh+' '+App.authTarget.nameEn).trim())+'</div>'+
+              '<div>目前身份 / Current</div><div>'+escapeHtml(App.authTarget.status)+'</div>'+
             '</div>'+
           '</div>')
         : '';
-
-      var stepTitle = (step===1) ? 'Step 1：掃描授權者 QR / Scan approver QR'
-                    : (step===2) ? 'Step 2：掃描目標 QR / Scan target QR'
-                    : (step===3) ? 'Step 3：選擇授權 / Choose role'
-                    : 'Step 4：最後確認 / Final confirm';
 
       var body = '';
 
       if(step===1){
         body =
-          '<div class="small">請先掃描同工／管理員 QR。掃描成功後會顯示 ID 及姓名，再確認繼續。<br/>Scan STAFF/ADMIN QR first. After capture, confirm to continue.</div>'+
-          '<div id="authCam" class="card" style="margin-top:10px;">'+
-            '<div class="videoWrap"><video id="videoAuth" playsinline></video></div>'+
+          flash+
+          '<div class="small">請掃描授權者 QR。<br/>Scan approver QR.</div>'+
+          '<div id="authCam1" class="card '+(App.authFlash ? 'hide' : '')+'" style="margin-top:10px;">'+
+            '<div class="videoWrap"><video id="videoAuth1" playsinline></video></div>'+
             '<div class="miniBtnRow">'+
               '<button id="btnSwitchCamAuth1" class="alt">🔄 切換相機 / Switch camera</button>'+
               '<button id="btnAuthCancel" class="danger">⬅️ 返回 / Back</button>'+
             '</div>'+
           '</div>'+
-          '<div id="authMsg"></div>';
+          '<div id="authMsg"></div>'+
+          '<div id="authActions" class="miniBtnRow '+(App.authFlash ? '' : 'hide')+'" style="margin-top:12px;">'+
+            '<button id="btnAuthRescan1" class="primary">🔁 重新掃描 / Rescan</button>'+
+            '<button id="btnAuthBackMenu" class="alt">⬅️ 返回 / Back</button>'+
+          '</div>';
       }
 
       if(step===2){
         body =
+          flash+
           approverCard+
-          '<div class="small" style="margin-top:10px;">請掃描目標會員 QR。若 QR 有問題會顯示原因。<br/>Scan target member QR.</div>'+
+          '<div class="small" style="margin-top:10px;">請掃描目標會員 QR。<br/>Scan target member QR.</div>'+
           '<div id="authCam2" class="card" style="margin-top:10px;">'+
             '<div class="videoWrap"><video id="videoAuth2" playsinline></video></div>'+
             '<div class="miniBtnRow">'+
               '<button id="btnSwitchCamAuth2" class="alt">🔄 切換相機 / Switch camera</button>'+
-              '<button id="btnAuthRestart2" class="primary">🔁 重新掃描 / Rescan</button>'+
               '<button id="btnAuthBack1" class="alt">⬅️ 上一步 / Back</button>'+
             '</div>'+
           '</div>'+
-          '<div id="authMsg"></div>';
+          '<div id="authMsg"></div>'+
+          '<div id="authActions" class="miniBtnRow hide" style="margin-top:12px;">'+
+            '<button id="btnAuthRescan2" class="primary">🔁 重新掃描 / Rescan</button>'+
+            '<button id="btnAuthBackMenu" class="alt">⬅️ 返回 / Back</button>'+
+          '</div>';
       }
 
       if(step===3){
         body =
+          flash+
           approverCard + targetCard +
           '<div class="small" style="margin-top:10px;">選擇授權類別：TEMP（2日）或 HELPER（7日）。<br/>Choose TEMP (2 days) or HELPER (7 days).</div>'+
           '<div class="miniBtnRow">'+
@@ -730,7 +819,7 @@
             '<button id="btnRoleHelper" class="alt">🛟 HELPER（7日）</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnAuthBack2" class="alt">⬅️ 上一步 / Back</button>'+
+            '<button id="btnAuthRestartAll" class="danger">🔁 重新開始 / Restart</button>'+
           '</div>'+
           '<div id="authMsg"></div>';
       }
@@ -740,18 +829,19 @@
         var expTxt = (role==='TEMP') ? '2 days' : '7 days';
 
         body =
+          flash+
           approverCard + targetCard +
           '<div class="msgBox warn">'+
             '<div class="big warn">最後確認 / Final confirm</div>'+
             '<div class="small">此操作會即時更新目標身份並設定到期日。只會在你按「確認」後生效。<br/>Changes apply only after Confirm.</div>'+
             '<div class="kv" style="margin-top:10px;">'+
-              '<div>新身份</div><div>'+escapeHtml(role)+'</div>'+
-              '<div>到期</div><div>'+escapeHtml(expTxt)+'</div>'+
+              '<div>新身份 / New</div><div>'+escapeHtml(role)+'</div>'+
+              '<div>到期 / Expiry</div><div>'+escapeHtml(expTxt)+'</div>'+
             '</div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnAuthCommit" class="primary">✅ 確認授權 / Confirm</button>'+
-            '<button id="btnAuthBack3" class="alt">⬅️ 返回 / Back</button>'+
+            '<button id="btnAuthRestartAll" class="danger">🔁 重新開始 / Restart</button>'+
           '</div>'+
           '<div id="authMsg"></div>';
       }
@@ -759,28 +849,10 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🔐 授權 / Authorise</div>'+
-          '<div class="small">'+stepTitle+'</div>'+
+          '<div class="small">Step '+step+' / 4</div>'+
         '</div>'+
         '<div class="card">'+body+'</div>';
     }
-
-    /* ============================================================
-     * PATCH_BOUNDARY: EMAIL_UI_MAP_BEGIN
-     * Bilingual email status mapping for ALREADY/OK cases
-     * ============================================================ */
-    function emailUiFromStatus(status){
-      status = String(status||'').trim().toUpperCase();
-      if(status === 'SENT') return { zh:'📧 已發送電郵簽到證明。', en:'📧 Email proof sent.' };
-      if(status === 'OPTOUT') return { zh:'📧 已選擇不接收電郵。', en:'📧 Opted out of email.' };
-      if(status === 'NO_EMAIL') return { zh:'📧 未有電郵資料。', en:'📧 No email on file.' };
-      if(status === 'QUOTA') return { zh:'📧 今日電郵額度已用完。', en:'📧 Daily quota exceeded.' };
-      if(status === 'ERROR') return { zh:'📧 電郵發送失敗。', en:'📧 Failed to send email.' };
-      if(!status) return { zh:'📧 未有電郵狀態。', en:'📧 No email status.' };
-      return { zh:'📧 電郵狀態：' + status, en:'📧 Email status: ' + status };
-    }
-    /* ============================================================
-     * PATCH_BOUNDARY: EMAIL_UI_MAP_END
-     * ============================================================ */
 
     /******** Bind ********/
     function bindLogin(){
@@ -854,6 +926,7 @@
 
       $('btnStopCam').onclick = function(){
         stopScan();
+        cam.classList.add('hide');
         showBox(msg,'warn','⏹ 已停止相機','⏹ Camera stopped','<div class="small">可按「Scan again」重新開啟。</div>');
       };
 
@@ -869,27 +942,47 @@
         clear(msg);
         cam.classList.remove('hide');
         startScan('videoCheckin', function(text){
-          // Stop camera during processing, but do NOT collapse panel yet
+          // stop scanning during server call; keep camera open until result
           stopScan();
           showBox(msg,'warn','處理中…','Working…');
           doCheckin(text);
         }, msg);
       }
 
-      function renderEmailLine(res){
-        // Prefer emailUi (bilingual) if returned by backend
-        if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
-          return '<div class="msgBox warn" style="margin-top:10px;">' +
-                   '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>' +
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.emailUi.en || '')+'</div>' +
+      function renderEmailLine(res, isAlready){
+        if(isAlready && res && res.already){
+          var stA = String(res.already.emailStatus||'').toUpperCase();
+          if(stA === 'SENT'){
+            return '<div class="msgBox warn" style="margin-top:10px;">'+
+                     '<div class="big warn">📧 上次簽到已發送電郵簽到證明。</div>'+
+                     '<div style="margin-top:4px;font-size:16px;">📧 Email proof was sent at the last sign-in.</div>'+
+                   '</div>';
+          }
+          if(res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
+            return '<div class="msgBox warn" style="margin-top:10px;">'+
+                     '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>'+
+                     '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
+                   '</div>';
+          }
+          var uiA = emailUiFromStatus(stA);
+          return '<div class="msgBox warn" style="margin-top:10px;">'+
+                   '<div class="big warn">'+escapeHtml(uiA.zh)+'</div>'+
+                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(uiA.en)+'</div>'+
                  '</div>';
         }
-        var st = (res && res.emailStatus) ? res.emailStatus : '';
-        if(!st && res && res.already && res.already.emailStatus) st = res.already.emailStatus;
+
+        if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
+          return '<div class="msgBox warn" style="margin-top:10px;">'+
+                   '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>'+
+                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.emailUi.en || '')+'</div>'+
+                 '</div>';
+        }
+
+        var st = String((res && res.emailStatus) || '').toUpperCase();
         var ui = emailUiFromStatus(st);
-        return '<div class="msgBox warn" style="margin-top:10px;">' +
-                 '<div class="big warn">'+escapeHtml(ui.zh)+'</div>' +
-                 '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>' +
+        return '<div class="msgBox warn" style="margin-top:10px;">'+
+                 '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
+                 '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>'+
                '</div>';
       }
 
@@ -898,17 +991,20 @@
         var ua = getUA();
 
         callApi('api_checkin_scan', App.token, payload, null, deviceId, ua).then(function(res){
+          // collapse camera AFTER result (success OR error)
+          cam.classList.add('hide');
+
           if(!res || !res.ok){
-            // Keep camera panel open (no collapse), and allow retry
             showErr(msg, res || {code:'E500', zh:'系統錯誤', en:'Error'});
-            cam.classList.remove('hide');
             return;
           }
+
+          var isNew = isNewFriendByStatus(res.status);
+          var under18 = !!(res.member && res.member.isUnder18);
 
           var handledBy = res.staff ? ((res.staff.nameZh||'')+' '+(res.staff.nameEn||'')).trim() : '';
 
           if(res.result === 'ALREADY'){
-            cam.classList.add('hide'); // collapse after successful outcome
             var hb = res.already && res.already.handledBy
               ? ((res.already.handledBy.nameZh||'')+' '+(res.already.handledBy.nameEn||'')).trim() || (res.already.handledBy.staffId||'')
               : '';
@@ -916,33 +1012,35 @@
             showBox(msg,'ok','✅ 經已簽到','✅ Already checked in',
               '<div class="kv">'+
                 '<div>CCF ID</div><div>'+escapeHtml(res.member.id||'')+'</div>'+
-                '<div>中文名</div><div>'+escapeHtml(res.member.nameZh||'')+'</div>'+
-                '<div>English</div><div>'+escapeHtml(res.member.nameEn||'')+'</div>'+
-                '<div>Last sign-in</div><div>'+escapeHtml((res.already&&res.already.timeUk)||'')+'</div>'+
-                '<div>Handled by</div><div>'+escapeHtml(hb)+'</div>'+
+                '<div>中文名 / Chinese</div><div>'+escapeHtml(res.member.nameZh||'')+'</div>'+
+                '<div>英文名 / English</div><div>'+escapeHtml(res.member.nameEn||'')+'</div>'+
+                '<div>上次時間 / Last</div><div>'+escapeHtml((res.already&&res.already.timeUk)||'')+'</div>'+
+                '<div>經手 / By</div><div>'+escapeHtml(hb)+'</div>'+
                 '<div>Receipt</div><div>'+escapeHtml((res.already&&res.already.receiptId)||'')+'</div>'+
               '</div>' +
-              renderEmailLine(res.already && res.already.emailUi ? { emailUi: res.already.emailUi } : res)
+              newFriendWelcomeHtml(isNew) +
+              under18NoticeHtml(under18) +
+              renderEmailLine(res, true)
             );
             return;
           }
 
-          cam.classList.add('hide'); // collapse after successful outcome
-
           showBox(msg,'ok','✅ 簽到成功','✅ Check-in successful',
             '<div class="kv">'+
               '<div>CCF ID</div><div>'+escapeHtml(res.member.id||'')+'</div>'+
-              '<div>中文名</div><div>'+escapeHtml(res.member.nameZh||'')+'</div>'+
-              '<div>English</div><div>'+escapeHtml(res.member.nameEn||'')+'</div>'+
-              '<div>Time (UK)</div><div>'+escapeHtml(res.timeUk||'')+'</div>'+
-              '<div>Handled by</div><div>'+escapeHtml(handledBy)+'</div>'+
+              '<div>中文名 / Chinese</div><div>'+escapeHtml(res.member.nameZh||'')+'</div>'+
+              '<div>英文名 / English</div><div>'+escapeHtml(res.member.nameEn||'')+'</div>'+
+              '<div>時間 / Time (UK)</div><div>'+escapeHtml(res.timeUk||'')+'</div>'+
+              '<div>經手 / By</div><div>'+escapeHtml(handledBy)+'</div>'+
               '<div>Receipt</div><div>'+escapeHtml(res.receiptId||'')+'</div>'+
             '</div>' +
-            renderEmailLine(res)
+            newFriendWelcomeHtml(isNew) +
+            under18NoticeHtml(under18) +
+            renderEmailLine(res, false)
           );
         }).catch(function(){
+          cam.classList.add('hide');
           showErr(msg, { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
-          cam.classList.remove('hide');
         });
       }
     }
@@ -962,11 +1060,7 @@
           var text = q.value.trim();
           if(!text){ results.innerHTML=''; clear(manualMsg); return; }
 
-          /* ============================================================
-           * PATCH_BOUNDARY: MANUAL_SEARCH_PARTIAL_CCF_GATE_UI_BEGIN
-           * If user types partial CCF ID (e.g. CCF12), do not call backend.
-           * Only full CCF ID (e.g. CCF0123) should do an ID lookup.
-           * ============================================================ */
+          /* PATCH_BOUNDARY: MANUAL_SEARCH_PARTIAL_CCF_GATE_UI_BEGIN */
           var t = text.toUpperCase();
           var looksCcf = /^CCF\d+$/i.test(t);
           var fullCcf = /^CCF\d{4,}$/i.test(t);
@@ -975,13 +1069,11 @@
             showBox(manualMsg,'warn',
               '請輸入完整 CCF ID（例如 CCF0123）',
               'Please enter full CCF ID (e.g. CCF0123)',
-              '<div class="small">部分 CCF ID 不會搜尋，以免誤選。</div>'
+              '<div class="small">部分 CCF ID 不會搜尋，以免誤選。<br/>Partial CCF IDs are blocked to avoid mistakes.</div>'
             );
             return;
           }
-          /* ============================================================
-           * PATCH_BOUNDARY: MANUAL_SEARCH_PARTIAL_CCF_GATE_UI_END
-           * ============================================================ */
+          /* PATCH_BOUNDARY: MANUAL_SEARCH_PARTIAL_CCF_GATE_UI_END */
 
           doSearch(text);
         }, 220);
@@ -1002,8 +1094,8 @@
               '<div class="msgBox warn" style="margin-bottom:10px;">'+
                 '<div class="kv">'+
                   '<div>CCF ID</div><div>'+escapeHtml(r.id)+'</div>'+
-                  '<div>中文名</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
-                  '<div>English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
+                  '<div>中文名 / Chinese</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
+                  '<div>英文名 / English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
                 '</div>'+
                 '<div class="miniBtnRow">'+
                   '<button class="primary" data-id="'+escapeHtml(r.id)+'">✅ 選擇 / Select</button>'+
@@ -1014,7 +1106,6 @@
           Array.prototype.slice.call(results.querySelectorAll('button[data-id]')).forEach(function(btn){
             btn.onclick = function(){
               var id = btn.getAttribute('data-id');
-              App.selectedMember = { id:id, nameZh:'', nameEn:'' };
               showConfirmOnly(id);
             };
           });
@@ -1039,7 +1130,6 @@
         $('btnCancel').onclick = function(){
           confirmPanel.classList.add('hide');
           manualPanel.classList.remove('hide');
-          App.selectedMember=null;
         };
 
         $('btnConfirm').onclick = function(){
@@ -1048,24 +1138,38 @@
       }
 
       function renderEmailLineFromRes(res){
+        if(res && res.result === 'ALREADY'){
+          var stA = (res.already && res.already.emailStatus) ? String(res.already.emailStatus).toUpperCase() : '';
+          if(stA === 'SENT'){
+            return '<div class="msgBox warn" style="margin-top:10px;">'+
+                     '<div class="big warn">📧 上次簽到已發送電郵簽到證明。</div>'+
+                     '<div style="margin-top:4px;font-size:16px;">📧 Email proof was sent at the last sign-in.</div>'+
+                   '</div>';
+          }
+          if(res.already && res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
+            return '<div class="msgBox warn" style="margin-top:10px;">'+
+                     '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>'+
+                     '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
+                   '</div>';
+          }
+          var uiA = emailUiFromStatus(stA);
+          return '<div class="msgBox warn" style="margin-top:10px;">'+
+                   '<div class="big warn">'+escapeHtml(uiA.zh)+'</div>'+
+                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(uiA.en)+'</div>'+
+                 '</div>';
+        }
+
         if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
-          return '<div class="msgBox warn" style="margin-top:10px;">' +
-                   '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>' +
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.emailUi.en || '')+'</div>' +
+          return '<div class="msgBox warn" style="margin-top:10px;">'+
+                   '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>'+
+                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.emailUi.en || '')+'</div>'+
                  '</div>';
         }
-        // ALREADY may contain already.emailUi or already.emailStatus
-        if(res && res.already && res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
-          return '<div class="msgBox warn" style="margin-top:10px;">' +
-                   '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>' +
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.already.emailUi.en || '')+'</div>' +
-                 '</div>';
-        }
-        var st = (res && res.emailStatus) ? res.emailStatus : ((res && res.already && res.already.emailStatus) ? res.already.emailStatus : '');
+        var st = (res && res.emailStatus) ? String(res.emailStatus).toUpperCase() : '';
         var ui = emailUiFromStatus(st);
-        return '<div class="msgBox warn" style="margin-top:10px;">' +
-                 '<div class="big warn">'+escapeHtml(ui.zh)+'</div>' +
-                 '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>' +
+        return '<div class="msgBox warn" style="margin-top:10px;">'+
+                 '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
+                 '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>'+
                '</div>';
       }
 
@@ -1080,6 +1184,9 @@
           confirmPanel.classList.add('hide');
           manualPanel.classList.remove('hide');
 
+          var isNew = isNewFriendByStatus(res.status);
+          var under18 = !!(res.member && res.member.isUnder18);
+
           if(res.result === 'ALREADY'){
             var hb = res.already && res.already.handledBy
               ? ((res.already.handledBy.nameZh||'')+' '+(res.already.handledBy.nameEn||'')).trim() || (res.already.handledBy.staffId||'')
@@ -1088,12 +1195,14 @@
             showBox(manualMsg,'ok','✅ 經已簽到','✅ Already checked in',
               '<div class="kv">'+
                 '<div>CCF ID</div><div>'+escapeHtml((res.member&&res.member.id)||id)+'</div>'+
-                '<div>中文名</div><div>'+escapeHtml((res.member&&res.member.nameZh)||'')+'</div>'+
-                '<div>English</div><div>'+escapeHtml((res.member&&res.member.nameEn)||'')+'</div>'+
-                '<div>Last sign-in</div><div>'+escapeHtml((res.already&&res.already.timeUk)||'')+'</div>'+
-                '<div>Handled by</div><div>'+escapeHtml(hb)+'</div>'+
+                '<div>中文名 / Chinese</div><div>'+escapeHtml((res.member&&res.member.nameZh)||'')+'</div>'+
+                '<div>英文名 / English</div><div>'+escapeHtml((res.member&&res.member.nameEn)||'')+'</div>'+
+                '<div>上次時間 / Last</div><div>'+escapeHtml((res.already&&res.already.timeUk)||'')+'</div>'+
+                '<div>經手 / By</div><div>'+escapeHtml(hb)+'</div>'+
                 '<div>Receipt</div><div>'+escapeHtml((res.already&&res.already.receiptId)||'')+'</div>'+
               '</div>' +
+              newFriendWelcomeHtml(isNew) +
+              under18NoticeHtml(under18) +
               renderEmailLineFromRes(res)
             );
             return;
@@ -1104,12 +1213,14 @@
           showBox(manualMsg,'ok','✅ 簽到成功','✅ Check-in successful',
             '<div class="kv">'+
               '<div>CCF ID</div><div>'+escapeHtml((res.member&&res.member.id)||id)+'</div>'+
-              '<div>中文名</div><div>'+escapeHtml((res.member&&res.member.nameZh)||'')+'</div>'+
-              '<div>English</div><div>'+escapeHtml((res.member&&res.member.nameEn)||'')+'</div>'+
-              '<div>Time (UK)</div><div>'+escapeHtml(res.timeUk||'')+'</div>'+
-              '<div>Handled by</div><div>'+escapeHtml(handledBy)+'</div>'+
+              '<div>中文名 / Chinese</div><div>'+escapeHtml((res.member&&res.member.nameZh)||'')+'</div>'+
+              '<div>英文名 / English</div><div>'+escapeHtml((res.member&&res.member.nameEn)||'')+'</div>'+
+              '<div>時間 / Time (UK)</div><div>'+escapeHtml(res.timeUk||'')+'</div>'+
+              '<div>經手 / By</div><div>'+escapeHtml(handledBy)+'</div>'+
               '<div>Receipt</div><div>'+escapeHtml(res.receiptId||'')+'</div>'+
             '</div>' +
+            newFriendWelcomeHtml(isNew) +
+            under18NoticeHtml(under18) +
             renderEmailLineFromRes(res)
           );
         }).catch(function(){
@@ -1139,34 +1250,36 @@
             ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div style="margin-top:6px;font-size:16px;">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
             : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無記錄 / No check-ins yet</div></div>';
 
-          /* ============================================================
-           * PATCH_BOUNDARY: LIVE_NEWFRIENDS_ALWAYS_VISIBLE_BEGIN
-           * Always show 🆕 new friends list on live page
-           * ============================================================ */
+          /* PATCH_BOUNDARY: LIVE_NEWFRIENDS_BOX_WITH_PREFERREDNAME_BEGIN */
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });
+
+          function hiPref(p){
+            var s = String(p||'').trim();
+            if(!s) return '';
+            return '<span style="background:#fff3c4;padding:2px 8px;border-radius:10px;border:1px solid rgba(200,132,0,0.28);">'+escapeHtml(s)+'</span>';
+          }
 
           var newFriendsHtml = '';
           if(newFriends.length){
             newFriendsHtml =
               '<div class="msgBox warn" style="margin-top:10px;">'+
                 '<div class="big warn">🆕 新朋友 / New friends ('+escapeHtml(newFriends.length)+')</div>'+
-                '<div class="small">（自動顯示）/ Auto-shown</div>'+
-              '</div>'+
-              '<div class="listWrap" style="margin-top:10px;">'+
-                newFriends.map(function(n){
-                  var zh = n.nameZh || '';
-                  var en = n.nameEn || '';
-                  var top = '🆕 ' + (zh || en || '');
-                  var bottom = [];
-                  if(zh && en) bottom.push(en);
-                  bottom.push('CCF ID: ' + (n.id||''));
-                  return ''+
-                    '<div class="nameItem">'+
-                      '<div class="zh">'+escapeHtml(top)+'</div>'+
-                      '<div class="en">'+escapeHtml(bottom.join(' · '))+'</div>'+
-                    '</div>';
-                }).join('')+
+                '<div class="listWrap" style="margin-top:10px;">'+
+                  newFriends.map(function(n){
+                    var pref = (n.preferredName||'').trim();
+                    var zh = (n.nameZh||'').trim();
+                    var en = (n.nameEn||'').trim();
+                    var line1 = pref ? (hiPref(pref) + ' ') : '';
+                    var line2 = [zh, en].filter(Boolean).join(' · ');
+                    if(!line2) line2 = n.id || '';
+                    return ''+
+                      '<div class="nameItem">'+
+                        '<div class="zh">🆕 '+ line1 + '</div>'+
+                        '<div class="en">'+ escapeHtml(line2) + (n.id ? (' · ' + escapeHtml(n.id)) : '') +'</div>'+
+                      '</div>';
+                  }).join('')+
+                '</div>'+
               '</div>';
           } else {
             newFriendsHtml =
@@ -1175,15 +1288,13 @@
                 '<div class="small">暫時沒有 / None</div>'+
               '</div>';
           }
-          /* ============================================================
-           * PATCH_BOUNDARY: LIVE_NEWFRIENDS_ALWAYS_VISIBLE_END
-           * ============================================================ */
+          /* PATCH_BOUNDARY: LIVE_NEWFRIENDS_BOX_WITH_PREFERREDNAME_END */
 
           box.innerHTML =
             '<div class="kv">' +
               '<div>Event</div><div>'+escapeHtml(res.eventKey)+'</div>' +
-              '<div>已簽到</div><div><span class="big">'+escapeHtml(res.checkedInCount)+'</span></div>' +
-              '<div>新朋友</div><div><span class="big">'+escapeHtml(res.newCount||0)+'</span></div>' +
+              '<div>已簽到 / Checked-in</div><div><span class="big">'+escapeHtml(res.checkedInCount)+'</span></div>' +
+              '<div>新朋友 / New</div><div><span class="big">'+escapeHtml(res.newCount||0)+'</span></div>' +
             '</div>' +
             last +
             newFriendsHtml;
@@ -1203,6 +1314,7 @@
         renderNames();
       }
 
+      /* PATCH_BOUNDARY: LIVE_NAMES_LIST_PREFERREDNAME_ONLY_BEGIN */
       function renderNames(){
         var box = $('rtNamesBox');
         var res = App.liveData;
@@ -1218,14 +1330,13 @@
           '<div class="small">（可向下滑動 / Scroll down）</div>' +
           '<div class="listWrap" style="margin-top:10px;">' +
             res.names.map(function(n){
-              var zh = n.nameZh || '';
-              var en = n.nameEn || '';
-              var top = (n.isNew ? '🆕 ' : '') + (zh || en || '');
-              var bottom = (zh && en) ? en : '';
+              var pref = (n.preferredName||'').trim();
+              var zh = (n.nameZh||'').trim();
+              var en = (n.nameEn||'').trim();
+              var top = (n.isNew ? '🆕 ' : '') + (pref || zh || en || '');
               var cls = 'nameItem' + (tappable ? ' tap' : '');
               return '<div class="'+cls+'" data-mid="'+escapeHtml(n.id)+'">' +
                        '<div class="zh">' + escapeHtml(top) + '</div>' +
-                       (bottom ? ('<div class="en">' + escapeHtml(bottom) + '</div>') : '') +
                      '</div>';
             }).join('') +
           '</div>';
@@ -1239,6 +1350,7 @@
           });
         }
       }
+      /* PATCH_BOUNDARY: LIVE_NAMES_LIST_PREFERREDNAME_ONLY_END */
     }
 
     function bindVrm(){
@@ -1284,8 +1396,8 @@
                 '<div class="kv">'+
                   '<div>車牌 / Plate</div><div>'+escapeHtml(plates)+'</div>'+
                   '<div>CCF ID</div><div>'+escapeHtml(r.id)+'</div>'+
-                  '<div>中文名</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
-                  '<div>English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
+                  '<div>中文名 / Chinese</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
+                  '<div>英文名 / English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
                 '</div>'+
                 '<div style="margin-top:10px;">'+ci+'</div>'+
               '</div>';
@@ -1306,59 +1418,87 @@
 
       var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
 
+      function resetAuthAll(){
+        App.authApprover=null;
+        App.authTarget=null;
+        App.authRole=null;
+      }
+
       if(step === 1){
         $('btnAuthCancel').onclick = function(){ App.view='menu'; render(); };
+        $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
+        $('btnAuthRescan1').onclick = function(){ App.authFlash=null; render(); };
 
-        camBindSwitchButton_('btnSwitchCamAuth1', function(){
-          render(); // simplest restart: rerender step 1, startScan again
-        });
+        camBindSwitchButton_('btnSwitchCamAuth1', function(){ App.authFlash=null; render(); });
 
-        startScan('videoAuth', function(payload){
-          callApi('api_auth_validate_approver', App.token, payload).then(function(res){
-            if(!res || !res.ok){ showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+        // Only start scanning if camera panel is visible (no flash state)
+        if (!$('authCam1').classList.contains('hide')) {
+          startScan('videoAuth1', function(payload){
+            stopScan();
+            $('authCam1').classList.add('hide');
+            $('authActions').classList.remove('hide');
+            showBox('authMsg','warn','處理中…','Working…');
 
-            var a = res.approver;
-            var modal = openModal(
-              '<div class="big">確認授權者？ / Confirm approver?</div>'+
-              '<div class="kv">'+
-                '<div>CCF ID</div><div>'+escapeHtml(a.id)+'</div>'+
-                '<div>姓名</div><div>'+escapeHtml((a.nameZh+" "+a.nameEn).trim())+'</div>'+
-                '<div>身份</div><div>'+escapeHtml(a.status)+'</div>'+
-              '</div>'+
-              '<div class="miniBtnRow" style="margin-top:12px;">'+
-                '<button id="btnYes" class="primary">✅ 是我 / Yes</button>'+
-                '<button id="btnNo" class="danger">🔁 重新掃描 / Rescan</button>'+
-              '</div>'
-            );
-            modal.querySelector('#btnYes').onclick = function(){
-              closeModal(modal);
-              App.authApprover = a;
-              render();
-            };
-            modal.querySelector('#btnNo').onclick = function(){
-              closeModal(modal);
-              render();
-            };
-          }).catch(function(){
-            showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
-          });
-        }, 'authMsg');
+            callApi('api_auth_validate_approver', App.token, payload).then(function(res){
+              if(!res || !res.ok){
+                showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+                return;
+              }
+
+              var a = res.approver;
+              var modal = openModal(
+                '<div class="big">確認授權者？ / Confirm approver?</div>'+
+                '<div class="kv">'+
+                  '<div>CCF ID</div><div>'+escapeHtml(a.id)+'</div>'+
+                  '<div>姓名 / Name</div><div>'+escapeHtml((a.nameZh+" "+a.nameEn).trim())+'</div>'+
+                  '<div>身份 / Role</div><div>'+escapeHtml(a.status)+'</div>'+
+                '</div>'+
+                '<div class="miniBtnRow" style="margin-top:12px;">'+
+                  '<button id="btnYes" class="primary">✅ 是我 / Yes</button>'+
+                  '<button id="btnNo" class="danger">🔁 重新掃描 / Rescan</button>'+
+                '</div>'
+              );
+              modal.querySelector('#btnYes').onclick = function(){
+                closeModal(modal);
+                App.authApprover = a;
+                App.authFlash=null;
+                render();
+              };
+              modal.querySelector('#btnNo').onclick = function(){
+                closeModal(modal);
+                App.authFlash=null;
+                render();
+              };
+            }).catch(function(){
+              showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
+            });
+
+          }, 'authMsg');
+        }
 
         return;
       }
 
       if(step === 2){
-        $('btnAuthBack1').onclick = function(){ App.authApprover=null; render(); };
-        $('btnAuthRestart2').onclick = function(){ render(); };
+        $('btnAuthBack1').onclick = function(){ App.authApprover=null; App.authFlash=null; render(); };
+        $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
+        $('btnAuthRescan2').onclick = function(){ App.authFlash=null; render(); };
 
-        camBindSwitchButton_('btnSwitchCamAuth2', function(){
-          render();
-        });
+        camBindSwitchButton_('btnSwitchCamAuth2', function(){ App.authFlash=null; render(); });
 
         startScan('videoAuth2', function(payload){
+          stopScan();
+          $('authCam2').classList.add('hide');
+          $('authActions').classList.remove('hide');
+          showBox('authMsg','warn','處理中…','Working…');
+
           callApi('api_auth_validate_target', App.token, payload).then(function(res){
-            if(!res || !res.ok){ showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+            if(!res || !res.ok){
+              showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+              return;
+            }
             App.authTarget = res.target;
+            App.authFlash=null;
             render();
           }).catch(function(){
             showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
@@ -1369,26 +1509,53 @@
       }
 
       if(step === 3){
-        $('btnAuthBack2').onclick = function(){ App.authTarget=null; App.authRole=null; render(); };
-        $('btnRoleTemp').onclick = function(){ App.authRole='TEMP'; render(); };
-        $('btnRoleHelper').onclick = function(){ App.authRole='HELPER'; render(); };
+        $('btnAuthRestartAll').onclick = function(){
+          resetAuthAll();
+          App.authFlash=null;
+          render();
+        };
+        $('btnRoleTemp').onclick = function(){ App.authRole='TEMP'; App.authFlash=null; render(); };
+        $('btnRoleHelper').onclick = function(){ App.authRole='HELPER'; App.authFlash=null; render(); };
         return;
       }
 
       if(step === 4){
-        $('btnAuthBack3').onclick = function(){ App.authRole=null; render(); };
+        $('btnAuthRestartAll').onclick = function(){
+          resetAuthAll();
+          App.authFlash=null;
+          render();
+        };
 
         $('btnAuthCommit').onclick = function(){
           clear('authMsg');
+          showBox('authMsg','warn','處理中…','Working…');
+
           callApi('api_auth_commit', App.token, App.authApprover.id, App.authTarget.id, App.authRole).then(function(res){
-            if(!res || !res.ok){ showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-            showBox('authMsg','ok','✅ 已完成授權','✅ Authorised',
-              '<div class="kv">'+
-                '<div>Target</div><div>'+escapeHtml(res.target.id)+'</div>'+
-                '<div>New status</div><div>'+escapeHtml(res.target.newStatus)+'</div>'+
-                '<div>Expiry</div><div>'+escapeHtml(res.target.roleExpiresIso || res.target.roleExpires || '')+'</div>'+
-              '</div>'
-            );
+            if(!res || !res.ok){
+              showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+              return;
+            }
+
+            var exp = res.target && (res.target.roleExpiresIso || res.target.roleExpires) ? fmtIsoToUkYmdHm(res.target.roleExpiresIso || res.target.roleExpires) : '';
+
+            App.authFlash = {
+              kind:'ok',
+              zh:'✅ 已完成授權（已重置）',
+              en:'✅ Authorised (reset)',
+              detailHtml:
+                '<div class="kv">'+
+                  '<div>目標 / Target</div><div>'+escapeHtml(res.target.id||'')+'</div>'+
+                  '<div>新身份 / New</div><div>'+escapeHtml(res.target.newStatus||'')+'</div>'+
+                  '<div>到期 / Expiry</div><div>'+escapeHtml(exp)+'</div>'+
+                '</div>'+
+                '<div class="small" style="margin-top:10px;">'+
+                  '已重置流程：需要重新掃描授權者及目標 QR 才可進行下一次授權。<br/>'+
+                  'Flow reset: you must re-scan approver and target QR for the next authorisation.'+
+                '</div>'
+            };
+
+            resetAuthAll();
+            render(); // Step 1, camera collapsed due to flash
           }).catch(function(){
             showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
           });
@@ -1415,14 +1582,18 @@
         var today = res.today;
         var last4 = res.last4EventKeys || [];
         var plates = [m.vrm, m.vrm2].filter(Boolean).join(' / ');
+
+        var display = displayNameFromMember(m);
+        var namesLine = [ (m.nameZh||'').trim(), (m.nameEn||'').trim() ].filter(Boolean).join(' · ');
+
         var todayHtml = today
           ? ('<div class="msgBox ok" style="margin-top:10px;">'+
               '<div class="big ok">今日簽到 / Today</div>'+
               '<div class="kv">'+
                 '<div>Event</div><div>'+escapeHtml(today.eventKey)+'</div>'+
-                '<div>Time</div><div>'+escapeHtml(today.timeUk)+'</div>'+
-                '<div>Method</div><div>'+escapeHtml(today.method||'')+'</div>'+
-                '<div>Handled by</div><div>'+escapeHtml(((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')).trim() || today.handledBy.id||'')+'</div>'+
+                '<div>時間 / Time</div><div>'+escapeHtml(today.timeUk)+'</div>'+
+                '<div>方式 / Method</div><div>'+escapeHtml(today.method||'')+'</div>'+
+                '<div>經手 / By</div><div>'+escapeHtml(((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')).trim() || today.handledBy.id||'')+'</div>'+
                 '<div>Receipt</div><div>'+escapeHtml(today.receiptId||'')+'</div>'+
               '</div>'+
             '</div>')
@@ -1433,7 +1604,11 @@
         var last4Html = last4.length
           ? ('<div class="msgBox warn" style="margin-top:10px;">'+
               '<div class="big warn">最近 4 次活動 / Last 4 events</div>'+
-              '<div class="small" style="margin-top:6px;">'+escapeHtml(last4.join(' · '))+'</div>'+
+              '<div style="margin-top:8px;">'+
+                '<ul style="margin:0 0 0 18px;padding:0;line-height:1.6;">'+
+                  last4.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('')+
+                '</ul>'+
+              '</div>'+
             '</div>')
           : ('<div class="small" style="margin-top:10px;">未有過往記錄 / No history</div>');
 
@@ -1443,11 +1618,11 @@
           '<div class="big">👤 會員資料 / Member</div>'+
           '<div class="kv">'+
             '<div>CCF ID</div><div>'+escapeHtml(m.id||'')+'</div>'+
-            '<div>中文名</div><div>'+escapeHtml(m.nameZh||'')+'</div>'+
-            '<div>English</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
-            '<div>VRM</div><div>'+escapeHtml(plates||'')+'</div>'+
-            '<div>Status</div><div>'+escapeHtml(m.status||'')+'</div>'+
+            '<div>顯示名稱 / Display</div><div>'+escapeHtml(display||'')+'</div>'+
+            (namesLine ? '<div>姓名 / Names</div><div>'+escapeHtml(namesLine)+'</div>' : '')+
+            '<div>車牌 / VRM</div><div>'+escapeHtml(plates||'')+'</div>'+
           '</div>'+
+          under18NoticeHtml(!!m.isUnder18)+
           todayHtml+
           last4Html+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
@@ -1500,27 +1675,49 @@
 
       var modal = openModal(
         '<div class="big">'+escapeHtml(title)+'</div>'+
-        '<div class="videoWrap" style="margin-top:10px;"><video id="videoReauth" playsinline></video></div>'+
-        '<div class="miniBtnRow">'+
-          '<button id="btnSwitchCamReauth" class="alt">🔄 切換相機 / Switch camera</button>'+
-          '<button id="btnCancelReauth" class="danger">取消 / Cancel</button>'+
+        '<div id="reauthCam" class="card" style="margin-top:10px;">'+
+          '<div class="videoWrap"><video id="videoReauth" playsinline></video></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnSwitchCamReauth" class="alt">🔄 切換相機 / Switch camera</button>'+
+            '<button id="btnCancelReauth" class="danger">取消 / Cancel</button>'+
+          '</div>'+
         '</div>'+
-        '<div id="'+msgTarget+'"></div>'
+        '<div id="'+msgTarget+'"></div>'+
+        '<div id="reauthActions" class="miniBtnRow hide" style="margin-top:12px;">'+
+          '<button id="btnRescanReauth" class="primary">🔁 重新掃描 / Rescan</button>'+
+          '<button id="btnBackReauth" class="alt">⬅️ 返回 / Back</button>'+
+        '</div>'
       );
+
+      function restart(){
+        clear(msgTarget);
+        $('reauthCam').classList.remove('hide');
+        $('reauthActions').classList.add('hide');
+        startScan('videoReauth', onCapturedReauth, msgTarget);
+      }
 
       modal.querySelector('#btnCancelReauth').onclick = function(){
         stopScan();
         closeModal(modal);
       };
+      modal.querySelector('#btnBackReauth').onclick = function(){
+        stopScan();
+        closeModal(modal);
+      };
+      modal.querySelector('#btnRescanReauth').onclick = function(){
+        stopScan();
+        restart();
+      };
 
       camBindSwitchButton_('btnSwitchCamReauth', function(){
         stopScan();
-        // restart scan in-place
-        startScan('videoReauth', onCapturedReauth, msgTarget);
+        restart();
       });
 
       function onCapturedReauth(payload){
         stopScan();
+        $('reauthCam').classList.add('hide');
+        $('reauthActions').classList.remove('hide');
         showBox(msgTarget,'warn','處理中…','Working…');
 
         var reauthPayload = isSuper ? '' : payload;
@@ -1532,43 +1729,58 @@
             return;
           }
 
+          var del = res.deleted || {};
+          var memName = (del.memberNameZh||'').trim() || (del.memberNameEn||'').trim() || '';
+          var byName = ((del.byNameZh||'') + ' ' + (del.byNameEn||'')).trim();
+
+          var memberDisplay = (del.memberId||'') + (memName ? ('（'+memName+'）') : '');
+          var byDisplay = (del.byId||del.by||'') + (byName ? ('（'+byName+'）') : '');
+
           var email = res.email || {};
           var emailLine = '';
           if(email.status === 'SENT'){
-            emailLine = '<div class="small">📧 Email sent to: '+escapeHtml(email.toMasked||'')+'</div>';
-          } else if(email.status === 'OPTOUT'){
-            emailLine = '<div class="small">📧 Member opted out</div>';
-          } else if(email.status === 'NO_EMAIL'){
-            emailLine = '<div class="small">📧 No email on file</div>';
+            emailLine =
+              '<div class="msgBox warn" style="margin-top:10px;">'+
+                '<div class="big warn">📧 已發送刪除通知電郵</div>'+
+                '<div style="margin-top:4px;font-size:16px;">📧 Delete notice email sent</div>'+
+                '<div class="small" style="margin-top:8px;">To: '+escapeHtml(email.toMasked||'')+'</div>'+
+              '</div>';
           } else if(email.status){
-            emailLine = '<div class="small">📧 Email status: '+escapeHtml(email.status)+'</div>';
+            var ui = emailUiFromStatus(email.status);
+            emailLine =
+              '<div class="msgBox warn" style="margin-top:10px;">'+
+                '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
+                '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>'+
+              '</div>';
           }
 
-          showBox(msgTarget,'ok','✅ 已刪除','✅ Deleted',
+          showBox(msgTarget,'ok','✅ 已刪除今日簽到','✅ Deleted today attendance',
             '<div class="kv">'+
-              '<div>Event</div><div>'+escapeHtml(res.deleted.eventKey)+'</div>'+
-              '<div>Member</div><div>'+escapeHtml(res.deleted.memberId)+'</div>'+
-              '<div>By</div><div>'+escapeHtml(res.deleted.by)+'</div>'+
-            '</div>'+emailLine
+              '<div>Event</div><div>'+escapeHtml(del.eventKey||'')+'</div>'+
+              '<div>已刪除 / Deleted</div><div>Attendance record deleted / 出席記錄已刪除</div>'+
+              '<div>Member</div><div>'+escapeHtml(memberDisplay)+'</div>'+
+              '<div>By</div><div>'+escapeHtml(byDisplay)+'</div>'+
+            '</div>' +
+            emailLine
           );
 
           try{ closeModal(parentModal); }catch(e){}
-          try{ if(App.view==='realtime') { App.liveNamesOpen=false; App.liveData=null; } }catch(e){}
-
           var btnRow = document.createElement('div');
           btnRow.className = 'miniBtnRow';
           btnRow.style.marginTop = '12px';
-          btnRow.innerHTML = '<button id="btnCloseAfter" class="alt">⬅️ 返回 / Back</button>';
+          btnRow.innerHTML = '<button id="btnCloseAfter" class="alt">⬅️ 返回 Live / Back to Live</button>';
           modal.querySelector('.modal').appendChild(btnRow);
           modal.querySelector('#btnCloseAfter').onclick = function(){ closeModal(modal); App.view='realtime'; render(); };
+
         }).catch(function(){
           showErr(msgTarget, {code:'E500', zh:'系統錯誤', en:'Error'});
         });
       }
 
-      startScan('videoReauth', onCapturedReauth, msgTarget);
+      restart();
     }
 
+    // boot
     render();
   </script>
 </body>
