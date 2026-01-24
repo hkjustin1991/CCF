@@ -1,36 +1,44 @@
 /***************************************
  * CCF Staff Portal (stable + upgrades)
  * File: Code.gs
- * v2026-01-24.staff3
+ * v2026-01-24.staff5
  *
- * SOURCE OF TRUTH: This file is regenerated from the user's pasted baseline
- * (v2026-01-23.staff2) with minimal, explicitly requested changes only.
+ * SOURCE OF TRUTH: Regenerated from your pasted baseline + prior agreed changes.
+ * No refactors unless required for the requested behaviours.
  *
  * ============================================================
- * CHANGELOG (2026-01-24.staff3) — REQUESTED FEATURES IMPLEMENTED
+ * CHANGELOG (2026-01-24.staff5)
  * ============================================================
- * [A] Live page:
- *   - api_get_live_page now returns newCount + per-name isNew
- *     (new = PENDING or PROVISIONAL by status in Members)
+ * [1] Manual search:
+ *   - Search includes PreferredName.
+ *   - If query looks like partial CCF ID (e.g. "CCF12"), return NO results.
+ *     Only complete CCF ID (CCF + >=4 digits) triggers direct ID lookup.
  *
- * [B] Check-in ALREADY payload enrichment:
- *   - findExistingCheckin_ now returns emailStatus + emailToMasked (from Checkins row)
+ * [2] Live payload:
+ *   - Live names include preferredName for UI new-friend box rendering.
  *
- * [C] Authorisation strictness (server-side enforcement):
- *   - Normal STAFF/ADMIN session: approver QR must be self-only (same ID as session)
- *   - SUPERUSER session: approver must be ADMIN only (STAFF rejected)
- *   - Target cannot be STAFF/ADMIN (cannot downgrade)
- *   - Cannot self-authorise (target == session staff) with required zh message
+ * [3] Under-18 flag:
+ *   - Read Members.IsMinor (YES/NO) if the column exists.
+ *   - Return member.isUnder18 in check-in responses (OK + ALREADY).
+ *   - No under-16 computation (UI will show under-18 message + under-16 reminder).
  *
- * Notes:
- * - Camera switch feature is UI-only and will be implemented in index.html.
- * - No sheet schema changes. No refactors unless required for these features.
+ * [4] Emails (Staff Portal proof + delete notice):
+ *   - Greeting uses preferredName if present; otherwise NameEn, then NameZh.
+ *   - Delete notice email wording is explicitly "DELETED / 已刪除".
+ *   - Staff name remains hidden in delete emails (uses only byLabel / CCF ID label).
+ *
+ * [5] Delete API response enriched for UI:
+ *   - Returns byId/byNameZh/byNameEn for UI display.
+ *   - Keeps legacy deleted.by field for backward compatibility.
+ *
+ * [6] Existing features preserved:
+ *   - QR strict parsing, dedupe logic, bilingual errors, logging, auth strict rules.
+ *
+ * PATCH BOUNDARIES:
+ *   - Search for "PATCH_BOUNDARY:" to locate changes for later patching.
  ***************************************/
 
-/* =========================
- * Constants / Config
- * ========================= */
-const APP_VERSION = '2026-01-24.staff3';
+const APP_VERSION = '2026-01-24.staff5';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -42,7 +50,7 @@ const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
 const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
 const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
 
-// Members schema
+// Members schema (first 11 columns must match)
 const MEMBERS_HEADERS_REQUIRED = [
   'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
 ];
@@ -57,7 +65,7 @@ const STATUS_ADMIN = 'ADMIN';
 const STATUS_HELPER = 'HELPER';
 const STATUS_TEMP = 'TEMP';
 
-// check-in allowed (include ADMIN/HELPER/TEMP so they can still be checked-in if scanned)
+// Check-in allowed
 const ALLOWED_STATUSES_FOR_CHECKIN = [
   STATUS_ACTIVE, STATUS_PENDING, STATUS_PROVISIONAL,
   STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP
@@ -70,22 +78,29 @@ const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, 
 const HELPER_EXPIRY_DAYS = 7;
 const TEMP_EXPIRY_DAYS = 2;
 
-// Optional Members columns
+// Optional Members columns used by Staff Portal
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_MEMBERS_OPTIONAL_HEADERS_BEGIN
+ * Add PreferredName so staff portal can search by it + show on live new-friend box.
+ * NOTE: IsMinor is read IF PRESENT, but is NOT inserted automatically.
+ * ============================================================ */
 const MEMBERS_OPTIONAL_HEADERS = [
   'VRM','VRM2',
-  'RoleExpires' // Date/time when HELPER/TEMP expires (blank for STAFF/ADMIN/ACTIVE/etc.)
+  'RoleExpires',
+  'PreferredName'
 ];
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_MEMBERS_OPTIONAL_HEADERS_END
+ * ============================================================ */
 
 /******** Web App Router ********/
 function doGet(e) {
   const mode = String((e && e.parameter && e.parameter.mode) || '').toLowerCase();
 
-  // Registration portal (public, no sign-in)
   if (mode === 'reg') {
-    return doGetReg_(e); // lives in Reg.gs
+    return doGetReg_(e); // Reg.gs
   }
 
-  // Default: staff portal
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   return t.evaluate()
@@ -122,14 +137,17 @@ function isHelperOrTemp_(st){
   return (st === STATUS_HELPER || st === STATUS_TEMP);
 }
 
-/* === PATCH_BOUNDARY: STAFF3_LIVE_NEWFRIEND_RULES_BEGIN ===
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_NEWFRIEND_RULE_BEGIN
  * Rule: New friend = PENDING or PROVISIONAL (Members Status)
- */
+ * ============================================================ */
 function isNewFriendStatus_(st){
   st = normalizeStatus_(st);
   return (st === STATUS_PENDING || st === STATUS_PROVISIONAL);
 }
-/* === PATCH_BOUNDARY: STAFF3_LIVE_NEWFRIEND_RULES_END === */
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_NEWFRIEND_RULE_END
+ * ============================================================ */
 
 function addDays_(d, days){
   const x = new Date(d.getTime());
@@ -141,7 +159,6 @@ function isExpired_(expiry){
   const dt = (expiry instanceof Date) ? expiry : new Date(expiry);
   return dt.getTime() < nowUk_().getTime();
 }
-
 function safeToDate_(v){
   if (!v) return null;
   if (v instanceof Date) return v;
@@ -181,10 +198,9 @@ function maskVrm_(vrm){
   return v.slice(0,4) + ' ***';
 }
 
-/* === PATCH_BOUNDARY: STAFF3_EMAILSTATUS_UI_HELPER_BEGIN ===
- * Used to provide consistent UI hints (esp. for ALREADY records).
- * (UI may choose to map statuses itself; this helper is safe and optional.)
- */
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_EMAIL_UI_HELPER_BEGIN
+ * ============================================================ */
 function emailUiFromStatus_(status){
   const s = String(status||'').trim().toUpperCase();
   if (s === 'SENT')   return { zh:'已發送電郵簽到證明。', en:'Email proof of check-in sent.' };
@@ -195,7 +211,9 @@ function emailUiFromStatus_(status){
   if (!s)             return { zh:'未有電郵狀態。', en:'No email status.' };
   return { zh:'電郵狀態：' + s, en:'Email status: ' + s };
 }
-/* === PATCH_BOUNDARY: STAFF3_EMAILSTATUS_UI_HELPER_END === */
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_EMAIL_UI_HELPER_END
+ * ============================================================ */
 
 /******** Members sheet + optional columns ********/
 function getMembersSheet_() {
@@ -260,8 +278,19 @@ function getMembersIndex_() {
 
     const vrm1 = hasVRM && ('VRM' in col) ? normalizeVrm_(row[col['VRM']]) : '';
     const vrm2 = hasVRM && ('VRM2' in col) ? normalizeVrm_(row[col['VRM2']]) : '';
-
     const roleExpires = ('RoleExpires' in col) ? safeToDate_(row[col['RoleExpires']]) : null;
+
+    /* ============================================================
+     * PATCH_BOUNDARY: STAFF5_PREFERREDNAME_AND_UNDER18_INDEX_BEGIN
+     * Read PreferredName if present; read IsMinor if present (YES => under-18).
+     * NOTE: We do NOT auto-insert IsMinor column.
+     * ============================================================ */
+    const preferredName = ('PreferredName' in col) ? String(row[col['PreferredName']] || '').trim() : '';
+    const isMinorRaw = ('IsMinor' in col) ? String(row[col['IsMinor']] || '').trim().toUpperCase() : '';
+    const isUnder18 = (isMinorRaw === 'YES');
+    /* ============================================================
+     * PATCH_BOUNDARY: STAFF5_PREFERREDNAME_AND_UNDER18_INDEX_END
+     * ============================================================ */
 
     byId[id] = {
       rowNumber: r + 2,
@@ -269,6 +298,8 @@ function getMembersIndex_() {
       key: String(row[col['Key']] || '').trim(),
       nameZh: String(row[col['NameZh']] || '').trim(),
       nameEn: String(row[col['NameEn']] || '').trim(),
+      preferredName: preferredName,
+      isUnder18: !!isUnder18,
       email: String(row[col['Email']] || '').trim(),
       mobile: String(row[col['Mobile']] || '').trim(),
       status: String(row[col['Status']] || '').trim(),
@@ -276,7 +307,7 @@ function getMembersIndex_() {
       notes: String(row[col['Notes']] || '').trim(),
       vrm: vrm1,
       vrm2: vrm2,
-      roleExpires: roleExpires ? roleExpires.toISOString() : '' // store as ISO string for cache
+      roleExpires: roleExpires ? roleExpires.toISOString() : ''
     };
   }
 
@@ -358,7 +389,7 @@ function getSession_(token) {
   const k = 'sess_' + token;
   const raw = cache.get(k);
   if (!raw) return null;
-  cache.put(k, raw, SESSION_TTL_SECONDS); // sliding
+  cache.put(k, raw, SESSION_TTL_SECONDS);
   try { return JSON.parse(raw); } catch (e) { cache.remove(k); return null; }
 }
 
@@ -437,7 +468,6 @@ function api_login(input) {
   if (!m.key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
   if (m.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符，可能是舊 QR 卡，請聯絡影音同工', en:'Key mismatch (possibly old QR badge). Please contact Media team.' };
 
-  // HELPER/TEMP expiry enforcement
   if (isHelperOrTemp_(st)) {
     const exp = m.roleExpires ? safeToDate_(m.roleExpires) : null;
     if (!exp) return { ok:false, code:'E419', zh:'此臨時權限缺少到期日，請聯絡影音同工', en:'Expiry missing. Please contact Media team.' };
@@ -459,7 +489,7 @@ function api_login_internal(input) {
   return { ok:false, code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.' };
 }
 
-/******** Activity log (commit-only logging elsewhere uses this) ********/
+/******** Activity log ********/
 function api_log_activity(token, action, details) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -474,16 +504,11 @@ function api_log_activity(token, action, details) {
 }
 
 /******** Check-in: dedupe lookup ********/
-/* === PATCH_BOUNDARY: STAFF3_CHECKIN_ALREADY_EMAILFIELDS_BEGIN ===
- * Enrich ALREADY payload with EmailStatus + masked EmailTo from Checkins row.
- */
 function findExistingCheckin_(sh, eventKey, memberId) {
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return null;
 
-  // Read first 12 columns (includes EmailTo + EmailStatus)
   const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
-
   for (let i = data.length - 1; i >= 0; i--) {
     const row = data[i];
     const ev = String(row[1] || '').trim();
@@ -506,7 +531,6 @@ function findExistingCheckin_(sh, eventKey, memberId) {
   }
   return null;
 }
-/* === PATCH_BOUNDARY: STAFF3_CHECKIN_ALREADY_EMAILFIELDS_END === */
 
 function validateMemberForCheckin_(m, parsedKeyOrNull) {
   const st = normalizeStatus_(m.status);
@@ -522,6 +546,10 @@ function validateMemberForCheckin_(m, parsedKeyOrNull) {
 }
 
 /******** Email proof (check-in) ********/
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_EMAIL_PREFERREDNAME_BEGIN
+ * Greeting uses preferredName if present; otherwise NameEn then NameZh.
+ * ============================================================ */
 function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
   const emailTo = String(member.email || '').trim();
 
@@ -538,7 +566,9 @@ function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
 
   const nameEn = String(member.nameEn || '').trim();
   const nameZh = String(member.nameZh || '').trim();
-  const greetName = nameEn || nameZh || 'there';
+  const pref = String(member.preferredName || '').trim();
+  const greetName = pref || nameEn || nameZh || 'there';
+
   const dtLine = fmtUk_(ts, 'yyyy-MM-dd HH:mm:ss');
 
   const subject = `CCF Check-in proof / 簽到證明: ${eventKey} (Receipt ${receiptId})`;
@@ -565,6 +595,9 @@ Receipt ID：${receiptId}
     return { status:'ERROR', to:emailTo, ui:{ zh:'電郵發送失敗。若需要協助，請聯絡影音同工。', en:'Failed to send email. Please contact Media team for help.' } };
   }
 }
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_EMAIL_PREFERREDNAME_END
+ * ============================================================ */
 
 /******** Check-in APIs ********/
 function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
@@ -575,7 +608,8 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
   const parsed = parseQrPayloadStrict_(qrPayload);
   if (!parsed.ok) return parsed;
 
-  const m = getMembersIndex_().byId[parsed.id];
+  const mi = getMembersIndex_();
+  const m = mi.byId[parsed.id];
   if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
 
   const v = validateMemberForCheckin_(m, parsed.key);
@@ -596,7 +630,11 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
         result:'ALREADY',
         eventKey,
         status: v.status,
-        member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+        member:{
+          id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
+          preferredName: m.preferredName || '',
+          isUnder18: !!m.isUnder18
+        },
         already: existing
       };
     }
@@ -627,7 +665,11 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
       eventKey,
       timeUk: fmtUk_(ts, 'HH:mm:ss'),
       status: v.status,
-      member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+      member:{
+        id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
+        preferredName: m.preferredName || '',
+        isUnder18: !!m.isUnder18
+      },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
       selfCheckin,
@@ -648,7 +690,8 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
   const id = String(memberId || '').trim().toUpperCase();
   if (!id) return { ok:false, code:'E416', zh:'請輸入 ID', en:'Please enter an ID' };
 
-  const m = getMembersIndex_().byId[id];
+  const mi = getMembersIndex_();
+  const m = mi.byId[id];
   if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
 
   const v = validateMemberForCheckin_(m, null);
@@ -669,7 +712,11 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
         result:'ALREADY',
         eventKey,
         status: v.status,
-        member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+        member:{
+          id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
+          preferredName: m.preferredName || '',
+          isUnder18: !!m.isUnder18
+        },
         already: existing
       };
     }
@@ -699,7 +746,11 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
       eventKey,
       timeUk: fmtUk_(ts, 'HH:mm:ss'),
       status: v.status,
-      member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
+      member:{
+        id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
+        preferredName: m.preferredName || '',
+        isUnder18: !!m.isUnder18
+      },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
       emailUi: email.ui,
@@ -711,6 +762,11 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
   }
 }
 
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_SEARCH_PREFERREDNAME_AND_CCF_STRICT_BEGIN
+ * - Search includes PreferredName.
+ * - Partial CCF (CCF+digits but not full) returns empty results.
+ * ============================================================ */
 function api_search_members(token, query) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -719,10 +775,16 @@ function api_search_members(token, query) {
   if (!q) return { ok:true, results:[] };
 
   const byId = getMembersIndex_().byId;
+  const qUpper = q.toUpperCase();
 
-  if (/^CCF\d{4,}$/i.test(q)) {
-    const id = q.toUpperCase();
-    const m = byId[id];
+  // Partial CCF: return nothing (avoid accidental selection)
+  if (/^CCF\d+$/i.test(qUpper) && !/^CCF\d{4,}$/i.test(qUpper)) {
+    return { ok:true, results:[] };
+  }
+
+  // Exact ID lookup only
+  if (/^CCF\d{4,}$/i.test(qUpper)) {
+    const m = byId[qUpper];
     if (!m) return { ok:true, results:[] };
     if (normalizeStatus_(m.status) === STATUS_DISABLED) return { ok:true, results:[] };
     return { ok:true, results:[ { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' } ] };
@@ -735,7 +797,7 @@ function api_search_members(token, query) {
     const m = byId[id];
     if (normalizeStatus_(m.status) === STATUS_DISABLED) continue;
 
-    const hay = [m.id, m.nameZh, m.nameEn, m.email, m.mobile]
+    const hay = [m.id, m.nameZh, m.nameEn, m.preferredName, m.email, m.mobile]
       .map(x => String(x || '').toLowerCase())
       .join(' | ');
 
@@ -745,9 +807,15 @@ function api_search_members(token, query) {
 
   return { ok:true, results: out };
 }
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_SEARCH_PREFERREDNAME_AND_CCF_STRICT_END
+ * ============================================================ */
 
 /******** Live page (names) ********/
-/* === PATCH_BOUNDARY: STAFF3_LIVE_PAYLOAD_NEWFRIENDS_BEGIN === */
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_LIVE_PAYLOAD_WITH_PREFERREDNAME_BEGIN
+ * Live names include preferredName for UI.
+ * ============================================================ */
 function api_get_live_page(token, eventKeyOptional) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -813,6 +881,7 @@ function api_get_live_page(token, eventKeyOptional) {
     names.push({
       nameZh: n.nameZh || '',
       nameEn: n.nameEn || '',
+      preferredName: m ? (m.preferredName || '') : '',
       id: id,
       isNew: isNew
     });
@@ -830,7 +899,9 @@ function api_get_live_page(token, eventKeyOptional) {
   cache.put(cacheKey, JSON.stringify(payload), 15);
   return payload;
 }
-/* === PATCH_BOUNDARY: STAFF3_LIVE_PAYLOAD_NEWFRIENDS_END === */
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_LIVE_PAYLOAD_WITH_PREFERREDNAME_END
+ * ============================================================ */
 
 /******** VRM search ********/
 function api_search_vrm(token, query, eventKeyOptional) {
@@ -843,7 +914,6 @@ function api_search_vrm(token, query, eventKeyOptional) {
 
   const eventKey = String(eventKeyOptional || '').trim() || getDefaultEventKey_();
 
-  // checked set
   const sh = getCheckinsSheet_();
   const lastRow = sh.getLastRow();
   const checkedSet = new Set();
@@ -880,22 +950,15 @@ function api_search_vrm(token, query, eventKeyOptional) {
 }
 
 /*****************************************************************
- * PENDING STAFF PORTAL FEATURES: backend endpoints
+ * Authorisation endpoints (strict enforcement preserved)
  *****************************************************************/
 
-/******** Authorisation endpoints (UI will do scanning; backend enforces) ********/
-
-/**
- * Validate an approver QR payload (must be STAFF/ADMIN)
- */
-/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_APPROVER_BEGIN === */
 function api_auth_validate_approver(token, approverQrPayload){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
 
   const sessStaff = auth.sess.staff;
 
-  // HELPER/TEMP cannot authorise
   if (!sessStaff.isSuper && !isPrivilegedStaff_(sessStaff.status)) {
     return { ok:false, code:'E403', zh:'此帳號沒有授權權限', en:'No authorisation permission.' };
   }
@@ -909,7 +972,6 @@ function api_auth_validate_approver(token, approverQrPayload){
 
   const st = normalizeStatus_(m.status);
 
-  // SUPERUSER: approver must be ADMIN only
   if (sessStaff.isSuper){
     if (st !== STATUS_ADMIN){
       return {
@@ -920,7 +982,6 @@ function api_auth_validate_approver(token, approverQrPayload){
       };
     }
   } else {
-    // Normal STAFF/ADMIN: self-only approver (must match session staff)
     if (parsed.id !== String(sessStaff.id||'').trim().toUpperCase()){
       return {
         ok:false,
@@ -940,12 +1001,7 @@ function api_auth_validate_approver(token, approverQrPayload){
 
   return { ok:true, approver:{ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', status:st } };
 }
-/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_APPROVER_END === */
 
-/**
- * Validate a target QR payload (must exist, not disabled)
- */
-/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_TARGET_BEGIN === */
 function api_auth_validate_target(token, targetQrPayload){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -958,8 +1014,6 @@ function api_auth_validate_target(token, targetQrPayload){
   const parsed = parseQrPayloadStrict_(targetQrPayload);
   if (!parsed.ok) return parsed;
 
-  // Cannot self-authorise: when target equals current session staff ID
-  // (This also matches “scanned yourself twice” scenario in the 2-step UI flow.)
   const sessId = String(sessStaff.id||'').trim().toUpperCase();
   if (!sessStaff.isSuper && sessId && parsed.id === sessId){
     return {
@@ -977,7 +1031,6 @@ function api_auth_validate_target(token, targetQrPayload){
   const st = normalizeStatus_(m.status);
   if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
 
-  // cannot downgrade STAFF/ADMIN via HELPER/TEMP authorisation
   if (st === STATUS_STAFF || st === STATUS_ADMIN){
     return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
   }
@@ -994,24 +1047,13 @@ function api_auth_validate_target(token, targetQrPayload){
     }
   };
 }
-/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_TARGET_END === */
 
-/**
- * Commit privilege change
- * newStatus: 'HELPER' or 'TEMP'
- * Requires:
- *   - Normal STAFF/ADMIN: approver must be self-only (session staff), and must be STAFF/ADMIN
- *   - SUPERUSER: approver must be ADMIN only
- * TEMP expiry = 2 days, HELPER expiry = 7 days.
- */
-/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_COMMIT_BEGIN === */
 function api_auth_commit(token, approverId, targetId, newStatus){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
 
   const sessStaff = auth.sess.staff;
 
-  // HELPER/TEMP cannot authorise
   if (!sessStaff.isSuper && !isPrivilegedStaff_(sessStaff.status)) {
     return { ok:false, code:'E403', zh:'此帳號沒有授權權限', en:'No authorisation permission.' };
   }
@@ -1023,13 +1065,11 @@ function api_auth_commit(token, approverId, targetId, newStatus){
 
   const mi = getMembersIndex_();
 
-  // Approver must exist
   const apId = String(approverId||'').trim().toUpperCase();
   const ap = mi.byId[apId];
   if (!ap) return { ok:false, code:'E412', zh:'找不到授權者', en:'Approver not found.' };
   const apSt = normalizeStatus_(ap.status);
 
-  // SUPERUSER: approver must be ADMIN only
   if (sessStaff.isSuper){
     if (apSt !== STATUS_ADMIN){
       return {
@@ -1040,7 +1080,6 @@ function api_auth_commit(token, approverId, targetId, newStatus){
       };
     }
   } else {
-    // Normal STAFF/ADMIN: approver must be self-only (session staff)
     const sessId = String(sessStaff.id||'').trim().toUpperCase();
     if (!sessId || apId !== sessId){
       return {
@@ -1056,11 +1095,9 @@ function api_auth_commit(token, approverId, targetId, newStatus){
     return { ok:false, code:'E415', zh:'授權者必須為同工/管理員', en:'Approver must be STAFF/ADMIN.' };
   }
 
-  // Target
   const tgtId = String(targetId||'').trim().toUpperCase();
   if (!tgtId) return { ok:false, code:'E416', zh:'找不到目標會員', en:'Target not found.' };
 
-  // Cannot self-authorise: approver == target
   if (tgtId === apId){
     return {
       ok:false,
@@ -1075,12 +1112,10 @@ function api_auth_commit(token, approverId, targetId, newStatus){
   const oldSt = normalizeStatus_(tgt.status);
   if (oldSt === STATUS_DISABLED) return { ok:false, code:'E414', zh:'目標帳號已停用', en:'Target disabled.' };
 
-  // cannot downgrade STAFF/ADMIN
   if (oldSt === STATUS_STAFF || oldSt === STATUS_ADMIN){
     return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
   }
 
-  // Update Members sheet: Status + RoleExpires
   const sh = getMembersSheet_();
   const cols = mi.cols;
   const rowNumber = tgt.rowNumber || findMemberRowById_(sh, cols, tgtId);
@@ -1098,7 +1133,6 @@ function api_auth_commit(token, approverId, targetId, newStatus){
 
     clearMembersIndexCache_();
 
-    // Log commit-only
     const shLog = ensureActivityLogSheet_();
     shLog.appendRow([
       nowUk_(),
@@ -1115,7 +1149,6 @@ function api_auth_commit(token, approverId, targetId, newStatus){
       getDefaultEventKey_()
     ]);
 
-    // Return BOTH roleExpires and roleExpiresIso for UI compatibility
     return {
       ok:true,
       target:{
@@ -1130,7 +1163,6 @@ function api_auth_commit(token, approverId, targetId, newStatus){
     lock.releaseLock();
   }
 }
-/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_COMMIT_END === */
 
 /******** Live: member detail (tap name) ********/
 function api_live_get_member_detail(token, memberId, eventKeyOptional){
@@ -1140,7 +1172,6 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
 
-  // TEMP/HELPER cannot access
   if (!staff.isSuper && !(st === STATUS_STAFF || st === STATUS_ADMIN)) {
     return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
   }
@@ -1156,7 +1187,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
   const lastRow = sh.getLastRow();
 
   let today = null;
-  const eventKeys = []; // last 4 distinct event keys
+  const eventKeys = [];
 
   if (lastRow >= 2){
     const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
@@ -1192,6 +1223,8 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       id: m.id,
       nameZh: m.nameZh||'',
       nameEn: m.nameEn||'',
+      preferredName: m.preferredName||'',
+      isUnder18: !!m.isUnder18,
       vrm: m.vrm||'',
       vrm2: m.vrm2||'',
       status: normalizeStatus_(m.status)
@@ -1201,7 +1234,12 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
   };
 }
 
-/******** Delete today's attendance endpoint (unchanged) ********/
+/******** Delete today's attendance ********/
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_DELETE_EMAIL_AND_RETURN_ENRICH_BEGIN
+ * Delete email uses preferredName for greeting; explicit deletion wording.
+ * Returns byId/byName for UI; email keeps staff name hidden.
+ * ============================================================ */
 function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQrPayloadOptional){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -1214,9 +1252,15 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
   if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
 
+  // audit label for log/email (no staff name needed in email)
   let auditLabel = staff.id;
   let auditNameZh = staff.nameZh||'';
   let auditNameEn = staff.nameEn||'';
+
+  // for UI
+  let byId = staff.id;
+  let byNameZh = staff.nameZh||'';
+  let byNameEn = staff.nameEn||'';
 
   if (staff.isSuper){
     const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
@@ -1241,6 +1285,10 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
     auditNameZh = admin.nameZh || 'ADMIN';
     auditNameEn = admin.nameEn || 'ADMIN';
+
+    byId = admin.id;
+    byNameZh = admin.nameZh || '';
+    byNameEn = admin.nameEn || '';
 
   } else {
     const parsed = parseQrPayloadStrict_(reauthQrPayload);
@@ -1269,6 +1317,10 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     auditLabel = staff.id;
     auditNameZh = staff.nameZh||'';
     auditNameEn = staff.nameEn||'';
+
+    byId = staff.id;
+    byNameZh = staffRec.nameZh || staff.nameZh || '';
+    byNameEn = staffRec.nameEn || staff.nameEn || '';
   }
 
   const targetId = String(memberId||'').trim().toUpperCase();
@@ -1295,12 +1347,11 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     }
     if (hitIdx < 0) return { ok:false, code:'E404', zh:'找不到此會員今日簽到記錄', en:'Today check-in not found.' };
 
-    const deleteRowNumber = hitIdx + 2;
-    sh.deleteRow(deleteRowNumber);
+    sh.deleteRow(hitIdx + 2);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
-    const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel, auditNameZh, auditNameEn);
+    const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel);
 
     const logSh = ensureActivityLogSheet_();
     logSh.appendRow([
@@ -1314,6 +1365,9 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
         memberId: targetId,
         memberNameZh: target.nameZh||'',
         memberNameEn: target.nameEn||'',
+        byId: byId,
+        byNameZh: byNameZh,
+        byNameEn: byNameEn,
         emailStatus: emailRes.status,
         emailToMasked: emailRes.toMasked
       }),
@@ -1327,7 +1381,10 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
         memberId: targetId,
         memberNameZh: target.nameZh||'',
         memberNameEn: target.nameEn||'',
-        by: auditLabel
+        by: auditLabel,
+        byId: byId,
+        byNameZh: byNameZh,
+        byNameEn: byNameEn
       },
       email: emailRes
     };
@@ -1336,7 +1393,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   }
 }
 
-function maybeSendDeleteNoticeEmail_(member, eventKey, byLabel, byNameZh, byNameEn){
+function maybeSendDeleteNoticeEmail_(member, eventKey, byLabel){
   const to = String(member.email||'').trim();
   const opted = isOptedOut_(member.optOutEmail);
   const quota = MailApp.getRemainingDailyQuota();
@@ -1360,23 +1417,27 @@ function maybeSendDeleteNoticeEmail_(member, eventKey, byLabel, byNameZh, byName
 
   const nameEn = String(member.nameEn||'').trim();
   const nameZh = String(member.nameZh||'').trim();
-  const greet = nameEn || nameZh || 'there';
-  const subject = 'CCF Attendance Update / 出席記錄更新';
+  const pref = String(member.preferredName||'').trim();
+  const greet = pref || nameEn || nameZh || 'there';
+
+  const subject = 'CCF Attendance Deleted / 出席記錄已刪除';
   const body =
 `Hi ${greet},
 
-Your attendance record for:
+Your attendance record has been DELETED:
 Event: ${eventKey}
-has been updated by our staff (${byLabel}).
 
-If you have any questions, please contact us as soon as possible.
+Handled by: ${byLabel}
+
+If you believe this is a mistake, please contact CCF staff as soon as possible.
 
 ${nameZh ? nameZh + '，' : ''}你好：
-你於以下聚會的出席記錄已被同工更新：
+你於以下聚會的出席記錄已被刪除：
 活動：${eventKey}
+
 經手：${byLabel}
 
-如有任何疑問，請盡快聯絡同工。`;
+如你認為有誤，請盡快聯絡同工。`;
 
   try{
     MailApp.sendEmail(to, subject, body);
@@ -1388,8 +1449,11 @@ ${nameZh ? nameZh + '，' : ''}你好：
     return out;
   }
 }
+/* ============================================================
+ * PATCH_BOUNDARY: STAFF5_DELETE_EMAIL_AND_RETURN_ENRICH_END
+ * ============================================================ */
 
-/******** Members sheet row helpers for authorisation ********/
+/******** Members sheet row helpers ********/
 function findMemberRowById_(sh, cols, id){
   const idx = cols['ID'];
   if (idx === undefined) return null;
