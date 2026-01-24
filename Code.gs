@@ -1,27 +1,36 @@
 /***************************************
  * CCF Staff Portal (stable + upgrades)
  * File: Code.gs
- * v2026-01-23.staff2
+ * v2026-01-24.staff3
  *
- * Includes:
- * - Router: default Staff Portal; ?mode=reg -> Reg portal (handled in Reg.gs via doGetReg_)
- * - Staff login: STAFF/ADMIN (and optional HELPER/TEMP with expiry) + SUPERUSER via BYPASS_CODE
- * - Check-in (scan/manual), Live page, VRM search (as before)
- * - Pending Staff Portal changes implemented in backend:
- *   (1) Privilege authorisation endpoints (2-step scan in UI; server-side enforcement)
- *       - TEMP expiry = 2 days
- *       - HELPER expiry = 7 days
- *       - HELPER/TEMP cannot authorise anyone
- *       - Commit-only logging (no button-click logging)
- *   (2) Live "tap name" details endpoint (STAFF/ADMIN/SUPERUSER only)
- *       - shows member info + VRM + today's sign-in + last 4 EventKeys
- *   (3) Delete today's attendance endpoint
- *       - STAFF/ADMIN: requires re-scan of SAME logged-in staff QR
- *       - SUPERUSER: requires ADMIN QR (ADMIN only; STAFF rejected) and logs SUPERUSER (ADMIN:CCFxxxx)
- *       - sends email if eligible + logs action
+ * SOURCE OF TRUTH: This file is regenerated from the user's pasted baseline
+ * (v2026-01-23.staff2) with minimal, explicitly requested changes only.
+ *
+ * ============================================================
+ * CHANGELOG (2026-01-24.staff3) — REQUESTED FEATURES IMPLEMENTED
+ * ============================================================
+ * [A] Live page:
+ *   - api_get_live_page now returns newCount + per-name isNew
+ *     (new = PENDING or PROVISIONAL by status in Members)
+ *
+ * [B] Check-in ALREADY payload enrichment:
+ *   - findExistingCheckin_ now returns emailStatus + emailToMasked (from Checkins row)
+ *
+ * [C] Authorisation strictness (server-side enforcement):
+ *   - Normal STAFF/ADMIN session: approver QR must be self-only (same ID as session)
+ *   - SUPERUSER session: approver must be ADMIN only (STAFF rejected)
+ *   - Target cannot be STAFF/ADMIN (cannot downgrade)
+ *   - Cannot self-authorise (target == session staff) with required zh message
+ *
+ * Notes:
+ * - Camera switch feature is UI-only and will be implemented in index.html.
+ * - No sheet schema changes. No refactors unless required for these features.
  ***************************************/
 
-const APP_VERSION = '2026-01-23.staff2';
+/* =========================
+ * Constants / Config
+ * ========================= */
+const APP_VERSION = '2026-01-24.staff3';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -113,6 +122,15 @@ function isHelperOrTemp_(st){
   return (st === STATUS_HELPER || st === STATUS_TEMP);
 }
 
+/* === PATCH_BOUNDARY: STAFF3_LIVE_NEWFRIEND_RULES_BEGIN ===
+ * Rule: New friend = PENDING or PROVISIONAL (Members Status)
+ */
+function isNewFriendStatus_(st){
+  st = normalizeStatus_(st);
+  return (st === STATUS_PENDING || st === STATUS_PROVISIONAL);
+}
+/* === PATCH_BOUNDARY: STAFF3_LIVE_NEWFRIEND_RULES_END === */
+
 function addDays_(d, days){
   const x = new Date(d.getTime());
   x.setDate(x.getDate() + Number(days || 0));
@@ -162,6 +180,22 @@ function maskVrm_(vrm){
   if (!v) return '';
   return v.slice(0,4) + ' ***';
 }
+
+/* === PATCH_BOUNDARY: STAFF3_EMAILSTATUS_UI_HELPER_BEGIN ===
+ * Used to provide consistent UI hints (esp. for ALREADY records).
+ * (UI may choose to map statuses itself; this helper is safe and optional.)
+ */
+function emailUiFromStatus_(status){
+  const s = String(status||'').trim().toUpperCase();
+  if (s === 'SENT')   return { zh:'已發送電郵簽到證明。', en:'Email proof of check-in sent.' };
+  if (s === 'OPTOUT') return { zh:'此會員已選擇不接收電郵。', en:'Email is opted out.' };
+  if (s === 'NO_EMAIL') return { zh:'未有電郵資料。', en:'No email on file.' };
+  if (s === 'QUOTA')  return { zh:'今日電郵額度已用完。', en:'Daily email quota exceeded.' };
+  if (s === 'ERROR')  return { zh:'電郵發送失敗。', en:'Failed to send email.' };
+  if (!s)             return { zh:'未有電郵狀態。', en:'No email status.' };
+  return { zh:'電郵狀態：' + s, en:'Email status: ' + s };
+}
+/* === PATCH_BOUNDARY: STAFF3_EMAILSTATUS_UI_HELPER_END === */
 
 /******** Members sheet + optional columns ********/
 function getMembersSheet_() {
@@ -229,7 +263,6 @@ function getMembersIndex_() {
 
     const roleExpires = ('RoleExpires' in col) ? safeToDate_(row[col['RoleExpires']]) : null;
 
-    // If duplicate IDs exist in test data, later rows will overwrite in byId (acceptable for portal operations)
     byId[id] = {
       rowNumber: r + 2,
       id,
@@ -441,28 +474,39 @@ function api_log_activity(token, action, details) {
 }
 
 /******** Check-in: dedupe lookup ********/
+/* === PATCH_BOUNDARY: STAFF3_CHECKIN_ALREADY_EMAILFIELDS_BEGIN ===
+ * Enrich ALREADY payload with EmailStatus + masked EmailTo from Checkins row.
+ */
 function findExistingCheckin_(sh, eventKey, memberId) {
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return null;
 
+  // Read first 12 columns (includes EmailTo + EmailStatus)
   const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
+
   for (let i = data.length - 1; i >= 0; i--) {
     const row = data[i];
     const ev = String(row[1] || '').trim();
     const mid = String(row[2] || '').trim();
     if (ev === eventKey && mid === memberId) {
       const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+      const emailTo = String(row[10] || '').trim();
+      const emailStatus = String(row[11] || '').trim();
       return {
         timeUk: fmtUk_(ts, 'HH:mm:ss'),
         eventKey: ev,
         handledBy: { staffId: String(row[6] || ''), nameZh: String(row[7] || ''), nameEn: String(row[8] || '') },
         receiptId: String(row[9] || ''),
-        method: String(row[5] || '')
+        method: String(row[5] || ''),
+        emailStatus: emailStatus || '',
+        emailToMasked: emailTo ? maskEmail_(emailTo) : '',
+        emailUi: emailUiFromStatus_(emailStatus || '')
       };
     }
   }
   return null;
 }
+/* === PATCH_BOUNDARY: STAFF3_CHECKIN_ALREADY_EMAILFIELDS_END === */
 
 function validateMemberForCheckin_(m, parsedKeyOrNull) {
   const st = normalizeStatus_(m.status);
@@ -587,7 +631,9 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
       selfCheckin,
-      emailUi: email.ui
+      emailUi: email.ui,
+      emailStatus: email.status,
+      emailToMasked: email.to ? maskEmail_(email.to) : ''
     };
   } finally {
     lock.releaseLock();
@@ -656,7 +702,9 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
       member:{ id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '' },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
-      emailUi: email.ui
+      emailUi: email.ui,
+      emailStatus: email.status,
+      emailToMasked: email.to ? maskEmail_(email.to) : ''
     };
   } finally {
     lock.releaseLock();
@@ -699,6 +747,7 @@ function api_search_members(token, query) {
 }
 
 /******** Live page (names) ********/
+/* === PATCH_BOUNDARY: STAFF3_LIVE_PAYLOAD_NEWFRIENDS_BEGIN === */
 function api_get_live_page(token, eventKeyOptional) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -752,15 +801,28 @@ function api_get_live_page(token, eventKeyOptional) {
   ids.sort((a,b) => latestById[b].t - latestById[a].t);
 
   const names = [];
+  let newCount = 0;
+
   for (const id of ids) {
     const n = latestById[id];
-    names.push({ nameZh: n.nameZh || '', nameEn: n.nameEn || '', id: id });
+    const m = members[id];
+    const stNorm = m ? normalizeStatus_(m.status) : '';
+    const isNew = isNewFriendStatus_(stNorm);
+    if (isNew) newCount++;
+
+    names.push({
+      nameZh: n.nameZh || '',
+      nameEn: n.nameEn || '',
+      id: id,
+      isNew: isNew
+    });
   }
 
   const payload = {
     ok:true,
     eventKey,
     checkedInCount: names.length,
+    newCount: newCount,
     lastSignIn,
     names
   };
@@ -768,6 +830,7 @@ function api_get_live_page(token, eventKeyOptional) {
   cache.put(cacheKey, JSON.stringify(payload), 15);
   return payload;
 }
+/* === PATCH_BOUNDARY: STAFF3_LIVE_PAYLOAD_NEWFRIENDS_END === */
 
 /******** VRM search ********/
 function api_search_vrm(token, query, eventKeyOptional) {
@@ -825,11 +888,13 @@ function api_search_vrm(token, query, eventKeyOptional) {
 /**
  * Validate an approver QR payload (must be STAFF/ADMIN)
  */
+/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_APPROVER_BEGIN === */
 function api_auth_validate_approver(token, approverQrPayload){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
 
   const sessStaff = auth.sess.staff;
+
   // HELPER/TEMP cannot authorise
   if (!sessStaff.isSuper && !isPrivilegedStaff_(sessStaff.status)) {
     return { ok:false, code:'E403', zh:'此帳號沒有授權權限', en:'No authorisation permission.' };
@@ -843,6 +908,29 @@ function api_auth_validate_approver(token, approverQrPayload){
   if (!m) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
 
   const st = normalizeStatus_(m.status);
+
+  // SUPERUSER: approver must be ADMIN only
+  if (sessStaff.isSuper){
+    if (st !== STATUS_ADMIN){
+      return {
+        ok:false,
+        code:'E491',
+        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
+        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+      };
+    }
+  } else {
+    // Normal STAFF/ADMIN: self-only approver (must match session staff)
+    if (parsed.id !== String(sessStaff.id||'').trim().toUpperCase()){
+      return {
+        ok:false,
+        code:'E492',
+        zh:'普通同工／管理員只可用你自己嘅 QR 作授權（自用）。請先登出，再用你自己嘅同工卡登入。',
+        en:'STAFF/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
+      };
+    }
+  }
+
   if (!(st === STATUS_STAFF || st === STATUS_ADMIN)) {
     return { ok:false, code:'E415', zh:'此 QR 並非同工/管理員，不能授權', en:'Not STAFF/ADMIN. Cannot authorise.' };
   }
@@ -852,10 +940,12 @@ function api_auth_validate_approver(token, approverQrPayload){
 
   return { ok:true, approver:{ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', status:st } };
 }
+/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_APPROVER_END === */
 
 /**
  * Validate a target QR payload (must exist, not disabled)
  */
+/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_TARGET_BEGIN === */
 function api_auth_validate_target(token, targetQrPayload){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -868,6 +958,18 @@ function api_auth_validate_target(token, targetQrPayload){
   const parsed = parseQrPayloadStrict_(targetQrPayload);
   if (!parsed.ok) return parsed;
 
+  // Cannot self-authorise: when target equals current session staff ID
+  // (This also matches “scanned yourself twice” scenario in the 2-step UI flow.)
+  const sessId = String(sessStaff.id||'').trim().toUpperCase();
+  if (!sessStaff.isSuper && sessId && parsed.id === sessId){
+    return {
+      ok:false,
+      code:'E487',
+      zh:'你已經掃描咗自己嘅 QR 兩次…請掃描『暫準同工』QR',
+      en:'You scanned your own QR twice. Please scan the TEMP/HELPER target QR.'
+    };
+  }
+
   const mi = getMembersIndex_();
   const m = mi.byId[parsed.id];
   if (!m) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
@@ -875,7 +977,11 @@ function api_auth_validate_target(token, targetQrPayload){
   const st = normalizeStatus_(m.status);
   if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
 
-  // Key mismatch should be shown in UI as target error (e.g., old QR)
+  // cannot downgrade STAFF/ADMIN via HELPER/TEMP authorisation
+  if (st === STATUS_STAFF || st === STATUS_ADMIN){
+    return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
+  }
+
   if (!m.key || m.key !== parsed.key) {
     return { ok:false, code:'E418', zh:'Key 不相符（可能是舊 QR）', en:'Key mismatch (possibly old QR).' };
   }
@@ -883,18 +989,22 @@ function api_auth_validate_target(token, targetQrPayload){
   return {
     ok:true,
     target:{
-      id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', status:normalizeStatus_(m.status),
+      id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', status:st,
       roleExpires: m.roleExpires || ''
     }
   };
 }
+/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_VALIDATE_TARGET_END === */
 
 /**
  * Commit privilege change
  * newStatus: 'HELPER' or 'TEMP'
- * Requires: approverId must be STAFF/ADMIN.
+ * Requires:
+ *   - Normal STAFF/ADMIN: approver must be self-only (session staff), and must be STAFF/ADMIN
+ *   - SUPERUSER: approver must be ADMIN only
  * TEMP expiry = 2 days, HELPER expiry = 7 days.
  */
+/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_COMMIT_BEGIN === */
 function api_auth_commit(token, approverId, targetId, newStatus){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -911,24 +1021,68 @@ function api_auth_commit(token, approverId, targetId, newStatus){
     return { ok:false, code:'E422', zh:'授權類別不正確', en:'Invalid authorisation role.' };
   }
 
-  // Approver must exist and be STAFF/ADMIN (even if SUPERUSER session)
   const mi = getMembersIndex_();
-  const ap = mi.byId[String(approverId||'').trim().toUpperCase()];
+
+  // Approver must exist
+  const apId = String(approverId||'').trim().toUpperCase();
+  const ap = mi.byId[apId];
   if (!ap) return { ok:false, code:'E412', zh:'找不到授權者', en:'Approver not found.' };
   const apSt = normalizeStatus_(ap.status);
+
+  // SUPERUSER: approver must be ADMIN only
+  if (sessStaff.isSuper){
+    if (apSt !== STATUS_ADMIN){
+      return {
+        ok:false,
+        code:'E491',
+        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
+        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+      };
+    }
+  } else {
+    // Normal STAFF/ADMIN: approver must be self-only (session staff)
+    const sessId = String(sessStaff.id||'').trim().toUpperCase();
+    if (!sessId || apId !== sessId){
+      return {
+        ok:false,
+        code:'E492',
+        zh:'普通同工／管理員只可用你自己嘅 QR 作授權（自用）。請先登出，再用你自己嘅同工卡登入。',
+        en:'STAFF/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
+      };
+    }
+  }
+
   if (!(apSt === STATUS_STAFF || apSt === STATUS_ADMIN)) {
     return { ok:false, code:'E415', zh:'授權者必須為同工/管理員', en:'Approver must be STAFF/ADMIN.' };
   }
 
+  // Target
   const tgtId = String(targetId||'').trim().toUpperCase();
+  if (!tgtId) return { ok:false, code:'E416', zh:'找不到目標會員', en:'Target not found.' };
+
+  // Cannot self-authorise: approver == target
+  if (tgtId === apId){
+    return {
+      ok:false,
+      code:'E487',
+      zh:'你已經掃描咗自己嘅 QR 兩次…請掃描『暫準同工』QR',
+      en:'You scanned your own QR twice. Please scan the TEMP/HELPER target QR.'
+    };
+  }
+
   const tgt = mi.byId[tgtId];
   if (!tgt) return { ok:false, code:'E412', zh:'找不到目標會員', en:'Target not found.' };
   const oldSt = normalizeStatus_(tgt.status);
   if (oldSt === STATUS_DISABLED) return { ok:false, code:'E414', zh:'目標帳號已停用', en:'Target disabled.' };
 
+  // cannot downgrade STAFF/ADMIN
+  if (oldSt === STATUS_STAFF || oldSt === STATUS_ADMIN){
+    return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
+  }
+
   // Update Members sheet: Status + RoleExpires
   const sh = getMembersSheet_();
-  const cols = mi.cols; // header->index
+  const cols = mi.cols;
   const rowNumber = tgt.rowNumber || findMemberRowById_(sh, cols, tgtId);
   if (!rowNumber) return { ok:false, code:'E500', zh:'找不到目標記錄行', en:'Target row not found.' };
 
@@ -961,11 +1115,22 @@ function api_auth_commit(token, approverId, targetId, newStatus){
       getDefaultEventKey_()
     ]);
 
-    return { ok:true, target:{ id:tgtId, oldStatus: oldSt, newStatus: stNew, roleExpires: expiry.toISOString() } };
+    // Return BOTH roleExpires and roleExpiresIso for UI compatibility
+    return {
+      ok:true,
+      target:{
+        id:tgtId,
+        oldStatus: oldSt,
+        newStatus: stNew,
+        roleExpires: expiry.toISOString(),
+        roleExpiresIso: expiry.toISOString()
+      }
+    };
   } finally {
     lock.releaseLock();
   }
 }
+/* === PATCH_BOUNDARY: STAFF3_AUTH_STRICT_COMMIT_END === */
 
 /******** Live: member detail (tap name) ********/
 function api_live_get_member_detail(token, memberId, eventKeyOptional){
@@ -995,7 +1160,6 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
   if (lastRow >= 2){
     const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
-    // Walk backwards for speed
     const seenEv = new Set();
     for (let i = data.length-1; i>=0; i--){
       const row = data[i];
@@ -1037,7 +1201,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
   };
 }
 
-/******** Delete today's attendance (💣) ********/
+/******** Delete today's attendance endpoint (unchanged) ********/
 function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQrPayloadOptional){
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -1047,17 +1211,14 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   const eventKey = getDefaultEventKey_();
   const mi = getMembersIndex_();
 
-  // Only STAFF/ADMIN/SUPERUSER can request delete
   const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
   if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
 
-  // Determine who is the "audit approver" for this delete
   let auditLabel = staff.id;
   let auditNameZh = staff.nameZh||'';
   let auditNameEn = staff.nameEn||'';
 
   if (staff.isSuper){
-    // SUPERUSER requires ADMIN QR only
     const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
     if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
 
@@ -1066,7 +1227,6 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
 
     const admSt = normalizeStatus_(admin.status);
     if (admSt !== STATUS_ADMIN){
-      // If STAFF scanned, instruct log out/back in as per your rule
       return {
         ok:false,
         code:'E491',
@@ -1083,7 +1243,6 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     auditNameEn = admin.nameEn || 'ADMIN';
 
   } else {
-    // Normal STAFF/ADMIN must rescan THEIR OWN QR and it must match current session staff id
     const parsed = parseQrPayloadStrict_(reauthQrPayload);
     if (!parsed.ok) return parsed;
 
@@ -1124,30 +1283,25 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     const lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok:false, code:'E404', zh:'今日暫無簽到記錄', en:'No check-ins today.' };
 
-    // Find last row matching (eventKey + memberId)
     const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
     let hitIdx = -1;
-    let hitRow = null;
     for (let i=data.length-1; i>=0; i--){
       const ev = String(data[i][1]||'').trim();
       const mid = String(data[i][2]||'').trim();
       if (ev === eventKey && mid === targetId){
         hitIdx = i;
-        hitRow = data[i];
         break;
       }
     }
     if (hitIdx < 0) return { ok:false, code:'E404', zh:'找不到此會員今日簽到記錄', en:'Today check-in not found.' };
 
-    const deleteRowNumber = hitIdx + 2; // offset for header
+    const deleteRowNumber = hitIdx + 2;
     sh.deleteRow(deleteRowNumber);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
-    // Email member if eligible
     const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel, auditNameZh, auditNameEn);
 
-    // Log
     const logSh = ensureActivityLogSheet_();
     logSh.appendRow([
       nowUk_(),
@@ -1207,7 +1361,7 @@ function maybeSendDeleteNoticeEmail_(member, eventKey, byLabel, byNameZh, byName
   const nameEn = String(member.nameEn||'').trim();
   const nameZh = String(member.nameZh||'').trim();
   const greet = nameEn || nameZh || 'there';
-  const subject = 'CCF Attendance Update / 出席記錄更新'; // no CCF ID
+  const subject = 'CCF Attendance Update / 出席記錄更新';
   const body =
 `Hi ${greet},
 
@@ -1251,10 +1405,8 @@ function findMemberRowById_(sh, cols, id){
 }
 
 function setMemberCell_(sh, cols, rowNumber, headerName, value){
-  // ensure optional columns exist if needed
   if (!(headerName in cols)) {
     ensureMembersOptionalColumns_();
-    // refresh cache/cols
     clearMembersIndexCache_();
     const mi = getMembersIndex_();
     cols = mi.cols;
