@@ -1,0 +1,965 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>CCF Registration</title>
+
+  <!--
+  ============================================================
+  FILE: Reg2.html (Registration UI)
+  UI VERSION TAG: reg2-ui1
+  ============================================================
+
+  CHANGELOG (reg2-ui1):
+  [1] Added camera switch (multi-camera):
+      - Shows “🔄 切換相機 / Switch camera” when multiple video inputs exist.
+      - Cycles device cameras, persists selected deviceId in localStorage.
+      - Falls back gracefully if labels unavailable / deviceId invalid.
+  [2] No changes to existing registration logic, QR generation, or email UI.
+  [3] No change to scan behaviour other than adding the camera selection capability.
+
+  PATCH BOUNDARIES:
+    - Search for "PATCH_BOUNDARY: REG2_CAMERA_SWITCH" blocks.
+  ============================================================
+  -->
+
+  <style>
+    :root{
+      --bg:#f5f7ff; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
+      --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e; --warn:#c88400;
+      --shadow: 0 10px 24px rgba(10,30,80,0.10);
+
+      --pad: clamp(10px, 3.2vw, 16px);
+      --radius: clamp(14px, 3.2vw, 18px);
+      --fs-title: clamp(20px, 4.8vw, 26px);
+      --fs-big: clamp(18px, 4.2vw, 22px);
+      --fs-body: clamp(13px, 3.4vw, 16px);
+      --fs-input: clamp(16px, 4vw, 18px);
+    }
+    *{box-sizing:border-box}
+    html { -webkit-text-size-adjust: 100%; }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    .wrap{max-width:760px;margin:0 auto;padding:var(--pad)}
+    .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
+    .title{font-size:var(--fs-title);font-weight:900}
+    .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
+    .hint{font-size:var(--fs-body);color:var(--muted);margin-top:8px;line-height:1.45}
+    .pill{font-size:12px;color:var(--muted);border:1px solid var(--border);padding:4px 10px;border-radius:999px;background:#fff}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:calc(var(--pad) + 2px);margin:10px 0;box-shadow:var(--shadow)}
+    .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
+    .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
+    .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
+    input,textarea,button{width:100%;border-radius:var(--radius);border:1px solid var(--border);background:#fff;color:var(--text);padding:calc(var(--pad) + 2px);font-size:var(--fs-input)}
+    textarea{min-height:96px;resize:vertical}
+    button{cursor:pointer;font-weight:900;box-shadow:0 6px 14px rgba(10,30,80,0.06)}
+    button.primary{background:#e9fff4;border-color:rgba(26,168,108,0.25)}
+    button.alt{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
+    button.danger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}
+    .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+    .miniBtnRow button{flex:1 1 180px}
+    .divider{height:1px;background:var(--border);margin:12px 0}
+    .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
+    .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
+    .msgBox.err{border-color:rgba(217,60,94,0.35);background:#fff1f4}
+    .msgBox.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6}
+    .ok{color:var(--good)} .err{color:var(--bad)} .warn{color:var(--warn)}
+    .hide{display:none!important}
+    .kv{display:grid;grid-template-columns:140px 1fr;gap:8px 10px;margin-top:10px}
+    .kv div:nth-child(odd){color:var(--muted)}
+
+    .overlay{
+      position:fixed;inset:0;background:rgba(0,0,0,0.45);
+      z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;
+    }
+    .modal{
+      width:min(720px, 100%);
+      background:#fff;border-radius:18px;border:1px solid var(--border);
+      box-shadow:0 24px 60px rgba(0,0,0,0.25);
+      padding:14px;max-height:85vh;overflow:auto;
+    }
+    .videoWrap{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#f7f9ff}
+    video{width:100%;display:block}
+    .qrWrap{display:flex;justify-content:center;align-items:center;padding:12px;border:1px solid var(--border);border-radius:16px;background:#fff;margin-top:10px}
+
+    .btnSelGood{
+      border-color: rgba(26,168,108,0.7) !important;
+      box-shadow: 0 0 0 3px rgba(26,168,108,0.18) !important;
+      background:#e9fff4 !important;
+    }
+    .btnSelBad{
+      border-color: rgba(217,60,94,0.65) !important;
+      box-shadow: 0 0 0 3px rgba(217,60,94,0.14) !important;
+      background:#ffeef2 !important;
+    }
+    .carState{
+      font-size: clamp(18px, 4.6vw, 22px);
+      font-weight:950;
+      margin-top:8px;
+    }
+    .carState.good{ color: var(--good); }
+    .carState.bad{ color: var(--bad); }
+
+    @media (pointer: coarse){
+      button{ min-height: 52px; }
+    }
+    @media (max-width: 420px){
+      .kv{ grid-template-columns: 120px 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div>
+        <div class="title">CCF Registration / 會員登記</div>
+        <div class="sub">只作登記，不會自動簽到 / Registration only (no auto check-in)</div>
+        <div class="hint">
+          完成後請交給接待同工掃描 QR。<br/>
+          After completion, ask Welcome team to scan the QR.
+        </div>
+      </div>
+      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui1</span></div>
+    </header>
+
+    <main id="app"></main>
+
+    <footer class="small" style="padding:8px 4px;">
+      如問題持續，請聯絡影音同工 / Contact Media team if issue persists
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+
+  <script>
+    function $(id){ return document.getElementById(id); }
+
+    function callApi(fn){
+      var args = Array.prototype.slice.call(arguments, 1);
+      return new Promise(function(resolve, reject){
+        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+        runner[fn].apply(runner, args);
+      });
+    }
+
+    function escapeHtml(s){
+      s = String(s || '');
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    function getDeviceId(){
+      try{
+        var id = localStorage.getItem('ccf_reg_deviceId');
+        if(!id){
+          id = 'R' + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+          localStorage.setItem('ccf_reg_deviceId', id);
+        }
+        return id;
+      }catch(e){
+        return 'R' + Date.now().toString(36);
+      }
+    }
+    function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
+
+    function showBox(kind, zh, en, detail){
+      detail = detail || '';
+      var cls = (kind==='ok')?'ok':(kind==='err'?'err':'warn');
+      return ''+
+        '<div class="msgBox '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+
+          '<div class="big '+cls+'">'+zh+'</div>'+
+          '<div style="margin-top:4px;font-size:16px;">'+en+'</div>'+
+          (detail ? ('<div style="margin-top:10px;">'+detail+'</div>') : '')+
+        '</div>';
+    }
+
+    function showServerErr(res){
+      var zh = (res && res.zh) ? res.zh : '系統錯誤';
+      var en = (res && res.en) ? res.en : 'System error';
+      var code = (res && res.code) ? ('<div class="small">Code: '+escapeHtml(res.code)+'</div>') : '';
+      var detail = (res && res.detail) ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+      return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
+    }
+
+    function normalizeVrm(s){
+      return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+    }
+
+    var State = {
+      view: 'home',          // home | form | scan | success
+      flow: 'create',        // create | self_update
+      authQrPayload: null,
+      prefill: null,
+      lastResult: null,
+      lastSubmit: null
+    };
+
+    function openModal(html){
+      var o = document.createElement('div');
+      o.className = 'overlay';
+      o.innerHTML = '<div class="modal">'+html+'</div>';
+      document.body.appendChild(o);
+      return o;
+    }
+    function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
+
+    function drawQr(targetId, payload){
+      var t = $(targetId);
+      if(!t) return;
+      t.innerHTML = '';
+      try{
+        new QRCode(t, { text: String(payload||''), width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+      }catch(e){
+        var img = document.createElement('img');
+        img.alt = 'CCF QR';
+        img.width = 240; img.height = 240;
+        img.src = 'https://quickchart.io/qr?text=' + encodeURIComponent(String(payload||'')) + '&size=240&ecLevel=M&margin=2&format=png';
+        t.appendChild(img);
+      }
+    }
+
+    /******** Camera scan ********/
+    var scan = { stream:null, raf:null, scanning:false, detector:null };
+
+    function stopScan(){
+      scan.scanning = false;
+      if(scan.raf) cancelAnimationFrame(scan.raf);
+      scan.raf = null;
+      if(scan.stream){
+        try{ scan.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+      }
+      scan.stream = null;
+    }
+
+    /* ============================================================
+     * PATCH_BOUNDARY: REG2_CAMERA_SWITCH_BEGIN
+     * Camera switch (multi-camera), persists selected deviceId
+     * ============================================================ */
+    function camGetSelectedId_(){
+      try{ return localStorage.getItem('ccf_reg_cam_deviceId') || ''; }catch(e){ return ''; }
+    }
+    function camSetSelectedId_(id){
+      try{
+        if(id) localStorage.setItem('ccf_reg_cam_deviceId', id);
+        else localStorage.removeItem('ccf_reg_cam_deviceId');
+      }catch(e){}
+    }
+    function camListVideoInputs_(){
+      if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve([]);
+      return navigator.mediaDevices.enumerateDevices().then(function(devs){
+        var cams = (devs||[]).filter(function(d){ return d && d.kind === 'videoinput'; });
+        cams.sort(function(a,b){ return String(a.deviceId||'').localeCompare(String(b.deviceId||'')); });
+        return cams;
+      }).catch(function(){ return []; });
+    }
+    function camBuildPreferredConstraints_(){
+      var sel = camGetSelectedId_();
+      if(sel){
+        return { video: { deviceId: { exact: sel } }, audio:false };
+      }
+      return { video: { facingMode: { ideal:'environment' } }, audio:false };
+    }
+    function camBindSwitchButton_(btnEl, restartFn){
+      if(!btnEl) return;
+      camListVideoInputs_().then(function(cams){
+        if(!cams || cams.length < 2){
+          btnEl.classList.add('hide');
+          return;
+        }
+        btnEl.classList.remove('hide');
+        btnEl.onclick = function(){
+          camListVideoInputs_().then(function(cams2){
+            if(!cams2 || cams2.length < 2) return;
+            var cur = camGetSelectedId_();
+            var idx = cams2.findIndex(function(x){ return x.deviceId === cur; });
+            var next = cams2[(idx >= 0 ? idx+1 : 0) % cams2.length];
+            camSetSelectedId_(next.deviceId || '');
+            if(typeof restartFn === 'function') restartFn();
+          });
+        };
+      });
+    }
+    /* ============================================================
+     * PATCH_BOUNDARY: REG2_CAMERA_SWITCH_END
+     * ============================================================ */
+
+    function startScan(videoEl, onCaptured, onError){
+      stopScan();
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        onError({ zh:'此裝置不支援相機', en:'Camera not supported' });
+        return;
+      }
+
+      var constraintsPreferred = camBuildPreferredConstraints_();
+      var constraintsFacingFallback = { video: { facingMode: { ideal:'environment' } }, audio:false };
+      var constraintsFallback = { video: true, audio:false };
+
+      function tryStart(constraints, allowFallback){
+        navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
+          scan.stream = stream;
+          videoEl.srcObject = stream;
+          return videoEl.play().then(function(){
+            scan.scanning = true;
+            loop(videoEl, onCaptured);
+          });
+        }).catch(function(err){
+          var sel = camGetSelectedId_();
+          var usingExact = !!(sel && constraints && constraints.video && constraints.video.deviceId && constraints.video.deviceId.exact);
+          if(usingExact){
+            camSetSelectedId_('');
+            return tryStart(constraintsFacingFallback, true);
+          }
+          if(allowFallback) return tryStart(constraintsFallback, false);
+          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: err });
+        });
+      }
+
+      tryStart(constraintsPreferred, true);
+    }
+
+    function loop(videoEl, onCaptured){
+      if(!scan.scanning) return;
+
+      if(!videoEl || videoEl.readyState < 2){
+        scan.raf = requestAnimationFrame(function(){ loop(videoEl, onCaptured); });
+        return;
+      }
+
+      try{
+        if('BarcodeDetector' in window){
+          scan.detector = scan.detector || new BarcodeDetector({ formats:['qr_code'] });
+          scan.detector.detect(videoEl).then(function(codes){
+            var v = (codes && codes.length && codes[0].rawValue) ? codes[0].rawValue : null;
+            if(v){
+              stopScan();
+              onCaptured(v);
+              return;
+            }
+            scan.raf = requestAnimationFrame(function(){ loop(videoEl, onCaptured); });
+          }).catch(function(){
+            scan.raf = requestAnimationFrame(function(){ loop(videoEl, onCaptured); });
+          });
+          return;
+        }
+      }catch(e){}
+
+      try{
+        var canvas = scan._c || (scan._c = document.createElement('canvas'));
+        var ctx = scan._x || (scan._x = canvas.getContext('2d', { willReadFrequently:true }));
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        ctx.drawImage(videoEl,0,0,canvas.width,canvas.height);
+        var img = ctx.getImageData(0,0,canvas.width,canvas.height);
+        var qr = window.jsQR(img.data, canvas.width, canvas.height);
+        if(qr && qr.data){
+          stopScan();
+          onCaptured(qr.data);
+          return;
+        }
+      }catch(e){}
+
+      scan.raf = requestAnimationFrame(function(){ loop(videoEl, onCaptured); });
+    }
+
+    /******** Views ********/
+    function viewHome(){
+      return ''+
+        '<div class="card">'+
+          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
+            '<button id="btnScan" class="alt">📷 掃描 QR（查看/更改資料）</button>'+
+          '</div>'+
+        '</div>'+
+        '<div id="msg"></div>';
+    }
+
+    function viewForm(prefill){
+      prefill = prefill || {};
+      var hasCar = (prefill.hasCar === true);
+      var hasCarFalse = (prefill.hasCar === false);
+      var isMinor = (prefill.isMinor === true);
+
+      // defaults
+      var cc = '44';
+      var nat = '';
+      if (prefill.mobile && String(prefill.mobile).startsWith('+')){
+        var d = String(prefill.mobile).slice(1).replace(/\D/g,'');
+        if (d.startsWith('44')) { cc='44'; nat=d.slice(2); }
+        else if (d.startsWith('852')) { cc='852'; nat=d.slice(3); }
+        else { cc = d.slice(0,3); nat = d.slice(3); }
+      }
+
+      return ''+
+        '<div class="card"><div class="big">📝 填寫資料 / Details</div></div>'+
+
+        '<div class="card">'+
+          '<div class="label">中文名 / Chinese name</div>'+
+          '<input id="nameZh" autocomplete="name" value="'+escapeHtml(prefill.nameZh||'')+'" />'+
+
+          '<div class="label" style="margin-top:10px;">英文名 / English name</div>'+
+          '<input id="nameEn" autocomplete="name" placeholder="First Last" value="'+escapeHtml(prefill.nameEn||'')+'" />'+
+
+          '<div class="label" style="margin-top:10px;">常用稱呼 / Preferred name（可選）</div>'+
+          '<input id="preferredName" autocomplete="off" value="'+escapeHtml(prefill.preferredName||'')+'" />'+
+
+          '<div class="divider"></div>'+
+
+          '<div class="label">電郵 / Email</div>'+
+          '<input id="email" type="email" autocomplete="email" value="'+escapeHtml(prefill.email||'')+'" />'+
+          '<div style="margin-top:6px;display:flex;gap:10px;align-items:center;">'+
+            '<input id="optInEmail" type="checkbox" style="width:auto;transform:scale(1.1);" '+(prefill.optInEmail===false?'':'checked')+' />'+
+            '<div style="font-weight:900;">接收電郵 / Email opt-in</div>'+
+          '</div>'+
+          '<div id="emailOptHint" class="small" style="color:var(--bad);display:none;margin-top:6px;">如未填電郵，請先取消勾選 / Uncheck to continue without email.</div>'+
+
+          '<div class="divider"></div>'+
+
+          '<div class="label">手機 / Mobile（如不想提供，可留空）</div>'+
+          '<div style="display:flex;gap:10px;align-items:center;">'+
+            '<div style="padding:12px 12px;border:1px solid var(--border);border-radius:14px;background:#fff;font-weight:900;">+</div>'+
+            '<input id="phoneCc" style="max-width:140px;" inputmode="numeric" autocomplete="off" placeholder="country code" value="'+escapeHtml(cc)+'" />'+
+            '<input id="phoneNat" inputmode="numeric" autocomplete="tel" placeholder="number" value="'+escapeHtml(nat)+'" />'+
+          '</div>'+
+          '<div class="small" style="margin-top:6px;">第一格：國碼 / Country code<br/>例：香港 +852 ｜英國 +44</div>'+
+
+          '<div class="divider"></div>'+
+
+          '<div style="display:flex;gap:10px;align-items:center;">'+
+            '<input id="isMinor" type="checkbox" style="width:auto;transform:scale(1.1);" '+(isMinor?'checked':'')+' />'+
+            '<div style="font-weight:950;">未滿 18 歲 / Under 18</div>'+
+          '</div>'+
+          '<div id="parentEmailBlock" class="'+(isMinor?'':'hide')+'" style="margin-top:10px;">'+
+            '<div class="label">家長/監護人電郵（可選） / Parent email (optional)</div>'+
+            '<input id="parentEmail" type="email" autocomplete="email" value="'+escapeHtml(prefill.parentEmail||'')+'" />'+
+            '<div class="small" style="margin-top:6px;">如填寫，必須與本人電郵不同。<br/>If filled, must be different from member email.</div>'+
+          '</div>'+
+
+          '<div class="divider"></div>'+
+
+          '<div class="label">是否有車？ / Do you have a car?</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnCarYes" class="alt '+(hasCar?'btnSelGood':'')+'" type="button">🚗 有車 / Yes</button>'+
+            '<button id="btnCarNo" class="alt '+(hasCarFalse?'btnSelBad':'')+'" type="button">🚶 無車 / No</button>'+
+          '</div>'+
+          '<div id="carState" class="carState '+(hasCar?'good':(hasCarFalse?'bad':''))+'">'+
+            (hasCar ? '✅ 已選擇：有車 / Selected: Yes' : (hasCarFalse ? '❌ 已選擇：無車 / Selected: No' : '（必填 / Required）'))+
+          '</div>'+
+
+          '<div id="vrmBlock" class="'+(hasCar?'':'hide')+'" style="margin-top:10px;">'+
+            '<div class="label">車牌 1 / VRM 1</div>'+
+            '<input id="vrm" autocomplete="off" value="'+escapeHtml(prefill.vrm||'')+'" />'+
+            '<div class="label" style="margin-top:10px;">車牌 2 / VRM 2（可選）</div>'+
+            '<input id="vrm2" autocomplete="off" value="'+escapeHtml(prefill.vrm2||'')+'" />'+
+          '</div>'+
+
+          '<div class="divider"></div>'+
+
+          '<div class="label">備註 / Notes</div>'+
+          '<textarea id="notes">'+escapeHtml(prefill.notes||'')+'</textarea>'+
+          '<div id="notesHelp" class="small hide">提示：家人關係／短住探訪／特殊需要<br/>Tip: family relationship / visiting / special needs</div>'+
+
+          '<div class="miniBtnRow">'+
+            '<button id="btnSubmit" class="primary" type="button">✅ 提交 / Submit</button>'+
+            '<button id="btnBackHome" class="danger" type="button">⬅️ 返回 / Back</button>'+
+          '</div>'+
+
+          '<div id="formMsg"></div>'+
+        '</div>';
+    }
+
+    function viewScan(){
+      return ''+
+        '<div class="card">'+
+          '<div class="big">📷 掃描 QR</div>'+
+          '<div class="small">掃描你的 QR 以查看/更改資料（只作登記，不會自動簽到）。</div>'+
+          '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
+            '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
+          '</div>'+
+          '<div id="scanMsg"></div>'+
+        '</div>';
+    }
+
+    function emailUiBlock(res){
+      var email = res && res.email;
+      var meta = res && res.emailMeta;
+
+      if(!email){
+        return showBox('warn','📧 沒有電郵狀態回傳','📧 No email status returned','<div class="small">請聯絡影音同工。</div>');
+      }
+
+      if (meta && meta.optInEmail === false){
+        return showBox(
+          'warn',
+          '📧 你已選擇不接收電郵（本次不會發出 QR 電郵）',
+          '📧 You opted out of email (no QR email will be sent)',
+          '<div class="small">如日後需要電郵收取 QR，請再登記一次並勾選接收電郵。</div>'
+        );
+      }
+
+      if (meta && meta.emailProvided === false){
+        return showBox(
+          'warn',
+          '📧 未有提供電郵（本次不會發出 QR 電郵）',
+          '📧 No email provided (no QR email will be sent)',
+          '<div class="small">如日後需要電郵收取 QR，請再登記一次並提供電郵。</div>'
+        );
+      }
+
+      if (email.sentToNew){
+        return showBox(
+          'ok',
+          '📧 已發送電郵（內含 QR）',
+          '📧 Email sent (with QR)',
+          '<div class="small">To: '+escapeHtml(email.toNewMasked||'')+'</div>'
+        );
+      }
+
+      var reason = email.reason ? ('<div class="small">Reason: '+escapeHtml(email.reason)+'</div>') : '';
+      var guidance =
+        '<div class="small" style="margin-top:8px;">' +
+          '❗ 如你未收到 QR 電郵，可用相同資料再登記一次並勾選接收電郵（系統會識別並重新發出新 QR，舊 QR 會即時失效）。<br/>' +
+          'If you didn’t receive the QR email, you can re-register with the same details and opt-in to email (a new QR will be issued; old QR becomes invalid).<br/>' +
+          '（如你當初沒有填寫電郵或手機，系統可能無法識別，請直接聯絡接待／影音同工。）' +
+        '</div>';
+
+      return showBox('err','📧 未能確認電郵已發送','📧 Email not confirmed sent', reason + guidance);
+    }
+
+    function viewSuccess(res){
+      var gz = (res && res.greet && res.greet.zh) ? res.greet.zh : '';
+      var ge = (res && res.greet && res.greet.en) ? res.greet.en : '';
+      if (!gz && !ge && res && res.member && res.member.greet){
+        gz = res.member.greet.zh || '';
+        ge = res.member.greet.en || '';
+      }
+      var showNameZh = escapeHtml(gz || ge || '');
+      var showNameEn = escapeHtml(ge || gz || '');
+
+      var helloLine =
+        (showNameZh || showNameEn)
+          ? ('你好 ' + showNameZh + '，歡迎你來到 CCF 😊<br/>' +
+             'Hi ' + showNameEn + ', welcome to CCF 😊<br/><br/>')
+          : ('歡迎你來到 CCF 😊<br/>Welcome to CCF 😊<br/><br/>');
+
+      return ''+
+        '<div class="card">'+
+          '<div class="big ok">✅ 完成 / Done</div>'+
+          '<div class="msgBox ok" style="margin-top:10px;">'+
+            '<div class="big ok">CCF ID：'+escapeHtml(res.memberId||'')+'</div>'+
+            '<div style="margin-top:6px;font-size:16px;">'+
+              helloLine +
+              '請交給接待同工掃描此「新」QR 以完成簽到。<br/>'+
+              'Please ask Welcome team to scan this NEW QR to check-in.'+
+            '</div>'+
+          '</div>'+
+          (res.mode==='UPDATE'
+            ? showBox('warn','⚠️ 舊 QR 已即時失效（不能再用作簽到或事奉）','⚠️ Old QR invalid immediately (no check-in/service)',
+                '<div class="small">請由現在起只使用「新」QR，並銷毀舊 QR。</div>')
+            : ''
+          )+
+          '<div class="qrWrap"><div id="qrTarget"></div></div>'+
+          emailUiBlock(res)+
+          '<div class="miniBtnRow">'+
+            '<button id="btnHome" class="alt" type="button">🏠 返回主頁 / Home</button>'+
+          '</div>'+
+        '</div>';
+    }
+
+    function render(){
+      stopScan();
+
+      if(State.view === 'home'){
+        $('app').innerHTML = viewHome();
+        $('btnNew').onclick = function(){
+          State.view = 'form';
+          State.flow = 'create';
+          State.prefill = null;
+          render();
+        };
+        $('btnScan').onclick = function(){
+          State.view = 'scan';
+          render();
+        };
+        return;
+      }
+
+      if(State.view === 'form'){
+        $('app').innerHTML = viewForm(State.prefill || {});
+        bindForm();
+        return;
+      }
+
+      if(State.view === 'scan'){
+        $('app').innerHTML = viewScan();
+        bindScan();
+        return;
+      }
+
+      if(State.view === 'success'){
+        $('app').innerHTML = viewSuccess(State.lastResult || {});
+        try{ drawQr('qrTarget', (State.lastResult||{}).qrPayload ); }catch(e){}
+        $('btnHome').onclick = function(){ State.view='home'; State.lastResult=null; State.lastSubmit=null; render(); };
+        return;
+      }
+    }
+
+    /******** Bindings ********/
+    function bindScan(){
+      var v = $('video');
+
+      function restartScan(){
+        $('scanMsg').innerHTML = '';
+        startScan(v, onCaptured, function(){
+          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start');
+        });
+      }
+
+      $('btnCancelScan').onclick = function(){
+        stopScan();
+        State.view='home';
+        render();
+      };
+
+      // Bind camera switch (shows only if multiple cams)
+      camBindSwitchButton_($('btnSwitchCam'), function(){
+        stopScan();
+        restartScan();
+      });
+
+      function onCaptured(text){
+        $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+
+        callApi('api_reg_self_lookup_public', text).then(function(res){
+          if(!res || !res.ok){
+            $('scanMsg').innerHTML = showServerErr(res);
+            return;
+          }
+
+          var m = res.member;
+
+          // PROVISIONAL -> edit
+          if(String(m.status||'').toUpperCase() === 'PROVISIONAL'){
+            stopScan();
+            State.view = 'form';
+            State.flow = 'self_update';
+            State.authQrPayload = text;
+            State.prefill = m;
+            render();
+            return;
+          }
+
+          // review modal
+          var modal = openModal(
+            '<div class="big">資料是否正確？</div>'+
+            '<div class="small">如需要更改，提交後會重新發出新 QR（舊 QR 即時失效）。<br/>If changes are needed, a new QR will be issued (old QR becomes invalid immediately).</div>'+
+            '<div class="kv">'+
+              '<div>中文名</div><div>'+escapeHtml(m.nameZh||'')+'</div>'+
+              '<div>英文名</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
+              '<div>常用稱呼</div><div>'+escapeHtml(m.preferredName||'')+'</div>'+
+              '<div>電郵</div><div>'+escapeHtml(m.email||'')+'</div>'+
+              '<div>手機</div><div>'+escapeHtml(m.mobile||'')+'</div>'+
+              '<div>備註</div><div>'+escapeHtml(m.notes||'')+'</div>'+
+            '</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="btnCorrect" class="primary" type="button">✅ 正確 / Correct</button>'+
+              '<button id="btnWrong" class="danger" type="button">✏️ 需要更改 / Incorrect</button>'+
+            '</div>'
+          );
+
+          modal.querySelector('#btnCorrect').onclick = function(){
+            closeModal(modal);
+            stopScan();
+            State.view='home';
+            render();
+          };
+
+          modal.querySelector('#btnWrong').onclick = function(){
+            closeModal(modal);
+            stopScan();
+            State.view = 'form';
+            State.flow = 'self_update';
+            State.authQrPayload = text;
+            State.prefill = m;
+            render();
+          };
+
+        }).catch(function(err){
+          var msg = (err && err.message) ? err.message : String(err||'');
+          $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        });
+      }
+
+      restartScan();
+    }
+
+    function bindForm(){
+      $('notes').addEventListener('focus', function(){ $('notesHelp').classList.remove('hide'); });
+      $('notes').addEventListener('blur', function(){ $('notesHelp').classList.add('hide'); });
+
+      $('isMinor').addEventListener('change', function(){
+        $('parentEmailBlock').classList.toggle('hide', !$('isMinor').checked);
+      });
+
+      function setCar(v){
+        window._hasCar = v;
+        if(v === 'YES'){
+          $('btnCarYes').classList.add('btnSelGood');
+          $('btnCarNo').classList.remove('btnSelBad');
+          $('carState').classList.remove('bad');
+          $('carState').classList.add('good');
+          $('carState').textContent = '✅ 已選擇：有車 / Selected: Yes';
+          $('vrmBlock').classList.remove('hide');
+        } else {
+          $('btnCarNo').classList.add('btnSelBad');
+          $('btnCarYes').classList.remove('btnSelGood');
+          $('carState').classList.remove('good');
+          $('carState').classList.add('bad');
+          $('carState').textContent = '❌ 已選擇：無車 / Selected: No';
+          $('vrmBlock').classList.add('hide');
+          if($('vrm')) $('vrm').value = '';
+          if($('vrm2')) $('vrm2').value = '';
+        }
+      }
+
+      window._hasCar = (State.prefill && State.prefill.hasCar === true) ? 'YES' :
+                       (State.prefill && State.prefill.hasCar === false) ? 'NO' : '';
+
+      $('btnCarYes').onclick = function(){ setCar('YES'); };
+      $('btnCarNo').onclick = function(){ setCar('NO'); };
+
+      function refreshEmailHint(){
+        var need = $('optInEmail').checked && !$('email').value.trim();
+        $('emailOptHint').style.display = need ? 'block' : 'none';
+      }
+      $('optInEmail').addEventListener('change', refreshEmailHint);
+      $('email').addEventListener('input', refreshEmailHint);
+      refreshEmailHint();
+
+      $('btnBackHome').onclick = function(){
+        State.view='home';
+        State.flow='create';
+        State.prefill=null;
+        State.authQrPayload=null;
+        render();
+      };
+
+      $('btnSubmit').onclick = function(){
+        $('formMsg').innerHTML = '';
+
+        var data = readFormData_();
+        State.lastSubmit = data;
+
+        var v = validateLocal(data);
+        if(!v.ok){
+          $('formMsg').innerHTML = showBox('err', v.zh, v.en);
+          return;
+        }
+
+        if(State.flow === 'self_update'){
+          confirmUpdateThen(function(){
+            $('formMsg').innerHTML = showBox('warn','更新中…','Updating…');
+            callApi('api_reg_self_update_public', State.authQrPayload, data).then(handleResult).catch(function(err){
+              var msg = (err && err.message) ? err.message : String(err||'');
+              $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+            });
+          });
+          return;
+        }
+
+        $('formMsg').innerHTML = showBox('warn','檢查中…','Checking…');
+        callApi('api_reg_find_candidates_public', {
+          email: data.email,
+          mobile: (data.phoneCc && data.phoneNat) ? ('+'+data.phoneCc+data.phoneNat) : '',
+          nameZh: data.nameZh,
+          nameEn: data.nameEn
+        }).then(function(r){
+          if(!r || !r.ok){
+            $('formMsg').innerHTML = showServerErr(r);
+            return;
+          }
+          var list = r.results || [];
+          if(list.length){
+            showCandidatesModal(list, data);
+          } else {
+            doCreate(data);
+          }
+        }).catch(function(err){
+          var msg = (err && err.message) ? err.message : String(err||'');
+          $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        });
+      };
+    }
+
+    function readFormData_(){
+      var ccRaw = $('phoneCc').value.trim();
+      var natRaw = $('phoneNat').value.trim();
+      var ccDig = ccRaw.replace(/\D/g,'');
+      var natDig = natRaw.replace(/\D/g,'');
+
+      if (ccDig === '44' && !natDig) ccDig = '';
+
+      return {
+        nameZh: $('nameZh').value.trim(),
+        nameEn: $('nameEn').value.trim(),
+        preferredName: $('preferredName').value.trim(),
+
+        email: $('email').value.trim(),
+        optInEmail: $('optInEmail').checked,
+
+        notes: $('notes').value.trim(),
+
+        phoneCc: ccDig,
+        phoneNat: natDig,
+
+        isMinor: $('isMinor').checked,
+        parentEmail: $('parentEmail') ? $('parentEmail').value.trim() : '',
+
+        hasCar: window._hasCar,
+        vrm: normalizeVrm($('vrm') ? $('vrm').value : ''),
+        vrm2: normalizeVrm($('vrm2') ? $('vrm2').value : ''),
+
+        deviceId: getDeviceId(),
+        ua: getUA()
+      };
+    }
+
+    function validateLocal(d){
+      if (d.email && d.parentEmail && d.email.trim().toLowerCase() === d.parentEmail.trim().toLowerCase()){
+        return { ok:false, zh:'家長電郵與本人電郵相同，請刪除其中一個或改用不同電郵。', en:'Parent email equals member email. Remove one or use a different email.' };
+      }
+
+      if (d.optInEmail && !d.email){
+        return { ok:false, zh:'如選擇接收電郵，請填寫電郵；或取消勾選後再繼續', en:'Email is required if email opt-in is checked.' };
+      }
+
+      var hasPhone = (d.phoneCc && d.phoneNat);
+      if (!d.email && !hasPhone){
+        return { ok:false, zh:'請填寫手機或電郵（至少一項）', en:'Please provide phone or email (at least one).' };
+      }
+
+      if(hasPhone){
+        if (d.phoneCc === '852' && d.phoneNat.length !== 8){
+          return { ok:false, zh:'香港號碼必須為 8 位數。', en:'Hong Kong number must be 8 digits.' };
+        }
+        if (d.phoneCc === '44'){
+          var okUk = (d.phoneNat.length === 10) || (d.phoneNat.length === 11 && d.phoneNat[0] === '0');
+          if(!okUk) return { ok:false, zh:'英國號碼格式不正確（10 位數，或 11 位並以 0 開頭）。', en:'UK number invalid.' };
+        }
+      }
+
+      if(!d.nameZh && !d.nameEn) return { ok:false, zh:'請填寫中文名或英文名（至少一項）', en:'Please provide Chinese or English name (at least one).' };
+      if(!d.nameZh && d.nameEn){
+        var parts = d.nameEn.split(/\s+/).filter(Boolean);
+        if(parts.length < 2) return { ok:false, zh:'只填英文名時，請同時填寫名及姓', en:'If only English name, include first and last name.' };
+      }
+
+      if(d.hasCar !== 'YES' && d.hasCar !== 'NO') return { ok:false, zh:'請選擇是否有車', en:'Please choose whether you have a car.' };
+      if(d.hasCar === 'YES' && !d.vrm && !d.vrm2) return { ok:false, zh:'如有車，請填寫至少一個車牌', en:'If you have a car, provide at least one VRM.' };
+
+      return { ok:true };
+    }
+
+    function confirmUpdateThen(onConfirm){
+      var modal = openModal(
+        '<div class="big">確認更改？ / Confirm changes?</div>'+
+        '<div class="msgBox warn" style="margin-top:10px;">'+
+          '<div class="big warn">⚠️ 舊 QR 會即時失效</div>'+
+          '<div style="margin-top:4px;font-size:16px;">Old QR becomes invalid immediately.</div>'+
+          '<div class="small" style="margin-top:6px;">'+
+            '更新後只可使用新 QR（簽到及事奉）。<br/>'+
+            'After update, you must use the NEW QR for check-in and service.'+
+          '</div>'+
+        '</div>'+
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="btnGo" class="primary" type="button">✅ 確認 / Confirm</button>'+
+          '<button id="btnCancel" class="danger" type="button">取消 / Cancel</button>'+
+        '</div>'
+      );
+      modal.querySelector('#btnCancel').onclick = function(){ closeModal(modal); };
+      modal.querySelector('#btnGo').onclick = function(){ closeModal(modal); onConfirm(); };
+    }
+
+    function showCandidatesModal(list, data){
+      var rows = list.map(function(c){
+        var nm = ((c.nameZh||'')+' '+(c.nameEn||'')).trim() || c.id;
+        var vrmLine = c.vrmMasked ? ('<div><b>車牌</b>: '+escapeHtml(c.vrmMasked)+'</div>') : '';
+        return ''+
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn" style="font-size:18px;">'+escapeHtml(nm)+'</div>'+
+            '<div class="small" style="margin-top:6px;">'+
+              '<div><b>CCF ID</b>: '+escapeHtml(c.id)+'</div>'+
+              (c.emailMasked ? ('<div><b>Email</b>: '+escapeHtml(c.emailMasked)+'</div>') : '')+
+              (c.mobileMasked ? ('<div><b>Mobile</b>: '+escapeHtml(c.mobileMasked)+'</div>') : '')+
+              vrmLine+
+            '</div>'+
+            (c.isStaff
+              ? showBox('err','此為同工記錄，請聯絡影音同工','Staff record — contact Media team')
+              : '<div class="miniBtnRow">'+
+                  '<button class="primary" data-use="'+escapeHtml(c.id)+'">✅ 同一人 / Same person</button>'+
+                '</div>'
+            )+
+          '</div>';
+      }).join('');
+
+      var modal = openModal(
+        '<div class="big">可能已有記錄 / Possible match</div>'+
+        '<div class="small">如是同一人，請選擇「Same person」以覆寫資料並重新發出新 QR。</div>'+
+        rows+
+        '<div class="divider"></div>'+
+        '<div class="miniBtnRow">'+
+          '<button id="btnNone" class="alt" type="button">都不是，建立新會員 / Create new</button>'+
+          '<button id="btnBack" class="danger" type="button">返回修改 / Back</button>'+
+        '</div>'
+      );
+
+      modal.querySelector('#btnBack').onclick = function(){ closeModal(modal); $('formMsg').innerHTML=''; };
+      modal.querySelector('#btnNone').onclick = function(){ closeModal(modal); doCreate(data); };
+
+      Array.prototype.slice.call(modal.querySelectorAll('button[data-use]')).forEach(function(btn){
+        btn.onclick = function(){
+          var id = btn.getAttribute('data-use');
+          closeModal(modal);
+
+          confirmUpdateThen(function(){
+            $('formMsg').innerHTML = showBox('warn','更新中…','Updating…');
+            callApi('api_reg_update_by_id_public', id, data).then(handleResult).catch(function(err){
+              var msg = (err && err.message) ? err.message : String(err||'');
+              $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+            });
+          });
+        };
+      });
+    }
+
+    function doCreate(data){
+      $('formMsg').innerHTML = showBox('warn','建立中…','Creating…');
+      callApi('api_reg_create_member_public', data).then(handleResult).catch(function(err){
+        var msg = (err && err.message) ? err.message : String(err||'');
+        $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+      });
+    }
+
+    function handleResult(res){
+      if(!res || !res.ok){
+        $('formMsg').innerHTML = showServerErr(res);
+        return;
+      }
+      State.lastResult = res;
+      State.view = 'success';
+      render();
+    }
+
+    // init
+    render();
+  </script>
+</body>
+</html>
