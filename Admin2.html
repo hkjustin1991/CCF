@@ -75,9 +75,6 @@
     .kv{display:grid;grid-template-columns:170px 1fr;gap:8px 10px;margin-top:10px}
     .kv div:nth-child(odd){color:var(--muted)}
 
-    .videoWrap{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#f7f9ff}
-    video{width:100%;display:block}
-
     .footer{margin-top:14px;padding:6px 4px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
     .menuGrid{
@@ -105,10 +102,18 @@
     .tick{font-weight:950}
     .clickable{cursor:pointer}
     .muted{color:var(--muted)}
-
     .chip{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted);background:#fff}
     .chip.bad{border-color:rgba(217,60,94,0.25);background:#fff1f4;color:#9f1239}
     .flag{margin-left:6px;font-weight:950}
+
+    /* list items (same feel as staff live list) */
+    .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
+    .nameItem{
+      padding:10px;border:1px solid var(--border);border-radius:12px;margin-top:8px;
+      white-space:normal;overflow-wrap:anywhere;word-break:break-word;
+    }
+    .nameItem .zh{font-weight:950;}
+    .nameItem .en{color:var(--muted);font-size:14px;margin-top:4px;font-weight:700;}
 
     /* Modal */
     .overlay{
@@ -141,8 +146,6 @@
     @media (max-width: 520px){
       .chartCard{ height:440px; }
     }
-
-    .nowrap{white-space:nowrap}
   </style>
 </head>
 
@@ -178,20 +181,15 @@
       token:null,
       actor:null, // {id, role, nameZh, nameEn}
       view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period
-      stream:null, raf:null, scanning:false, detector:null,
-      stable:{ value:null, count:0, firstTs:0 },
       debounceT:null,
       clockTimer:null,
 
       from:'2026-01-11',
       to:null,
 
-      matrixState:null,
-      chart:null
+      chart:null,
+      matrixState:null
     };
-
-    var STABLE_REQUIRED_COUNT = 2;
-    var STABLE_REQUIRED_MS = 250;
 
     function $(id){ return document.getElementById(id); }
 
@@ -251,7 +249,8 @@
 
     function roleIsAdmin(){
       if(!App.actor) return false;
-      return (String(App.actor.role||'').toUpperCase() === 'ADMIN' || String(App.actor.role||'').toUpperCase() === 'SUPERUSER');
+      var r = String(App.actor.role||'').toUpperCase();
+      return (r === 'ADMIN' || r === 'SUPERUSER');
     }
 
     function getTodayYmdUk(){
@@ -286,9 +285,7 @@
       if(!m) return null;
       return new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
     }
-    function daysBetween(a,b){
-      return Math.floor((b.getTime()-a.getTime())/(24*60*60*1000));
-    }
+    function daysBetween(a,b){ return Math.floor((b.getTime()-a.getTime())/(24*60*60*1000)); }
     function maxDaysForRole(){ return roleIsAdmin() ? 366 : 181; }
     function validateRangeClient(fromYmd, toYmd){
       var a = parseYmd(fromYmd);
@@ -314,325 +311,162 @@
       return m ? m[1] : '';
     }
 
-    function eventDisplay(ev){
-      var ymd = eventDateYmdFromKey(ev);
-      if (ymd) return 'Sunday service ' + ymd;
-      return String(ev||'');
-    }
-
-    function resetStability(){
-      App.stable.value=null; App.stable.count=0; App.stable.firstTs=0;
-    }
-    function acceptWhenStable(candidate){
-      var now = Date.now();
-      if(!candidate){ resetStability(); return null; }
-      if(App.stable.value === candidate){
-        App.stable.count += 1;
-      } else {
-        App.stable.value = candidate;
-        App.stable.count = 1;
-        App.stable.firstTs = now;
-      }
-      var elapsed = now - (App.stable.firstTs || now);
-      if(App.stable.count >= STABLE_REQUIRED_COUNT && elapsed >= STABLE_REQUIRED_MS){
-        var v = App.stable.value;
-        resetStability();
-        return v;
-      }
-      return null;
-    }
-
-    function stopScan(){
-      App.scanning=false;
-      if(App.raf) cancelAnimationFrame(App.raf);
-      App.raf=null;
-      if(App.stream){
-        App.stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} });
-        App.stream=null;
-      }
-      resetStability();
-    }
-
-    function startScan(videoId, onCaptured, msgTarget){
-      stopScan();
-      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-        showErr(msgTarget, { code:'E420', zh:'此裝置不支援相機', en:'Camera not supported' });
-        return;
-      }
-
-      var constraintsPreferred = { video: { facingMode: { ideal:'environment' } }, audio:false };
-      var constraintsFallback  = { video: true, audio:false };
-
-      function tryStart(constraints, allowFallback){
-        navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
-          App.stream = stream;
-          var v = $(videoId);
-          v.srcObject = stream;
-          return v.play().then(function(){
-            App.scanning=true;
-            scanLoop(v, onCaptured, msgTarget);
-          });
-        }).catch(function(err){
-          if(allowFallback){ tryStart(constraintsFallback, false); return; }
-          stopScan();
-          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : '' });
-        });
-      }
-      tryStart(constraintsPreferred, true);
-    }
-
-    function scanLoop(video, onCaptured, msgTarget){
-      if(!App.scanning) return;
-      if(!video || video.readyState < 2){
-        App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
-        return;
-      }
-
-      try{
-        if('BarcodeDetector' in window){
-          App.detector = App.detector || new BarcodeDetector({ formats:['qr_code'] });
-          App.detector.detect(video).then(function(codes){
-            var candidate = (codes && codes.length && codes[0].rawValue) ? codes[0].rawValue : null;
-            var stable = acceptWhenStable(candidate);
-            if(stable){ stopScan(); onCaptured(stable); return; }
-            App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
-          }).catch(function(){
-            App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
-          });
-          return;
-        }
-      }catch(e){}
-
-      var text = null;
-      try{
-        var canvas = App._canvas || (App._canvas=document.createElement('canvas'));
-        var ctx = App._ctx || (App._ctx=canvas.getContext('2d',{ willReadFrequently:true }));
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video,0,0,canvas.width,canvas.height);
-        var img = ctx.getImageData(0,0,canvas.width,canvas.height);
-        var qr = window.jsQR(img.data, canvas.width, canvas.height);
-        if(qr && qr.data) text = qr.data;
-      }catch(e){}
-
-      var stable2 = acceptWhenStable(text);
-      if(stable2){ stopScan(); onCaptured(stable2); return; }
-
-      App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
-    }
-
-    function setLoginBusy(busy){
-      var b = !!busy;
-      var a = $('btnStartScan'); if(a) a.disabled = b;
-      var c = $('btnInternal'); if(c) c.disabled = b;
-    }
-
-    function render(){
-      stopScan();
-      clearTimeout(App.debounceT);
-      if(!App.to) App.to = getTodayYmdUk();
-
-      var root = $('app');
-      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); return; }
-      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); return; }
-      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); return; }
-      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); return; }
-      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); return; }
-      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); return; }
-      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); return; }
-    }
-
-    /* ---------------- Views ---------------- */
-
+    /* ---------- Login (no camera here; QR login via server is handled elsewhere) ---------- */
     function viewLogin(){
       return ''+
         '<div class="card">'+
           '<div class="big">🔐 登入 / Login</div>'+
           '<div class="small">請掃描你自己的同工 QR 登入。<br/>Please scan your own staff QR to login.</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnStartScan" class="btnMain">📷 掃描 QR / Scan QR</button>'+
-          '</div>'+
-          '<div id="camBox" class="card hide" style="margin-top:10px;">'+
-            '<div class="big">📷 掃描中… / Scanning…</div>'+
-            '<div class="videoWrap" style="margin-top:10px;"><video id="videoLogin" playsinline></video></div>'+
-            '<div class="miniBtnRow">'+
-              '<button id="btnCancelScan" class="btnDanger">取消 / Cancel</button>'+
-            '</div>'+
-          '</div>'+
           '<div class="divider"></div>'+
           '<div class="label">授權登入 / Authorised login</div>'+
           '<input id="internalField" type="password" autocomplete="off" />'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnInternal" class="btnBack">OK</button>'+
           '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnScanLogin" class="btnMain">📷 掃描 QR / Scan QR</button>'+
+          '</div>'+
           '<div id="loginMsg"></div>'+
         '</div>';
     }
 
-    function viewMenu(){
-      var zh = (App.actor && App.actor.nameZh) ? App.actor.nameZh : '';
-      var en = (App.actor && App.actor.nameEn) ? App.actor.nameEn : '';
-      var id = (App.actor && App.actor.id) ? App.actor.id : '';
-      var nameLine = (en || zh) ? ((en||zh) + (zh && en ? (' / ' + zh) : '')) : '';
+    /* Camera scan helpers for login/reauth (kept minimal + stable) */
+    var Scan = { stream:null, raf:null, scanning:false, detector:null, stable:{v:null,c:0,t0:0} };
+    var STABLE_REQUIRED_COUNT = 2;
+    var STABLE_REQUIRED_MS = 250;
 
-      return ''+
-        '<div class="card">'+
-          '<div class="big">👋 歡迎 / Welcome</div>'+
-          '<div class="small">'+
-            'CCF ID：<b>'+escapeHtml(id)+'</b><br/>' +
-            (nameLine ? ('姓名 / Name：<b>'+escapeHtml(nameLine)+'</b><br/>') : '')+
-            '多謝你一直喺 CCF 服侍 🙏<br/>' +
-            'Thank you for your ongoing service at CCF.'+
-          '</div>'+
-          '<div class="msgBox.warn msgBox warn" style="margin-top:10px;">'+
-            '<div class="big warn">🕒 英國時間 / UK time</div>'+
-            '<div style="margin-top:6px;font-size:20px;font-weight:950;"><span id="ukClock">--:--:--</span></div>'+
-          '</div>'+
-          '<div class="msgBox warn" style="margin-top:10px;">'+
-            '<div class="big warn">⚠️ 提醒 / Reminder</div>'+
-            '<div class="small">'+
-              '會員資料受英國資料保障法規管。存取屬「need-to-know」原則；未經授權存取嚴格禁止。此管理平台內的行為可能會被記錄。<br/>'+
-              'Member data are subject to UK data protection law. Access is on a “need-to-know” basis. Unauthorised access is strictly prohibited. Actions on this portal may be recorded.'+
-            '</div>'+
-          '</div>'+
-        '</div>'+
-        '<div class="card">'+
-          '<div class="big">📌 主選單 / Main menu</div>'+
-          '<div class="menuGrid">'+
-            '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
-            '<button id="goFinance" class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
-            '<button id="goServing" class="btnGhost" disabled>🧩 事奉 / Serving（coming soon）</button>'+
-            '<button id="goSoon" class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
-          '</div>'+
-          '<div class="divider"></div>'+
-          '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
-        '</div>';
+    function resetStability(){ Scan.stable.v=null; Scan.stable.c=0; Scan.stable.t0=0; }
+    function acceptWhenStable(candidate){
+      var now = Date.now();
+      if(!candidate){ resetStability(); return null; }
+      if(Scan.stable.v === candidate){ Scan.stable.c += 1; }
+      else { Scan.stable.v = candidate; Scan.stable.c = 1; Scan.stable.t0 = now; }
+      var elapsed = now - (Scan.stable.t0 || now);
+      if(Scan.stable.c >= STABLE_REQUIRED_COUNT && elapsed >= STABLE_REQUIRED_MS){
+        var v = Scan.stable.v; resetStability(); return v;
+      }
+      return null;
     }
-
-    function viewAttendanceHome(){
-      return ''+
-        '<div class="card" style="border-color:rgba(26,168,108,0.25);background:#f6fffb;">'+
-          '<div class="big ok">📊 會員管理及出席 / Member admin and attendance</div>'+
-          '<div class="small">（此頁只顯示出席/統計，聯絡資料需額外授權）<br/>(Shows attendance/stats only. Contact details require extra authorisation.)</div>'+
-          '<div class="menuGrid" style="margin-top:12px;">'+
-            '<button id="goMatrix" class="btnMatrix">✅ 出席矩陣 / Attendance matrix</button>'+
-            '<button id="goLookup" class="btnLookup">🔎 個人查詢 / Member lookup</button>'+
-            '<button id="goStats" class="btnStats">📈 聚會統計 / Service stats</button>'+
-            '<button id="goPeriod" class="btnPeriod">📅 月度/季度統計 / Period stats</button>'+
-          '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="backMenu" class="btnBack">⬅️ 返回 / Back</button>'+
-          '</div>'+
-        '</div>';
+    function stopScan(){
+      Scan.scanning=false;
+      if(Scan.raf) cancelAnimationFrame(Scan.raf);
+      Scan.raf=null;
+      if(Scan.stream){
+        Scan.stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} });
+        Scan.stream=null;
+      }
+      resetStability();
     }
+    function startScan(videoEl, onCaptured){
+      stopScan();
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        onCaptured(null, {code:'E420', zh:'此裝置不支援相機', en:'Camera not supported'});
+        return;
+      }
+      var constraintsPreferred = { video: { facingMode: { ideal:'environment' } }, audio:false };
+      var constraintsFallback  = { video: true, audio:false };
 
-    function viewMatrix(){
-      return ''+
-        '<div class="card" style="border-color:rgba(40,90,200,0.18);background:#f4f8ff;">'+
-          '<div class="big">✅ 出席矩陣 / Attendance matrix</div>'+
-          '<div class="small">只計算 SundayService_YYYY-MM-DD。DISABLED 會員不會顯示為欄（但統計仍會包含其出席記錄）。<br/>'+
-          'SundayService only. DISABLED members are hidden as columns (attendance still counts in totals).</div>'+
-          '<div class="kv">'+
-            '<div>開始 / From</div><div><input id="from" type="date" /></div>'+
-            '<div>結束 / To</div><div><input id="to" type="date" /></div>'+
-          '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnLoad" class="btnMatrix">🔄 載入 / Load</button>'+
-            '<button id="backAttendance" class="btnBack">⬅️ 返回 / Back</button>'+
-          '</div>'+
-          '<div id="filterWrap" class="hide">'+
-            '<div class="label" style="margin-top:10px;">篩選 / Filter（realtime）</div>'+
-            '<input id="filterLive" placeholder="CCF ID / 中文 / English" />'+
-          '</div>'+
-          '<div id="matrixMsg"></div>'+
-          '<div id="matrixOut" style="margin-top:10px;"></div>'+
-        '</div>';
+      function tryStart(constraints, allowFallback){
+        navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
+          Scan.stream = stream;
+          videoEl.srcObject = stream;
+          return videoEl.play().then(function(){
+            Scan.scanning=true;
+            loop();
+          });
+        }).catch(function(err){
+          if(allowFallback){ tryStart(constraintsFallback, false); return; }
+          stopScan();
+          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : ''});
+        });
+      }
+
+      function loop(){
+        if(!Scan.scanning) return;
+        if(!videoEl || videoEl.readyState < 2){
+          Scan.raf = requestAnimationFrame(loop);
+          return;
+        }
+
+        try{
+          if('BarcodeDetector' in window){
+            Scan.detector = Scan.detector || new BarcodeDetector({ formats:['qr_code'] });
+            Scan.detector.detect(videoEl).then(function(codes){
+              var candidate = (codes && codes.length && codes[0].rawValue) ? codes[0].rawValue : null;
+              var stable = acceptWhenStable(candidate);
+              if(stable){
+                stopScan();
+                onCaptured(stable, null);
+                return;
+              }
+              Scan.raf = requestAnimationFrame(loop);
+            }).catch(function(){
+              Scan.raf = requestAnimationFrame(loop);
+            });
+            return;
+          }
+        }catch(e){}
+
+        // jsQR fallback
+        var text = null;
+        try{
+          var canvas = Scan._canvas || (Scan._canvas=document.createElement('canvas'));
+          var ctx = Scan._ctx || (Scan._ctx=canvas.getContext('2d',{ willReadFrequently:true }));
+          canvas.width = videoEl.videoWidth;
+          canvas.height = videoEl.videoHeight;
+          ctx.drawImage(videoEl,0,0,canvas.width,canvas.height);
+          var img = ctx.getImageData(0,0,canvas.width,canvas.height);
+          var qr = window.jsQR(img.data, canvas.width, canvas.height);
+          if(qr && qr.data) text = qr.data;
+        }catch(e){}
+
+        var stable2 = acceptWhenStable(text);
+        if(stable2){
+          stopScan();
+          onCaptured(stable2, null);
+          return;
+        }
+        Scan.raf = requestAnimationFrame(loop);
+      }
+
+      tryStart(constraintsPreferred, true);
     }
-
-    function viewMemberLookup(){
-      return ''+
-        '<div class="card" style="border-color:rgba(200,132,0,0.35);background:#fffaf0;">'+
-          '<div class="big">🔎 個人查詢 / Member lookup</div>'+
-          '<div class="kv">'+
-            '<div>開始 / From</div><div><input id="from2" type="date" /></div>'+
-            '<div>結束 / To</div><div><input id="to2" type="date" /></div>'+
-          '</div>'+
-          '<div class="divider"></div>'+
-          '<div class="label">輸入 / Input</div>'+
-          '<input id="mq" placeholder="CCF ID / 中文 / English" />'+
-          '<div id="mResults" style="margin-top:10px;"></div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="backAttendance2" class="btnBack">⬅️ 返回 / Back</button>'+
-          '</div>'+
-          '<div id="memberMsg"></div>'+
-        '</div>';
-    }
-
-    function viewStats(){
-      return ''+
-        '<div class="card" style="border-color:rgba(26,168,108,0.18);background:#f6fffb;">'+
-          '<div class="big">📈 聚會統計 / Service stats</div>'+
-          '<div class="small">Existing + New = Total。New = 首次出席該 Sunday service。<br/>Existing + New = Total. New = first-time attendance.</div>'+
-          '<div class="kv">'+
-            '<div>開始 / From</div><div><input id="from3" type="date" /></div>'+
-            '<div>結束 / To</div><div><input id="to3" type="date" /></div>'+
-          '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnLoadStats" class="btnStats">🔄 載入 / Load</button>'+
-            (roleIsAdmin() ? '<button id="btnRebuild" class="btnPeriod">🔄 重建 / Rebuild</button>' : '')+
-            '<button id="backAttendance3" class="btnBack">⬅️ 返回 / Back</button>'+
-          '</div>'+
-          '<div id="statsMsg"></div>'+
-          '<div class="chartCard"><canvas id="statsChart"></canvas></div>'+
-        '</div>';
-    }
-
-    function viewPeriod(){
-      return ''+
-        '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#faf8ff;">'+
-          '<div class="big">📅 月度/季度統計 / Period stats</div>'+
-          '<div class="small">總人次 / Total attendance；獨立人數 / Unique attendance；首次出席 / New (unique)</div>'+
-          '<div class="kv">'+
-            '<div>開始 / From</div><div><input id="from4" type="date" /></div>'+
-            '<div>結束 / To</div><div><input id="to4" type="date" /></div>'+
-          '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnLoadPeriod" class="btnPeriod">🔄 載入 / Load</button>'+
-            '<button id="backAttendance4" class="btnBack">⬅️ 返回 / Back</button>'+
-          '</div>'+
-          '<div id="periodMsg"></div>'+
-          '<div id="periodOut" style="margin-top:10px;"></div>'+
-        '</div>';
-    }
-
-    /* ---------------- Bindings ---------------- */
 
     function bindLogin(){
-      $('btnStartScan').onclick = function(){
-        clear('loginMsg');
-        $('camBox').classList.remove('hide');
-
-        $('btnCancelScan').onclick = function(){
-          stopScan();
-          $('camBox').classList.add('hide');
-        };
-
-        startScan('videoLogin', function(payload){
-          $('camBox').classList.add('hide');
-          setLoginBusy(true);
-          callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
-            showErr('loginMsg', { code:'E500', zh:'系統錯誤', en:'System error' });
-          }).finally(function(){ setLoginBusy(false); });
-        }, 'loginMsg');
-      };
-
       $('btnInternal').onclick = function(){
         clear('loginMsg');
-        setLoginBusy(true);
         var v = String($('internalField').value||'').trim();
         callApi('api_admin_login', v).then(onLoginRes).catch(function(){
-          showErr('loginMsg', { code:'E500', zh:'系統錯誤', en:'System error' });
-        }).finally(function(){ setLoginBusy(false); });
+          showErr('loginMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      };
+
+      $('btnScanLogin').onclick = function(){
+        clear('loginMsg');
+
+        var modal = openModal(
+          '<div class="big">📷 掃描 QR / Scan QR</div>'+
+          '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
+          '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
+          '</div>'+
+          '<div id="scanMsg"></div>'
+        );
+        modal.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(modal); };
+
+        var vEl = modal.querySelector('#vLogin');
+        startScan(vEl, function(payload, err){
+          if(err){ showErr('scanMsg', err); return; }
+          showBox('scanMsg','warn','處理中…','Working…');
+          callApi('api_admin_login', payload).then(function(res){
+            if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            closeModal(modal);
+            onLoginRes(res);
+          }).catch(function(){
+            showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        });
       };
 
       function onLoginRes(res){
@@ -650,14 +484,70 @@
       }
     }
 
+    function viewMenu(){
+      var zh = (App.actor && App.actor.nameZh) ? App.actor.nameZh : '';
+      var en = (App.actor && App.actor.nameEn) ? App.actor.nameEn : '';
+      var id = (App.actor && App.actor.id) ? App.actor.id : '';
+      var nameLine = (en || zh) ? ((en||zh) + (zh && en ? (' / ' + zh) : '')) : '';
+
+      return ''+
+        '<div class="card">'+
+          '<div class="big">👋 歡迎 / Welcome</div>'+
+          '<div class="small">'+
+            'CCF ID：<b>'+escapeHtml(id)+'</b><br/>' +
+            (nameLine ? ('姓名 / Name：<b>'+escapeHtml(nameLine)+'</b><br/>') : '')+
+            '多謝你一直喺 CCF 服侍 🙏<br/>' +
+            'Thank you for your ongoing service at CCF.'+
+          '</div>'+
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">🕒 英國時間 / UK time</div>'+
+            '<div style="margin-top:6px;font-size:20px;font-weight:950;"><span id="ukClock">--:--:--</span></div>'+
+          '</div>'+
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">⚠️ 提醒 / Reminder</div>'+
+            '<div class="small">'+
+              '會員資料受英國資料保障法規管。存取屬「need-to-know」原則；未經授權存取嚴格禁止。此管理平台內的行為可能會被記錄。<br/>'+
+              'Member data are subject to UK data protection law. Access is on a “need-to-know” basis. Unauthorised access is strictly prohibited. Actions on this portal may be recorded.'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div class="big">📌 主選單 / Main menu</div>'+
+          '<div class="menuGrid">'+
+            '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
+            '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
+            '<button class="btnGhost" disabled>🧩 事奉 / Serving（coming soon）</button>'+
+            '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
+          '</div>'+
+          '<div class="divider"></div>'+
+          '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+        '</div>';
+    }
+
     function bindMenu(){
-      $('goAttendance').onclick = function(){ logAction('OPEN_ATTENDANCE_HOME','', 'nav'); App.view='attendanceHome'; render(); };
+      $('goAttendance').onclick = function(){ logAction('OPEN_ATT_HOME','', 'nav'); App.view='attendanceHome'; render(); };
       $('btnLogout').onclick = function(){
         logAction('LOGOUT','', 'nav');
         App.token=null; App.actor=null;
         App.view='login';
         render();
       };
+    }
+
+    function viewAttendanceHome(){
+      return ''+
+        '<div class="card" style="border-color:rgba(26,168,108,0.25);background:#f6fffb;">'+
+          '<div class="big ok">📊 會員管理及出席 / Member admin and attendance</div>'+
+          '<div class="menuGrid" style="margin-top:12px;">'+
+            '<button id="goMatrix" class="btnMatrix">✅ 出席矩陣 / Attendance matrix</button>'+
+            '<button id="goLookup" class="btnLookup">🔎 個人查詢 / Member lookup</button>'+
+            '<button id="goStats" class="btnStats">📈 聚會統計 / Service stats</button>'+
+            '<button id="goPeriod" class="btnPeriod">📅 月度/季度統計 / Period stats</button>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="backMenu" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+        '</div>';
     }
 
     function bindAttendanceHome(){
@@ -668,12 +558,33 @@
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
     }
 
+    function viewMatrix(){
+      return ''+
+        '<div class="card" style="border-color:rgba(40,90,200,0.18);background:#f4f8ff;">'+
+          '<div class="big">✅ 出席矩陣 / Attendance matrix</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to" type="date" /></div>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnLoad" class="btnMatrix">🔄 載入 / Load</button>'+
+            '<button id="backAttendance" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="filterWrap" class="hide">'+
+            '<div class="label" style="margin-top:10px;">篩選 / Filter（realtime）</div>'+
+            '<input id="filterLive" placeholder="CCF ID / 中文 / English" />'+
+          '</div>'+
+          '<div id="matrixMsg"></div>'+
+          '<div id="matrixOut" style="margin-top:10px;"></div>'+
+        '</div>';
+    }
+
     function bindMatrix(){
       $('from').value = App.from;
-      $('to').value = App.to;
-      App.matrixState = null;
-      $('matrixOut').innerHTML = '';
+      $('to').value = App.to || getTodayYmdUk();
       $('filterWrap').classList.add('hide');
+      $('matrixOut').innerHTML = '';
+      App.matrixState = null;
 
       $('backAttendance').onclick = function(){ App.view='attendanceHome'; render(); };
       $('btnLoad').onclick = function(){ loadMatrix(); };
@@ -689,6 +600,8 @@
         if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
         showBox('matrixMsg','warn','載入中…','Loading…');
+        logAction('MATRIX_LOAD', JSON.stringify({from:from,to:to}), 'matrix');
+
         callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
           if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
 
@@ -703,20 +616,16 @@
 
           $('filterWrap').classList.remove('hide');
           $('filterLive').value = '';
-          $('filterLive').oninput = function(){
-            applyMatrixFilter(String($('filterLive').value||'').trim());
-          };
+          $('filterLive').oninput = function(){ applyMatrixFilter(String($('filterLive').value||'').trim()); };
         }).catch(function(){
           showErr('matrixMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
       }
 
-      function safeClassId(id){
-        return String(id||'').replace(/[^A-Za-z0-9]/g,'_');
-      }
+      function safeClassId(id){ return String(id||'').replace(/[^A-Za-z0-9]/g,'_'); }
 
       function renderMatrixTable(res){
-        var events = res.events;
+        var events = res.events || [];
         var members = res.members || [];
         var attended = res.attended || {};
 
@@ -727,28 +636,27 @@
           var m = members[i];
           var cid = safeClassId(m.id);
           var flag = m.lowFlag ? ('<span class="flag" title="'+escapeHtml(m.lowFlagEn||'')+'">〽️</span>') : '';
-          var label =
-            '<div class="clickable" data-mid="'+escapeHtml(m.id)+'">' +
-              escapeHtml(m.id) + flag +
-              '<br/><span class="muted">' + escapeHtml((m.nameZh||'').trim()) + '</span>' +
-              '<br/><span class="muted">' + escapeHtml((m.nameEn||'').trim()) + '</span>' +
-            '</div>';
-
-          html += '<th class="mcolh_'+cid+'">'+label+'</th>';
+          html += '<th class="mcolh_'+cid+'">'+
+                    '<div class="clickable" data-mid="'+escapeHtml(m.id)+'">'+
+                      escapeHtml(m.id)+flag+
+                      '<br/><span class="muted">'+escapeHtml(m.nameZh||'')+'</span>'+
+                      '<br/><span class="muted">'+escapeHtml(m.nameEn||'')+'</span>'+
+                    '</div>'+
+                  '</th>';
         }
         html += '</tr></thead><tbody>';
 
         for(var r=0;r<events.length;r++){
           var ev = events[r];
-          var dateOnly = eventDateYmdFromKey(ev) || ev;
+          var ymd = eventDateYmdFromKey(ev) || ev;
           html += '<tr>';
-          html += '<td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(dateOnly)+'</span></td>';
+          html += '<td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(ymd)+'</span></td>';
 
           for(var c=0;c<members.length;c++){
             var mid = members[c].id;
-            var cid = safeClassId(mid);
+            var cid2 = safeClassId(mid);
             var tick = (attended[mid] && attended[mid][ev]) ? '✅' : '';
-            html += '<td class="clickable mcol_'+cid+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+tick+'</span></td>';
+            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+tick+'</span></td>';
           }
           html += '</tr>';
         }
@@ -756,6 +664,7 @@
         html += '</tbody></table></div>';
         $('matrixOut').innerHTML = html;
 
+        // member clicks
         Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-mid]')).forEach(function(el){
           el.onclick = function(){
             var mid = el.getAttribute('data-mid');
@@ -763,6 +672,7 @@
           };
         });
 
+        // event clicks => unified service stats dialog
         Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-ev]')).forEach(function(el){
           el.onclick = function(){
             var ev = el.getAttribute('data-ev');
@@ -792,56 +702,28 @@
       }
     }
 
-    function openEventStatsModal(ev){
-      var ymd = eventDateYmdFromKey(ev);
-      if(!ymd){
-        var m0 = openModal('<div class="big">Event / 活動</div><div class="small">'+escapeHtml(ev)+'</div><div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>');
-        m0.querySelector('#c').onclick = function(){ closeModal(m0); };
-        return;
-      }
-
-      var m = openModal('<div class="big">📊 活動統計 / Event stats</div><div class="small">載入中… / Loading…</div>');
-      callApi('api_admin_stats', App.token, ymd, ymd).then(function(res){
-        if(!res || !res.ok){
-          m.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
-            '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
-          m.querySelector('#c').onclick = function(){ closeModal(m); };
-          return;
-        }
-        var row = (res.events||[]).find(function(x){ return x.eventKey === ev; }) || null;
-        if(!row){
-          m.querySelector('.modal').innerHTML =
-            '<div class="big warn">沒有數據 / No data</div>'+
-            '<div class="small">'+escapeHtml(ev)+'</div>'+
-            '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
-          m.querySelector('#c').onclick = function(){ closeModal(m); };
-          return;
-        }
-
-        m.querySelector('.modal').innerHTML =
-          '<div class="big">📊 '+escapeHtml(eventDisplay(ev))+'</div>'+
-          '<div class="kv" style="margin-top:10px;">'+
-            '<div>總出席 / Total</div><div><b>'+escapeHtml(String(row.total))+'</b></div>'+
-            '<div>新朋友 / New</div><div><b>'+escapeHtml(String(row.new))+'</b></div>'+
-            '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(row.existing))+'</b></div>'+
+    function viewMemberLookup(){
+      return ''+
+        '<div class="card" style="border-color:rgba(200,132,0,0.35);background:#fffaf0;">'+
+          '<div class="big">🔎 個人查詢 / Member lookup</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from2" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to2" type="date" /></div>'+
           '</div>'+
-          '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
-        m.querySelector('#c').onclick = function(){ closeModal(m); };
-      }).catch(function(){
-        m.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
-          '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
-        m.querySelector('#c').onclick = function(){ closeModal(m); };
-      });
+          '<div class="divider"></div>'+
+          '<div class="label">輸入 / Input</div>'+
+          '<input id="mq" placeholder="CCF ID / 中文 / English" />'+
+          '<div id="mResults" style="margin-top:10px;"></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="backAttendance2" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="memberMsg"></div>'+
+        '</div>';
     }
 
     function bindMemberLookup(){
       $('from2').value = App.from;
-      $('to2').value = App.to;
-
+      $('to2').value = App.to || getTodayYmdUk();
       $('backAttendance2').onclick = function(){ App.view='attendanceHome'; render(); };
 
       var input = $('mq');
@@ -851,14 +733,13 @@
           var q = String(input.value||'').trim();
           if(!q){ $('mResults').innerHTML=''; clear('memberMsg'); return; }
 
-          // CCF ID rule: if starts with CCF, must be full CCF#### (prevents huge lists)
+          // CCF rule: if starts with CCF, must be full CCF#### (prevents huge lists)
           var qU = q.toUpperCase();
           if (qU.startsWith('CCF') && !/^CCF\d{4}$/.test(qU)){
             showBox('memberMsg','warn','請輸入完整 CCF ID（4 位數）','Please enter full CCF ID (4 digits).');
             $('mResults').innerHTML = '';
             return;
           }
-
           doSearch(q);
         }, 240);
       });
@@ -866,6 +747,7 @@
       function doSearch(q){
         clear('memberMsg');
         $('mResults').innerHTML = '<div class="small">Searching…</div>';
+        logAction('MEMBER_SEARCH', q, 'member_search');
 
         callApi('api_admin_member_search', App.token, q).then(function(res){
           if(!res || !res.ok){ showErr('memberMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); $('mResults').innerHTML=''; return; }
@@ -917,10 +799,27 @@
       }
     }
 
+    function viewStats(){
+      return ''+
+        '<div class="card" style="border-color:rgba(26,168,108,0.18);background:#f6fffb;">'+
+          '<div class="big">📈 聚會統計 / Service stats</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from3" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to3" type="date" /></div>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnLoadStats" class="btnStats">🔄 載入 / Load</button>'+
+            (roleIsAdmin() ? '<button id="btnRebuild" class="btnPeriod">🔄 重建 / Rebuild</button>' : '')+
+            '<button id="backAttendance3" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="statsMsg"></div>'+
+          '<div class="chartCard"><canvas id="statsChart"></canvas></div>'+
+        '</div>';
+    }
+
     function bindStats(){
       $('from3').value = App.from;
-      $('to3').value = App.to;
-
+      $('to3').value = App.to || getTodayYmdUk();
       $('backAttendance3').onclick = function(){ App.view='attendanceHome'; render(); };
 
       $('btnLoadStats').onclick = function(){ loadStats(false); };
@@ -937,6 +836,7 @@
         if(!v.ok){ showBox('statsMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
         showBox('statsMsg','warn','載入中…','Loading…');
+        logAction('STATS_LOAD', JSON.stringify({from:from,to:to,rebuild:!!rebuildFirst}), 'stats');
 
         var p = Promise.resolve();
         if (rebuildFirst){
@@ -977,6 +877,7 @@
       }
 
       function drawStatsChart_(events){
+        // labels: YYYY-MM-DD
         var labels = events.map(function(x){ return eventDateYmdFromKey(x.eventKey) || x.eventKey; });
         var existing = events.map(function(x){ return x.existing; });
         var nnew = events.map(function(x){ return x.new; });
@@ -998,6 +899,35 @@
               responsive:true,
               maintainAspectRatio:false,
               plugins:{ legend:{ display:true } },
+              // ✅ Click bar segments still works (tooltip)
+              // ✅ Clicking the x-axis label opens service stats dialog
+              onClick: function(evt, elements, chart){
+                try{
+                  if(elements && elements.length) return;
+
+                  var p = chart.canvas.getBoundingClientRect();
+                  var x = evt.native.clientX - p.left;
+                  var y = evt.native.clientY - p.top;
+
+                  var xScale = chart.scales && chart.scales.x;
+                  if(!xScale) return;
+
+                  var top = xScale.top - 6;
+                  var bottom = xScale.bottom + 18;
+                  if(y < top || y > bottom) return;
+
+                  var idx = xScale.getValueForPixel(x);
+                  if(idx === null || idx === undefined) return;
+
+                  idx = Math.round(idx);
+                  if(idx < 0 || idx >= chart.data.labels.length) return;
+
+                  var ymd = chart.data.labels[idx];
+                  if(!ymd) return;
+
+                  openEventStatsModal('SundayService_' + ymd);
+                }catch(e){}
+              },
               scales:{
                 x:{ stacked:true, ticks:{ maxRotation:0, minRotation:0 } },
                 y:{ stacked:true, beginAtZero:true, stacked:true }
@@ -1010,10 +940,26 @@
       }
     }
 
+    function viewPeriod(){
+      return ''+
+        '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#faf8ff;">'+
+          '<div class="big">📅 月度/季度統計 / Period stats</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from4" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to4" type="date" /></div>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnLoadPeriod" class="btnPeriod">🔄 載入 / Load</button>'+
+            '<button id="backAttendance4" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="periodMsg"></div>'+
+          '<div id="periodOut" style="margin-top:10px;"></div>'+
+        '</div>';
+    }
+
     function bindPeriod(){
       $('from4').value = App.from;
-      $('to4').value = App.to;
-
+      $('to4').value = App.to || getTodayYmdUk();
       $('backAttendance4').onclick = function(){ App.view='attendanceHome'; render(); };
       $('btnLoadPeriod').onclick = function(){ loadPeriod(); };
       loadPeriod();
@@ -1028,6 +974,7 @@
         if(!v.ok){ showBox('periodMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
         showBox('periodMsg','warn','載入中…','Loading…');
+        logAction('PERIOD_LOAD', JSON.stringify({from:from,to:to}), 'period');
 
         callApi('api_admin_period_stats', App.token, from, to).then(function(res){
           if(!res || !res.ok){ showErr('periodMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
@@ -1073,10 +1020,119 @@
       }
     }
 
-    /* ---------- Member detail modal ---------- */
+    /* ---------- Unified Service Stats Dialog (matrix + chart x-label) ---------- */
+    function openEventStatsModal(ev){
+      var eventKey = String(ev||'').trim();
+      var ymd = eventDateYmdFromKey(eventKey);
+      if(!ymd){
+        var m0 = openModal(
+          '<div class="big">活動 / Event</div>'+
+          '<div class="small">'+escapeHtml(eventKey)+'</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'
+        );
+        m0.querySelector('#c').onclick = function(){ closeModal(m0); };
+        return;
+      }
 
+      var m = openModal('<div class="big">📊 聚會統計 / Service stats</div><div class="small">載入中… / Loading…</div>');
+
+      callApi('api_admin_event_detail', App.token, eventKey).then(function(res){
+        if(!res || !res.ok){
+          m.querySelector('.modal').innerHTML =
+            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          m.querySelector('#c').onclick = function(){ closeModal(m); };
+          return;
+        }
+
+        var c = res.counts || {total:0,new:0,existing:0};
+        var newList = (res.lists && res.lists.newMembers) ? res.lists.newMembers : [];
+        var exList  = (res.lists && res.lists.existingMembers) ? res.lists.existingMembers : [];
+
+        function renderNameItem_(o){
+          var pref = String(o.preferredName||'').trim();
+          var zh = String(o.nameZh||'').trim();
+          var en = String(o.nameEn||'').trim();
+
+          var top = pref || zh || en || o.id;
+          var bottom = '';
+
+          if (pref){
+            if (zh) bottom = zh;
+            else if (en) bottom = en;
+          } else if (zh && en){
+            bottom = en;
+          }
+
+          return ''+
+            '<div class="nameItem">'+
+              '<div class="zh">'+escapeHtml(top)+'</div>'+
+              (bottom ? ('<div class="en">'+escapeHtml(bottom)+'</div>') : '')+
+            '</div>';
+        }
+
+        function renderList_(arr){
+          return ''+
+            '<div class="listWrap" style="margin-top:10px;">'+
+              arr.map(renderNameItem_).join('')+
+            '</div>';
+        }
+
+        var btnNew = (c.new > 0)
+          ? '<button id="btnNew" class="btnMatrix">👥 新朋友名單 / New list ('+c.new+')</button>'
+          : '';
+        var btnEx = (c.existing > 0)
+          ? '<button id="btnEx" class="btnLookup">👥 舊朋友名單 / Existing list ('+c.existing+')</button>'
+          : '';
+
+        m.querySelector('.modal').innerHTML =
+          '<div class="big">📊 Sunday service '+escapeHtml(res.dateYmd||'')+'</div>'+
+          '<div class="kv" style="margin-top:10px;">'+
+            '<div>總出席 / Total</div><div><b>'+escapeHtml(String(c.total||0))+'</b></div>'+
+            '<div>新朋友 / New</div><div><b>'+escapeHtml(String(c.new||0))+'</b></div>'+
+            '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(c.existing||0))+'</b></div>'+
+          '</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            btnNew + btnEx +
+          '</div>'+
+          '<div id="listBox"></div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+
+        m.querySelector('#c').onclick = function(){ closeModal(m); };
+
+        if (c.new > 0){
+          m.querySelector('#btnNew').onclick = function(){
+            m.querySelector('#listBox').innerHTML = renderList_(newList);
+          };
+        }
+        if (c.existing > 0){
+          m.querySelector('#btnEx').onclick = function(){
+            m.querySelector('#listBox').innerHTML = renderList_(exList);
+          };
+        }
+
+      }).catch(function(){
+        m.querySelector('.modal').innerHTML =
+          '<div class="big err">系統錯誤 / Error</div>'+
+          '<div class="small">System error</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+        m.querySelector('#c').onclick = function(){ closeModal(m); };
+      });
+    }
+
+    /* ---------- Member detail (collapsed attendance) + gated actions ---------- */
     function openMemberDetail(memberId, fromYmd, toYmd){
       var modal = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
+      logAction('OPEN_MEMBER_DETAIL', memberId, 'member_detail');
 
       callApi('api_admin_member_detail', App.token, memberId, fromYmd, toYmd).then(function(res){
         if(!res || !res.ok){
@@ -1101,9 +1157,7 @@
             '</div>';
         }
 
-        var attList = att.map(function(ev){
-          return '<li>'+escapeHtml(ev)+'</li>';
-        }).join('');
+        var attList = att.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('');
 
         modal.querySelector('.modal').innerHTML =
           '<div class="modalTopBtns">'+
@@ -1162,19 +1216,20 @@
         };
 
         modal.querySelector('#btnContact').onclick = function(){
-          openContactFlow_(m.id, modal);
+          openContactFlow_(m.id);
         };
         modal.querySelector('#btnStatus').onclick = function(){
-          openStatusFlow_(m.id, m.status||'', modal);
+          openStatusFlow_(m.id, m.status||'');
         };
-
       }).catch(function(){
         closeModal(modal);
         showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
       });
     }
 
-    function openContactFlow_(memberId, parentModal){
+    function openContactFlow_(memberId){
+      logAction('CLICK_CONTACT', memberId, 'contact');
+
       var m = openModal(
         '<div class="big">📇 查看聯絡/車牌 / View contact/VRM</div>'+
         '<div class="small">請填寫原因。下一步需再次掃描你本人同工 QR 作確認。<br/>Please provide reason. Next step requires scanning your own staff QR.</div>'+
@@ -1195,8 +1250,9 @@
       };
     }
 
-    function openStatusFlow_(memberId, currentStatus, parentModal){
-      // NOTE: TEMP option included here; backend must allow it (Admin.gs patch)
+    function openStatusFlow_(memberId, currentStatus){
+      logAction('CLICK_STATUS', memberId, 'status');
+
       var m = openModal(
         '<div class="big">🛠 更改狀態 / Change status</div>'+
         '<div class="small">選擇新狀態後，需要再次掃描你本人同工 QR 作確認。所有操作會被記錄。<br/>Select new status then re-scan your own staff QR to confirm. All actions are logged.</div>'+
@@ -1227,10 +1283,12 @@
     }
 
     function openReauthScan_(mode, memberId, payload){
+      logAction('OPEN_REAUTH', memberId+'|'+mode, mode);
+
       var m = openModal(
         '<div class="big">🔐 最後確認 / Final confirm</div>'+
         '<div class="small">請掃描你本人同工 QR 作確認。<br/>Please scan your own staff QR to confirm.</div>'+
-        '<div class="videoWrap" style="margin-top:10px;"><video id="v" playsinline></video></div>'+
+        '<div class="videoWrap" style="margin-top:10px;"><video id="vReauth" playsinline></video></div>'+
         '<div class="miniBtnRow">'+
           '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
         '</div>'+
@@ -1238,8 +1296,10 @@
       );
       m.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(m); };
 
-      startScan('v', function(qr){
-        stopScan();
+      var vEl = m.querySelector('#vReauth');
+      startScan(vEl, function(qr, err){
+        if(err){ showErr('msg', err); return; }
+
         showBox('msg','warn','處理中…','Working…');
 
         if(mode === 'contact'){
@@ -1258,7 +1318,7 @@
         }).catch(function(){
           showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
-      }, 'msg');
+      });
     }
 
     function renderContactResult_(modalOverlay, res){
@@ -1284,6 +1344,7 @@
     }
 
     function renderStatusResult_(modalOverlay, res){
+      var exp = res.expiryIso ? ('<div>到期 / Expiry</div><div>'+escapeHtml(res.expiryIso)+'</div>') : '';
       modalOverlay.querySelector('.modal').innerHTML =
         '<div class="big ok">✅ 已更新狀態 / Status updated</div>'+
         '<div class="small">此操作已被記錄。This action is logged.</div>'+
@@ -1291,6 +1352,7 @@
           '<div>Member</div><div><b>'+escapeHtml(res.memberId||'')+'</b></div>'+
           '<div>From</div><div>'+escapeHtml(displayMemberStatusLabel(res.fromStatus||''))+'</div>'+
           '<div>To</div><div>'+escapeHtml(displayMemberStatusLabel(res.toStatus||''))+'</div>'+
+          exp+
         '</div>'+
         '<div class="miniBtnRow" style="margin-top:12px;">'+
           '<button id="btnClose" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -1298,11 +1360,22 @@
       modalOverlay.querySelector('#btnClose').onclick = function(){ closeModal(modalOverlay); };
     }
 
-    /* ---------------- init ---------------- */
+    function render(){
+      if(!App.to) App.to = getTodayYmdUk();
+      var root = $('app');
+
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); return; }
+      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); return; }
+      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); return; }
+      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); return; }
+      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); return; }
+      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); return; }
+      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); return; }
+    }
+
+    /* init */
     App.to = getTodayYmdUk();
     render();
-
-    /* ===== END OF Admin2.html (COMPLETE) ===== */
   </script>
 </body>
 </html>
