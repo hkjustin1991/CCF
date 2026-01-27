@@ -1,0 +1,1308 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>CCF Admin Portal</title>
+
+  <style>
+    :root{
+      --bg:#f5f7ff; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
+      --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e; --warn:#c88400;
+      --shadow: 0 10px 24px rgba(10,30,80,0.10);
+      --pad: clamp(10px, 3.2vw, 16px);
+      --radius: clamp(14px, 3.2vw, 18px);
+      --fs-title: clamp(20px, 4.8vw, 28px);
+      --fs-big: clamp(18px, 4.2vw, 22px);
+      --fs-body: clamp(13px, 3.4vw, 16px);
+      --fs-input: clamp(16px, 4vw, 18px);
+    }
+    *{box-sizing:border-box}
+    html{-webkit-text-size-adjust:100%}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    .wrap{max-width:980px;margin:0 auto;padding:var(--pad)}
+    .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
+    .title{font-size:var(--fs-title);font-weight:950}
+    .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
+    .hint{font-size:var(--fs-body);color:var(--muted);margin-top:8px;line-height:1.45}
+    .pill{font-size:12px;color:var(--muted);border:1px solid var(--border);padding:4px 10px;border-radius:999px;background:#fff}
+
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:calc(var(--pad) + 2px);margin:10px 0;box-shadow:var(--shadow)}
+    .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
+    .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
+    .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
+
+    input,button,select,textarea{
+      width:100%;
+      border-radius:var(--radius);
+      border:1px solid var(--border);
+      background:#fff;
+      color:var(--text);
+      padding:calc(var(--pad) + 2px);
+      font-size:var(--fs-input)
+    }
+    textarea{min-height:110px;resize:vertical}
+
+    button{cursor:pointer;font-weight:900;box-shadow:0 6px 14px rgba(10,30,80,0.06)}
+    button:disabled{opacity:.45;cursor:not-allowed}
+
+    /* Color system (distinct functions) */
+    .btnMain{background:#e9fff4;border-color:rgba(26,168,108,0.25)}          /* light green */
+    .btnMatrix{background:#eef4ff;border-color:rgba(40,90,200,0.18)}        /* light blue */
+    .btnLookup{background:#fff6e6;border-color:rgba(200,132,0,0.35)}        /* light amber */
+    .btnStats{background:#eefbf7;border-color:rgba(26,168,108,0.18)}        /* light mint */
+    .btnPeriod{background:#f3f0ff;border-color:rgba(110,80,200,0.18)}       /* light purple */
+    .btnBack{background:#eef4ff;border-color:rgba(40,90,200,0.18)}          /* blue-ish */
+    .btnDanger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}        /* red-ish */
+    .btnGhost{background:#fff;border-color:rgba(10,30,80,0.12)}             /* white */
+    .btnPink{background:#fff1f4;border-color:rgba(217,60,94,0.25)}          /* pink */
+
+    .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+    .miniBtnRow button{flex:1 1 180px}
+    .divider{height:1px;background:var(--border);margin:12px 0}
+
+    .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
+    .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
+    .msgBox.err{border-color:rgba(217,60,94,0.35);background:#fff1f4}
+    .msgBox.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6}
+    .ok{color:var(--good)} .err{color:var(--bad)} .warn{color:var(--warn)}
+    .hide{display:none!important}
+
+    .kv{display:grid;grid-template-columns:170px 1fr;gap:8px 10px;margin-top:10px}
+    .kv div:nth-child(odd){color:var(--muted)}
+
+    .videoWrap{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#f7f9ff}
+    video{width:100%;display:block}
+
+    .footer{margin-top:14px;padding:6px 4px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+
+    .menuGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .menuGrid button{min-height:56px}
+    @media (max-width: 520px){
+      .menuGrid{ grid-template-columns: 1fr; }
+      .kv{ grid-template-columns: 120px 1fr; }
+    }
+
+    /* Tables */
+    .tableWrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:#fff}
+    table{border-collapse:separate;border-spacing:0;min-width:740px;width:max-content}
+    th,td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:10px;vertical-align:middle;white-space:nowrap}
+    th{position:sticky;top:0;background:#fff;font-weight:900;z-index:4}
+    td:first-child, th:first-child{position:sticky;left:0;background:#fff}
+    th:first-child{z-index:8}     /* fixes overlap */
+    td:first-child{z-index:7}
+    tr:last-child td{border-bottom:0}
+    th:last-child, td:last-child{border-right:0}
+    .tick{font-weight:950}
+    .clickable{cursor:pointer}
+    .muted{color:var(--muted)}
+
+    .chip{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted);background:#fff}
+    .chip.bad{border-color:rgba(217,60,94,0.25);background:#fff1f4;color:#9f1239}
+    .flag{margin-left:6px;font-weight:950}
+
+    /* Modal */
+    .overlay{
+      position:fixed;inset:0;background:rgba(0,0,0,0.45);
+      z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;
+    }
+    .modal{
+      width:min(920px, 100%);
+      background:#fff;border-radius:18px;border:1px solid var(--border);
+      box-shadow:0 24px 60px rgba(0,0,0,0.25);
+      padding:14px;max-height:85vh;overflow:auto;
+      position:relative;
+    }
+    .modalTopBtns{
+      position:absolute; top:12px; right:12px;
+      display:flex; gap:10px; flex-wrap:wrap;
+    }
+    .modalTopBtns button{
+      width:auto; padding:10px 12px; border-radius:14px; font-size:14px;
+    }
+
+    .chartCard{
+      margin-top:10px;
+      height:520px; /* bigger */
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      padding:10px;
+    }
+    @media (max-width: 520px){
+      .chartCard{ height:440px; }
+    }
+
+    .nowrap{white-space:nowrap}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div>
+        <div class="title"><?= ADMIN_TITLE_ZH ?></div>
+        <div class="sub"><?= ADMIN_TITLE_EN ?></div>
+        <div class="hint">
+          ⚠️ 請避免用手機使用此管理平台，建議使用電腦或平板。<br/>
+          ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/><br/>
+          管理平台（只限已授權同工）。請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
+          Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
+        </div>
+      </div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?></span></div>
+    </header>
+
+    <main id="app"></main>
+
+    <footer class="footer">
+      <div>© Cantonese Christian Fellowship</div>
+      <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <script>
+    var App = {
+      token:null,
+      actor:null, // {id, role, nameZh, nameEn}
+      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period
+      stream:null, raf:null, scanning:false, detector:null,
+      stable:{ value:null, count:0, firstTs:0 },
+      debounceT:null,
+      clockTimer:null,
+
+      from:'2026-01-11',
+      to:null,
+
+      matrixState:null,
+      chart:null
+    };
+
+    var STABLE_REQUIRED_COUNT = 2;
+    var STABLE_REQUIRED_MS = 250;
+
+    function $(id){ return document.getElementById(id); }
+
+    function callApi(fn){
+      var args = Array.prototype.slice.call(arguments, 1);
+      return new Promise(function(resolve, reject){
+        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+        runner[fn].apply(runner, args);
+      });
+    }
+
+    function logAction(action, details, context){
+      try{
+        if(!App.token) return;
+        callApi('api_admin_log', App.token, String(action||''), String(details||''), String(context||''));
+      }catch(e){}
+    }
+
+    function escapeHtml(s){
+      s = String(s || '');
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+              .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
+      detailHtml = detailHtml || '';
+      var el = $(targetId); if(!el) return;
+      el.innerHTML =
+        '<div class="msgBox '+kind+'">' +
+          '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+titleZh+'</div>' +
+          '<div style="margin-top:4px;font-size:16px;">'+titleEn+'</div>' +
+          (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '') +
+        '</div>';
+    }
+
+    function showErr(targetId, res){
+      var code = res && res.code ? (' <span class="chip">'+escapeHtml(res.code)+'</span>') : '';
+      var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+      showBox(
+        targetId,
+        'err',
+        escapeHtml((res && res.zh) || '系統錯誤') + code,
+        escapeHtml((res && res.en) || 'System error'),
+        detail
+      );
+    }
+
+    function openModal(html){
+      var o = document.createElement('div');
+      o.className = 'overlay';
+      o.innerHTML = '<div class="modal">'+html+'</div>';
+      document.body.appendChild(o);
+      return o;
+    }
+    function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
+    function clear(targetId){ var el=$(targetId); if(el) el.innerHTML=''; }
+
+    function roleIsAdmin(){
+      if(!App.actor) return false;
+      return (String(App.actor.role||'').toUpperCase() === 'ADMIN' || String(App.actor.role||'').toUpperCase() === 'SUPERUSER');
+    }
+
+    function getTodayYmdUk(){
+      try{
+        var fmt = new Intl.DateTimeFormat('en-CA', { timeZone:'Europe/London', year:'numeric', month:'2-digit', day:'2-digit' });
+        return fmt.format(new Date());
+      }catch(e){
+        var d = new Date();
+        return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+      }
+    }
+
+    function startClock(){
+      var el = $('ukClock');
+      if(!el) return;
+      function tick(){
+        try{
+          var fmt = new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/London', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+          el.textContent = fmt.format(new Date());
+        }catch(e){
+          var d = new Date();
+          el.textContent = ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+        }
+      }
+      tick();
+      if(App.clockTimer) clearInterval(App.clockTimer);
+      App.clockTimer = setInterval(tick, 1000);
+    }
+
+    function parseYmd(s){
+      var m = String(s||'').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m) return null;
+      return new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
+    }
+    function daysBetween(a,b){
+      return Math.floor((b.getTime()-a.getTime())/(24*60*60*1000));
+    }
+    function maxDaysForRole(){ return roleIsAdmin() ? 366 : 181; }
+    function validateRangeClient(fromYmd, toYmd){
+      var a = parseYmd(fromYmd);
+      var b = parseYmd(toYmd);
+      if(!a || !b) return { ok:false, zh:'日期格式錯誤（YYYY-MM-DD）', en:'Invalid date format (YYYY-MM-DD).' };
+      if(b.getTime() < a.getTime()) return { ok:false, zh:'結束日期不可早於開始日期', en:'End date cannot be before start date.' };
+      var days = daysBetween(a,b)+1;
+      var max = maxDaysForRole();
+      if(days > max) return { ok:false, zh:'所選日期範圍過長（最多 '+max+' 日）', en:'Date range too long (max '+max+' days).' };
+      return { ok:true };
+    }
+
+    function displayMemberStatusLabel(st){
+      st = String(st||'').trim().toUpperCase();
+      if (st === 'ACTIVE') return 'Member';
+      if (st === 'ADMIN') return 'staff';
+      if (st === 'STAFF') return 'STAFF';
+      return st || '';
+    }
+
+    function eventDateYmdFromKey(ev){
+      var m = String(ev||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+      return m ? m[1] : '';
+    }
+
+    function eventDisplay(ev){
+      var ymd = eventDateYmdFromKey(ev);
+      if (ymd) return 'Sunday service ' + ymd;
+      return String(ev||'');
+    }
+
+    function resetStability(){
+      App.stable.value=null; App.stable.count=0; App.stable.firstTs=0;
+    }
+    function acceptWhenStable(candidate){
+      var now = Date.now();
+      if(!candidate){ resetStability(); return null; }
+      if(App.stable.value === candidate){
+        App.stable.count += 1;
+      } else {
+        App.stable.value = candidate;
+        App.stable.count = 1;
+        App.stable.firstTs = now;
+      }
+      var elapsed = now - (App.stable.firstTs || now);
+      if(App.stable.count >= STABLE_REQUIRED_COUNT && elapsed >= STABLE_REQUIRED_MS){
+        var v = App.stable.value;
+        resetStability();
+        return v;
+      }
+      return null;
+    }
+
+    function stopScan(){
+      App.scanning=false;
+      if(App.raf) cancelAnimationFrame(App.raf);
+      App.raf=null;
+      if(App.stream){
+        App.stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} });
+        App.stream=null;
+      }
+      resetStability();
+    }
+
+    function startScan(videoId, onCaptured, msgTarget){
+      stopScan();
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        showErr(msgTarget, { code:'E420', zh:'此裝置不支援相機', en:'Camera not supported' });
+        return;
+      }
+
+      var constraintsPreferred = { video: { facingMode: { ideal:'environment' } }, audio:false };
+      var constraintsFallback  = { video: true, audio:false };
+
+      function tryStart(constraints, allowFallback){
+        navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
+          App.stream = stream;
+          var v = $(videoId);
+          v.srcObject = stream;
+          return v.play().then(function(){
+            App.scanning=true;
+            scanLoop(v, onCaptured, msgTarget);
+          });
+        }).catch(function(err){
+          if(allowFallback){ tryStart(constraintsFallback, false); return; }
+          stopScan();
+          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : '' });
+        });
+      }
+      tryStart(constraintsPreferred, true);
+    }
+
+    function scanLoop(video, onCaptured, msgTarget){
+      if(!App.scanning) return;
+      if(!video || video.readyState < 2){
+        App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
+        return;
+      }
+
+      try{
+        if('BarcodeDetector' in window){
+          App.detector = App.detector || new BarcodeDetector({ formats:['qr_code'] });
+          App.detector.detect(video).then(function(codes){
+            var candidate = (codes && codes.length && codes[0].rawValue) ? codes[0].rawValue : null;
+            var stable = acceptWhenStable(candidate);
+            if(stable){ stopScan(); onCaptured(stable); return; }
+            App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
+          }).catch(function(){
+            App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
+          });
+          return;
+        }
+      }catch(e){}
+
+      var text = null;
+      try{
+        var canvas = App._canvas || (App._canvas=document.createElement('canvas'));
+        var ctx = App._ctx || (App._ctx=canvas.getContext('2d',{ willReadFrequently:true }));
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        var img = ctx.getImageData(0,0,canvas.width,canvas.height);
+        var qr = window.jsQR(img.data, canvas.width, canvas.height);
+        if(qr && qr.data) text = qr.data;
+      }catch(e){}
+
+      var stable2 = acceptWhenStable(text);
+      if(stable2){ stopScan(); onCaptured(stable2); return; }
+
+      App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
+    }
+
+    function setLoginBusy(busy){
+      var b = !!busy;
+      var a = $('btnStartScan'); if(a) a.disabled = b;
+      var c = $('btnInternal'); if(c) c.disabled = b;
+    }
+
+    function render(){
+      stopScan();
+      clearTimeout(App.debounceT);
+      if(!App.to) App.to = getTodayYmdUk();
+
+      var root = $('app');
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); return; }
+      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); return; }
+      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); return; }
+      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); return; }
+      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); return; }
+      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); return; }
+      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); return; }
+    }
+
+    /* ---------------- Views ---------------- */
+
+    function viewLogin(){
+      return ''+
+        '<div class="card">'+
+          '<div class="big">🔐 登入 / Login</div>'+
+          '<div class="small">請掃描你自己的同工 QR 登入。<br/>Please scan your own staff QR to login.</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnStartScan" class="btnMain">📷 掃描 QR / Scan QR</button>'+
+          '</div>'+
+          '<div id="camBox" class="card hide" style="margin-top:10px;">'+
+            '<div class="big">📷 掃描中… / Scanning…</div>'+
+            '<div class="videoWrap" style="margin-top:10px;"><video id="videoLogin" playsinline></video></div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnCancelScan" class="btnDanger">取消 / Cancel</button>'+
+            '</div>'+
+          '</div>'+
+          '<div class="divider"></div>'+
+          '<div class="label">授權登入 / Authorised login</div>'+
+          '<input id="internalField" type="password" autocomplete="off" />'+
+          '<div class="miniBtnRow" style="margin-top:8px;">'+
+            '<button id="btnInternal" class="btnBack">OK</button>'+
+          '</div>'+
+          '<div id="loginMsg"></div>'+
+        '</div>';
+    }
+
+    function viewMenu(){
+      var zh = (App.actor && App.actor.nameZh) ? App.actor.nameZh : '';
+      var en = (App.actor && App.actor.nameEn) ? App.actor.nameEn : '';
+      var id = (App.actor && App.actor.id) ? App.actor.id : '';
+      var nameLine = (en || zh) ? ((en||zh) + (zh && en ? (' / ' + zh) : '')) : '';
+
+      return ''+
+        '<div class="card">'+
+          '<div class="big">👋 歡迎 / Welcome</div>'+
+          '<div class="small">'+
+            'CCF ID：<b>'+escapeHtml(id)+'</b><br/>' +
+            (nameLine ? ('姓名 / Name：<b>'+escapeHtml(nameLine)+'</b><br/>') : '')+
+            '多謝你一直喺 CCF 服侍 🙏<br/>' +
+            'Thank you for your ongoing service at CCF.'+
+          '</div>'+
+          '<div class="msgBox.warn msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">🕒 英國時間 / UK time</div>'+
+            '<div style="margin-top:6px;font-size:20px;font-weight:950;"><span id="ukClock">--:--:--</span></div>'+
+          '</div>'+
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">⚠️ 提醒 / Reminder</div>'+
+            '<div class="small">'+
+              '會員資料受英國資料保障法規管。存取屬「need-to-know」原則；未經授權存取嚴格禁止。此管理平台內的行為可能會被記錄。<br/>'+
+              'Member data are subject to UK data protection law. Access is on a “need-to-know” basis. Unauthorised access is strictly prohibited. Actions on this portal may be recorded.'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div class="big">📌 主選單 / Main menu</div>'+
+          '<div class="menuGrid">'+
+            '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
+            '<button id="goFinance" class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
+            '<button id="goServing" class="btnGhost" disabled>🧩 事奉 / Serving（coming soon）</button>'+
+            '<button id="goSoon" class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
+          '</div>'+
+          '<div class="divider"></div>'+
+          '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+        '</div>';
+    }
+
+    function viewAttendanceHome(){
+      return ''+
+        '<div class="card" style="border-color:rgba(26,168,108,0.25);background:#f6fffb;">'+
+          '<div class="big ok">📊 會員管理及出席 / Member admin and attendance</div>'+
+          '<div class="small">（此頁只顯示出席/統計，聯絡資料需額外授權）<br/>(Shows attendance/stats only. Contact details require extra authorisation.)</div>'+
+          '<div class="menuGrid" style="margin-top:12px;">'+
+            '<button id="goMatrix" class="btnMatrix">✅ 出席矩陣 / Attendance matrix</button>'+
+            '<button id="goLookup" class="btnLookup">🔎 個人查詢 / Member lookup</button>'+
+            '<button id="goStats" class="btnStats">📈 聚會統計 / Service stats</button>'+
+            '<button id="goPeriod" class="btnPeriod">📅 月度/季度統計 / Period stats</button>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="backMenu" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+        '</div>';
+    }
+
+    function viewMatrix(){
+      return ''+
+        '<div class="card" style="border-color:rgba(40,90,200,0.18);background:#f4f8ff;">'+
+          '<div class="big">✅ 出席矩陣 / Attendance matrix</div>'+
+          '<div class="small">只計算 SundayService_YYYY-MM-DD。DISABLED 會員不會顯示為欄（但統計仍會包含其出席記錄）。<br/>'+
+          'SundayService only. DISABLED members are hidden as columns (attendance still counts in totals).</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to" type="date" /></div>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnLoad" class="btnMatrix">🔄 載入 / Load</button>'+
+            '<button id="backAttendance" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="filterWrap" class="hide">'+
+            '<div class="label" style="margin-top:10px;">篩選 / Filter（realtime）</div>'+
+            '<input id="filterLive" placeholder="CCF ID / 中文 / English" />'+
+          '</div>'+
+          '<div id="matrixMsg"></div>'+
+          '<div id="matrixOut" style="margin-top:10px;"></div>'+
+        '</div>';
+    }
+
+    function viewMemberLookup(){
+      return ''+
+        '<div class="card" style="border-color:rgba(200,132,0,0.35);background:#fffaf0;">'+
+          '<div class="big">🔎 個人查詢 / Member lookup</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from2" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to2" type="date" /></div>'+
+          '</div>'+
+          '<div class="divider"></div>'+
+          '<div class="label">輸入 / Input</div>'+
+          '<input id="mq" placeholder="CCF ID / 中文 / English" />'+
+          '<div id="mResults" style="margin-top:10px;"></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="backAttendance2" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="memberMsg"></div>'+
+        '</div>';
+    }
+
+    function viewStats(){
+      return ''+
+        '<div class="card" style="border-color:rgba(26,168,108,0.18);background:#f6fffb;">'+
+          '<div class="big">📈 聚會統計 / Service stats</div>'+
+          '<div class="small">Existing + New = Total。New = 首次出席該 Sunday service。<br/>Existing + New = Total. New = first-time attendance.</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from3" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to3" type="date" /></div>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnLoadStats" class="btnStats">🔄 載入 / Load</button>'+
+            (roleIsAdmin() ? '<button id="btnRebuild" class="btnPeriod">🔄 重建 / Rebuild</button>' : '')+
+            '<button id="backAttendance3" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="statsMsg"></div>'+
+          '<div class="chartCard"><canvas id="statsChart"></canvas></div>'+
+        '</div>';
+    }
+
+    function viewPeriod(){
+      return ''+
+        '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#faf8ff;">'+
+          '<div class="big">📅 月度/季度統計 / Period stats</div>'+
+          '<div class="small">總人次 / Total attendance；獨立人數 / Unique attendance；首次出席 / New (unique)</div>'+
+          '<div class="kv">'+
+            '<div>開始 / From</div><div><input id="from4" type="date" /></div>'+
+            '<div>結束 / To</div><div><input id="to4" type="date" /></div>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnLoadPeriod" class="btnPeriod">🔄 載入 / Load</button>'+
+            '<button id="backAttendance4" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="periodMsg"></div>'+
+          '<div id="periodOut" style="margin-top:10px;"></div>'+
+        '</div>';
+    }
+
+    /* ---------------- Bindings ---------------- */
+
+    function bindLogin(){
+      $('btnStartScan').onclick = function(){
+        clear('loginMsg');
+        $('camBox').classList.remove('hide');
+
+        $('btnCancelScan').onclick = function(){
+          stopScan();
+          $('camBox').classList.add('hide');
+        };
+
+        startScan('videoLogin', function(payload){
+          $('camBox').classList.add('hide');
+          setLoginBusy(true);
+          callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
+            showErr('loginMsg', { code:'E500', zh:'系統錯誤', en:'System error' });
+          }).finally(function(){ setLoginBusy(false); });
+        }, 'loginMsg');
+      };
+
+      $('btnInternal').onclick = function(){
+        clear('loginMsg');
+        setLoginBusy(true);
+        var v = String($('internalField').value||'').trim();
+        callApi('api_admin_login', v).then(onLoginRes).catch(function(){
+          showErr('loginMsg', { code:'E500', zh:'系統錯誤', en:'System error' });
+        }).finally(function(){ setLoginBusy(false); });
+      };
+
+      function onLoginRes(res){
+        if(!res || !res.ok){ showErr('loginMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+        App.token = res.token;
+        callApi('api_admin_ping', App.token).then(function(p){
+          App.actor = (p && p.ok && p.actor) ? p.actor : res.actor;
+          App.view = 'menu';
+          render();
+        }).catch(function(){
+          App.actor = res.actor;
+          App.view = 'menu';
+          render();
+        });
+      }
+    }
+
+    function bindMenu(){
+      $('goAttendance').onclick = function(){ logAction('OPEN_ATTENDANCE_HOME','', 'nav'); App.view='attendanceHome'; render(); };
+      $('btnLogout').onclick = function(){
+        logAction('LOGOUT','', 'nav');
+        App.token=null; App.actor=null;
+        App.view='login';
+        render();
+      };
+    }
+
+    function bindAttendanceHome(){
+      $('goMatrix').onclick = function(){ logAction('OPEN_MATRIX','', 'nav'); App.view='matrix'; render(); };
+      $('goLookup').onclick = function(){ logAction('OPEN_LOOKUP','', 'nav'); App.view='memberLookup'; render(); };
+      $('goStats').onclick = function(){ logAction('OPEN_STATS','', 'nav'); App.view='stats'; render(); };
+      $('goPeriod').onclick = function(){ logAction('OPEN_PERIOD','', 'nav'); App.view='period'; render(); };
+      $('backMenu').onclick = function(){ App.view='menu'; render(); };
+    }
+
+    function bindMatrix(){
+      $('from').value = App.from;
+      $('to').value = App.to;
+      App.matrixState = null;
+      $('matrixOut').innerHTML = '';
+      $('filterWrap').classList.add('hide');
+
+      $('backAttendance').onclick = function(){ App.view='attendanceHome'; render(); };
+      $('btnLoad').onclick = function(){ loadMatrix(); };
+
+      function loadMatrix(){
+        clear('matrixMsg');
+        $('matrixOut').innerHTML = '';
+        App.matrixState = null;
+
+        var from = $('from').value;
+        var to = $('to').value;
+        var v = validateRangeClient(from, to);
+        if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
+
+        showBox('matrixMsg','warn','載入中…','Loading…');
+        callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
+          if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+
+          clear('matrixMsg');
+          if(!res.events || !res.events.length){
+            showBox('matrixMsg','warn','此範圍沒有出席記錄','No attendance records in this range.');
+            return;
+          }
+
+          App.matrixState = res;
+          renderMatrixTable(res);
+
+          $('filterWrap').classList.remove('hide');
+          $('filterLive').value = '';
+          $('filterLive').oninput = function(){
+            applyMatrixFilter(String($('filterLive').value||'').trim());
+          };
+        }).catch(function(){
+          showErr('matrixMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+
+      function safeClassId(id){
+        return String(id||'').replace(/[^A-Za-z0-9]/g,'_');
+      }
+
+      function renderMatrixTable(res){
+        var events = res.events;
+        var members = res.members || [];
+        var attended = res.attended || {};
+
+        var html = '<div class="tableWrap"><table><thead><tr>';
+        html += '<th>Event / 活動</th>';
+
+        for(var i=0;i<members.length;i++){
+          var m = members[i];
+          var cid = safeClassId(m.id);
+          var flag = m.lowFlag ? ('<span class="flag" title="'+escapeHtml(m.lowFlagEn||'')+'">〽️</span>') : '';
+          var label =
+            '<div class="clickable" data-mid="'+escapeHtml(m.id)+'">' +
+              escapeHtml(m.id) + flag +
+              '<br/><span class="muted">' + escapeHtml((m.nameZh||'').trim()) + '</span>' +
+              '<br/><span class="muted">' + escapeHtml((m.nameEn||'').trim()) + '</span>' +
+            '</div>';
+
+          html += '<th class="mcolh_'+cid+'">'+label+'</th>';
+        }
+        html += '</tr></thead><tbody>';
+
+        for(var r=0;r<events.length;r++){
+          var ev = events[r];
+          var dateOnly = eventDateYmdFromKey(ev) || ev;
+          html += '<tr>';
+          html += '<td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(dateOnly)+'</span></td>';
+
+          for(var c=0;c<members.length;c++){
+            var mid = members[c].id;
+            var cid = safeClassId(mid);
+            var tick = (attended[mid] && attended[mid][ev]) ? '✅' : '';
+            html += '<td class="clickable mcol_'+cid+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+tick+'</span></td>';
+          }
+          html += '</tr>';
+        }
+
+        html += '</tbody></table></div>';
+        $('matrixOut').innerHTML = html;
+
+        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-mid]')).forEach(function(el){
+          el.onclick = function(){
+            var mid = el.getAttribute('data-mid');
+            openMemberDetail(mid, $('from').value, $('to').value);
+          };
+        });
+
+        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-ev]')).forEach(function(el){
+          el.onclick = function(){
+            var ev = el.getAttribute('data-ev');
+            openEventStatsModal(ev);
+          };
+        });
+      }
+
+      function applyMatrixFilter(text){
+        if(!App.matrixState || !App.matrixState.members) return;
+        var t = String(text||'').trim().toLowerCase();
+        var members = App.matrixState.members;
+
+        for(var i=0;i<members.length;i++){
+          var m = members[i];
+          var cid = safeClassId(m.id);
+          var hay = (m.id + ' ' + (m.nameZh||'') + ' ' + (m.nameEn||'')).toLowerCase();
+          var show = (!t) || hay.includes(t);
+
+          var th = $('matrixOut').querySelector('.mcolh_'+cid);
+          if(th) th.style.display = show ? '' : 'none';
+
+          Array.prototype.slice.call($('matrixOut').querySelectorAll('.mcol_'+cid)).forEach(function(td){
+            td.style.display = show ? '' : 'none';
+          });
+        }
+      }
+    }
+
+    function openEventStatsModal(ev){
+      var ymd = eventDateYmdFromKey(ev);
+      if(!ymd){
+        var m0 = openModal('<div class="big">Event / 活動</div><div class="small">'+escapeHtml(ev)+'</div><div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>');
+        m0.querySelector('#c').onclick = function(){ closeModal(m0); };
+        return;
+      }
+
+      var m = openModal('<div class="big">📊 活動統計 / Event stats</div><div class="small">載入中… / Loading…</div>');
+      callApi('api_admin_stats', App.token, ymd, ymd).then(function(res){
+        if(!res || !res.ok){
+          m.querySelector('.modal').innerHTML =
+            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
+          m.querySelector('#c').onclick = function(){ closeModal(m); };
+          return;
+        }
+        var row = (res.events||[]).find(function(x){ return x.eventKey === ev; }) || null;
+        if(!row){
+          m.querySelector('.modal').innerHTML =
+            '<div class="big warn">沒有數據 / No data</div>'+
+            '<div class="small">'+escapeHtml(ev)+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
+          m.querySelector('#c').onclick = function(){ closeModal(m); };
+          return;
+        }
+
+        m.querySelector('.modal').innerHTML =
+          '<div class="big">📊 '+escapeHtml(eventDisplay(ev))+'</div>'+
+          '<div class="kv" style="margin-top:10px;">'+
+            '<div>總出席 / Total</div><div><b>'+escapeHtml(String(row.total))+'</b></div>'+
+            '<div>新朋友 / New</div><div><b>'+escapeHtml(String(row.new))+'</b></div>'+
+            '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(row.existing))+'</b></div>'+
+          '</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
+        m.querySelector('#c').onclick = function(){ closeModal(m); };
+      }).catch(function(){
+        m.querySelector('.modal').innerHTML =
+          '<div class="big err">系統錯誤 / Error</div>'+
+          '<div class="small">System error</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;"><button id="c" class="btnBack">⬅️ 返回 / Back</button></div>';
+        m.querySelector('#c').onclick = function(){ closeModal(m); };
+      });
+    }
+
+    function bindMemberLookup(){
+      $('from2').value = App.from;
+      $('to2').value = App.to;
+
+      $('backAttendance2').onclick = function(){ App.view='attendanceHome'; render(); };
+
+      var input = $('mq');
+      input.addEventListener('input', function(){
+        clearTimeout(App.debounceT);
+        App.debounceT = setTimeout(function(){
+          var q = String(input.value||'').trim();
+          if(!q){ $('mResults').innerHTML=''; clear('memberMsg'); return; }
+
+          // CCF ID rule: if starts with CCF, must be full CCF#### (prevents huge lists)
+          var qU = q.toUpperCase();
+          if (qU.startsWith('CCF') && !/^CCF\d{4}$/.test(qU)){
+            showBox('memberMsg','warn','請輸入完整 CCF ID（4 位數）','Please enter full CCF ID (4 digits).');
+            $('mResults').innerHTML = '';
+            return;
+          }
+
+          doSearch(q);
+        }, 240);
+      });
+
+      function doSearch(q){
+        clear('memberMsg');
+        $('mResults').innerHTML = '<div class="small">Searching…</div>';
+
+        callApi('api_admin_member_search', App.token, q).then(function(res){
+          if(!res || !res.ok){ showErr('memberMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); $('mResults').innerHTML=''; return; }
+          var list = res.results || [];
+          if(!list.length){
+            $('mResults').innerHTML = '<div class="msgBox warn"><div class="big warn">沒有結果 / No results</div></div>';
+            return;
+          }
+
+          $('mResults').innerHTML = list.map(function(r){
+            var stDisp = displayMemberStatusLabel(r.status||'');
+            var statusChip = (String(r.status||'').toUpperCase() === 'DISABLED')
+              ? '<span class="chip bad">DISABLED / 已停用</span>'
+              : '<span class="chip">'+escapeHtml(stDisp)+'</span>';
+
+            var flagLine = r.lowFlag
+              ? ('<div class="small" style="margin-top:6px;">〽️ '+escapeHtml(r.lowFlagZh||'')+'<br/>'+escapeHtml(r.lowFlagEn||'')+'</div>')
+              : '';
+
+            return ''+
+              '<div class="msgBox warn" style="margin-bottom:10px;">'+
+                '<div class="kv">'+
+                  '<div>CCF ID</div><div><b>'+escapeHtml(r.id)+'</b>'+(r.lowFlag ? ' <span class="flag">〽️</span>' : '')+'</div>'+
+                  '<div>中文名</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
+                  '<div>English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
+                  '<div>狀態 / Status</div><div>'+statusChip+'</div>'+
+                '</div>'+
+                flagLine+
+                '<div class="miniBtnRow">'+
+                  '<button class="btnLookup" data-mid="'+escapeHtml(r.id)+'">查看 / View</button>'+
+                '</div>'+
+              '</div>';
+          }).join('');
+
+          Array.prototype.slice.call($('mResults').querySelectorAll('button[data-mid]')).forEach(function(btn){
+            btn.onclick = function(){
+              var mid = btn.getAttribute('data-mid');
+              var from = $('from2').value;
+              var to = $('to2').value;
+              var v = validateRangeClient(from, to);
+              if(!v.ok){ showBox('memberMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
+              openMemberDetail(mid, from, to);
+            };
+          });
+
+        }).catch(function(){
+          showErr('memberMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+    }
+
+    function bindStats(){
+      $('from3').value = App.from;
+      $('to3').value = App.to;
+
+      $('backAttendance3').onclick = function(){ App.view='attendanceHome'; render(); };
+
+      $('btnLoadStats').onclick = function(){ loadStats(false); };
+      if ($('btnRebuild')) $('btnRebuild').onclick = function(){ loadStats(true); };
+
+      loadStats(false);
+
+      function loadStats(rebuildFirst){
+        clear('statsMsg');
+
+        var from = $('from3').value;
+        var to = $('to3').value;
+        var v = validateRangeClient(from, to);
+        if(!v.ok){ showBox('statsMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
+
+        showBox('statsMsg','warn','載入中…','Loading…');
+
+        var p = Promise.resolve();
+        if (rebuildFirst){
+          if (!roleIsAdmin()){
+            showBox('statsMsg','err','只有管理員可以重建','Only admin can rebuild.');
+            return;
+          }
+          p = callApi('api_admin_stats_rebuild', App.token);
+        }
+
+        p.then(function(){ return callApi('api_admin_stats', App.token, from, to); })
+        .then(function(res){
+          if(!res || !res.ok){ showErr('statsMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+
+          if(!res.events || !res.events.length){
+            showBox('statsMsg','warn','此範圍沒有數據','No data in this range.');
+            drawEmptyChart_();
+            return;
+          }
+          drawStatsChart_(res.events);
+
+          if (res.cache){
+            $('statsMsg').innerHTML =
+              '<div class="small">Cache used: '+escapeHtml(String(res.cache.used))+
+              ' · Updated: '+escapeHtml(res.cache.updatedAt||'')+'</div>';
+          }
+        }).catch(function(){
+          showErr('statsMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+
+      function drawEmptyChart_(){
+        try{
+          var ctx = $('statsChart').getContext('2d');
+          if (App.chart) { App.chart.destroy(); App.chart = null; }
+          App.chart = new Chart(ctx, { type:'bar', data:{labels:[],datasets:[]}, options:{responsive:true, maintainAspectRatio:false} });
+        }catch(e){}
+      }
+
+      function drawStatsChart_(events){
+        var labels = events.map(function(x){ return eventDateYmdFromKey(x.eventKey) || x.eventKey; });
+        var existing = events.map(function(x){ return x.existing; });
+        var nnew = events.map(function(x){ return x.new; });
+
+        try{
+          var ctx = $('statsChart').getContext('2d');
+          if (App.chart) { App.chart.destroy(); App.chart = null; }
+
+          App.chart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: [
+                { label: '舊朋友 / Existing', data: existing, stack: 'stack1' },
+                { label: '新朋友 / New', data: nnew, stack: 'stack1' }
+              ]
+            },
+            options: {
+              responsive:true,
+              maintainAspectRatio:false,
+              plugins:{ legend:{ display:true } },
+              scales:{
+                x:{ stacked:true, ticks:{ maxRotation:0, minRotation:0 } },
+                y:{ stacked:true, beginAtZero:true, stacked:true }
+              }
+            }
+          });
+        }catch(e){
+          showBox('statsMsg','warn','圖表載入失敗（請檢查網絡）','Chart failed to load (check network).');
+        }
+      }
+    }
+
+    function bindPeriod(){
+      $('from4').value = App.from;
+      $('to4').value = App.to;
+
+      $('backAttendance4').onclick = function(){ App.view='attendanceHome'; render(); };
+      $('btnLoadPeriod').onclick = function(){ loadPeriod(); };
+      loadPeriod();
+
+      function loadPeriod(){
+        clear('periodMsg');
+        $('periodOut').innerHTML = '';
+
+        var from = $('from4').value;
+        var to = $('to4').value;
+        var v = validateRangeClient(from, to);
+        if(!v.ok){ showBox('periodMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
+
+        showBox('periodMsg','warn','載入中…','Loading…');
+
+        callApi('api_admin_period_stats', App.token, from, to).then(function(res){
+          if(!res || !res.ok){ showErr('periodMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          clear('periodMsg');
+
+          var months = res.months || [];
+          var seasons = res.seasons || [];
+
+          $('periodOut').innerHTML =
+            '<div class="msgBox ok"><div class="big ok">按月 / By month</div>'+renderPeriodTable('month', months)+'</div>'+
+            '<div class="msgBox ok" style="margin-top:10px;"><div class="big ok">按季度 / By season</div>'+renderPeriodTable('season', seasons)+'</div>';
+
+        }).catch(function(){
+          showErr('periodMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+
+      function renderPeriodTable(kind, rows){
+        if(!rows.length) return '<div class="small" style="margin-top:6px;">(no data)</div>';
+
+        var h =
+          '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
+            '<th>'+(kind==='month'?'月份 / Month':'季度 / Season')+'</th>'+
+            '<th>聚會數 / Services</th>'+
+            '<th>總人次 / Total</th>'+
+            '<th>獨立人數 / Unique</th>'+
+            '<th>新朋友 / New（unique）</th>'+
+          '</tr></thead><tbody>';
+
+        for(var i=0;i<rows.length;i++){
+          var r = rows[i];
+          h += '<tr>'+
+            '<td><span class="chip">'+escapeHtml(kind==='month'?r.month:r.season)+'</span></td>'+
+            '<td>'+escapeHtml(String(r.services||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.totalAttendance||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.uniqueAttendance||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.newUnique||0))+'</td>'+
+          '</tr>';
+        }
+
+        h += '</tbody></table></div>';
+        return h;
+      }
+    }
+
+    /* ---------- Member detail modal ---------- */
+
+    function openMemberDetail(memberId, fromYmd, toYmd){
+      var modal = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
+
+      callApi('api_admin_member_detail', App.token, memberId, fromYmd, toYmd).then(function(res){
+        if(!res || !res.ok){
+          closeModal(modal);
+          showErr('app', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          return;
+        }
+
+        var m = res.member || {};
+        var stats = res.stats || {};
+        var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
+        var low = res.lowAttendance || {};
+
+        var statusDisplay = displayMemberStatusLabel(m.status||'');
+
+        var lowCard = '';
+        if (low.enabled && low.flag){
+          lowCard =
+            '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="big warn">〽️ 出席偏低 / Low attendance</div>'+
+              '<div class="small">出席偏低：建議關顧跟進<br/>Low attendance — consider pastoral care.</div>'+
+            '</div>';
+        }
+
+        var attList = att.map(function(ev){
+          return '<li>'+escapeHtml(ev)+'</li>';
+        }).join('');
+
+        modal.querySelector('.modal').innerHTML =
+          '<div class="modalTopBtns">'+
+            '<button id="btnContact" class="btnPink">📇 查看聯絡/車牌 / View contact/VRM</button>'+
+            '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>'+
+          '</div>'+
+          '<div class="big">👤 會員 / Member</div>'+
+          '<div class="kv">'+
+            '<div>CCF ID</div><div><b>'+escapeHtml(m.id||'')+'</b>'+(low.enabled && low.flag ? ' <span class="flag">〽️</span>' : '')+'</div>'+
+            '<div>中文名</div><div>'+escapeHtml(m.nameZh||'')+'</div>'+
+            '<div>English</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
+            '<div>Preferred</div><div>'+escapeHtml(m.preferredName||'')+'</div>'+
+            '<div>Member since</div><div>'+escapeHtml(m.memberSince||'')+'</div>'+
+            '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
+          '</div>'+
+
+          '<div class="msgBox ok" style="margin-top:10px;">'+
+            '<div class="big ok">📌 統計 / Stats</div>'+
+            '<div class="kv">'+
+              '<div>出席 / Attended</div><div>'+escapeHtml(String(stats.attended||0))+' / '+escapeHtml(String(stats.total||0))+'</div>'+
+              '<div>百分比 / Percent</div><div>'+escapeHtml(String(stats.percent||0))+'%</div>'+
+              '<div>起算日 / Denom start</div><div>'+escapeHtml(String(stats.denomStart||''))+'</div>'+
+            '</div>'+
+          '</div>'+
+
+          lowCard+
+
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">🗓️ 出席記錄 / Attendance</div>'+
+            '<div class="small">('+escapeHtml(String(att.length))+' records)</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnToggleAtt" class="btnBack">▶ 展開 / Expand</button>'+
+            '</div>'+
+            '<div id="attBox" class="hide" style="margin-top:10px;">'+
+              '<ul style="margin:0;padding-left:18px;white-space:normal;">'+attList+'</ul>'+
+            '</div>'+
+          '</div>'+
+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="btnClose" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="detailMsg"></div>';
+
+        modal.querySelector('#btnClose').onclick = function(){ closeModal(modal); };
+
+        modal.querySelector('#btnToggleAtt').onclick = function(){
+          var box = modal.querySelector('#attBox');
+          var btn = modal.querySelector('#btnToggleAtt');
+          if(box.classList.contains('hide')){
+            box.classList.remove('hide');
+            btn.textContent = '▼ 收起 / Collapse';
+          } else {
+            box.classList.add('hide');
+            btn.textContent = '▶ 展開 / Expand';
+          }
+        };
+
+        modal.querySelector('#btnContact').onclick = function(){
+          openContactFlow_(m.id, modal);
+        };
+        modal.querySelector('#btnStatus').onclick = function(){
+          openStatusFlow_(m.id, m.status||'', modal);
+        };
+
+      }).catch(function(){
+        closeModal(modal);
+        showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
+      });
+    }
+
+    function openContactFlow_(memberId, parentModal){
+      var m = openModal(
+        '<div class="big">📇 查看聯絡/車牌 / View contact/VRM</div>'+
+        '<div class="small">請填寫原因。下一步需再次掃描你本人同工 QR 作確認。<br/>Please provide reason. Next step requires scanning your own staff QR.</div>'+
+        '<div class="label" style="margin-top:10px;">原因 / Reason</div>'+
+        '<textarea id="reason"></textarea>'+
+        '<div class="miniBtnRow">'+
+          '<button id="btnNext" class="btnPink">下一步 / Next</button>'+
+          '<button id="btnCancel" class="btnBack">取消 / Cancel</button>'+
+        '</div>'+
+        '<div id="msg"></div>'
+      );
+      m.querySelector('#btnCancel').onclick = function(){ closeModal(m); };
+      m.querySelector('#btnNext').onclick = function(){
+        var reason = String(m.querySelector('#reason').value||'').trim();
+        if(!reason){ showBox('msg','err','請填寫原因','Please provide a reason.'); return; }
+        closeModal(m);
+        openReauthScan_('contact', memberId, reason);
+      };
+    }
+
+    function openStatusFlow_(memberId, currentStatus, parentModal){
+      // NOTE: TEMP option included here; backend must allow it (Admin.gs patch)
+      var m = openModal(
+        '<div class="big">🛠 更改狀態 / Change status</div>'+
+        '<div class="small">選擇新狀態後，需要再次掃描你本人同工 QR 作確認。所有操作會被記錄。<br/>Select new status then re-scan your own staff QR to confirm. All actions are logged.</div>'+
+        '<div class="kv" style="margin-top:10px;">'+
+          '<div>目前 / Current</div><div><span class="chip">'+escapeHtml(displayMemberStatusLabel(currentStatus))+'</span></div>'+
+          '<div>新狀態 / New</div><div>'+
+            '<select id="newStatus">'+
+              '<option value="ACTIVE">Member（ACTIVE）</option>'+
+              '<option value="PROVISIONAL">PROVISIONAL</option>'+
+              '<option value="DISABLED">DISABLED</option>'+
+              '<option value="TEMP">TEMP（7 days / 7 日）</option>'+
+              '<option value="STAFF">STAFF</option>'+
+            '</select>'+
+          '</div>'+
+        '</div>'+
+        '<div class="miniBtnRow">'+
+          '<button id="btnNext" class="btnPink">下一步 / Next</button>'+
+          '<button id="btnCancel" class="btnBack">取消 / Cancel</button>'+
+        '</div>'+
+        '<div id="msg"></div>'
+      );
+      m.querySelector('#btnCancel').onclick = function(){ closeModal(m); };
+      m.querySelector('#btnNext').onclick = function(){
+        var ns = String(m.querySelector('#newStatus').value||'').trim();
+        closeModal(m);
+        openReauthScan_('status', memberId, ns);
+      };
+    }
+
+    function openReauthScan_(mode, memberId, payload){
+      var m = openModal(
+        '<div class="big">🔐 最後確認 / Final confirm</div>'+
+        '<div class="small">請掃描你本人同工 QR 作確認。<br/>Please scan your own staff QR to confirm.</div>'+
+        '<div class="videoWrap" style="margin-top:10px;"><video id="v" playsinline></video></div>'+
+        '<div class="miniBtnRow">'+
+          '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
+        '</div>'+
+        '<div id="msg"></div>'
+      );
+      m.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(m); };
+
+      startScan('v', function(qr){
+        stopScan();
+        showBox('msg','warn','處理中…','Working…');
+
+        if(mode === 'contact'){
+          callApi('api_admin_member_contact_reveal', App.token, memberId, payload, qr).then(function(res){
+            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            renderContactResult_(m, res);
+          }).catch(function(){
+            showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+          return;
+        }
+
+        callApi('api_admin_member_status_change', App.token, memberId, payload, qr).then(function(res){
+          if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          renderStatusResult_(m, res);
+        }).catch(function(){
+          showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }, 'msg');
+    }
+
+    function renderContactResult_(modalOverlay, res){
+      var m = res.member || {};
+      var plates = [m.vrm, m.vrm2].filter(Boolean).join(' / ');
+      modalOverlay.querySelector('.modal').innerHTML =
+        '<div class="big ok">✅ 已顯示資料 / Details revealed</div>'+
+        '<div class="small">此操作已被記錄。This action is logged.</div>'+
+        '<div class="kv" style="margin-top:10px;">'+
+          '<div>CCF ID</div><div><b>'+escapeHtml(m.id||'')+'</b></div>'+
+          '<div>中文名</div><div>'+escapeHtml(m.nameZh||'')+'</div>'+
+          '<div>English</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
+          '<div>Preferred</div><div>'+escapeHtml(m.preferredName||'')+'</div>'+
+          '<div>狀態 / Status</div><div>'+escapeHtml(displayMemberStatusLabel(m.status||''))+'</div>'+
+          '<div>Email</div><div>'+escapeHtml(m.email||'')+'</div>'+
+          '<div>Mobile</div><div>'+escapeHtml(m.mobile||'')+'</div>'+
+          '<div>VRM</div><div>'+escapeHtml(plates||'')+'</div>'+
+        '</div>'+
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="btnClose" class="btnBack">⬅️ 返回 / Back</button>'+
+        '</div>';
+      modalOverlay.querySelector('#btnClose').onclick = function(){ closeModal(modalOverlay); };
+    }
+
+    function renderStatusResult_(modalOverlay, res){
+      modalOverlay.querySelector('.modal').innerHTML =
+        '<div class="big ok">✅ 已更新狀態 / Status updated</div>'+
+        '<div class="small">此操作已被記錄。This action is logged.</div>'+
+        '<div class="kv" style="margin-top:10px;">'+
+          '<div>Member</div><div><b>'+escapeHtml(res.memberId||'')+'</b></div>'+
+          '<div>From</div><div>'+escapeHtml(displayMemberStatusLabel(res.fromStatus||''))+'</div>'+
+          '<div>To</div><div>'+escapeHtml(displayMemberStatusLabel(res.toStatus||''))+'</div>'+
+        '</div>'+
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="btnClose" class="btnBack">⬅️ 返回 / Back</button>'+
+        '</div>';
+      modalOverlay.querySelector('#btnClose').onclick = function(){ closeModal(modalOverlay); };
+    }
+
+    /* ---------------- init ---------------- */
+    App.to = getTodayYmdUk();
+    render();
+
+    /* ===== END OF Admin2.html (COMPLETE) ===== */
+  </script>
+</body>
+</html>
