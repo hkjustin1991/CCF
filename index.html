@@ -9,48 +9,30 @@
   <meta http-equiv="Expires" content="0" />
   <title>CCF Staff Portal</title>
 
-  <!--
-  ============================================================
-  FILE: index.html (Staff Portal UI)
-  UI VERSION TAG: staff5-ui2
-  ============================================================
-
-  Key behaviour highlights (staff5-ui2):
-  - Main menu: equal-sized buttons; green=Check-in, blue=Live/VRM, orange=Authorise.
-  - Manual search: supports Preferred name; partial CCF ID is blocked (bilingual warning).
-  - Live: New friends warn box shows zh/en and highlights preferredName; no "auto-shown".
-  - Live Names list: shows preferredName only (fallback to names if empty); tap shows full detail.
-  - Check-in UI:
-      * shows 🆕 New friend badge (PENDING/PROVISIONAL) + welcome block
-      * shows under-18 notice (with “if under 16…” reminder) when member.isUnder18
-      * email status bilingual; for ALREADY+SENT: “sent at last sign-in”
-      * scan camera collapses AFTER result (success OR error) and Scan again reopens cleanly
-  - Member detail modal:
-      * NO status shown
-      * Last 4 events are bullet list (each on its own line)
-  - Authorise flow:
-      * scan screens collapse on capture and show result + rescan/back buttons
-      * after successful commit, flow resets to Step 1 AND camera stays collapsed (needs rescan)
-  - Delete flow:
-      * scan screen collapses on capture and shows comprehensive bilingual result
-      * timestamps formatted friendly when ISO appears (yyyy/MM/dd HH:mm, UK time)
-  - Camera switch: available when multiple cameras exist; persists chosen device.
-
-  PATCH BOUNDARIES: search "PATCH_BOUNDARY:" for later patch/search/copy.
-  ============================================================
-  -->
+  <!-- ============================================================
+   * FILE: index.html (Staff Portal UI)
+   * UI VERSION: staff7-ui2-fixed
+   * For Code.gs: v2026-01-24.staff7
+   *
+   * IMPORTANT: No "Under18" variables anywhere.
+   * Uses only:
+   *   - member.isMinor
+   *   - live item n.isMinor
+   * ============================================================ -->
 
   <style>
     :root{
       --bg:#f5f7ff; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
       --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e; --warn:#c88400;
       --shadow: 0 10px 24px rgba(10,30,80,0.10);
-      --pad: clamp(10px, 3.2vw, 16px);
+
+      --pad: clamp(10px, 3.2vw, 18px);
       --radius: clamp(14px, 3.2vw, 18px);
-      --fs-title: clamp(20px, 4.8vw, 26px);
-      --fs-big: clamp(18px, 4.2vw, 22px);
-      --fs-body: clamp(13px, 3.4vw, 16px);
-      --fs-input: clamp(16px, 4vw, 18px);
+      --fs-title: clamp(20px, 5.2vw, 28px);
+      --fs-big: clamp(18px, 4.8vw, 24px);
+      --fs-body: clamp(14px, 3.8vw, 18px);
+      --fs-input: clamp(16px, 4.2vw, 20px);
+      --fs-small: clamp(12px, 3.2vw, 15px);
     }
     *{box-sizing:border-box}
     html{-webkit-text-size-adjust:100%}
@@ -60,26 +42,34 @@
     .title{font-size:var(--fs-title);font-weight:900}
     .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
     .hint{font-size:var(--fs-body);color:var(--muted);margin-top:8px;line-height:1.45}
-    .pill{font-size:12px;color:var(--muted);border:1px solid var(--border);padding:4px 10px;border-radius:999px;background:#fff}
+    .pill{font-size:var(--fs-small);color:var(--muted);border:1px solid var(--border);padding:4px 10px;border-radius:999px;background:#fff}
     .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:calc(var(--pad) + 2px);margin:10px 0;box-shadow:var(--shadow)}
     .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
     .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
     .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
-    input,button{width:100%;border-radius:var(--radius);border:1px solid var(--border);background:#fff;color:var(--text);padding:calc(var(--pad) + 2px);font-size:var(--fs-input)}
+
+    input,button{
+      width:100%;
+      border-radius:var(--radius);
+      border:1px solid var(--border);
+      background:#fff;
+      color:var(--text);
+      padding:calc(var(--pad) + 2px);
+      font-size:var(--fs-input)
+    }
     button{cursor:pointer;font-weight:900;box-shadow:0 6px 14px rgba(10,30,80,0.06)}
     button.primary{background:#e9fff4;border-color:rgba(26,168,108,0.25)}
     button.alt{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
     button.danger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}
-
-    /* PATCH_BOUNDARY: MENU_BUTTON_STYLES_BEGIN */
     button.blue{ background:#eef4ff; border-color:rgba(40,90,200,0.18); }
     button.orange{ background:#fff6e6; border-color:rgba(200,132,0,0.35); }
+
     .menuGrid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
     .menuGrid button{ min-height: 62px; }
-    /* PATCH_BOUNDARY: MENU_BUTTON_STYLES_END */
 
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
+
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
@@ -87,11 +77,15 @@
     .msgBox.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6}
     .ok{color:var(--good)} .err{color:var(--bad)} .warn{color:var(--warn)}
     .hide{display:none!important}
+
     .kv{display:grid;grid-template-columns:150px 1fr;gap:8px 10px;margin-top:10px}
     .kv div:nth-child(odd){color:var(--muted)}
+    .msgEn{margin-top:4px;font-size:var(--fs-body);}
+
     .videoWrap{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#f7f9ff}
     video{width:100%;display:block}
-    .footer{margin-top:14px;padding:6px 4px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+
+    .footer{margin-top:14px;padding:6px 4px;font-size:var(--fs-small);color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
     .overlay{
       position:fixed;inset:0;background:rgba(0,0,0,0.45);
@@ -111,10 +105,10 @@
     }
     .nameItem.tap{cursor:pointer}
     .nameItem .zh{font-weight:950;}
-    .nameItem .en{color:var(--muted);font-size:14px;margin-top:4px;font-weight:700;}
+    .nameItem .en{color:var(--muted);font-size:var(--fs-body);margin-top:4px;font-weight:700;}
 
     @media (pointer: coarse){
-      button{ min-height: 52px; }
+      button{ min-height: 56px; }
     }
     @media (max-width: 420px){
       .kv{ grid-template-columns: 120px 1fr; }
@@ -133,7 +127,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff5-ui2</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff7-ui2-fixed</span></div>
     </header>
 
     <main id="app"></main>
@@ -149,20 +143,17 @@
   <script>
     var App = {
       token:null, staff:null,
-      view:'login', // login | menu | checkinMenu | scanCheckin | manualCheckin | realtime | vrm | auth
+      view:'login',
       stream:null, raf:null, scanning:false, detector:null,
       debounceT:null, intervalId:null, clockTimer:null,
-
       liveNamesOpen:false,
       liveData:null,
-
       stable:{ value:null, count:0, firstTs:0 },
 
-      // auth flow state
       authApprover:null,
       authTarget:null,
       authRole:null,
-      authFlash:null // {kind:'ok'|'err'|'warn', zh,en, detailHtml}
+      authFlash:null
     };
 
     var STABLE_REQUIRED_COUNT = 2;
@@ -190,7 +181,7 @@
       el.innerHTML =
         '<div class="msgBox '+kind+'">' +
           '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+titleZh+'</div>' +
-          '<div style="margin-top:4px;font-size:16px;">'+titleEn+'</div>' +
+          '<div class="msgEn">'+titleEn+'</div>' +
           (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '') +
         '</div>';
     }
@@ -215,8 +206,15 @@
       return o;
     }
     function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
-
     function clear(targetId){ var el=$(targetId); if(el) el.innerHTML=''; }
+
+    function kvHtml(pairs){
+      var rows = (pairs||[]).filter(function(x){ return x && String(x.v||'').trim() !== ''; });
+      if(!rows.length) return '';
+      return '<div class="kv">' + rows.map(function(x){
+        return '<div>'+escapeHtml(x.k)+'</div><div>'+escapeHtml(x.v)+'</div>';
+      }).join('') + '</div>';
+    }
 
     function staffDisplayName(){
       if(!App.staff) return '';
@@ -252,12 +250,57 @@
         return 'D' + Date.now().toString(36);
       }
     }
+    function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
 
-    function getUA(){
-      try{ return navigator.userAgent || ''; }catch(e){ return ''; }
+    function hiPref(p){
+      var s = String(p||'').trim();
+      if(!s) return '';
+      return '<span style="background:#fff3c4;padding:2px 8px;border-radius:10px;border:1px solid rgba(200,132,0,0.28);">'+escapeHtml(s)+'</span>';
     }
 
-    /* PATCH_BOUNDARY: FORMATTERS_BEGIN */
+    function isMinorNoticeHtml(isMinor){
+      if(!isMinor) return '';
+      return ''+
+        '<div class="msgBox warn" style="margin-top:10px;">'+
+          '<div class="big warn">⚠️ 未滿 18 歲提示</div>'+
+          '<div class="msgEn">⚠️ Minor (under 18) notice</div>'+
+          '<div class="small" style="margin-top:8px;">'+
+            '請留意同行安排及監護需要。<br/>'+
+            '如屬未滿 16 歲，請按教會/同工指引採取相應行動（例如確保監護人同在、必要時通知負責同工）。'+
+            '<div class="divider"></div>'+
+            'Please be mindful of supervision/guardian arrangements.<br/>'+
+            'If they are under 16, take appropriate actions per safeguarding guidance (e.g., ensure a guardian is present; escalate if needed).'+
+          '</div>'+
+        '</div>';
+    }
+
+    function emailUiFromStatus(status){
+      status = String(status||'').trim().toUpperCase();
+      if(status === 'SENT') return { zh:'📧 已發送電郵簽到證明。', en:'📧 Email proof sent.' };
+      if(status === 'OPTOUT') return { zh:'📧 已選擇不接收電郵。', en:'📧 Opted out of email.' };
+      if(status === 'NO_EMAIL') return { zh:'📧 未有電郵資料。', en:'📧 No email on file.' };
+      if(status === 'QUOTA') return { zh:'📧 今日電郵額度已用完。', en:'📧 Daily quota exceeded.' };
+      if(status === 'ERROR') return { zh:'📧 電郵發送失敗。', en:'📧 Failed to send email.' };
+      if(!status) return { zh:'📧 未有電郵狀態。', en:'📧 No email status.' };
+      return { zh:'📧 電郵狀態：' + status, en:'📧 Email status: ' + status };
+    }
+
+    function newFriendWelcomeHtml(member){
+      if(!member || !member.isNewFriend) return '';
+      var pref = (member.preferredName||'').trim();
+      var extra = pref ? ('<div class="small" style="margin-top:8px;">Preferred / 常用稱呼：'+hiPref(pref)+'</div>') : '';
+      return ''+
+        '<div class="msgBox warn" style="margin-top:10px;">'+
+          '<div class="big warn">🆕 新朋友 / New friend</div>'+
+          '<div class="msgEn">🎉 歡迎第一次到訪 / Welcome</div>'+
+          '<div class="small" style="margin-top:8px;">'+
+            '歡迎你！如需要加入社群或有任何問題，請聯絡接待/影音同工。<br/>'+
+            'Welcome! If you need help or want to join the community, please speak to the Welcome/Media team.'+
+          '</div>'+
+          extra+
+        '</div>';
+    }
+
     function fmtIsoToUkYmdHm(iso){
       if(!iso) return '';
       var d = new Date(iso);
@@ -281,78 +324,11 @@
         return yy + '/' + mm + '/' + dd + ' ' + hh + ':' + mi;
       }
     }
-    /* PATCH_BOUNDARY: FORMATTERS_END */
 
-    function resetStability(){
-      App.stable.value = null;
-      App.stable.count = 0;
-      App.stable.firstTs = 0;
-    }
-
-    function acceptWhenStable(candidate){
-      var now = Date.now();
-      if(!candidate){
-        resetStability();
-        return null;
-      }
-      if(App.stable.value === candidate){
-        App.stable.count += 1;
-      } else {
-        App.stable.value = candidate;
-        App.stable.count = 1;
-        App.stable.firstTs = now;
-      }
-      var elapsed = now - (App.stable.firstTs || now);
-      if(App.stable.count >= STABLE_REQUIRED_COUNT && elapsed >= STABLE_REQUIRED_MS){
-        var v = App.stable.value;
-        resetStability();
-        return v;
-      }
-      return null;
-    }
-
-    function stopScan(){
-      App.scanning=false;
-      if(App.raf) cancelAnimationFrame(App.raf);
-      App.raf=null;
-      if(App.stream){
-        App.stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} });
-        App.stream=null;
-      }
-      resetStability();
-    }
-
-    function stopIntervals(){
-      if(App.intervalId){ clearInterval(App.intervalId); App.intervalId=null; }
-      if(App.clockTimer){ clearInterval(App.clockTimer); App.clockTimer=null; }
-    }
-
-    function startClock(){
-      var el = $('liveClock');
-      if(!el) return;
-
-      function tick(){
-        try{
-          var fmt = new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/London', hour:'2-digit', minute:'2-digit', second:'2-digit' });
-          el.textContent = fmt.format(new Date());
-        }catch(e){
-          var d = new Date();
-          el.textContent = ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
-        }
-      }
-      tick();
-      App.clockTimer = setInterval(tick, 1000);
-    }
-
-    /* PATCH_BOUNDARY: CAMERA_SWITCH_BEGIN */
-    function camGetSelectedId_(){
-      try{ return localStorage.getItem('ccf_cam_deviceId') || ''; }catch(e){ return ''; }
-    }
+    // Camera switch + scan
+    function camGetSelectedId_(){ try{ return localStorage.getItem('ccf_cam_deviceId') || ''; }catch(e){ return ''; } }
     function camSetSelectedId_(id){
-      try{
-        if(id) localStorage.setItem('ccf_cam_deviceId', id);
-        else localStorage.removeItem('ccf_cam_deviceId');
-      }catch(e){}
+      try{ if(id) localStorage.setItem('ccf_cam_deviceId', id); else localStorage.removeItem('ccf_cam_deviceId'); }catch(e){}
     }
     function camListVideoInputs_(){
       if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return Promise.resolve([]);
@@ -365,12 +341,8 @@
     function camBindSwitchButton_(btnId, restartFn){
       var btn = $(btnId);
       if(!btn) return;
-
       camListVideoInputs_().then(function(cams){
-        if(!cams || cams.length < 2){
-          btn.classList.add('hide');
-          return;
-        }
+        if(!cams || cams.length < 2){ btn.classList.add('hide'); return; }
         btn.classList.remove('hide');
         btn.onclick = function(){
           camListVideoInputs_().then(function(cams2){
@@ -386,16 +358,40 @@
     }
     function camBuildPreferredConstraints_(){
       var sel = camGetSelectedId_();
-      if(sel){
-        return { video: { deviceId: { exact: sel } }, audio:false };
-      }
+      if(sel) return { video: { deviceId: { exact: sel } }, audio:false };
       return { video: { facingMode: { ideal:'environment' } }, audio:false };
     }
-    /* PATCH_BOUNDARY: CAMERA_SWITCH_END */
+
+    function resetStability(){
+      App.stable.value = null;
+      App.stable.count = 0;
+      App.stable.firstTs = 0;
+    }
+    function acceptWhenStable(candidate){
+      var now = Date.now();
+      if(!candidate){ resetStability(); return null; }
+      if(App.stable.value === candidate){ App.stable.count += 1; }
+      else { App.stable.value = candidate; App.stable.count = 1; App.stable.firstTs = now; }
+      var elapsed = now - (App.stable.firstTs || now);
+      if(App.stable.count >= STABLE_REQUIRED_COUNT && elapsed >= STABLE_REQUIRED_MS){
+        var v = App.stable.value; resetStability(); return v;
+      }
+      return null;
+    }
+
+    function stopScan(){
+      App.scanning=false;
+      if(App.raf) cancelAnimationFrame(App.raf);
+      App.raf=null;
+      if(App.stream){
+        App.stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} });
+        App.stream=null;
+      }
+      resetStability();
+    }
 
     function startScan(videoId, onCaptured, msgTarget){
       stopScan();
-
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         showErr(msgTarget, { code:'E420', zh:'此裝置不支援相機', en:'Camera not supported' });
         return;
@@ -430,7 +426,6 @@
           showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : '' });
         });
       }
-
       tryStart(constraintsPreferred, true);
     }
 
@@ -448,11 +443,7 @@
           App.detector.detect(video).then(function(codes){
             var candidate = (codes && codes.length && codes[0].rawValue) ? codes[0].rawValue : null;
             var stable = acceptWhenStable(candidate);
-            if(stable){
-              stopScan();
-              onCaptured(stable);
-              return;
-            }
+            if(stable){ stopScan(); onCaptured(stable); return; }
             App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
           }).catch(function(){
             App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
@@ -476,12 +467,7 @@
       }catch(e){}
 
       var stable2 = acceptWhenStable(text);
-      if(stable2){
-        stopScan();
-        onCaptured(stable2);
-        return;
-      }
-
+      if(stable2){ stopScan(); onCaptured(stable2); return; }
       App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
     }
 
@@ -504,8 +490,26 @@
       });
     }
 
+    function startClock(){
+      var el = $('liveClock');
+      if(!el) return;
+      function tick(){
+        try{
+          var fmt = new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/London', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+          el.textContent = fmt.format(new Date());
+        }catch(e){
+          var d = new Date();
+          el.textContent = ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+        }
+      }
+      tick();
+      App.clockTimer = setInterval(tick, 1000);
+    }
+
     function logout(){
-      stopScan(); stopIntervals();
+      stopScan();
+      if(App.intervalId){ clearInterval(App.intervalId); App.intervalId=null; }
+      if(App.clockTimer){ clearInterval(App.clockTimer); App.clockTimer=null; }
       try { callApi('api_logout', App.token); } catch(e){}
       try { sessionStorage.removeItem('ccf_token'); } catch(e){}
       App.token=null; App.staff=null;
@@ -514,10 +518,10 @@
     }
 
     function render(){
-      stopScan(); stopIntervals();
+      stopScan();
+      if(App.intervalId){ clearInterval(App.intervalId); App.intervalId=null; }
+      if(App.clockTimer){ clearInterval(App.clockTimer); App.clockTimer=null; }
       clearTimeout(App.debounceT);
-      App.liveNamesOpen=false;
-      App.liveData=null;
 
       if(App.view !== 'auth'){
         App.authApprover=null;
@@ -537,62 +541,7 @@
       if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); return; }
     }
 
-    /* PATCH_BOUNDARY: UI_HELPERS_BEGIN */
-    function isNewFriendByStatus(st){
-      st = String(st||'').toUpperCase();
-      return (st === 'PENDING' || st === 'PROVISIONAL');
-    }
-
-    function displayNameFromMember(m){
-      m = m || {};
-      var pref = (m.preferredName||'').trim();
-      var zh = (m.nameZh||'').trim();
-      var en = (m.nameEn||'').trim();
-      return pref || zh || en || (m.id||'');
-    }
-
-    function under18NoticeHtml(isUnder18){
-      if(!isUnder18) return '';
-      return ''+
-        '<div class="msgBox warn" style="margin-top:10px;">'+
-          '<div class="big warn">⚠️ 未滿 18 歲提示</div>'+
-          '<div style="margin-top:4px;font-size:16px;">⚠️ Under-18 notice</div>'+
-          '<div class="small" style="margin-top:8px;">'+
-            '請留意同行安排及監護需要。<br/>'+
-            '如屬未滿 16 歲，請按教會/同工指引採取相應行動（例如確保監護人同在、必要時通知負責同工）。'+
-            '<div class="divider"></div>'+
-            'Please be mindful of supervision/guardian arrangements.<br/>'+
-            'If they are under 16, take appropriate actions per safeguarding guidance (e.g., ensure a guardian is present; escalate if needed).'+
-          '</div>'+
-        '</div>';
-    }
-
-    function emailUiFromStatus(status){
-      status = String(status||'').trim().toUpperCase();
-      if(status === 'SENT') return { zh:'📧 已發送電郵簽到證明。', en:'📧 Email proof sent.' };
-      if(status === 'OPTOUT') return { zh:'📧 已選擇不接收電郵。', en:'📧 Opted out of email.' };
-      if(status === 'NO_EMAIL') return { zh:'📧 未有電郵資料。', en:'📧 No email on file.' };
-      if(status === 'QUOTA') return { zh:'📧 今日電郵額度已用完。', en:'📧 Daily quota exceeded.' };
-      if(status === 'ERROR') return { zh:'📧 電郵發送失敗。', en:'📧 Failed to send email.' };
-      if(!status) return { zh:'📧 未有電郵狀態。', en:'📧 No email status.' };
-      return { zh:'📧 電郵狀態：' + status, en:'📧 Email status: ' + status };
-    }
-
-    function newFriendWelcomeHtml(isNew){
-      if(!isNew) return '';
-      return ''+
-        '<div class="msgBox warn" style="margin-top:10px;">'+
-          '<div class="big warn">🆕 新朋友 / New friend</div>'+
-          '<div style="margin-top:4px;font-size:16px;">🎉 歡迎第一次到訪 / Welcome</div>'+
-          '<div class="small" style="margin-top:8px;">'+
-            '歡迎你！如需要加入社群或有任何問題，請聯絡接待/影音同工。<br/>'+
-            'Welcome! If you need help or want to join the community, please speak to the Welcome/Media team.'+
-          '</div>'+
-        '</div>';
-    }
-    /* PATCH_BOUNDARY: UI_HELPERS_END */
-
-    /******** Views ********/
+    // ===== Views =====
     function viewLogin(){
       return ''+
         '<div class="card">'+
@@ -630,23 +579,19 @@
       return ''+
         '<div class="card">'+
           '<div class="big">👋 已登入 / Logged in</div>'+
-          '<div class="kv">'+
-            '<div>同工 / Staff</div><div>'+escapeHtml(staffDisplayName())+'</div>'+
-            '<div>身份 / Role</div><div>'+escapeHtml(isSuper ? 'SUPERUSER' : st)+'</div>'+
-          '</div>'+
+          kvHtml([
+            {k:'同工 / Staff', v:staffDisplayName()},
+            {k:'身份 / Role', v:(isSuper ? 'SUPERUSER' : st)}
+          ])+
         '</div>'+
         '<div class="card">'+
           '<div class="big">📌 主選單 / Main menu</div>'+
-
-          /* PATCH_BOUNDARY: MENU_EQUAL_BUTTONS_BEGIN */
           '<div class="menuGrid">'+
             '<button id="goCheckin" class="primary">✅ 簽到 / Check-in</button>'+
             '<button id="goRealtime" class="blue">📊 即時情況 / Live</button>'+
             '<button id="goVrm" class="blue">🚗 車牌搜尋 / Car reg</button>'+
             (showAuth ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button>' : '<div></div>')+
           '</div>'+
-          /* PATCH_BOUNDARY: MENU_EQUAL_BUTTONS_END */
-
           '<div class="divider"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnLogout" class="danger">🚪 登出 / Logout</button>'+
@@ -738,12 +683,11 @@
 
     function viewAuth(){
       var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
-
       var flash = '';
       if(App.authFlash){
         flash = '<div class="msgBox '+App.authFlash.kind+'">'+
                   '<div class="big '+(App.authFlash.kind==='ok'?'ok':(App.authFlash.kind==='err'?'err':'warn'))+'">'+escapeHtml(App.authFlash.zh||'')+'</div>'+
-                  '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(App.authFlash.en||'')+'</div>'+
+                  '<div class="msgEn">'+escapeHtml(App.authFlash.en||'')+'</div>'+
                   (App.authFlash.detailHtml ? ('<div style="margin-top:10px;">'+App.authFlash.detailHtml+'</div>') : '')+
                 '</div>';
       }
@@ -751,27 +695,26 @@
       var approverCard = App.authApprover
         ? ('<div class="msgBox ok">'+
             '<div class="big ok">授權者 / Approver</div>'+
-            '<div class="kv">'+
-              '<div>CCF ID</div><div>'+escapeHtml(App.authApprover.id)+'</div>'+
-              '<div>姓名 / Name</div><div>'+escapeHtml((App.authApprover.nameZh+' '+App.authApprover.nameEn).trim())+'</div>'+
-              '<div>身份 / Role</div><div>'+escapeHtml(App.authApprover.status)+'</div>'+
-            '</div>'+
+            kvHtml([
+              {k:'CCF ID', v:App.authApprover.id||''},
+              {k:'姓名 / Name', v:(App.authApprover.nameZh+' '+App.authApprover.nameEn).trim()},
+              {k:'身份 / Role', v:App.authApprover.status||''}
+            ])+
           '</div>')
         : '';
 
       var targetCard = App.authTarget
         ? ('<div class="msgBox warn">'+
             '<div class="big warn">目標 / Target</div>'+
-            '<div class="kv">'+
-              '<div>CCF ID</div><div>'+escapeHtml(App.authTarget.id)+'</div>'+
-              '<div>姓名 / Name</div><div>'+escapeHtml((App.authTarget.nameZh+' '+App.authTarget.nameEn).trim())+'</div>'+
-              '<div>目前身份 / Current</div><div>'+escapeHtml(App.authTarget.status)+'</div>'+
-            '</div>'+
+            kvHtml([
+              {k:'CCF ID', v:App.authTarget.id||''},
+              {k:'姓名 / Name', v:(App.authTarget.nameZh+' '+App.authTarget.nameEn).trim()},
+              {k:'目前身份 / Current', v:App.authTarget.status||''}
+            ])+
           '</div>')
         : '';
 
       var body = '';
-
       if(step===1){
         body =
           flash+
@@ -788,9 +731,7 @@
             '<button id="btnAuthRescan1" class="primary">🔁 重新掃描 / Rescan</button>'+
             '<button id="btnAuthBackMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>';
-      }
-
-      if(step===2){
+      } else if(step===2){
         body =
           flash+
           approverCard+
@@ -807,9 +748,7 @@
             '<button id="btnAuthRescan2" class="primary">🔁 重新掃描 / Rescan</button>'+
             '<button id="btnAuthBackMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>';
-      }
-
-      if(step===3){
+      } else if(step===3){
         body =
           flash+
           approverCard + targetCard +
@@ -822,22 +761,16 @@
             '<button id="btnAuthRestartAll" class="danger">🔁 重新開始 / Restart</button>'+
           '</div>'+
           '<div id="authMsg"></div>';
-      }
-
-      if(step===4){
+      } else {
         var role = App.authRole;
         var expTxt = (role==='TEMP') ? '2 days' : '7 days';
-
         body =
           flash+
           approverCard + targetCard +
           '<div class="msgBox warn">'+
             '<div class="big warn">最後確認 / Final confirm</div>'+
             '<div class="small">此操作會即時更新目標身份並設定到期日。只會在你按「確認」後生效。<br/>Changes apply only after Confirm.</div>'+
-            '<div class="kv" style="margin-top:10px;">'+
-              '<div>新身份 / New</div><div>'+escapeHtml(role)+'</div>'+
-              '<div>到期 / Expiry</div><div>'+escapeHtml(expTxt)+'</div>'+
-            '</div>'+
+            kvHtml([{k:'新身份 / New', v:role},{k:'到期 / Expiry', v:expTxt}])+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnAuthCommit" class="primary">✅ 確認授權 / Confirm</button>'+
@@ -854,7 +787,7 @@
         '<div class="card">'+body+'</div>';
     }
 
-    /******** Bind ********/
+    // ===== Bindings =====
     function bindLogin(){
       $('btnStartLoginScan').onclick = function(){
         clear('msg');
@@ -923,6 +856,7 @@
       clear(msg);
 
       $('backCheckinMenu').onclick = function(){ App.view='checkinMenu'; render(); };
+      $('btnRestartScan').onclick = function(){ startCheckinScan(); };
 
       $('btnStopCam').onclick = function(){
         stopScan();
@@ -930,24 +864,8 @@
         showBox(msg,'warn','⏹ 已停止相機','⏹ Camera stopped','<div class="small">可按「Scan again」重新開啟。</div>');
       };
 
-      $('btnRestartScan').onclick = function(){ startCheckinScan(); };
-
-      camBindSwitchButton_('btnSwitchCamCheckin', function(){
-        startCheckinScan();
-      });
-
+      camBindSwitchButton_('btnSwitchCamCheckin', function(){ startCheckinScan(); });
       startCheckinScan();
-
-      function startCheckinScan(){
-        clear(msg);
-        cam.classList.remove('hide');
-        startScan('videoCheckin', function(text){
-          // stop scanning during server call; keep camera open until result
-          stopScan();
-          showBox(msg,'warn','處理中…','Working…');
-          doCheckin(text);
-        }, msg);
-      }
 
       function renderEmailLine(res, isAlready){
         if(isAlready && res && res.already){
@@ -955,26 +873,26 @@
           if(stA === 'SENT'){
             return '<div class="msgBox warn" style="margin-top:10px;">'+
                      '<div class="big warn">📧 上次簽到已發送電郵簽到證明。</div>'+
-                     '<div style="margin-top:4px;font-size:16px;">📧 Email proof was sent at the last sign-in.</div>'+
+                     '<div class="msgEn">📧 Email proof was sent at the last sign-in.</div>'+
                    '</div>';
           }
           if(res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
             return '<div class="msgBox warn" style="margin-top:10px;">'+
                      '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>'+
-                     '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
+                     '<div class="msgEn">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
                    '</div>';
           }
           var uiA = emailUiFromStatus(stA);
           return '<div class="msgBox warn" style="margin-top:10px;">'+
                    '<div class="big warn">'+escapeHtml(uiA.zh)+'</div>'+
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(uiA.en)+'</div>'+
+                   '<div class="msgEn">'+escapeHtml(uiA.en)+'</div>'+
                  '</div>';
         }
 
         if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
           return '<div class="msgBox warn" style="margin-top:10px;">'+
                    '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>'+
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.emailUi.en || '')+'</div>'+
+                   '<div class="msgEn">'+escapeHtml(res.emailUi.en || '')+'</div>'+
                  '</div>';
         }
 
@@ -982,8 +900,19 @@
         var ui = emailUiFromStatus(st);
         return '<div class="msgBox warn" style="margin-top:10px;">'+
                  '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
-                 '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>'+
+                 '<div class="msgEn">'+escapeHtml(ui.en)+'</div>'+
                '</div>';
+      }
+
+      function startCheckinScan(){
+        clear(msg);
+        cam.classList.remove('hide');
+        startScan('videoCheckin', function(text){
+          stopScan();
+          cam.classList.add('hide');
+          showBox(msg,'warn','處理中…','Working…');
+          doCheckin(text);
+        }, msg);
       }
 
       function doCheckin(payload){
@@ -991,18 +920,12 @@
         var ua = getUA();
 
         callApi('api_checkin_scan', App.token, payload, null, deviceId, ua).then(function(res){
-          // collapse camera AFTER result (success OR error)
-          cam.classList.add('hide');
-
           if(!res || !res.ok){
             showErr(msg, res || {code:'E500', zh:'系統錯誤', en:'Error'});
             return;
           }
 
-          var isNew = isNewFriendByStatus(res.status);
-          var under18 = !!(res.member && res.member.isUnder18);
-
-          var handledBy = res.staff ? ((res.staff.nameZh||'')+' '+(res.staff.nameEn||'')).trim() : '';
+          var isMinor = !!(res.member && res.member.isMinor);
 
           if(res.result === 'ALREADY'){
             var hb = res.already && res.already.handledBy
@@ -1010,36 +933,37 @@
               : '';
 
             showBox(msg,'ok','✅ 經已簽到','✅ Already checked in',
-              '<div class="kv">'+
-                '<div>CCF ID</div><div>'+escapeHtml(res.member.id||'')+'</div>'+
-                '<div>中文名 / Chinese</div><div>'+escapeHtml(res.member.nameZh||'')+'</div>'+
-                '<div>英文名 / English</div><div>'+escapeHtml(res.member.nameEn||'')+'</div>'+
-                '<div>上次時間 / Last</div><div>'+escapeHtml((res.already&&res.already.timeUk)||'')+'</div>'+
-                '<div>經手 / By</div><div>'+escapeHtml(hb)+'</div>'+
-                '<div>Receipt</div><div>'+escapeHtml((res.already&&res.already.receiptId)||'')+'</div>'+
-              '</div>' +
-              newFriendWelcomeHtml(isNew) +
-              under18NoticeHtml(under18) +
+              kvHtml([
+                {k:'CCF ID', v:res.member.id||''},
+                {k:'中文名 / Chinese', v:res.member.nameZh||''},
+                {k:'英文名 / English', v:res.member.nameEn||''},
+                {k:'上次時間 / Last', v:(res.already&&res.already.timeUk)||''},
+                {k:'經手 / By', v:hb},
+                {k:'Receipt', v:(res.already&&res.already.receiptId)||''}
+              ]) +
+              newFriendWelcomeHtml(res.member) +
+              isMinorNoticeHtml(isMinor) +
               renderEmailLine(res, true)
             );
             return;
           }
 
+          var handledBy = res.staff ? ((res.staff.nameZh||'')+' '+(res.staff.nameEn||'')).trim() : '';
+
           showBox(msg,'ok','✅ 簽到成功','✅ Check-in successful',
-            '<div class="kv">'+
-              '<div>CCF ID</div><div>'+escapeHtml(res.member.id||'')+'</div>'+
-              '<div>中文名 / Chinese</div><div>'+escapeHtml(res.member.nameZh||'')+'</div>'+
-              '<div>英文名 / English</div><div>'+escapeHtml(res.member.nameEn||'')+'</div>'+
-              '<div>時間 / Time (UK)</div><div>'+escapeHtml(res.timeUk||'')+'</div>'+
-              '<div>經手 / By</div><div>'+escapeHtml(handledBy)+'</div>'+
-              '<div>Receipt</div><div>'+escapeHtml(res.receiptId||'')+'</div>'+
-            '</div>' +
-            newFriendWelcomeHtml(isNew) +
-            under18NoticeHtml(under18) +
+            kvHtml([
+              {k:'CCF ID', v:res.member.id||''},
+              {k:'中文名 / Chinese', v:res.member.nameZh||''},
+              {k:'英文名 / English', v:res.member.nameEn||''},
+              {k:'時間 / Time (UK)', v:res.timeUk||''},
+              {k:'經手 / By', v:handledBy},
+              {k:'Receipt', v:res.receiptId||''}
+            ]) +
+            newFriendWelcomeHtml(res.member) +
+            isMinorNoticeHtml(isMinor) +
             renderEmailLine(res, false)
           );
         }).catch(function(){
-          cam.classList.add('hide');
           showErr(msg, { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
         });
       }
@@ -1060,7 +984,6 @@
           var text = q.value.trim();
           if(!text){ results.innerHTML=''; clear(manualMsg); return; }
 
-          /* PATCH_BOUNDARY: MANUAL_SEARCH_PARTIAL_CCF_GATE_UI_BEGIN */
           var t = text.toUpperCase();
           var looksCcf = /^CCF\d+$/i.test(t);
           var fullCcf = /^CCF\d{4,}$/i.test(t);
@@ -1073,7 +996,6 @@
             );
             return;
           }
-          /* PATCH_BOUNDARY: MANUAL_SEARCH_PARTIAL_CCF_GATE_UI_END */
 
           doSearch(text);
         }, 220);
@@ -1092,11 +1014,11 @@
           results.innerHTML = res.results.map(function(r){
             return ''+
               '<div class="msgBox warn" style="margin-bottom:10px;">'+
-                '<div class="kv">'+
-                  '<div>CCF ID</div><div>'+escapeHtml(r.id)+'</div>'+
-                  '<div>中文名 / Chinese</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
-                  '<div>英文名 / English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
-                '</div>'+
+                kvHtml([
+                  {k:'CCF ID', v:r.id||''},
+                  {k:'中文名 / Chinese', v:r.nameZh||''},
+                  {k:'英文名 / English', v:r.nameEn||''}
+                ])+
                 '<div class="miniBtnRow">'+
                   '<button class="primary" data-id="'+escapeHtml(r.id)+'">✅ 選擇 / Select</button>'+
                 '</div>'+
@@ -1121,7 +1043,7 @@
 
         confirmPanel.innerHTML = ''+
           '<div class="big">確認簽到？ / Confirm check-in?</div>'+
-          '<div class="kv"><div>CCF ID</div><div>'+escapeHtml(id)+'</div></div>'+
+          kvHtml([{k:'CCF ID', v:id}])+
           '<div class="miniBtnRow">'+
             '<button id="btnConfirm" class="primary">✅ 確認 / Confirm</button>'+
             '<button id="btnCancel" class="danger">取消 / Cancel</button>'+
@@ -1132,9 +1054,7 @@
           manualPanel.classList.remove('hide');
         };
 
-        $('btnConfirm').onclick = function(){
-          doManualCheckin(id);
-        };
+        $('btnConfirm').onclick = function(){ doManualCheckin(id); };
       }
 
       function renderEmailLineFromRes(res){
@@ -1143,33 +1063,33 @@
           if(stA === 'SENT'){
             return '<div class="msgBox warn" style="margin-top:10px;">'+
                      '<div class="big warn">📧 上次簽到已發送電郵簽到證明。</div>'+
-                     '<div style="margin-top:4px;font-size:16px;">📧 Email proof was sent at the last sign-in.</div>'+
+                     '<div class="msgEn">📧 Email proof was sent at the last sign-in.</div>'+
                    '</div>';
           }
           if(res.already && res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
             return '<div class="msgBox warn" style="margin-top:10px;">'+
                      '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>'+
-                     '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
+                     '<div class="msgEn">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
                    '</div>';
           }
           var uiA = emailUiFromStatus(stA);
           return '<div class="msgBox warn" style="margin-top:10px;">'+
                    '<div class="big warn">'+escapeHtml(uiA.zh)+'</div>'+
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(uiA.en)+'</div>'+
+                   '<div class="msgEn">'+escapeHtml(uiA.en)+'</div>'+
                  '</div>';
         }
 
         if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
           return '<div class="msgBox warn" style="margin-top:10px;">'+
                    '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>'+
-                   '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(res.emailUi.en || '')+'</div>'+
+                   '<div class="msgEn">'+escapeHtml(res.emailUi.en || '')+'</div>'+
                  '</div>';
         }
         var st = (res && res.emailStatus) ? String(res.emailStatus).toUpperCase() : '';
         var ui = emailUiFromStatus(st);
         return '<div class="msgBox warn" style="margin-top:10px;">'+
                  '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
-                 '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>'+
+                 '<div class="msgEn">'+escapeHtml(ui.en)+'</div>'+
                '</div>';
       }
 
@@ -1184,8 +1104,7 @@
           confirmPanel.classList.add('hide');
           manualPanel.classList.remove('hide');
 
-          var isNew = isNewFriendByStatus(res.status);
-          var under18 = !!(res.member && res.member.isUnder18);
+          var isMinor = !!(res.member && res.member.isMinor);
 
           if(res.result === 'ALREADY'){
             var hb = res.already && res.already.handledBy
@@ -1193,16 +1112,16 @@
               : '';
 
             showBox(manualMsg,'ok','✅ 經已簽到','✅ Already checked in',
-              '<div class="kv">'+
-                '<div>CCF ID</div><div>'+escapeHtml((res.member&&res.member.id)||id)+'</div>'+
-                '<div>中文名 / Chinese</div><div>'+escapeHtml((res.member&&res.member.nameZh)||'')+'</div>'+
-                '<div>英文名 / English</div><div>'+escapeHtml((res.member&&res.member.nameEn)||'')+'</div>'+
-                '<div>上次時間 / Last</div><div>'+escapeHtml((res.already&&res.already.timeUk)||'')+'</div>'+
-                '<div>經手 / By</div><div>'+escapeHtml(hb)+'</div>'+
-                '<div>Receipt</div><div>'+escapeHtml((res.already&&res.already.receiptId)||'')+'</div>'+
-              '</div>' +
-              newFriendWelcomeHtml(isNew) +
-              under18NoticeHtml(under18) +
+              kvHtml([
+                {k:'CCF ID', v:(res.member&&res.member.id)||id},
+                {k:'中文名 / Chinese', v:(res.member&&res.member.nameZh)||''},
+                {k:'英文名 / English', v:(res.member&&res.member.nameEn)||''},
+                {k:'上次時間 / Last', v:(res.already&&res.already.timeUk)||''},
+                {k:'經手 / By', v:hb},
+                {k:'Receipt', v:(res.already&&res.already.receiptId)||''}
+              ])+
+              newFriendWelcomeHtml(res.member)+
+              isMinorNoticeHtml(isMinor)+
               renderEmailLineFromRes(res)
             );
             return;
@@ -1211,16 +1130,16 @@
           var handledBy = res.staff ? ((res.staff.nameZh||'')+' '+(res.staff.nameEn||'')).trim() : '';
 
           showBox(manualMsg,'ok','✅ 簽到成功','✅ Check-in successful',
-            '<div class="kv">'+
-              '<div>CCF ID</div><div>'+escapeHtml((res.member&&res.member.id)||id)+'</div>'+
-              '<div>中文名 / Chinese</div><div>'+escapeHtml((res.member&&res.member.nameZh)||'')+'</div>'+
-              '<div>英文名 / English</div><div>'+escapeHtml((res.member&&res.member.nameEn)||'')+'</div>'+
-              '<div>時間 / Time (UK)</div><div>'+escapeHtml(res.timeUk||'')+'</div>'+
-              '<div>經手 / By</div><div>'+escapeHtml(handledBy)+'</div>'+
-              '<div>Receipt</div><div>'+escapeHtml(res.receiptId||'')+'</div>'+
-            '</div>' +
-            newFriendWelcomeHtml(isNew) +
-            under18NoticeHtml(under18) +
+            kvHtml([
+              {k:'CCF ID', v:(res.member&&res.member.id)||id},
+              {k:'中文名 / Chinese', v:(res.member&&res.member.nameZh)||''},
+              {k:'英文名 / English', v:(res.member&&res.member.nameEn)||''},
+              {k:'時間 / Time (UK)', v:res.timeUk||''},
+              {k:'經手 / By', v:handledBy},
+              {k:'Receipt', v:res.receiptId||''}
+            ])+
+            newFriendWelcomeHtml(res.member)+
+            isMinorNoticeHtml(isMinor)+
             renderEmailLineFromRes(res)
           );
         }).catch(function(){
@@ -1247,18 +1166,11 @@
           App.liveData = res;
 
           var last = res.lastSignIn
-            ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div style="margin-top:6px;font-size:16px;">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
+            ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div class="msgEn">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
             : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無記錄 / No check-ins yet</div></div>';
 
-          /* PATCH_BOUNDARY: LIVE_NEWFRIENDS_BOX_WITH_PREFERREDNAME_BEGIN */
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });
-
-          function hiPref(p){
-            var s = String(p||'').trim();
-            if(!s) return '';
-            return '<span style="background:#fff3c4;padding:2px 8px;border-radius:10px;border:1px solid rgba(200,132,0,0.28);">'+escapeHtml(s)+'</span>';
-          }
 
           var newFriendsHtml = '';
           if(newFriends.length){
@@ -1270,13 +1182,11 @@
                     var pref = (n.preferredName||'').trim();
                     var zh = (n.nameZh||'').trim();
                     var en = (n.nameEn||'').trim();
-                    var line1 = pref ? (hiPref(pref) + ' ') : '';
                     var line2 = [zh, en].filter(Boolean).join(' · ');
-                    if(!line2) line2 = n.id || '';
                     return ''+
                       '<div class="nameItem">'+
-                        '<div class="zh">🆕 '+ line1 + '</div>'+
-                        '<div class="en">'+ escapeHtml(line2) + (n.id ? (' · ' + escapeHtml(n.id)) : '') +'</div>'+
+                        '<div class="zh">🆕 ' + (n.isMinor ? '🧒 ' : '') + (pref ? (hiPref(pref)+' ') : '') + '</div>'+
+                        '<div class="en">'+escapeHtml(line2)+'</div>'+
                       '</div>';
                   }).join('')+
                 '</div>'+
@@ -1288,7 +1198,6 @@
                 '<div class="small">暫時沒有 / None</div>'+
               '</div>';
           }
-          /* PATCH_BOUNDARY: LIVE_NEWFRIENDS_BOX_WITH_PREFERREDNAME_END */
 
           box.innerHTML =
             '<div class="kv">' +
@@ -1301,7 +1210,7 @@
 
           if(App.liveNamesOpen) renderNames();
         }).catch(function(){
-          $('rtBox').innerHTML='';
+          box.innerHTML='';
           showErr('rtBox', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
         });
       }
@@ -1314,7 +1223,6 @@
         renderNames();
       }
 
-      /* PATCH_BOUNDARY: LIVE_NAMES_LIST_PREFERREDNAME_ONLY_BEGIN */
       function renderNames(){
         var box = $('rtNamesBox');
         var res = App.liveData;
@@ -1333,7 +1241,8 @@
               var pref = (n.preferredName||'').trim();
               var zh = (n.nameZh||'').trim();
               var en = (n.nameEn||'').trim();
-              var top = (n.isNew ? '🆕 ' : '') + (pref || zh || en || '');
+              var minor = n.isMinor ? '🧒 ' : '';
+              var top = minor + (n.isNew ? '🆕 ' : '') + (pref || zh || en || '');
               var cls = 'nameItem' + (tappable ? ' tap' : '');
               return '<div class="'+cls+'" data-mid="'+escapeHtml(n.id)+'">' +
                        '<div class="zh">' + escapeHtml(top) + '</div>' +
@@ -1350,7 +1259,6 @@
           });
         }
       }
-      /* PATCH_BOUNDARY: LIVE_NAMES_LIST_PREFERREDNAME_ONLY_END */
     }
 
     function bindVrm(){
@@ -1393,12 +1301,12 @@
 
             return ''+
               '<div class="msgBox warn" style="margin-bottom:10px;">'+
-                '<div class="kv">'+
-                  '<div>車牌 / Plate</div><div>'+escapeHtml(plates)+'</div>'+
-                  '<div>CCF ID</div><div>'+escapeHtml(r.id)+'</div>'+
-                  '<div>中文名 / Chinese</div><div>'+escapeHtml(r.nameZh||'')+'</div>'+
-                  '<div>英文名 / English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
-                '</div>'+
+                kvHtml([
+                  {k:'車牌 / Plate', v:plates},
+                  {k:'CCF ID', v:r.id||''},
+                  {k:'中文名 / Chinese', v:r.nameZh||''},
+                  {k:'英文名 / English', v:r.nameEn||''}
+                ])+
                 '<div style="margin-top:10px;">'+ci+'</div>'+
               '</div>';
           }).join('');
@@ -1409,193 +1317,187 @@
       }
     }
 
-    /******** Auth UI wiring ********/
-    function bindAuth(){
-      if(!canUseAuth()){
-        showBox('authMsg','err','沒有權限','No permission');
-        return;
-      }
+    // Auth + detail + delete + suppress
+function bindAuth(){
+  if(!canUseAuth()){
+    showBox('authMsg','err','沒有權限','No permission');
+    return;
+  }
 
-      var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
+  var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
 
-      function resetAuthAll(){
-        App.authApprover=null;
-        App.authTarget=null;
-        App.authRole=null;
-      }
+  function resetAuthAll(){
+    App.authApprover=null;
+    App.authTarget=null;
+    App.authRole=null;
+  }
 
-      if(step === 1){
-        $('btnAuthCancel').onclick = function(){ App.view='menu'; render(); };
-        $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
-        $('btnAuthRescan1').onclick = function(){ App.authFlash=null; render(); };
+  if(step === 1){
+    $('btnAuthCancel').onclick = function(){ App.view='menu'; render(); };
+    $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
+    $('btnAuthRescan1').onclick = function(){ App.authFlash=null; render(); };
 
-        camBindSwitchButton_('btnSwitchCamAuth1', function(){ App.authFlash=null; render(); });
+    camBindSwitchButton_('btnSwitchCamAuth1', function(){ App.authFlash=null; render(); });
 
-        // Only start scanning if camera panel is visible (no flash state)
-        if (!$('authCam1').classList.contains('hide')) {
-          startScan('videoAuth1', function(payload){
-            stopScan();
-            $('authCam1').classList.add('hide');
-            $('authActions').classList.remove('hide');
-            showBox('authMsg','warn','處理中…','Working…');
+    // Only start scanning if camera panel is visible (flash state collapses camera)
+    if (!$('authCam1').classList.contains('hide')) {
+      startScan('videoAuth1', function(payload){
+        stopScan();
+        $('authCam1').classList.add('hide');
+        $('authActions').classList.remove('hide');
+        showBox('authMsg','warn','處理中…','Working…');
 
-            callApi('api_auth_validate_approver', App.token, payload).then(function(res){
-              if(!res || !res.ok){
-                showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
-                return;
-              }
+        callApi('api_auth_validate_approver', App.token, payload).then(function(res){
+          if(!res || !res.ok){
+            showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+            return;
+          }
 
-              var a = res.approver;
-              var modal = openModal(
-                '<div class="big">確認授權者？ / Confirm approver?</div>'+
-                '<div class="kv">'+
-                  '<div>CCF ID</div><div>'+escapeHtml(a.id)+'</div>'+
-                  '<div>姓名 / Name</div><div>'+escapeHtml((a.nameZh+" "+a.nameEn).trim())+'</div>'+
-                  '<div>身份 / Role</div><div>'+escapeHtml(a.status)+'</div>'+
-                '</div>'+
-                '<div class="miniBtnRow" style="margin-top:12px;">'+
-                  '<button id="btnYes" class="primary">✅ 是我 / Yes</button>'+
-                  '<button id="btnNo" class="danger">🔁 重新掃描 / Rescan</button>'+
-                '</div>'
-              );
-              modal.querySelector('#btnYes').onclick = function(){
-                closeModal(modal);
-                App.authApprover = a;
-                App.authFlash=null;
-                render();
-              };
-              modal.querySelector('#btnNo').onclick = function(){
-                closeModal(modal);
-                App.authFlash=null;
-                render();
-              };
-            }).catch(function(){
-              showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
-            });
+          var a = res.approver;
+          var modal = openModal(
+            '<div class="big">確認授權者？ / Confirm approver?</div>'+
+            kvHtml([
+              {k:'CCF ID', v:a.id||''},
+              {k:'姓名 / Name', v:(a.nameZh+" "+a.nameEn).trim()},
+              {k:'身份 / Role', v:a.status||''}
+            ])+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="btnYes" class="primary">✅ 是我 / Yes</button>'+
+              '<button id="btnNo" class="danger">🔁 重新掃描 / Rescan</button>'+
+            '</div>'
+          );
 
-          }, 'authMsg');
-        }
-
-        return;
-      }
-
-      if(step === 2){
-        $('btnAuthBack1').onclick = function(){ App.authApprover=null; App.authFlash=null; render(); };
-        $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
-        $('btnAuthRescan2').onclick = function(){ App.authFlash=null; render(); };
-
-        camBindSwitchButton_('btnSwitchCamAuth2', function(){ App.authFlash=null; render(); });
-
-        startScan('videoAuth2', function(payload){
-          stopScan();
-          $('authCam2').classList.add('hide');
-          $('authActions').classList.remove('hide');
-          showBox('authMsg','warn','處理中…','Working…');
-
-          callApi('api_auth_validate_target', App.token, payload).then(function(res){
-            if(!res || !res.ok){
-              showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
-              return;
-            }
-            App.authTarget = res.target;
+          modal.querySelector('#btnYes').onclick = function(){
+            closeModal(modal);
+            App.authApprover = a;
             App.authFlash=null;
             render();
-          }).catch(function(){
-            showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
-          });
-        }, 'authMsg');
+          };
+          modal.querySelector('#btnNo').onclick = function(){
+            closeModal(modal);
+            App.authFlash=null;
+            render();
+          };
+        }).catch(function(){
+          showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
+        });
 
-        return;
-      }
-
-      if(step === 3){
-        $('btnAuthRestartAll').onclick = function(){
-          resetAuthAll();
-          App.authFlash=null;
-          render();
-        };
-        $('btnRoleTemp').onclick = function(){ App.authRole='TEMP'; App.authFlash=null; render(); };
-        $('btnRoleHelper').onclick = function(){ App.authRole='HELPER'; App.authFlash=null; render(); };
-        return;
-      }
-
-      if(step === 4){
-        $('btnAuthRestartAll').onclick = function(){
-          resetAuthAll();
-          App.authFlash=null;
-          render();
-        };
-
-        $('btnAuthCommit').onclick = function(){
-          clear('authMsg');
-          showBox('authMsg','warn','處理中…','Working…');
-
-          callApi('api_auth_commit', App.token, App.authApprover.id, App.authTarget.id, App.authRole).then(function(res){
-            if(!res || !res.ok){
-              showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
-              return;
-            }
-
-            var exp = res.target && (res.target.roleExpiresIso || res.target.roleExpires) ? fmtIsoToUkYmdHm(res.target.roleExpiresIso || res.target.roleExpires) : '';
-
-            App.authFlash = {
-              kind:'ok',
-              zh:'✅ 已完成授權（已重置）',
-              en:'✅ Authorised (reset)',
-              detailHtml:
-                '<div class="kv">'+
-                  '<div>目標 / Target</div><div>'+escapeHtml(res.target.id||'')+'</div>'+
-                  '<div>新身份 / New</div><div>'+escapeHtml(res.target.newStatus||'')+'</div>'+
-                  '<div>到期 / Expiry</div><div>'+escapeHtml(exp)+'</div>'+
-                '</div>'+
-                '<div class="small" style="margin-top:10px;">'+
-                  '已重置流程：需要重新掃描授權者及目標 QR 才可進行下一次授權。<br/>'+
-                  'Flow reset: you must re-scan approver and target QR for the next authorisation.'+
-                '</div>'
-            };
-
-            resetAuthAll();
-            render(); // Step 1, camera collapsed due to flash
-          }).catch(function(){
-            showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
-          });
-        };
-        return;
-      }
+      }, 'authMsg');
     }
+    return;
+  }
 
-    /******** Member detail modal + delete flow ********/
-    function openMemberDetailModal(memberId){
-      var modal = openModal(
-        '<div class="big">載入中… / Loading…</div>'+
-        '<div class="small">請稍候 / Please wait</div>'
-      );
+  if(step === 2){
+    $('btnAuthBack1').onclick = function(){ App.authApprover=null; App.authFlash=null; render(); };
+    $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
+    $('btnAuthRescan2').onclick = function(){ App.authFlash=null; render(); };
 
-      callApi('api_live_get_member_detail', App.token, memberId, null).then(function(res){
+    camBindSwitchButton_('btnSwitchCamAuth2', function(){ App.authFlash=null; render(); });
+
+    startScan('videoAuth2', function(payload){
+      stopScan();
+      $('authCam2').classList.add('hide');
+      $('authActions').classList.remove('hide');
+      showBox('authMsg','warn','處理中…','Working…');
+
+      callApi('api_auth_validate_target', App.token, payload).then(function(res){
         if(!res || !res.ok){
-          closeModal(modal);
-          showErr('rtBox', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+          showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
           return;
         }
+        App.authTarget = res.target;
+        App.authFlash=null;
+        render();
+      }).catch(function(){
+        showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
+      });
+    }, 'authMsg');
+
+    return;
+  }
+
+  if(step === 3){
+    $('btnAuthRestartAll').onclick = function(){ resetAuthAll(); App.authFlash=null; render(); };
+    $('btnRoleTemp').onclick = function(){ App.authRole='TEMP'; App.authFlash=null; render(); };
+    $('btnRoleHelper').onclick = function(){ App.authRole='HELPER'; App.authFlash=null; render(); };
+    return;
+  }
+
+  if(step === 4){
+    $('btnAuthRestartAll').onclick = function(){ resetAuthAll(); App.authFlash=null; render(); };
+
+    $('btnAuthCommit').onclick = function(){
+      clear('authMsg');
+      showBox('authMsg','warn','處理中…','Working…');
+
+      callApi('api_auth_commit', App.token, App.authApprover.id, App.authTarget.id, App.authRole).then(function(res){
+        if(!res || !res.ok){
+          showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+          return;
+        }
+
+        var exp = res.target && (res.target.roleExpiresIso || res.target.roleExpires)
+          ? fmtIsoToUkYmdHm(res.target.roleExpiresIso || res.target.roleExpires)
+          : '';
+
+        App.authFlash = {
+          kind:'ok',
+          zh:'✅ 已完成授權（已重置）',
+          en:'✅ Authorised (reset)',
+          detailHtml:
+            kvHtml([
+              {k:'目標 / Target', v:res.target.id||''},
+              {k:'新身份 / New', v:res.target.newStatus||''},
+              {k:'到期 / Expiry', v:exp}
+            ]) +
+            '<div class="small" style="margin-top:10px;">'+
+              '已重置流程：需要重新掃描授權者及目標 QR 才可進行下一次授權。<br/>'+
+              'Flow reset: you must re-scan approver and target QR for the next authorisation.'+
+            '</div>'
+        };
+
+        resetAuthAll();
+        render(); // Step 1, camera collapsed due to flash
+      }).catch(function(){
+        showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
+      });
+    };
+    return;
+  }
+}
+
+    // --- Member detail + delete + suppress flow functions ---
+    // For stability: reuse the functions from earlier working version:
+    // openMemberDetailModal / openDeleteFlow / openReauthScan / openSuppressNewFriendFlow / openSuppressReauthScan
+    // They are present in your staff7-ui1 file; if you already had them working, keep them.
+    //
+    // In this v7-ui2-fixed, we keep them in a minimal safe form by delegating to Live tap details only if needed.
+    //
+    // To avoid another regression, DO NOT add stub redefinitions at end.
+
+    // === Minimal implementations (required) ===
+    function openMemberDetailModal(memberId){
+      var modal = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
+      callApi('api_live_get_member_detail', App.token, memberId, null).then(function(res){
+        if(!res || !res.ok){ closeModal(modal); showErr('rtBox', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
 
         var m = res.member || {};
         var today = res.today;
         var last4 = res.last4EventKeys || [];
         var plates = [m.vrm, m.vrm2].filter(Boolean).join(' / ');
-
-        var display = displayNameFromMember(m);
+        var display = (m.preferredName||'').trim() || (m.nameZh||'').trim() || (m.nameEn||'').trim() || (m.id||'');
         var namesLine = [ (m.nameZh||'').trim(), (m.nameEn||'').trim() ].filter(Boolean).join(' · ');
 
         var todayHtml = today
           ? ('<div class="msgBox ok" style="margin-top:10px;">'+
               '<div class="big ok">今日簽到 / Today</div>'+
-              '<div class="kv">'+
-                '<div>Event</div><div>'+escapeHtml(today.eventKey)+'</div>'+
-                '<div>時間 / Time</div><div>'+escapeHtml(today.timeUk)+'</div>'+
-                '<div>方式 / Method</div><div>'+escapeHtml(today.method||'')+'</div>'+
-                '<div>經手 / By</div><div>'+escapeHtml(((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')).trim() || today.handledBy.id||'')+'</div>'+
-                '<div>Receipt</div><div>'+escapeHtml(today.receiptId||'')+'</div>'+
-              '</div>'+
+              kvHtml([
+                {k:'Event', v:today.eventKey||''},
+                {k:'時間 / Time', v:today.timeUk||''},
+                {k:'方式 / Method', v:today.method||''},
+                {k:'經手 / By', v:(((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')).trim() || today.handledBy.id||'')},
+                {k:'Receipt', v:today.receiptId||''}
+              ])+
             '</div>')
           : ('<div class="msgBox warn" style="margin-top:10px;">'+
               '<div class="big warn">今日未見簽到 / Not checked-in today</div>'+
@@ -1612,28 +1514,32 @@
             '</div>')
           : ('<div class="small" style="margin-top:10px;">未有過往記錄 / No history</div>');
 
-        var canDelete = canTapLiveNames() || (App.staff && App.staff.id === 'SUPERUSER');
+        var canAct = canTapLiveNames() || (App.staff && App.staff.id === 'SUPERUSER');
 
         modal.querySelector('.modal').innerHTML =
           '<div class="big">👤 會員資料 / Member</div>'+
-          '<div class="kv">'+
-            '<div>CCF ID</div><div>'+escapeHtml(m.id||'')+'</div>'+
-            '<div>顯示名稱 / Display</div><div>'+escapeHtml(display||'')+'</div>'+
-            (namesLine ? '<div>姓名 / Names</div><div>'+escapeHtml(namesLine)+'</div>' : '')+
-            '<div>車牌 / VRM</div><div>'+escapeHtml(plates||'')+'</div>'+
-          '</div>'+
-          under18NoticeHtml(!!m.isUnder18)+
+          kvHtml([
+            {k:'CCF ID', v:m.id||''},
+            {k:'顯示名稱 / Display', v:display||''},
+            {k:'姓名 / Names', v:namesLine||''},
+            {k:'車牌 / VRM', v:plates||''}
+          ])+
+          isMinorNoticeHtml(!!m.isMinor)+
           todayHtml+
           last4Html+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="btnClose" class="alt">⬅️ 返回 / Back</button>'+
-            (canDelete ? '<button id="btnDelete" class="danger">💣 刪除今日簽到 / Delete today</button>' : '')+
+            (canAct ? '<button id="btnSuppressNew" class="alt">🏷️ 移除新朋友標記 / Remove new-friend tag</button>' : '')+
+            (canAct ? '<button id="btnDelete" class="danger">💣 刪除今日簽到 / Delete today</button>' : '')+
           '</div>'+
           '<div id="detailMsg"></div>';
 
         modal.querySelector('#btnClose').onclick = function(){ closeModal(modal); };
 
-        if(canDelete){
+        if(canAct){
+          modal.querySelector('#btnSuppressNew').onclick = function(){
+            openSuppressNewFriendFlow(memberId, modal);
+          };
           modal.querySelector('#btnDelete').onclick = function(){
             if(!today){
               showBox('detailMsg','warn','今日無記錄','No record today');
@@ -1650,7 +1556,6 @@
 
     function openDeleteFlow(memberId, parentModal){
       var isSuper = App.staff && App.staff.id === 'SUPERUSER';
-
       var modal = openModal(
         '<div class="big err">💣 確認刪除？ / Confirm delete?</div>'+
         '<div class="small">此操作會刪除今日出席記錄，並會被記錄。<br/>This deletes today’s attendance and will be logged.</div>'+
@@ -1660,10 +1565,7 @@
         '</div>'
       );
       modal.querySelector('#btnCancel').onclick = function(){ closeModal(modal); };
-      modal.querySelector('#btnGo').onclick = function(){
-        closeModal(modal);
-        openReauthScan(memberId, parentModal, isSuper);
-      };
+      modal.querySelector('#btnGo').onclick = function(){ closeModal(modal); openReauthScan(memberId, parentModal, isSuper); };
     }
 
     function openReauthScan(memberId, parentModal, isSuper){
@@ -1696,23 +1598,11 @@
         startScan('videoReauth', onCapturedReauth, msgTarget);
       }
 
-      modal.querySelector('#btnCancelReauth').onclick = function(){
-        stopScan();
-        closeModal(modal);
-      };
-      modal.querySelector('#btnBackReauth').onclick = function(){
-        stopScan();
-        closeModal(modal);
-      };
-      modal.querySelector('#btnRescanReauth').onclick = function(){
-        stopScan();
-        restart();
-      };
+      modal.querySelector('#btnCancelReauth').onclick = function(){ stopScan(); closeModal(modal); };
+      modal.querySelector('#btnBackReauth').onclick = function(){ stopScan(); closeModal(modal); };
+      modal.querySelector('#btnRescanReauth').onclick = function(){ stopScan(); restart(); };
 
-      camBindSwitchButton_('btnSwitchCamReauth', function(){
-        stopScan();
-        restart();
-      });
+      camBindSwitchButton_('btnSwitchCamReauth', function(){ stopScan(); restart(); });
 
       function onCapturedReauth(payload){
         stopScan();
@@ -1724,10 +1614,7 @@
         var adminPayload = isSuper ? payload : '';
 
         callApi('api_live_delete_today_checkin', App.token, memberId, reauthPayload, adminPayload).then(function(res){
-          if(!res || !res.ok){
-            showErr(msgTarget, res || {code:'E500', zh:'系統錯誤', en:'Error'});
-            return;
-          }
+          if(!res || !res.ok){ showErr(msgTarget, res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
 
           var del = res.deleted || {};
           var memName = (del.memberNameZh||'').trim() || (del.memberNameEn||'').trim() || '';
@@ -1736,32 +1623,13 @@
           var memberDisplay = (del.memberId||'') + (memName ? ('（'+memName+'）') : '');
           var byDisplay = (del.byId||del.by||'') + (byName ? ('（'+byName+'）') : '');
 
-          var email = res.email || {};
-          var emailLine = '';
-          if(email.status === 'SENT'){
-            emailLine =
-              '<div class="msgBox warn" style="margin-top:10px;">'+
-                '<div class="big warn">📧 已發送刪除通知電郵</div>'+
-                '<div style="margin-top:4px;font-size:16px;">📧 Delete notice email sent</div>'+
-                '<div class="small" style="margin-top:8px;">To: '+escapeHtml(email.toMasked||'')+'</div>'+
-              '</div>';
-          } else if(email.status){
-            var ui = emailUiFromStatus(email.status);
-            emailLine =
-              '<div class="msgBox warn" style="margin-top:10px;">'+
-                '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
-                '<div style="margin-top:4px;font-size:16px;">'+escapeHtml(ui.en)+'</div>'+
-              '</div>';
-          }
-
           showBox(msgTarget,'ok','✅ 已刪除今日簽到','✅ Deleted today attendance',
-            '<div class="kv">'+
-              '<div>Event</div><div>'+escapeHtml(del.eventKey||'')+'</div>'+
-              '<div>已刪除 / Deleted</div><div>Attendance record deleted / 出席記錄已刪除</div>'+
-              '<div>Member</div><div>'+escapeHtml(memberDisplay)+'</div>'+
-              '<div>By</div><div>'+escapeHtml(byDisplay)+'</div>'+
-            '</div>' +
-            emailLine
+            kvHtml([
+              {k:'Event', v:del.eventKey||''},
+              {k:'已刪除 / Deleted', v:'Attendance record deleted / 出席記錄已刪除'},
+              {k:'Member', v:memberDisplay},
+              {k:'By', v:byDisplay}
+            ])
           );
 
           try{ closeModal(parentModal); }catch(e){}
@@ -1771,6 +1639,102 @@
           btnRow.innerHTML = '<button id="btnCloseAfter" class="alt">⬅️ 返回 Live / Back to Live</button>';
           modal.querySelector('.modal').appendChild(btnRow);
           modal.querySelector('#btnCloseAfter').onclick = function(){ closeModal(modal); App.view='realtime'; render(); };
+        }).catch(function(){
+          showErr(msgTarget, {code:'E500', zh:'系統錯誤', en:'Error'});
+        });
+      }
+
+      restart();
+    }
+
+    function openSuppressNewFriendFlow(memberId, parentModal){
+      var modal = openModal(
+        '<div class="big warn">🏷️ 確認移除新朋友標記？ / Remove new-friend tag?</div>'+
+        '<div class="small">此操作只影響今次聚會顯示（不會改資料、不會發電郵）。<br/>This affects display for this event only (no data change, no email).</div>'+
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="btnGoSupp" class="primary">✅ 继续 / Continue</button>'+
+          '<button id="btnCancelSupp" class="danger">取消 / Cancel</button>'+
+        '</div>'
+      );
+      modal.querySelector('#btnCancelSupp').onclick = function(){ closeModal(modal); };
+      modal.querySelector('#btnGoSupp').onclick = function(){ closeModal(modal); openSuppressReauthScan(memberId, parentModal); };
+    }
+
+    function openSuppressReauthScan(memberId, parentModal){
+      var isSuper = App.staff && App.staff.id === 'SUPERUSER';
+
+      var title = isSuper
+        ? '請掃描管理員（ADMIN）QR 以作記錄 / Scan ADMIN QR for audit'
+        : '請掃描你本人同工 QR 以確認 / Scan your own staff QR to confirm';
+
+      var msgTarget = 'suppMsg_' + Date.now().toString(36);
+
+      var modal = openModal(
+        '<div class="big">'+escapeHtml(title)+'</div>'+
+        '<div id="suppCam" class="card" style="margin-top:10px;">'+
+          '<div class="videoWrap"><video id="videoSupp" playsinline></video></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnSwitchCamSupp" class="alt">🔄 切換相機 / Switch camera</button>'+
+            '<button id="btnCancelSupp2" class="danger">取消 / Cancel</button>'+
+          '</div>'+
+        '</div>'+
+        '<div id="'+msgTarget+'"></div>'+
+        '<div id="suppActions" class="miniBtnRow hide" style="margin-top:12px;">'+
+          '<button id="btnRescanSupp" class="primary">🔁 重新掃描 / Rescan</button>'+
+          '<button id="btnBackSupp" class="alt">⬅️ 返回 / Back</button>'+
+        '</div>'
+      );
+
+      function restart(){
+        clear(msgTarget);
+        $('suppCam').classList.remove('hide');
+        $('suppActions').classList.add('hide');
+        startScan('videoSupp', onCaptured, msgTarget);
+      }
+
+      modal.querySelector('#btnCancelSupp2').onclick = function(){ stopScan(); closeModal(modal); };
+      modal.querySelector('#btnBackSupp').onclick = function(){ stopScan(); closeModal(modal); };
+      modal.querySelector('#btnRescanSupp').onclick = function(){ stopScan(); restart(); };
+
+      camBindSwitchButton_('btnSwitchCamSupp', function(){ stopScan(); restart(); });
+
+      function onCaptured(payload){
+        stopScan();
+        $('suppCam').classList.add('hide');
+        $('suppActions').classList.remove('hide');
+        showBox(msgTarget,'warn','處理中…','Working…');
+
+        var reauthPayload = isSuper ? '' : payload;
+        var adminPayload = isSuper ? payload : '';
+
+        callApi('api_live_suppress_new_friend', App.token, memberId, reauthPayload, adminPayload).then(function(res){
+          if(!res || !res.ok){ showErr(msgTarget, res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+
+          var t = res.target || {};
+          var byName = ((t.byNameZh||'') + ' ' + (t.byNameEn||'')).trim();
+          var byDisplay = (t.byId||'') + (byName ? ('（'+byName+'）') : '');
+
+          showBox(msgTarget,'ok','✅ 已移除新朋友標記','✅ New-friend tag removed',
+            '<div class="small">只影響本次聚會顯示，不會發電郵。<br/>Display-only for this event; no email.</div>'+
+            '<div class="divider"></div>'+
+            kvHtml([
+              {k:'Event', v:res.eventKey||''},
+              {k:'Member', v:(t.id||'')},
+              {k:'By', v:byDisplay}
+            ])
+          );
+
+          try{ closeModal(parentModal); }catch(e){}
+          var btnRow = document.createElement('div');
+          btnRow.className = 'miniBtnRow';
+          btnRow.style.marginTop = '12px';
+          btnRow.innerHTML = '<button id="btnCloseAfterSupp" class="alt">⬅️ 返回 Live / Back to Live</button>';
+          modal.querySelector('.modal').appendChild(btnRow);
+          modal.querySelector('#btnCloseAfterSupp').onclick = function(){
+            closeModal(modal);
+            App.view='realtime';
+            render();
+          };
 
         }).catch(function(){
           showErr(msgTarget, {code:'E500', zh:'系統錯誤', en:'Error'});
@@ -1780,7 +1744,11 @@
       restart();
     }
 
-    // boot
+    // ===== Missing view binders we haven't wired yet (simple wrappers) =====
+    function bindVrmWrapper(){ bindVrm(); }
+    // bindVrm already defined above, wrapper unused.
+
+    // Boot
     render();
   </script>
 </body>
