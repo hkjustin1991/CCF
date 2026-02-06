@@ -1,5 +1,5 @@
 /***************************************
- * CCF Staff Portal (stable + upgrades)
+ * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
  * v2026-02-02.staff8
  *
@@ -67,7 +67,7 @@ const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, 
 const HELPER_EXPIRY_DAYS = 7;
 const TEMP_EXPIRY_DAYS = 2;
 
-// Optional Members columns used by Staff Portal (auto-added if missing)
+// Optional Members columns used by Live Service Portal (auto-added if missing)
 const MEMBERS_OPTIONAL_HEADERS = [
   'VRM','VRM2',
   'RoleExpires',
@@ -91,7 +91,7 @@ function doGet(e) {
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   return t.evaluate()
-    .setTitle('CCF Staff Portal')
+    .setTitle('CCF Live Service Portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -181,6 +181,7 @@ function emailUiFromStatus_(status){
   if (!s)             return { zh:'未有電郵狀態。', en:'No email status.' };
   return { zh:'電郵狀態：' + s, en:'Email status: ' + s };
 }
+
 
 /******** Members sheet detection (order-insensitive) ********/
 function getMembersSheet_() {
@@ -1650,3 +1651,5 @@ function setMemberCell_(sh, cols, rowNumber, headerName, value){
   if (idx === undefined) return;
   sh.getRange(rowNumber, idx+1).setValue(value);
 }
+
+/* ===== END OF Code.gs (COMPLETE) ===== */

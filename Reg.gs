@@ -1382,6 +1382,7 @@ function regMaskVrm_(vrm){
   return v.slice(0,4) + ' ***';
 }
 
+/* ===== END OF Reg.gs (COMPLETE) ===== */
 /* ===== helpers for self attendance ===== */
 function regParseYmdUtc_(s){
   const v = String(s||'').trim();
