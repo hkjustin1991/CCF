@@ -1168,3 +1168,5 @@ function regMaskVrm_(vrm){
   if (!v) return '';
   return v.slice(0,4) + ' ***';
 }
+
+/* ===== END OF Reg.gs (COMPLETE) ===== */
