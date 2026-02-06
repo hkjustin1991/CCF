@@ -166,7 +166,8 @@
       // Manual UI state
       manualLastQuery:'',
       manualSelectedId:null,
-      manualLocked:false
+      manualLocked:false,
+      servingOpenGroup:null
     };
 
     var STABLE_REQUIRED_COUNT = 2;
@@ -1518,6 +1519,7 @@
         }
 
         var groupKeys = Object.keys(SERVING_GROUP_LABELS);
+        var openGroup = App.servingOpenGroup;
         var summaryHtml =
           '<div class="chipRow" style="margin-top:8px;">' +
           groupKeys.map(function(key){
@@ -1526,14 +1528,45 @@
             var allOk = applicable.every(function(r){ return !!r.checkedIn; });
             var cls = allOk ? 'good' : 'bad';
             var icon = allOk ? '✅' : '❌';
-            return '<span class="chip '+cls+'">'+icon+' '+key+'</span>';
+            var isOpen = (openGroup === key);
+            var openMark = isOpen ? ' ▲' : ' ▼';
+            return '<span class="chip '+cls+' servingGroupChip" data-group="'+key+'">'+icon+' '+key+openMark+'</span>';
           }).join('') +
           '</div>';
+
+        var expandedHtml = '';
+        if (openGroup){
+          var groupRows = list.filter(function(r){ return String(r.group||'').toUpperCase() === openGroup; });
+          var pending = groupRows.filter(function(r){ return !isServingNaRow_(r) && !r.checkedIn; });
+          if (!pending.length){
+            expandedHtml =
+              '<div class="msgBox ok" style="margin-top:10px;">'+
+                '<div class="big ok">✅ '+escapeHtml(openGroup)+' 全部已簽到 / All checked-in</div>'+
+              '</div>';
+          } else {
+            expandedHtml =
+              '<div class="msgBox warn" style="margin-top:10px;">'+
+                '<div class="big warn">❌ '+escapeHtml(openGroup)+' 未簽到 / Not yet</div>'+
+                '<div class="listWrap" style="margin-top:10px;">'+
+                  pending.map(function(row){
+                    var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
+                    var roleLine = [row.position, row.slot].filter(Boolean).join(' · ');
+                    return ''+
+                      '<div class="nameItem">'+
+                        '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
+                        '<div class="en">'+escapeHtml(roleLine)+'</div>'+
+                      '</div>';
+                  }).join('')+
+                '</div>'+
+              '</div>';
+          }
+        }
 
         box.innerHTML =
           '<div class="big">🧩 事奉 / Serving today</div>' +
           '<div class="small">共 ' + list.length + ' 位 / Total ' + list.length + '</div>' +
           summaryHtml +
+          expandedHtml +
           '<div class="listWrap" style="margin-top:10px;">' +
             list.map(function(row){
               var groupLabel = getServingGroupLabel_(row.group);
@@ -1553,6 +1586,14 @@
                 '</div>';
             }).join('') +
           '</div>';
+
+        Array.prototype.slice.call(box.querySelectorAll('.servingGroupChip')).forEach(function(el){
+          el.onclick = function(){
+            var group = String(el.getAttribute('data-group') || '').trim().toUpperCase();
+            App.servingOpenGroup = (App.servingOpenGroup === group) ? null : group;
+            renderServing(res);
+          };
+        });
       }
     }
 
