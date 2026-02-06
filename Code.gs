@@ -1,5 +1,5 @@
 /***************************************
- * CCF Staff Portal (stable + upgrades)
+ * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
  * v2026-02-02.staff8
  *
@@ -67,7 +67,7 @@ const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, 
 const HELPER_EXPIRY_DAYS = 7;
 const TEMP_EXPIRY_DAYS = 2;
 
-// Optional Members columns used by Staff Portal (auto-added if missing)
+// Optional Members columns used by Live Service Portal (auto-added if missing)
 const MEMBERS_OPTIONAL_HEADERS = [
   'VRM','VRM2',
   'RoleExpires',
@@ -91,7 +91,7 @@ function doGet(e) {
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   return t.evaluate()
-    .setTitle('CCF Staff Portal')
+    .setTitle('CCF Live Service Portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
