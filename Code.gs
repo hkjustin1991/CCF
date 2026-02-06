@@ -1,46 +1,34 @@
 /***************************************
  * CCF Staff Portal (stable + upgrades)
  * File: Code.gs
- * v2026-01-24.staff7
+ * v2026-02-02.staff8
  *
  * ============================================================
- * CHANGELOG (staff7)
+ * CHANGELOG (staff8)
  * ============================================================
- * [1] Members sheet header order:
- *     - getMembersSheet_() is now ORDER-INSENSITIVE (matches by required header set).
- *     - Prefers sheet named "Members" if multiple matches.
+ * [1] SECURITY: hide staff bypass code (no hardcode)
+ *     - Removed const BYPASS_CODE = '@9413'
+ *     - Reads Script Properties key: STAFF_BYPASS_CODE
  *
- * [2] IsMinor standardisation:
- *     - ONLY uses Members header "IsMinor" (YES/NO). No "Under18" variables anywhere.
- *     - Auto-add optional Members column: IsMinor (if missing).
- *     - Exposes boolean as member.isMinor (in check-in responses, live list, member detail).
+ * [2] SEARCH: optimised CCF ID behaviour
+ *     - "CCF" alone => no results
+ *     - Full CCF#### => exact match only
+ *     - Partial CCF digits (CCF0/CCF00/CCF000) => max 4 closest matches (ID-only)
  *
- * [3] New friend definition (history-based):
- *     - New friend = NO prior check-in ever (any EventKey), AND not STAFF/ADMIN.
- *     - Check-in OK responses include member.isNewFriend.
- *     - Live page "new friends" uses history-based rule + session-only suppression (below).
+ * [3] SELF-TEST: discrete endpoints + Healthcheck sheet
+ *     - api_selfcheck_readonly()          (no writes; safe)
+ *     - api_selfcheck_write_test()        (writes to Healthcheck sheet only)
+ *     - api_selfcheck_mark_completed()    (writes STAFF_CONFIRM to Healthcheck)
+ *     - doGet(?mode=healthping) returns plain "OK staff <version>"
  *
- * [4] Session-only suppression of 🆕 (new request):
- *     - New endpoint api_live_suppress_new_friend()
- *     - Same re-auth rules + log style as delete attendance, but NO EMAIL.
- *     - Suppression applies to the CURRENT EventKey only and is stored in cache.
- *     - If today attendance is deleted for that member, suppression is cleared so next sign-in
- *       shows 🆕 again (as long as they still have no prior history).
- *
- * [5] Preserved behaviours:
- *     - QR strict parsing + stability gate expectations
- *     - check-in dedupe logic
- *     - bilingual errors
- *     - strict authorisation rules
- *     - delete attendance endpoint + explicit DELETED email wording
- *     - preferredName used for proof/delete emails (fallback to NameEn/NameZh)
+ * [4] NOTE: No changes to QR parsing, scan stability, check-in dedupe, authorisation rules.
+ *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-01-24.staff7';
+const APP_VERSION = '2026-02-02.staff8';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
-const BYPASS_CODE = '@9413';
 const SESSION_TTL_SECONDS = 4 * 60 * 60;
 
 // Sheets
@@ -48,7 +36,10 @@ const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
 const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
 const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
 
-// Members required headers (order-insensitive in staff7)
+// Healthcheck (self-test) sheet (NEW)
+const HEALTHCHECK_SHEET_NAME = 'Healthcheck';
+
+// Members required headers (order-insensitive in staff7+)
 const MEMBERS_HEADERS_REQUIRED = [
   'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
 ];
@@ -87,9 +78,16 @@ const MEMBERS_OPTIONAL_HEADERS = [
 /******** Web App Router ********/
 function doGet(e) {
   const mode = String((e && e.parameter && e.parameter.mode) || '').toLowerCase();
+
+  // Public health ping for uptime/deployment checks (NEW)
+  if (mode === 'healthping') {
+    return ContentService.createTextOutput('OK staff ' + APP_VERSION)
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
-  if (mode === 'admin') return doGetAdmin_(e); // Admin.gs (Admin2.html)
-    
+  if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
+
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   return t.evaluate()
@@ -105,6 +103,16 @@ function getDefaultEventKey_(){ return 'SundayService_' + fmtUk_(nowUk_(), 'yyyy
 
 function normalizeStatus_(s){ return String(s || '').trim().toUpperCase(); }
 function normalizeVrm_(s){ return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+
+// Staff bypass code from Script Properties (NEW)
+function getStaffBypassCode_(){
+  try{
+    const p = PropertiesService.getScriptProperties();
+    return String(p.getProperty('STAFF_BYPASS_CODE') || '').trim();
+  }catch(e){
+    return '';
+  }
+}
 
 function isOptedOut_(optOutRaw){
   const v = String(optOutRaw || '').trim().toUpperCase();
@@ -341,6 +349,18 @@ function ensureActivityLogSheet_() {
   return sh;
 }
 
+// Healthcheck sheet ensure (NEW)
+function ensureHealthcheckSheet_(){
+  const ss = openSs_();
+  let sh = ss.getSheetByName(HEALTHCHECK_SHEET_NAME);
+  if (!sh){
+    sh = ss.insertSheet(HEALTHCHECK_SHEET_NAME);
+    sh.appendRow(['Timestamp','StaffId','StaffNameZh','StaffNameEn','Action','Details','EventKey','DeviceId','UserAgent']);
+    sh.getRange(1,1,1,9).setFontWeight('bold');
+  }
+  return sh;
+}
+
 /******** New-friend suppression cache (event-only) ********/
 function newFriendSuppressKey_(eventKey, memberId){
   return 'newSupp_' + String(eventKey||'').trim() + '_' + String(memberId||'').trim().toUpperCase();
@@ -423,7 +443,9 @@ function api_login(input) {
   const raw = String(input || '').trim();
   if (!raw) return { ok:false, code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.' };
 
-  if (raw === BYPASS_CODE) {
+  // SUPERUSER via Script Properties (hidden)
+  const bypass = getStaffBypassCode_();
+  if (bypass && raw === bypass) {
     const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
     const token = createSession_(staff);
     return { ok:true, token, staff };
@@ -461,7 +483,8 @@ function api_login(input) {
 
 function api_login_internal(input) {
   const raw = String(input || '').trim();
-  if (raw === BYPASS_CODE) {
+  const bypass = getStaffBypassCode_();
+  if (bypass && raw === bypass) {
     const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
     const token = createSession_(staff);
     return { ok:true, token, staff };
@@ -748,7 +771,7 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
   }
 }
 
-/******** Manual search ********/
+/******** Manual search (optimised) ********/
 function api_search_members(token, query) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -759,10 +782,10 @@ function api_search_members(token, query) {
   const byId = getMembersIndex_().byId;
   const qUpper = q.toUpperCase();
 
-  // Partial CCF blocked
-  if (/^CCF\d+$/i.test(qUpper) && !/^CCF\d{4,}$/i.test(qUpper)) return { ok:true, results:[] };
+  // "CCF" alone => no results
+  if (qUpper === 'CCF') return { ok:true, results:[] };
 
-  // Exact ID lookup only
+  // Full ID exact match only
   if (/^CCF\d{4,}$/i.test(qUpper)) {
     const m = byId[qUpper];
     if (!m) return { ok:true, results:[] };
@@ -770,6 +793,39 @@ function api_search_members(token, query) {
     return { ok:true, results:[ { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' } ] };
   }
 
+  // Partial CCF digits => show up to 4 closest matches (ID-only)
+  if (/^CCF\d{1,3}$/i.test(qUpper)) {
+    const digits = qUpper.replace(/^CCF/i,'');
+    const out = [];
+
+    // 1) padded “closest” first (e.g. CCF2 -> CCF0002)
+    const num = parseInt(digits,10);
+    if (!isNaN(num)) {
+      const padded = 'CCF' + String(num).padStart(4,'0');
+      if (byId[padded] && normalizeStatus_(byId[padded].status) !== STATUS_DISABLED) {
+        const m0 = byId[padded];
+        out.push({ id:m0.id, nameZh:m0.nameZh||'', nameEn:m0.nameEn||'' });
+      }
+    }
+
+    // 2) prefix matches (e.g. CCF00)
+    const starts = [];
+    for (const id in byId) {
+      if (!id.startsWith(qUpper)) continue;
+      const m = byId[id];
+      if (normalizeStatus_(m.status) === STATUS_DISABLED) continue;
+      if (out.some(x => x.id === m.id)) continue;
+      starts.push(m);
+    }
+    starts.sort((a,b)=> a.id.localeCompare(b.id));
+    starts.slice(0, 4 - out.length).forEach(m=>{
+      out.push({ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' });
+    });
+
+    return { ok:true, results: out.slice(0,4) };
+  }
+
+  // Generic search (same behaviour, cap 12)
   const qLower = q.toLowerCase();
   const out = [];
 
@@ -1162,7 +1218,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       isMinor: !!m.isMinor,
       vrm: m.vrm||'',
       vrm2: m.vrm2||'',
-      status: normalizeStatus_(m.status) // UI can ignore if desired
+      status: normalizeStatus_(m.status)
     },
     today: today,
     last4EventKeys: eventKeys
@@ -1247,11 +1303,9 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   const target = mi.byId[targetId];
   if (!target) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
 
-  // Set suppression for this event (no email)
   setNewFriendSuppressed_(eventKey, targetId);
   CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
-  // Log (commit-style)
   const logSh = ensureActivityLogSheet_();
   logSh.appendRow([
     nowUk_(),
@@ -1378,9 +1432,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
 
     sh.deleteRow(hitIdx + 2);
 
-    // Clear suppression so next sign-in shows 🆕 again if still no history
     clearNewFriendSuppressed_(eventKey, targetId);
-
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
     const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel);
@@ -1470,6 +1522,105 @@ ${nameZh ? nameZh + '，' : ''}你好：
   }catch(e){
     out.status = 'ERROR';
     return out;
+  }
+}
+
+/******** Self-test APIs (discrete) ********/
+function api_selfcheck_readonly(token){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const eventKey = getDefaultEventKey_();
+  const out = { ok:true, eventKey:eventKey, timeIso: nowUk_().toISOString(), checks:[] };
+
+  function add(ok, zh, en, detail){
+    out.checks.push({ ok: !!ok, zh:String(zh||''), en:String(en||''), detail:String(detail||'') });
+  }
+
+  // Members sheet
+  try{
+    const shM = getMembersSheet_();
+    add(!!shM, 'Members 表正常', 'Members sheet OK', shM ? shM.getName() : '');
+  }catch(e){
+    add(false, 'Members 表異常', 'Members sheet ERROR', String(e && e.message || e));
+  }
+
+  // Members index
+  try{
+    const mi = getMembersIndex_();
+    const n = mi && mi.byId ? Object.keys(mi.byId).length : 0;
+    add(true, 'Members 索引正常', 'Members index OK', 'count=' + n);
+  }catch(e){
+    add(false, 'Members 索引異常', 'Members index ERROR', String(e && e.message || e));
+  }
+
+  // Checkins sheet structure
+  try{
+    const shC = getCheckinsSheet_();
+    ensureCheckinsSheetColumns_(shC);
+    add(true, 'Checkins 表正常', 'Checkins sheet OK', shC ? shC.getName() : '');
+  }catch(e){
+    add(false, 'Checkins 表異常', 'Checkins sheet ERROR', String(e && e.message || e));
+  }
+
+  // Activity log ensure
+  try{
+    ensureActivityLogSheet_();
+    add(true, 'Activity log 正常', 'Activity log OK', ACTIVITY_LOG_SHEET_NAME);
+  }catch(e){
+    add(false, 'Activity log 異常', 'Activity log ERROR', String(e && e.message || e));
+  }
+
+  // Lock test
+  try{
+    const lock = LockService.getScriptLock();
+    lock.waitLock(1500);
+    lock.releaseLock();
+    add(true, '鎖定機制正常', 'Lock OK', '');
+  }catch(e){
+    add(false, '鎖定機制異常', 'Lock ERROR', String(e && e.message || e));
+  }
+
+  // Email quota (read)
+  try{
+    const q = MailApp.getRemainingDailyQuota();
+    add(true, '電郵額度可讀取', 'Email quota readable', 'quota=' + q);
+  }catch(e){
+    add(false, '電郵額度異常', 'Email quota ERROR', String(e && e.message || e));
+  }
+
+  return out;
+}
+
+function api_selfcheck_write_test(token, deviceId, ua){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const staff = auth.sess.staff;
+  const eventKey = getDefaultEventKey_();
+
+  try{
+    const sh = ensureHealthcheckSheet_();
+    sh.appendRow([nowUk_(), staff.id, staff.nameZh||'', staff.nameEn||'', 'WRITE_TEST', 'ok', eventKey, String(deviceId||''), String(ua||'')]);
+    return { ok:true, eventKey:eventKey, zh:'✅ 已完成寫入測試', en:'✅ Write test completed' };
+  }catch(e){
+    return { ok:false, code:'E500', zh:'寫入測試失敗', en:'Write test failed', detail:String(e && e.message || e) };
+  }
+}
+
+function api_selfcheck_mark_completed(token, deviceId, ua){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const staff = auth.sess.staff;
+  const eventKey = getDefaultEventKey_();
+
+  try{
+    const sh = ensureHealthcheckSheet_();
+    sh.appendRow([nowUk_(), staff.id, staff.nameZh||'', staff.nameEn||'', 'STAFF_CONFIRM', 'Self-check completed by staff', eventKey, String(deviceId||''), String(ua||'')]);
+    return { ok:true, eventKey:eventKey, zh:'✅ 已記錄「同工已確認」', en:'✅ Staff confirmation logged' };
+  }catch(e){
+    return { ok:false, code:'E500', zh:'記錄失敗', en:'Log failed', detail:String(e && e.message || e) };
   }
 }
 
