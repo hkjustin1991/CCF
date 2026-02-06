@@ -12,19 +12,23 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui1
+  UI VERSION TAG: reg2-ui2-selfhome-keepqr
   ============================================================
 
-  CHANGELOG (reg2-ui1):
-  [1] Added camera switch (multi-camera):
-      - Shows “🔄 切換相機 / Switch camera” when multiple video inputs exist.
-      - Cycles device cameras, persists selected deviceId in localStorage.
-      - Falls back gracefully if labels unavailable / deviceId invalid.
-  [2] No changes to existing registration logic, QR generation, or email UI.
-  [3] No change to scan behaviour other than adding the camera selection capability.
+  Changes (reg2-ui2):
+  [1] Scan QR -> Self menu with 3 options:
+      - Details check/change
+      - Attendance check (self only)
+      - Serving (coming soon)
+  [2] Updates: option to "Keep existing QR (no change)".
+      - Sends keepExistingQr to server for self_update / overwrite update.
+  [3] Double-submit prevention (client-side):
+      - disables Submit button while request is in-flight.
+  [4] Add field: Referred by / 介紹人 (optional).
+  [5] Keep existing camera switch behaviour (reg2-ui1) unchanged.
 
   PATCH BOUNDARIES:
-    - Search for "PATCH_BOUNDARY: REG2_CAMERA_SWITCH" blocks.
+    - Search for "PATCH_BOUNDARY:" blocks.
   ============================================================
   -->
 
@@ -60,6 +64,7 @@
     button.primary{background:#e9fff4;border-color:rgba(26,168,108,0.25)}
     button.alt{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
     button.danger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}
+    button:disabled{opacity:.55;cursor:not-allowed}
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
     .divider{height:1px;background:var(--border);margin:12px 0}
@@ -104,6 +109,15 @@
     .carState.good{ color: var(--good); }
     .carState.bad{ color: var(--bad); }
 
+    /* list (admin-like) */
+    .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
+    .nameItem{
+      padding:10px;border:1px solid var(--border);border-radius:12px;margin-top:8px;
+      white-space:normal;overflow-wrap:anywhere;word-break:break-word;
+    }
+    .nameItem .zh{font-weight:950;}
+    .nameItem .en{color:var(--muted);font-size:14px;margin-top:4px;font-weight:700;}
+
     @media (pointer: coarse){
       button{ min-height: 52px; }
     }
@@ -124,7 +138,7 @@
           After completion, ask Welcome team to scan the QR.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui1</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui2-selfhome-keepqr</span></div>
     </header>
 
     <main id="app"></main>
@@ -192,12 +206,15 @@
     }
 
     var State = {
-      view: 'home',          // home | form | scan | success
+      view: 'home',          // home | form | scan | success | selfHome | selfAttendance
       flow: 'create',        // create | self_update
       authQrPayload: null,
       prefill: null,
       lastResult: null,
-      lastSubmit: null
+      lastSubmit: null,
+
+      keepExistingQr: false, // keep key/QR during update
+      submitting: false      // prevent double submit
     };
 
     function openModal(html){
@@ -374,10 +391,74 @@
           '<div class="big">📌 選擇 / Choose</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
-            '<button id="btnScan" class="alt">📷 掃描 QR（查看/更改資料）</button>'+
+            '<button id="btnScan" class="alt">📷 掃描 QR（自助功能）</button>'+
+          '</div>'+
+          '<div class="small" style="margin-top:10px;">'+
+            '掃描 QR 可查看/更改資料、查閱自己出席記錄。<br/>'+
+            'Scan QR to check/change details and view your own attendance.'+
           '</div>'+
         '</div>'+
         '<div id="msg"></div>';
+    }
+
+    function viewSelfHome(m){
+      m = m || {};
+      var nameLine = ((m.nameZh||'') + ' ' + (m.nameEn||'')).trim();
+      return ''+
+        '<div class="card">'+
+          '<div class="big ok">✅ 已驗證 / Verified</div>'+
+          '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b>'+(nameLine?('<br/>'+escapeHtml(nameLine)):'')+'</div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnSelfDetails" class="primary">🪪 資料查看/更改 / Details check/change</button>'+
+            '<button id="btnSelfServing" class="alt">🧩 事奉確認 / Serving（coming soon）</button>'+
+            '<button id="btnSelfAtt" class="alt">📊 出席查詢 / Attendance check</button>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnSelfBack" class="danger">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="selfMsg"></div>'+
+        '</div>';
+    }
+
+    function viewAttendance(res){
+      res = res || {};
+      var m = res.member || {};
+      var stats = res.stats || {};
+      var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
+      var list = att.map(function(x){ return '<li>'+escapeHtml(x)+'</li>'; }).join('');
+
+      return ''+
+        '<div class="card">'+
+          '<div class="big">📊 出席查詢 / Attendance</div>'+
+          '<div class="small">只顯示你自己的記錄 / Shows your own record only</div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div class="kv">'+
+            '<div>CCF ID</div><div><b>'+escapeHtml(m.id||'')+'</b></div>'+
+            '<div>出席 / Attended</div><div>'+escapeHtml(String(stats.attended||0))+' / '+escapeHtml(String(stats.total||0))+'</div>'+
+            '<div>百分比 / Percent</div><div>'+escapeHtml(String(stats.percent||0))+'%</div>'+
+            '<div>起算日 / Denom start</div><div>'+escapeHtml(String(stats.denomStart||''))+'</div>'+
+          '</div>'+
+
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">🗓️ 出席記錄 / Attendance</div>'+
+            '<div class="small">('+escapeHtml(String(att.length))+' records)</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnToggleAtt" class="alt">▶ 展開 / Expand</button>'+
+            '</div>'+
+            '<div id="attBox" class="hide" style="margin-top:10px;">'+
+              '<ul style="margin:0;padding-left:18px;white-space:normal;">'+list+'</ul>'+
+            '</div>'+
+          '</div>'+
+
+          '<div class="miniBtnRow">'+
+            '<button id="btnBackSelf" class="danger">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="attMsg"></div>'+
+        '</div>';
     }
 
     function viewForm(prefill){
@@ -408,6 +489,9 @@
 
           '<div class="label" style="margin-top:10px;">常用稱呼 / Preferred name（可選）</div>'+
           '<input id="preferredName" autocomplete="off" value="'+escapeHtml(prefill.preferredName||'')+'" />'+
+
+          '<div class="label" style="margin-top:10px;">介紹人 / Referred by（可選）</div>'+
+          '<input id="referredBy" autocomplete="off" value="'+escapeHtml(prefill.referredBy||'')+'" />'+
 
           '<div class="divider"></div>'+
 
@@ -478,7 +562,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">📷 掃描 QR</div>'+
-          '<div class="small">掃描你的 QR 以查看/更改資料（只作登記，不會自動簽到）。</div>'+
+          '<div class="small">掃描你的 QR 以使用自助功能（只作登記，不會自動簽到）。</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
@@ -526,8 +610,8 @@
       var reason = email.reason ? ('<div class="small">Reason: '+escapeHtml(email.reason)+'</div>') : '';
       var guidance =
         '<div class="small" style="margin-top:8px;">' +
-          '❗ 如你未收到 QR 電郵，可用相同資料再登記一次並勾選接收電郵（系統會識別並重新發出新 QR，舊 QR 會即時失效）。<br/>' +
-          'If you didn’t receive the QR email, you can re-register with the same details and opt-in to email (a new QR will be issued; old QR becomes invalid).<br/>' +
+          '❗ 如你未收到 QR 電郵，可用相同資料再登記一次並勾選接收電郵（系統會識別並重新發出新 QR）。<br/>' +
+          'If you didn’t receive the QR email, you can re-register with the same details and opt-in to email (a new QR may be issued).<br/>' +
           '（如你當初沒有填寫電郵或手機，系統可能無法識別，請直接聯絡接待／影音同工。）' +
         '</div>';
 
@@ -535,6 +619,7 @@
     }
 
     function viewSuccess(res){
+      var keep = !!(res && res.keepExistingQr);
       var gz = (res && res.greet && res.greet.zh) ? res.greet.zh : '';
       var ge = (res && res.greet && res.greet.en) ? res.greet.en : '';
       if (!gz && !ge && res && res.member && res.member.greet){
@@ -550,18 +635,20 @@
              'Hi ' + showNameEn + ', welcome to CCF 😊<br/><br/>')
           : ('歡迎你來到 CCF 😊<br/>Welcome to CCF 😊<br/><br/>');
 
+      var instruction = keep
+        ? ('請交給接待同工掃描此 QR 以完成簽到。<br/>Please ask Welcome team to scan this QR to check-in.')
+        : ('請交給接待同工掃描此「新」QR 以完成簽到。<br/>Please ask Welcome team to scan this NEW QR to check-in.');
+
       return ''+
         '<div class="card">'+
           '<div class="big ok">✅ 完成 / Done</div>'+
           '<div class="msgBox ok" style="margin-top:10px;">'+
             '<div class="big ok">CCF ID：'+escapeHtml(res.memberId||'')+'</div>'+
             '<div style="margin-top:6px;font-size:16px;">'+
-              helloLine +
-              '請交給接待同工掃描此「新」QR 以完成簽到。<br/>'+
-              'Please ask Welcome team to scan this NEW QR to check-in.'+
+              helloLine + instruction +
             '</div>'+
           '</div>'+
-          (res.mode==='UPDATE'
+          ((!keep && res.mode==='UPDATE')
             ? showBox('warn','⚠️ 舊 QR 已即時失效（不能再用作簽到或事奉）','⚠️ Old QR invalid immediately (no check-in/service)',
                 '<div class="small">請由現在起只使用「新」QR，並銷毀舊 QR。</div>')
             : ''
@@ -583,6 +670,8 @@
           State.view = 'form';
           State.flow = 'create';
           State.prefill = null;
+          State.authQrPayload = null;
+          State.keepExistingQr = false;
           render();
         };
         $('btnScan').onclick = function(){
@@ -592,22 +681,42 @@
         return;
       }
 
-      if(State.view === 'form'){
-        $('app').innerHTML = viewForm(State.prefill || {});
-        bindForm();
-        return;
-      }
-
       if(State.view === 'scan'){
         $('app').innerHTML = viewScan();
         bindScan();
         return;
       }
 
+      if(State.view === 'selfHome'){
+        $('app').innerHTML = viewSelfHome(State.prefill || {});
+        bindSelfHome();
+        return;
+      }
+
+      if(State.view === 'selfAttendance'){
+        $('app').innerHTML = viewAttendance(State.lastResult || {});
+        bindAttendance();
+        return;
+      }
+
+      if(State.view === 'form'){
+        $('app').innerHTML = viewForm(State.prefill || {});
+        bindForm();
+        return;
+      }
+
       if(State.view === 'success'){
         $('app').innerHTML = viewSuccess(State.lastResult || {});
         try{ drawQr('qrTarget', (State.lastResult||{}).qrPayload ); }catch(e){}
-        $('btnHome').onclick = function(){ State.view='home'; State.lastResult=null; State.lastSubmit=null; render(); };
+        $('btnHome').onclick = function(){
+          State.view='home';
+          State.lastResult=null;
+          State.lastSubmit=null;
+          State.prefill=null;
+          State.authQrPayload=null;
+          State.keepExistingQr=false;
+          render();
+        };
         return;
       }
     }
@@ -629,7 +738,6 @@
         render();
       };
 
-      // Bind camera switch (shows only if multiple cams)
       camBindSwitchButton_($('btnSwitchCam'), function(){
         stopScan();
         restartScan();
@@ -644,53 +752,13 @@
             return;
           }
 
-          var m = res.member;
-
-          // PROVISIONAL -> edit
-          if(String(m.status||'').toUpperCase() === 'PROVISIONAL'){
-            stopScan();
-            State.view = 'form';
-            State.flow = 'self_update';
-            State.authQrPayload = text;
-            State.prefill = m;
-            render();
-            return;
-          }
-
-          // review modal
-          var modal = openModal(
-            '<div class="big">資料是否正確？</div>'+
-            '<div class="small">如需要更改，提交後會重新發出新 QR（舊 QR 即時失效）。<br/>If changes are needed, a new QR will be issued (old QR becomes invalid immediately).</div>'+
-            '<div class="kv">'+
-              '<div>中文名</div><div>'+escapeHtml(m.nameZh||'')+'</div>'+
-              '<div>英文名</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
-              '<div>常用稱呼</div><div>'+escapeHtml(m.preferredName||'')+'</div>'+
-              '<div>電郵</div><div>'+escapeHtml(m.email||'')+'</div>'+
-              '<div>手機</div><div>'+escapeHtml(m.mobile||'')+'</div>'+
-              '<div>備註</div><div>'+escapeHtml(m.notes||'')+'</div>'+
-            '</div>'+
-            '<div class="miniBtnRow" style="margin-top:12px;">'+
-              '<button id="btnCorrect" class="primary" type="button">✅ 正確 / Correct</button>'+
-              '<button id="btnWrong" class="danger" type="button">✏️ 需要更改 / Incorrect</button>'+
-            '</div>'
-          );
-
-          modal.querySelector('#btnCorrect').onclick = function(){
-            closeModal(modal);
-            stopScan();
-            State.view='home';
-            render();
-          };
-
-          modal.querySelector('#btnWrong').onclick = function(){
-            closeModal(modal);
-            stopScan();
-            State.view = 'form';
-            State.flow = 'self_update';
-            State.authQrPayload = text;
-            State.prefill = m;
-            render();
-          };
+          stopScan();
+          State.view = 'selfHome';
+          State.flow = 'self_update';
+          State.authQrPayload = text;
+          State.prefill = res.member;
+          State.lastResult = null;
+          render();
 
         }).catch(function(err){
           var msg = (err && err.message) ? err.message : String(err||'');
@@ -699,6 +767,61 @@
       }
 
       restartScan();
+    }
+
+    function bindSelfHome(){
+      $('btnSelfBack').onclick = function(){
+        State.view = 'home';
+        State.prefill = null;
+        State.authQrPayload = null;
+        render();
+      };
+
+      $('btnSelfServing').onclick = function(){
+        $('selfMsg').innerHTML = showBox('warn','🧩 功能準備中','🧩 Coming soon','<div class="small">稍後會加入事奉報名/確認功能。</div>');
+      };
+
+      $('btnSelfDetails').onclick = function(){
+        // Go to form with current info
+        State.view = 'form';
+        State.flow = 'self_update';
+        render();
+      };
+
+      $('btnSelfAtt').onclick = function(){
+        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+        callApi('api_reg_self_attendance_public', State.authQrPayload, null, null).then(function(res){
+          if(!res || !res.ok){
+            $('selfMsg').innerHTML = showServerErr(res);
+            return;
+          }
+          State.lastResult = res;
+          State.view = 'selfAttendance';
+          render();
+        }).catch(function(err){
+          var msg = (err && err.message) ? err.message : String(err||'');
+          $('selfMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        });
+      };
+    }
+
+    function bindAttendance(){
+      $('btnBackSelf').onclick = function(){
+        State.view = 'selfHome';
+        render();
+      };
+
+      $('btnToggleAtt').onclick = function(){
+        var box = $('attBox');
+        var btn = $('btnToggleAtt');
+        if(box.classList.contains('hide')){
+          box.classList.remove('hide');
+          btn.textContent = '▼ 收起 / Collapse';
+        } else {
+          box.classList.add('hide');
+          btn.textContent = '▶ 展開 / Expand';
+        }
+      };
     }
 
     function bindForm(){
@@ -745,15 +868,26 @@
       refreshEmailHint();
 
       $('btnBackHome').onclick = function(){
+        if(State.authQrPayload){
+          State.view = 'selfHome';
+          render();
+          return;
+        }
         State.view='home';
         State.flow='create';
         State.prefill=null;
         State.authQrPayload=null;
+        State.keepExistingQr=false;
         render();
       };
 
       $('btnSubmit').onclick = function(){
+        if(State.submitting) return;
+
         $('formMsg').innerHTML = '';
+        var btn = $('btnSubmit');
+        State.submitting = true;
+        if(btn) btn.disabled = true;
 
         var data = readFormData_();
         State.lastSubmit = data;
@@ -761,15 +895,22 @@
         var v = validateLocal(data);
         if(!v.ok){
           $('formMsg').innerHTML = showBox('err', v.zh, v.en);
+          State.submitting = false;
+          if(btn) btn.disabled = false;
           return;
         }
 
         if(State.flow === 'self_update'){
-          confirmUpdateThen(function(){
+          confirmUpdateThen(function(keep){
+            data.keepExistingQr = !!keep;
+            State.keepExistingQr = !!keep;
+
             $('formMsg').innerHTML = showBox('warn','更新中…','Updating…');
             callApi('api_reg_self_update_public', State.authQrPayload, data).then(handleResult).catch(function(err){
               var msg = (err && err.message) ? err.message : String(err||'');
               $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+              State.submitting = false;
+              if(btn) btn.disabled = false;
             });
           });
           return;
@@ -784,17 +925,22 @@
         }).then(function(r){
           if(!r || !r.ok){
             $('formMsg').innerHTML = showServerErr(r);
+            State.submitting = false;
+            if(btn) btn.disabled = false;
             return;
           }
           var list = r.results || [];
           if(list.length){
             showCandidatesModal(list, data);
+            // keep submitting true until modal action; if user closes modal we reset there
           } else {
             doCreate(data);
           }
         }).catch(function(err){
           var msg = (err && err.message) ? err.message : String(err||'');
           $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+          State.submitting = false;
+          if(btn) btn.disabled = false;
         });
       };
     }
@@ -811,6 +957,7 @@
         nameZh: $('nameZh').value.trim(),
         nameEn: $('nameEn').value.trim(),
         preferredName: $('preferredName').value.trim(),
+        referredBy: $('referredBy') ? $('referredBy').value.trim() : '',
 
         email: $('email').value.trim(),
         optInEmail: $('optInEmail').checked,
@@ -868,25 +1015,54 @@
       return { ok:true };
     }
 
+    /* ============================================================
+     * PATCH_BOUNDARY: REG2_KEEPQR_CONFIRM_BEGIN
+     * Confirm update modal with "keep existing QR" option.
+     * ============================================================ */
     function confirmUpdateThen(onConfirm){
       var modal = openModal(
         '<div class="big">確認更改？ / Confirm changes?</div>'+
         '<div class="msgBox warn" style="margin-top:10px;">'+
-          '<div class="big warn">⚠️ 舊 QR 會即時失效</div>'+
-          '<div style="margin-top:4px;font-size:16px;">Old QR becomes invalid immediately.</div>'+
+          '<div class="big warn">⚠️ 提示 / Reminder</div>'+
           '<div class="small" style="margin-top:6px;">'+
-            '更新後只可使用新 QR（簽到及事奉）。<br/>'+
-            'After update, you must use the NEW QR for check-in and service.'+
+            '如你覺得 QR 沒有外洩／遺失／被轉發，可選擇保留現有 QR（不更換）。<br/>'+
+            'If your QR is not lost/leaked/shared, you may keep the existing QR (no change).'+
           '</div>'+
         '</div>'+
+
+        '<div style="margin-top:10px;display:flex;gap:10px;align-items:center;">'+
+          '<input id="chkKeepQr" type="checkbox" style="width:auto;transform:scale(1.1);" />'+
+          '<div style="font-weight:950;">保留現有 QR（不更換） / Keep existing QR (do not change)</div>'+
+        '</div>'+
+
+        '<div class="msgBox warn" style="margin-top:10px;">'+
+          '<div class="small">'+
+            '如你懷疑 QR 已外洩／遺失／被轉發，請不要勾選（系統會重新發出新 QR，舊 QR 會失效）。<br/>'+
+            'If you suspect leakage/loss/sharing, do NOT tick (a NEW QR will be issued and old QR becomes invalid).'+
+          '</div>'+
+        '</div>'+
+
         '<div class="miniBtnRow" style="margin-top:12px;">'+
           '<button id="btnGo" class="primary" type="button">✅ 確認 / Confirm</button>'+
           '<button id="btnCancel" class="danger" type="button">取消 / Cancel</button>'+
         '</div>'
       );
-      modal.querySelector('#btnCancel').onclick = function(){ closeModal(modal); };
-      modal.querySelector('#btnGo').onclick = function(){ closeModal(modal); onConfirm(); };
+
+      modal.querySelector('#btnCancel').onclick = function(){
+        closeModal(modal);
+        State.submitting = false;
+        try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
+      };
+      modal.querySelector('#btnGo').onclick = function(){
+        var keep = !!modal.querySelector('#chkKeepQr').checked;
+        closeModal(modal);
+        State.keepExistingQr = keep;
+        onConfirm(keep);
+      };
     }
+    /* ============================================================
+     * PATCH_BOUNDARY: REG2_KEEPQR_CONFIRM_END
+     * ============================================================ */
 
     function showCandidatesModal(list, data){
       var rows = list.map(function(c){
@@ -912,7 +1088,7 @@
 
       var modal = openModal(
         '<div class="big">可能已有記錄 / Possible match</div>'+
-        '<div class="small">如是同一人，請選擇「Same person」以覆寫資料並重新發出新 QR。</div>'+
+        '<div class="small">如是同一人，請選擇「Same person」以覆寫資料並（如需要）重新發出新 QR。</div>'+
         rows+
         '<div class="divider"></div>'+
         '<div class="miniBtnRow">'+
@@ -921,19 +1097,31 @@
         '</div>'
       );
 
-      modal.querySelector('#btnBack').onclick = function(){ closeModal(modal); $('formMsg').innerHTML=''; };
-      modal.querySelector('#btnNone').onclick = function(){ closeModal(modal); doCreate(data); };
+      modal.querySelector('#btnBack').onclick = function(){
+        closeModal(modal);
+        $('formMsg').innerHTML='';
+        State.submitting = false;
+        try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
+      };
+      modal.querySelector('#btnNone').onclick = function(){
+        closeModal(modal);
+        doCreate(data);
+      };
 
       Array.prototype.slice.call(modal.querySelectorAll('button[data-use]')).forEach(function(btn){
         btn.onclick = function(){
           var id = btn.getAttribute('data-use');
           closeModal(modal);
 
-          confirmUpdateThen(function(){
+          confirmUpdateThen(function(keep){
+            data.keepExistingQr = !!keep;
             $('formMsg').innerHTML = showBox('warn','更新中…','Updating…');
+
             callApi('api_reg_update_by_id_public', id, data).then(handleResult).catch(function(err){
               var msg = (err && err.message) ? err.message : String(err||'');
               $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+              State.submitting = false;
+              try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
             });
           });
         };
@@ -945,16 +1133,22 @@
       callApi('api_reg_create_member_public', data).then(handleResult).catch(function(err){
         var msg = (err && err.message) ? err.message : String(err||'');
         $('formMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        State.submitting = false;
+        try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
       });
     }
 
     function handleResult(res){
       if(!res || !res.ok){
         $('formMsg').innerHTML = showServerErr(res);
+        State.submitting = false;
+        try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
         return;
       }
       State.lastResult = res;
       State.view = 'success';
+      State.submitting = false;
+      try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
       render();
     }
 
