@@ -166,7 +166,8 @@
       // Manual UI state
       manualLastQuery:'',
       manualSelectedId:null,
-      manualLocked:false
+      manualLocked:false,
+      servingOpenGroup:null
     };
 
     var STABLE_REQUIRED_COUNT = 2;
@@ -186,6 +187,26 @@
       s = String(s || '');
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
               .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    var SERVING_GROUP_LABELS = {
+      MEDIA: 'Media — Media Master / 影像大師',
+      WORSHIP: 'Worship — Worship Alliance / 敬拜聯盟',
+      LOGISTIC: 'Logistic — Logistic Specialist / 後勤特工',
+      SUPPORT: 'Support — Divine Supporter / 聖工支援隊',
+      FINANCE: 'Finance — Finance Dept / 財務公司'
+    };
+
+    function getServingGroupLabel_(group){
+      var key = String(group || '').trim().toUpperCase();
+      return SERVING_GROUP_LABELS[key] || key;
+    }
+    function isServingNaValue_(value){
+      var v = String(value || '').trim().toUpperCase();
+      return (v === 'N/A' || v === 'NA');
+    }
+    function isServingNaRow_(row){
+      return isServingNaValue_(row.position) || isServingNaValue_(row.slot) || isServingNaValue_(row.memberId);
     }
 
     function showBox(targetId, kind, titleZh, titleEn, detailHtml){
@@ -670,6 +691,7 @@
           '<div class="big">📊 即時情況 / Live</div>'+
           '<div class="small">英國時間 / UK time: <span class="pill" id="liveClock">--:--:--</span></div>'+
           '<div id="rtBox" class="card" style="margin-top:10px;"></div>'+
+          '<div id="rtServingBox" class="card" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnRtRefresh" class="primary">🔄 更新 / Refresh</button>'+
             '<button id="btnToggleNames" class="alt">👥 名單 / Names</button>'+
@@ -770,10 +792,10 @@
         body =
           flash+
           approverCard + targetCard +
-          '<div class="small" style="margin-top:10px;">選擇授權類別：TEMP（2日）或 HELPER（7日）。<br/>Choose TEMP (2 days) or HELPER (7 days).</div>'+
+          '<div class="small" style="margin-top:10px;">選擇授權類別：TEMP（2日）或 HELPER（31日，需於管理員平台處理）。<br/>Choose TEMP (2 days) or HELPER (31 days, Admin portal only).</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnRoleTemp" class="primary">⏳ TEMP（2日）</button>'+
-            '<button id="btnRoleHelper" class="alt">🛟 HELPER（7日）</button>'+
+            '<button id="btnRoleHelper" class="alt">🛟 HELPER（31日）</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnAuthRestartAll" class="danger">🔁 重新開始 / Restart</button>'+
@@ -781,7 +803,7 @@
           '<div id="authMsg"></div>';
       } else {
         var role = App.authRole;
-        var expTxt = (role==='TEMP') ? '2 days' : '7 days';
+        var expTxt = (role==='TEMP') ? '2 days' : '31 days';
         body =
           flash+
           approverCard + targetCard +
@@ -809,7 +831,7 @@
     function openSelfCheckModal(){
       var o = openModal(
         '<div class="big">🩺 自我檢查 / Self-check</div>'+
-        '<div class="small">此功能只檢查後端（Google Apps Script + Sheet）是否正常。<br/>This checks backend (Apps Script + Sheets). It cannot detect broken UI buttons.</div>'+
+        '<div class="small">Back-end checks only. Some forward functions may still be problematic. Feedback to Media team appreciated.</div>'+
         '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
         '<div class="miniBtnRow">'+
           '<button id="btnScRun" class="primary">▶️ 開始檢查 / Run checks</button>'+
@@ -1337,7 +1359,7 @@
 
           var last = res.lastSignIn
             ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div class="msgEn">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
-            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無記錄 / No check-ins yet</div></div>';
+            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">OK sign, please welcome and check in the first person</div></div>';
 
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });
@@ -1377,6 +1399,8 @@
             '</div>' +
             last +
             newFriendsHtml;
+
+          renderServing(res);
 
           if(App.liveNamesOpen) renderNames();
         }).catch(function(){
@@ -1478,6 +1502,98 @@
         };
 
         renderList();
+      }
+
+      function renderServing(res){
+        var box = $('rtServingBox');
+        if(!box) return;
+
+        var list = (res && res.servingToday) ? res.servingToday : [];
+        if(!list.length){
+          box.innerHTML =
+            '<div class="big">🧩 事奉 / Serving today</div>' +
+            '<div class="msgBox warn" style="margin-top:10px;">' +
+              '<div class="big warn">暫無記錄 / No serving records</div>' +
+            '</div>';
+          return;
+        }
+
+        var groupKeys = Object.keys(SERVING_GROUP_LABELS);
+        var openGroup = App.servingOpenGroup;
+        var summaryHtml =
+          '<div class="chipRow" style="margin-top:8px;">' +
+          groupKeys.map(function(key){
+            var rows = list.filter(function(r){ return String(r.group||'').toUpperCase() === key; });
+            var applicable = rows.filter(function(r){ return !isServingNaRow_(r); });
+            var allOk = applicable.every(function(r){ return !!r.checkedIn; });
+            var cls = allOk ? 'good' : 'bad';
+            var icon = allOk ? '✅' : '❌';
+            var isOpen = (openGroup === key);
+            var openMark = isOpen ? ' ▲' : ' ▼';
+            return '<span class="chip '+cls+' servingGroupChip" data-group="'+key+'">'+icon+' '+key+openMark+'</span>';
+          }).join('') +
+          '</div>';
+
+        var expandedHtml = '';
+        if (openGroup){
+          var groupRows = list.filter(function(r){ return String(r.group||'').toUpperCase() === openGroup; });
+          var pending = groupRows.filter(function(r){ return !isServingNaRow_(r) && !r.checkedIn; });
+          if (!pending.length){
+            expandedHtml =
+              '<div class="msgBox ok" style="margin-top:10px;">'+
+                '<div class="big ok">✅ '+escapeHtml(openGroup)+' 全部已簽到 / All checked-in</div>'+
+              '</div>';
+          } else {
+            expandedHtml =
+              '<div class="msgBox warn" style="margin-top:10px;">'+
+                '<div class="big warn">❌ '+escapeHtml(openGroup)+' 未簽到 / Not yet</div>'+
+                '<div class="listWrap" style="margin-top:10px;">'+
+                  pending.map(function(row){
+                    var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
+                    var roleLine = [row.position, row.slot].filter(Boolean).join(' · ');
+                    return ''+
+                      '<div class="nameItem">'+
+                        '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
+                        '<div class="en">'+escapeHtml(roleLine)+'</div>'+
+                      '</div>';
+                  }).join('')+
+                '</div>'+
+              '</div>';
+          }
+        }
+
+        box.innerHTML =
+          '<div class="big">🧩 事奉 / Serving today</div>' +
+          '<div class="small">共 ' + list.length + ' 位 / Total ' + list.length + '</div>' +
+          summaryHtml +
+          expandedHtml +
+          '<div class="listWrap" style="margin-top:10px;">' +
+            list.map(function(row){
+              var groupLabel = getServingGroupLabel_(row.group);
+              var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
+              var roleLine = [groupLabel, row.position, row.slot].filter(Boolean).join(' · ');
+              var isNa = isServingNaRow_(row);
+              var statusChip = isNa
+                ? '<span class="chip warn">N/A</span>'
+                : (row.checkedIn
+                  ? '<span class="chip good">✅ 已簽到 / Checked-in</span>'
+                  : '<span class="chip bad">❌ 未簽到 / Not yet</span>');
+              return ''+
+                '<div class="nameItem">'+
+                  '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
+                  '<div class="en">'+escapeHtml(roleLine)+'</div>'+
+                  '<div class="chipRow" style="margin-top:8px;">'+statusChip+'</div>'+
+                '</div>';
+            }).join('') +
+          '</div>';
+
+        Array.prototype.slice.call(box.querySelectorAll('.servingGroupChip')).forEach(function(el){
+          el.onclick = function(){
+            var group = String(el.getAttribute('data-group') || '').trim().toUpperCase();
+            App.servingOpenGroup = (App.servingOpenGroup === group) ? null : group;
+            renderServing(res);
+          };
+        });
       }
     }
 
