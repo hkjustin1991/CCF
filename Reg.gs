@@ -1,36 +1,40 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-01-24.reg1
+ * v2026-01-31.reg2
  *
- * SOURCE OF TRUTH: Reg.gs regenerated from the user's pasted baseline
- * (v2026-01-23.regGreet) with minimal, explicitly requested changes only.
+ * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
  * ============================================================
- * CHANGELOG (2026-01-24.reg1)
+ * CHANGELOG (2026-01-31.reg2)
  * ============================================================
- * [1] FIX: regComputeChangedFields_ was missing (hard runtime error).
- *     - Implemented with stable, conservative field comparisons.
+ * [1] Keep existing QR (no key rotation) on update:
+ *     - Accepts input.keepExistingQr (boolean) for:
+ *         - api_reg_self_update_public()
+ *         - api_reg_update_by_id_public()
+ *     - If true: does NOT change Key; qrPayload uses existing Key.
+ *     - Response includes keepExistingQr.
  *
- * [2] CLEANUP (requested): removed duplicate definitions of:
- *     - regEnsureRegActivity_
- *     - regLogActivity_
- *     - regLogBlock_
- *     Keeping one canonical set only (same behaviour).
+ * [2] Double-submit protection (server-side best effort):
+ *     - Dedup cache for CREATE by fingerprint (deviceId + identity fields) for 30s.
+ *     - Returns same successful CREATE result if repeated within TTL.
  *
- * [3] CACHE: regClearMembersIndexCache_ now clears BOTH:
- *     - membersIndex_staff_v1  (Staff Portal cache in Code.gs)
- *     - membersIndex_v6        (legacy key referenced previously)
+ * [3] New Members optional field: ReferredBy
+ *     - Added to REG_EXTRA_HEADERS and read/write paths.
  *
- * [4] SAFETY (minimal, defensive):
- *     - Treat ADMIN as staff-like for public portal blocking & candidate flag.
- *       (Prevents public overwrite of ADMIN records.)
+ * [4] Self attendance endpoint (self-only):
+ *     - api_reg_self_attendance_public(qrPayload, fromYmdOptional, toYmdOptional)
+ *     - Default window: last ~183 days ending today (UK).
+ *     - Denominator start = max(Member_Since, windowStart).
+ *
+ * [5] Safety: preserve ADMIN status on self-update
+ *     - If old status is ADMIN, do not downgrade to STAFF.
  *
  * PATCH BOUNDARIES:
- *   - Search for "PATCH_BOUNDARY:" to locate changes for future patching.
+ *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-01-24.reg1';
+const REG_VERSION = '2026-01-31.reg2';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -40,7 +44,10 @@ const REG_WA_LINK = 'https://chat.whatsapp.com/G08XRgAsM520nexCGHW9q4';
 const REG_QR_BASE = 'https://quickchart.io/qr';
 
 const REG_EXTRA_HEADERS = [
-  'Member_Since','PreferredName','HasCar','VRM','VRM2','IsMinor','ParentEmail'
+  'Member_Since','PreferredName','HasCar','VRM','VRM2','IsMinor','ParentEmail',
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_BEGIN */
+  'ReferredBy'
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_END */
 ];
 
 const REG_ACTIVITY_SHEET = 'Reg_Activity';
@@ -155,6 +162,49 @@ function regProjectCandidate_(r, score, nameHit){
 }
 
 /******** Create / Update / Self Update / Self Lookup ********/
+
+/* ============================================================
+ * PATCH_BOUNDARY: REG2_CREATE_DEDUP_BEGIN
+ * Prevent accidental double-create (best-effort cache TTL).
+ * ============================================================ */
+function regCreateDedupKey_(inObj){
+  const dev = String((inObj && inObj.deviceId) || '').trim();
+
+  const email = regNormEmail_(String((inObj && inObj.email) || ''));
+
+  // Prefer explicit country-code fields if provided, else use inObj.mobile
+  let mobile = '';
+  const cc = String((inObj && inObj.phoneCc) || '').replace(/\D/g,'');
+  const nat = String((inObj && inObj.phoneNat) || '').replace(/\D/g,'');
+  if (cc && nat) mobile = '+' + cc + nat;
+  if (!mobile) mobile = regNormMobile_(String((inObj && inObj.mobile) || ''));
+
+  const nameZh = regNormName_(String((inObj && inObj.nameZh) || ''));
+  const nameEn = regNormName_(String((inObj && inObj.nameEn) || ''));
+
+  const seed = [dev, email, mobile, nameZh, nameEn].join('|');
+  return 'regCreateDedup_' + Utilities.base64EncodeWebSafe(seed).slice(0, 180);
+}
+
+function regCreateDedupGet_(key){
+  try{
+    const raw = CacheService.getScriptCache().get(String(key||''));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  }catch(e){
+    return null;
+  }
+}
+
+function regCreateDedupPut_(key, payloadObj){
+  try{
+    CacheService.getScriptCache().put(String(key||''), JSON.stringify(payloadObj||{}), 30);
+  }catch(e){}
+}
+/* ============================================================
+ * PATCH_BOUNDARY: REG2_CREATE_DEDUP_END
+ * ============================================================ */
+
 function api_reg_create_member_public(input){
   const inObj = input || {};
   const deviceId = String(inObj.deviceId||'');
@@ -167,6 +217,14 @@ function api_reg_create_member_public(input){
       const res = api_reg_update_by_id_public(existingId, inObj);
       regLogActivity_('REG_OVERWRITE_BY_EXISTINGID', existingId, res.ok ? 'OK' : (res.code||'E500'), { deviceId, ua });
       return res;
+    }
+
+    // server-side double-create protection
+    const dedupKey = regCreateDedupKey_(inObj);
+    const prior = regCreateDedupGet_(dedupKey);
+    if (prior && prior.ok && prior.mode === 'CREATE') {
+      regLogActivity_('REG_CREATE_DEDUP_HIT', prior.memberId || '', 'OK', { deviceId, ua });
+      return prior;
     }
 
     const v = regValidateInput_(inObj);
@@ -229,7 +287,7 @@ function api_reg_create_member_public(input){
         deviceId, ua
       });
 
-      return {
+      const out = {
         ok:true,
         mode:'CREATE',
         memberId: alloc.id,
@@ -238,6 +296,11 @@ function api_reg_create_member_public(input){
         emailMeta: emailMeta,
         greet: { zh: g.greetZh, en: g.greetEn }
       };
+
+      // store in dedup cache (best effort)
+      regCreateDedupPut_(dedupKey, out);
+
+      return out;
 
     } finally {
       lock.releaseLock();
@@ -414,6 +477,9 @@ function api_reg_self_lookup_public(qrPayload){
         vrm2: regNormalizeVrm_(r.VRM2||''),
         isMinor: String(r.IsMinor||'').trim().toUpperCase() === 'YES',
         parentEmail: String(r.ParentEmail||'').trim(),
+        /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_BEGIN */
+        referredBy: String(r.ReferredBy||'').trim(),
+        /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_END */
         greet: { zh: g.greetZh, en: g.greetEn }
       }
     };
@@ -422,12 +488,131 @@ function api_reg_self_lookup_public(qrPayload){
   }
 }
 
+/* ============================================================
+ * PATCH_BOUNDARY: REG2_SELF_ATTENDANCE_BEGIN
+ * Self attendance endpoint (self-only).
+ * ============================================================ */
+function api_reg_self_attendance_public(qrPayload, fromYmdOptional, toYmdOptional){
+  try{
+    const parsed = regParseQr_(qrPayload);
+    if (!parsed.ok) return parsed;
+
+    const ms = regGetMembersScan_({ ensureExtras:true });
+    const rowNumber = regFindRowByIdFromScan_(ms, parsed.id);
+    if (!rowNumber) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+    const r = regReadRow_(ms, rowNumber);
+    const st = regStatus_(r.Status);
+    if (st === 'DISABLED') return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
+
+    if (String(r.Key||'').trim() !== parsed.key) return { ok:false, code:'E418', zh:'QR 已失效或不相符', en:'QR invalid/mismatch.' };
+
+    // Date range (default last ~183 days)
+    const todayUk = Utilities.formatDate(regNow_(), 'Europe/London', 'yyyy-MM-dd');
+    const today = regParseYmdUtc_(todayUk) || new Date();
+    let from = null;
+    let to = null;
+
+    if (fromYmdOptional && toYmdOptional){
+      from = regParseYmdUtc_(String(fromYmdOptional||''));
+      to = regParseYmdUtc_(String(toYmdOptional||''));
+      if (!from || !to){
+        return { ok:false, code:'E422', zh:'日期格式錯誤（YYYY-MM-DD）', en:'Invalid date format (YYYY-MM-DD).' };
+      }
+      if (to.getTime() < from.getTime()){
+        return { ok:false, code:'E423', zh:'結束日期不可早於開始日期', en:'End date cannot be before start date.' };
+      }
+    } else {
+      to = today;
+      from = new Date(to.getTime() - (183*24*60*60*1000));
+    }
+
+    // Denominator start = max(Member_Since, from)
+    let denomFrom = from;
+    const joinRaw = r.Member_Since || '';
+    const joinDt = regSafeToDate_(joinRaw);
+    if (joinDt){
+      const joinUtc = new Date(Date.UTC(joinDt.getFullYear(), joinDt.getMonth(), joinDt.getDate()));
+      if (joinUtc.getTime() > denomFrom.getTime()) denomFrom = joinUtc;
+    }
+
+    const check = regGetCheckinsDataMinimal_();
+    if (!check.ok) return check;
+
+    const serviceSet = new Set();
+    const attendedSet = new Set();
+
+    for (const row of check.rows){
+      const ev = row.eventKey;
+      if (!regIsSundayServiceKey_(ev)) continue;
+      const d = regEventDateFromKeyUtc_(ev);
+      if (!d) continue;
+      if (d.getTime() < denomFrom.getTime() || d.getTime() > to.getTime()) continue;
+
+      serviceSet.add(ev);
+      if (row.memberId === parsed.id) attendedSet.add(ev);
+    }
+
+    const attendedEventKeys = Array.from(attendedSet).sort((a,b)=>{
+      const da = regEventDateFromKeyUtc_(a); const db = regEventDateFromKeyUtc_(b);
+      if (da && db) return db.getTime() - da.getTime(); // desc
+      return String(b).localeCompare(String(a));
+    });
+
+    const attended = attendedEventKeys.length;
+    const total = serviceSet.size;
+    const percent = (total > 0) ? Math.round((attended/total)*1000)/10 : 0;
+
+    return {
+      ok:true,
+      range:{
+        from: regFmtYmdUtc_(denomFrom),
+        to: regFmtYmdUtc_(to)
+      },
+      member:{
+        id: r.ID,
+        nameZh: String(r.NameZh||'').trim(),
+        nameEn: String(r.NameEn||'').trim(),
+        preferredName: String(r.PreferredName||'').trim(),
+        memberSince: joinDt ? Utilities.formatDate(joinDt, 'Europe/London', 'yyyy-MM-dd') : ''
+      },
+      stats:{
+        attended: attended,
+        total: total,
+        percent: percent,
+        denomStart: regFmtYmdUtc_(denomFrom)
+      },
+      attendance:{
+        attendedEventKeys: attendedEventKeys
+      }
+    };
+
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+/* ============================================================
+ * PATCH_BOUNDARY: REG2_SELF_ATTENDANCE_END
+ * ============================================================ */
+
 /******** Update apply ********/
 function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   const deviceId = String(inObj.deviceId||'');
   const ua = String(inObj.ua||'');
 
   const oldRow = regReadRow_(ms, rowNumber);
+
+  /* PATCH_BOUNDARY: REG2_KEEP_EXISTING_QR_BEGIN */
+  const keepExistingQr = !!(inObj && inObj.keepExistingQr);
+  const oldKey = String(oldRow.Key || '').trim();
+  let keyToUse = oldKey;
+  if (!keepExistingQr) {
+    const newKey = regGenerateUniqueKeyFromScan_(ms);
+    regWriteCell_(ms, rowNumber, 'Key', newKey);
+    keyToUse = newKey;
+  }
+  /* PATCH_BOUNDARY: REG2_KEEP_EXISTING_QR_END */
+
   const oldEmail = String(oldRow.Email||'').trim();
   const newEmail = String(data.email||'').trim();
   const emailChanged = !!(regNormEmail_(oldEmail) && regNormEmail_(newEmail) && regNormEmail_(oldEmail) !== regNormEmail_(newEmail));
@@ -436,9 +621,7 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   const changedFields = regComputeChangedFields_(oldRow, data);
   /* PATCH_BOUNDARY: REG1_CHANGEDFIELDS_END */
 
-  const newKey = regGenerateUniqueKeyFromScan_(ms);
-  regWriteCell_(ms, rowNumber, 'Key', newKey);
-
+  // Apply updates
   regWriteCell_(ms, rowNumber, 'NameZh', data.nameZh);
   regWriteCell_(ms, rowNumber, 'NameEn', data.nameEn);
   regWriteCell_(ms, rowNumber, 'PreferredName', data.preferredName);
@@ -456,11 +639,19 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   regWriteCell_(ms, rowNumber, 'IsMinor', data.isMinor ? 'YES' : 'NO');
   regWriteCell_(ms, rowNumber, 'ParentEmail', data.parentEmail || '');
 
-  regWriteCell_(ms, rowNumber, 'Status', isStaff ? 'STAFF' : 'ACTIVE');
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_WRITE_BEGIN */
+  regWriteCell_(ms, rowNumber, 'ReferredBy', data.referredBy || '');
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_WRITE_END */
+
+  /* PATCH_BOUNDARY: REG2_PRESERVE_ADMIN_STATUS_BEGIN */
+  const stOldNorm = String(stOld||'').toUpperCase();
+  const newStatusToWrite = (stOldNorm === 'ADMIN') ? 'ADMIN' : (isStaff ? 'STAFF' : 'ACTIVE');
+  regWriteCell_(ms, rowNumber, 'Status', newStatusToWrite);
+  /* PATCH_BOUNDARY: REG2_PRESERVE_ADMIN_STATUS_END */
 
   regClearMembersIndexCache_();
 
-  const payload = memberId + '|' + newKey;
+  const payload = memberId + '|' + keyToUse;
 
   const includeWhatsApp = (!isStaff && String(stOld||'').toUpperCase() === 'PROVISIONAL');
 
@@ -490,12 +681,13 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
 
   regLogActivity_('REG_UPDATE', memberId, 'OK', {
     oldStatus: String(stOld||''),
-    newStatus: isStaff ? 'STAFF' : 'ACTIVE',
+    newStatus: newStatusToWrite,
     includeWhatsApp: includeWhatsApp ? 'YES' : 'NO',
     emailOptIn: emailMeta.optInEmail ? 'YES' : 'NO',
     emailProvided: emailMeta.emailProvided ? 'YES' : 'NO',
     emailSent: emailRes.sentToNew ? 'YES' : 'NO',
     reason: emailRes.reason || '',
+    keepExistingQr: keepExistingQr ? 'YES' : 'NO',
     deviceId, ua
   });
 
@@ -507,13 +699,14 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
     changedFields,
     email: emailRes,
     emailMeta: emailMeta,
-    greet: { zh: g.greetZh, en: g.greetEn }
+    greet: { zh: g.greetZh, en: g.greetEn },
+    keepExistingQr: keepExistingQr
   };
 }
 
 /* ============================================================
  * PATCH_BOUNDARY: REG1_COMPUTE_CHANGED_FIELDS_IMPLEMENTATION_BEGIN
- * Missing helper fix: regComputeChangedFields_
+ * regComputeChangedFields_ (extended minimally for ReferredBy)
  * ============================================================ */
 function regComputeChangedFields_(oldRow, data){
   const out = [];
@@ -528,9 +721,7 @@ function regComputeChangedFields_(oldRow, data){
     if (v === 'NO') return 'NO';
     return '';
   }
-  function normBoolToYesNo(b){ return b ? 'YES' : 'NO'; }
   function normOptInFromOld(optOutEmail){
-    // old stored as OptOutEmail: '' means opt-in, 'OPTOUT' means opted out
     return !regIsOptedOut_(optOutEmail);
   }
   function normVrm(x){ return regNormalizeVrm_(x); }
@@ -556,7 +747,6 @@ function regComputeChangedFields_(oldRow, data){
   const oldHasCar = normYesNo(oldRow.HasCar) === 'YES';
   if (!!oldHasCar !== !!data.hasCar) add('是否有車/Has car');
 
-  // VRM fields are meaningful only if hasCar is YES (store blank otherwise)
   const oldVrm1 = oldHasCar ? normVrm(oldRow.VRM) : '';
   const oldVrm2 = oldHasCar ? normVrm(oldRow.VRM2) : '';
   const newVrm1 = data.hasCar ? normVrm(data.vrm) : '';
@@ -571,6 +761,12 @@ function regComputeChangedFields_(oldRow, data){
   const oldParent = normStr(oldRow.ParentEmail);
   const newParent = normStr(data.parentEmail || '');
   if (!eqCI(oldParent, newParent)) add('家長電郵/Parent email');
+
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_CHANGEDFIELDS_BEGIN */
+  const oldRef = normStr(oldRow.ReferredBy);
+  const newRef = normStr(data.referredBy || '');
+  if (!eqCI(oldRef, newRef)) add('介紹人/Referred by');
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_CHANGEDFIELDS_END */
 
   return out;
 }
@@ -600,6 +796,10 @@ function regValidateInput_(inObj){
 
   const isMinor = !!inObj.isMinor;
   const parentEmail = String(inObj.parentEmail||'').trim();
+
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_VALIDATE_BEGIN */
+  const referredBy = String(inObj.referredBy||'').trim();
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_VALIDATE_END */
 
   if (email && parentEmail && regNormEmail_(email) === regNormEmail_(parentEmail)){
     return { ok:false, code:'E461', zh:'家長電郵與本人電郵相同，請刪除其中一個或改用不同電郵。', en:'Parent email equals member email. Remove one or use a different email.' };
@@ -632,7 +832,10 @@ function regValidateInput_(inObj){
       vrm: hasCar ? vrm : '',
       vrm2: hasCar ? vrm2 : '',
       isMinor: !!isMinor,
-      parentEmail: parentEmail
+      parentEmail: parentEmail,
+      /* PATCH_BOUNDARY: REG2_REFERREDBY_DATA_BEGIN */
+      referredBy: referredBy
+      /* PATCH_BOUNDARY: REG2_REFERREDBY_DATA_END */
     }
   };
 }
@@ -748,7 +951,11 @@ function regRowObj_(col, row, rowNumber){
     VRM: String(g('VRM')||'').trim(),
     VRM2: String(g('VRM2')||'').trim(),
     IsMinor: String(g('IsMinor')||'').trim(),
-    ParentEmail: String(g('ParentEmail')||'').trim()
+    ParentEmail: String(g('ParentEmail')||'').trim(),
+    /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_BEGIN */
+    ReferredBy: String(g('ReferredBy')||'').trim(),
+    /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_END */
+    Member_Since: g('Member_Since')
   };
 }
 
@@ -864,6 +1071,10 @@ function regBuildAppendRow_(ms, obj){
 
   set('IsMinor', obj.isMinor ? 'YES' : 'NO');
   set('ParentEmail', obj.parentEmail || '');
+
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_APPEND_BEGIN */
+  set('ReferredBy', obj.referredBy || '');
+  /* PATCH_BOUNDARY: REG2_REFERREDBY_APPEND_END */
 
   return row;
 }
@@ -1152,6 +1363,7 @@ function regMaskEmail_(email){
   const stars = '*'.repeat(Math.max(3, local.length - head.length - tail.length));
   return head + stars + tail + '@' + dom;
 }
+
 function regMaskMobile_(mobile){
   const raw = String(mobile||'').trim();
   if (!raw) return '';
@@ -1163,6 +1375,7 @@ function regMaskMobile_(mobile){
   const plus = raw.startsWith('+') ? '+' : '';
   return plus + head + stars + tail;
 }
+
 function regMaskVrm_(vrm){
   const v = regNormalizeVrm_(vrm||'');
   if (!v) return '';
