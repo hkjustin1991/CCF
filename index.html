@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Staff Portal UI)
-   * UI VERSION: staff7-ui2-fixed
-   * For Code.gs: v2026-01-24.staff7
+   * UI VERSION: staff8-ui1 (restored full functions + self-check)
+   * For Code.gs: v2026-02-02.staff8
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -107,6 +107,12 @@
     .nameItem .zh{font-weight:950;}
     .nameItem .en{color:var(--muted);font-size:var(--fs-body);margin-top:4px;font-weight:700;}
 
+    .chipRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .chip{font-size:var(--fs-small);padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--muted)}
+    .chip.good{border-color:rgba(26,168,108,0.35);background:#edfff6;color:var(--good)}
+    .chip.bad{border-color:rgba(217,60,94,0.35);background:#fff1f4;color:var(--bad)}
+    .chip.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6;color:var(--warn)}
+
     @media (pointer: coarse){
       button{ min-height: 56px; }
     }
@@ -127,7 +133,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff7-ui2-fixed</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff8-ui1</span></div>
     </header>
 
     <main id="app"></main>
@@ -148,12 +154,19 @@
       debounceT:null, intervalId:null, clockTimer:null,
       liveNamesOpen:false,
       liveData:null,
+      liveNamesFilter:'',
       stable:{ value:null, count:0, firstTs:0 },
 
+      // Auth flow
       authApprover:null,
       authTarget:null,
       authRole:null,
-      authFlash:null
+      authFlash:null,
+
+      // Manual UI state
+      manualLastQuery:'',
+      manualSelectedId:null,
+      manualLocked:false
     };
 
     var STABLE_REQUIRED_COUNT = 2;
@@ -590,12 +603,13 @@
             '<button id="goCheckin" class="primary">✅ 簽到 / Check-in</button>'+
             '<button id="goRealtime" class="blue">📊 即時情況 / Live</button>'+
             '<button id="goVrm" class="blue">🚗 車牌搜尋 / Car reg</button>'+
-            (showAuth ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button>' : '<div></div>')+
+            (showAuth ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button>' : '<button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>')+
           '</div>'+
-          '<div class="divider"></div>'+
           '<div class="miniBtnRow">'+
+            (showAuth ? '<button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>' : '')+
             '<button id="btnLogout" class="danger">🚪 登出 / Logout</button>'+
           '</div>'+
+          '<div id="menuMsg"></div>'+
         '</div>';
     }
 
@@ -639,7 +653,7 @@
           '<div class="small">Name / 中文名 / English / Preferred name / Email / CCF ID</div>'+
           '<div id="manualPanel" class="card" style="margin-top:10px;">'+
             '<div class="label">搜尋 / Search</div>'+
-            '<input id="q" autocomplete="off" />'+
+            '<input id="q" autocomplete="off" placeholder="例如：CCF0002 / 陳大文 / David / email..." />'+
             '<div id="results" style="margin-top:10px;"></div>'+
           '</div>'+
           '<div id="confirmPanel" class="card hide" style="margin-top:10px;"></div>'+
@@ -671,7 +685,7 @@
           '<div class="big">🚗 車牌搜尋 / Car reg</div>'+
           '<div class="card" style="margin-top:10px;">'+
             '<div class="label">車牌 / Plate</div>'+
-            '<input id="vrmQ" autocomplete="off" />'+
+            '<input id="vrmQ" autocomplete="off" placeholder="例如：AB12CDE" />'+
             '<div id="vrmResults" style="margin-top:10px;"></div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
@@ -704,14 +718,18 @@
         : '';
 
       var targetCard = App.authTarget
-        ? ('<div class="msgBox warn">'+
-            '<div class="big warn">目標 / Target</div>'+
-            kvHtml([
-              {k:'CCF ID', v:App.authTarget.id||''},
-              {k:'姓名 / Name', v:(App.authTarget.nameZh+' '+App.authTarget.nameEn).trim()},
-              {k:'目前身份 / Current', v:App.authTarget.status||''}
-            ])+
-          '</div>')
+        ? (function(){
+            var exp = App.authTarget.roleExpires ? fmtIsoToUkYmdHm(App.authTarget.roleExpires) : '';
+            return '<div class="msgBox warn">'+
+              '<div class="big warn">目標 / Target</div>'+
+              kvHtml([
+                {k:'CCF ID', v:App.authTarget.id||''},
+                {k:'姓名 / Name', v:(App.authTarget.nameZh+' '+App.authTarget.nameEn).trim()},
+                {k:'目前身份 / Current', v:App.authTarget.status||''},
+                {k:'到期 / Expiry', v:(exp || '—')}
+              ])+
+            '</div>';
+          })()
         : '';
 
       var body = '';
@@ -787,6 +805,115 @@
         '<div class="card">'+body+'</div>';
     }
 
+    // ===== Self-check modal (discrete functions) =====
+    function openSelfCheckModal(){
+      var o = openModal(
+        '<div class="big">🩺 自我檢查 / Self-check</div>'+
+        '<div class="small">此功能只檢查後端（Google Apps Script + Sheet）是否正常。<br/>This checks backend (Apps Script + Sheets). It cannot detect broken UI buttons.</div>'+
+        '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
+        '<div class="miniBtnRow">'+
+          '<button id="btnScRun" class="primary">▶️ 開始檢查 / Run checks</button>'+
+          '<button id="btnScWrite" class="orange">✍️ 寫入測試 / Write test</button>'+
+          '<button id="btnScConfirm" class="orange">✅ 同工確認 / Staff confirm</button>'+
+          '<button id="btnScClose" class="danger">關閉 / Close</button>'+
+        '</div>'
+      );
+
+      function setBusy(msg){
+        var b = o.querySelector('#scBox');
+        b.innerHTML = '<div class="small">'+escapeHtml(msg||'Loading...')+'</div>';
+      }
+
+      function renderChecks(res){
+        var b = o.querySelector('#scBox');
+        if(!res || !res.ok){
+          b.innerHTML = '';
+          showErrInto(b, res || {code:'E500', zh:'檢查失敗', en:'Self-check failed'});
+          return;
+        }
+        var checks = res.checks || [];
+        var chips = checks.map(function(c){
+          return '<span class="chip '+(c.ok?'good':'bad')+'">'+(c.ok?'✅ ':'❌ ')+escapeHtml(c.zh)+'</span>';
+        }).join('');
+        var detail = checks.map(function(c){
+          return '<div class="nameItem">'+
+                   '<div class="zh">'+(c.ok?'✅ ':'❌ ')+escapeHtml(c.zh)+'</div>'+
+                   '<div class="en">'+escapeHtml(c.en)+'</div>'+
+                   (c.detail ? '<div class="small" style="margin-top:6px;">'+escapeHtml(c.detail)+'</div>' : '')+
+                 '</div>';
+        }).join('');
+        b.innerHTML =
+          '<div class="small">Event: <span class="pill">'+escapeHtml(res.eventKey||'')+'</span> · '+escapeHtml(fmtIsoToUkYmdHm(res.timeIso||''))+'</div>'+
+          '<div class="chipRow">'+chips+'</div>'+
+          '<div class="divider"></div>'+
+          '<div class="listWrap">'+detail+'</div>';
+      }
+
+      function showErrInto(containerEl, res){
+        var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
+        var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+        containerEl.innerHTML =
+          '<div class="msgBox err">'+
+            '<div class="big err">'+escapeHtml((res && res.zh) || '發生錯誤')+code+'</div>'+
+            '<div class="msgEn">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            (detail ? ('<div style="margin-top:10px;">'+detail+'</div>') : '')+
+          '</div>';
+      }
+
+      o.querySelector('#btnScClose').onclick = function(){ closeModal(o); };
+
+      o.querySelector('#btnScRun').onclick = function(){
+        setBusy('更新中… / Running…');
+        callApi('api_selfcheck_readonly', App.token).then(renderChecks).catch(function(){
+          var b = o.querySelector('#scBox');
+          showErrInto(b, {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      };
+
+      o.querySelector('#btnScWrite').onclick = function(){
+        setBusy('寫入測試中… / Write testing…');
+        callApi('api_selfcheck_write_test', App.token, getDeviceId(), getUA()).then(function(res){
+          var b = o.querySelector('#scBox');
+          if(res && res.ok){
+            b.innerHTML =
+              '<div class="msgBox ok">'+
+                '<div class="big ok">'+escapeHtml(res.zh||'完成')+'</div>'+
+                '<div class="msgEn">'+escapeHtml(res.en||'Done')+'</div>'+
+                '<div class="small" style="margin-top:8px;">Event: '+escapeHtml(res.eventKey||'')+'</div>'+
+              '</div>';
+          } else {
+            showErrInto(b, res || {code:'E500', zh:'寫入測試失敗', en:'Write test failed'});
+          }
+        }).catch(function(){
+          var b = o.querySelector('#scBox');
+          showErrInto(b, {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      };
+
+      o.querySelector('#btnScConfirm').onclick = function(){
+        setBusy('記錄中… / Logging…');
+        callApi('api_selfcheck_mark_completed', App.token, getDeviceId(), getUA()).then(function(res){
+          var b = o.querySelector('#scBox');
+          if(res && res.ok){
+            b.innerHTML =
+              '<div class="msgBox ok">'+
+                '<div class="big ok">'+escapeHtml(res.zh||'完成')+'</div>'+
+                '<div class="msgEn">'+escapeHtml(res.en||'Done')+'</div>'+
+                '<div class="small" style="margin-top:8px;">Event: '+escapeHtml(res.eventKey||'')+'</div>'+
+              '</div>';
+          } else {
+            showErrInto(b, res || {code:'E500', zh:'記錄失敗', en:'Log failed'});
+          }
+        }).catch(function(){
+          var b = o.querySelector('#scBox');
+          showErrInto(b, {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      };
+
+      // Auto-run once
+      o.querySelector('#btnScRun').click();
+    }
+
     // ===== Bindings =====
     function bindLogin(){
       $('btnStartLoginScan').onclick = function(){
@@ -841,6 +968,7 @@
       $('goRealtime').onclick = function(){ App.view='realtime'; render(); };
       $('goVrm').onclick = function(){ App.view='vrm'; render(); };
       if ($('goAuth')) $('goAuth').onclick = function(){ App.view='auth'; render(); };
+      if ($('goSelfcheck')) $('goSelfcheck').onclick = function(){ openSelfCheckModal(); };
       $('btnLogout').onclick = function(){ logout(); };
     }
 
@@ -851,301 +979,343 @@
     }
 
     function bindScanCheckin(){
-      var cam = $('scanCam');
-      var msg = 'scanMsg';
-      clear(msg);
+      clear('scanMsg');
 
-      $('backCheckinMenu').onclick = function(){ App.view='checkinMenu'; render(); };
-      $('btnRestartScan').onclick = function(){ startCheckinScan(); };
+      function renderCheckinResult(res){
+        var box = $('scanMsg');
+        if(!res || !res.ok){ box.innerHTML=''; showErr('scanMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+
+        var m = res.member || {};
+        var nameLine = ((m.nameZh||'') + ' ' + (m.nameEn||'')).trim() || m.id || '';
+        var pref = (m.preferredName||'').trim();
+        var chips = '<div class="chipRow">'+
+          '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
+          '<span class="chip">'+escapeHtml(res.status||'')+'</span>'+
+          (res.result==='OK' ? '<span class="chip good">✅ OK</span>' : '<span class="chip warn">⚠️ ALREADY</span>')+
+          (pref ? '<span class="chip warn">⭐ '+escapeHtml(pref)+'</span>' : '')+
+        '</div>';
+
+        if(res.result === 'ALREADY'){
+          var a = res.already || {};
+          var emailUi = a.emailUi || emailUiFromStatus(a.emailStatus||'');
+          box.innerHTML =
+            '<div class="msgBox warn">'+
+              '<div class="big warn">⚠️ 已簽到 / Already checked-in</div>'+
+              '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
+              chips+
+              kvHtml([
+                {k:'時間 / Time', v:(a.timeUk||'')},
+                {k:'方式 / Method', v:(a.method||'')},
+                {k:'Receipt', v:(a.receiptId||'')},
+                {k:'電郵 / Email', v:(emailUi.zh || '')}
+              ])+
+            '</div>' +
+            isMinorNoticeHtml(!!m.isMinor);
+          return;
+        }
+
+        var emailLine = (res.emailUi && (res.emailUi.zh || res.emailUi.en)) ? (res.emailUi.zh + ' ' + (res.emailToMasked ? ('('+res.emailToMasked+')') : '')) : '';
+        box.innerHTML =
+          '<div class="msgBox ok">'+
+            '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
+            '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
+            chips+
+            kvHtml([
+              {k:'時間 / Time', v:(res.timeUk||'')},
+              {k:'Receipt', v:(res.receiptId||'')},
+              {k:'電郵 / Email', v: emailLine }
+            ])+
+          '</div>' +
+          newFriendWelcomeHtml(m) +
+          isMinorNoticeHtml(!!m.isMinor);
+      }
+
+      function onCaptured(text){
+        clear('scanMsg');
+        $('scanMsg').innerHTML = '<div class="small">處理中… / Processing…</div>';
+        callApi('api_checkin_scan', App.token, text, null, getDeviceId(), getUA()).then(renderCheckinResult).catch(function(){
+          showErr('scanMsg', {code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.'});
+        });
+      }
+
+      function start(){
+        clear('scanMsg');
+        startScan('videoCheckin', onCaptured, 'scanMsg');
+      }
+
+      camBindSwitchButton_('btnSwitchCamCheckin', function(){
+        start();
+      });
 
       $('btnStopCam').onclick = function(){
         stopScan();
-        cam.classList.add('hide');
-        showBox(msg,'warn','⏹ 已停止相機','⏹ Camera stopped','<div class="small">可按「Scan again」重新開啟。</div>');
+        showBox('scanMsg', 'warn', '相機已停止', 'Camera stopped', '<div class="small">你可以按「再次掃描」重新開始。</div>');
       };
 
-      camBindSwitchButton_('btnSwitchCamCheckin', function(){ startCheckinScan(); });
-      startCheckinScan();
+      $('btnRestartScan').onclick = function(){
+        start();
+      };
 
-      function renderEmailLine(res, isAlready){
-        if(isAlready && res && res.already){
-          var stA = String(res.already.emailStatus||'').toUpperCase();
-          if(stA === 'SENT'){
-            return '<div class="msgBox warn" style="margin-top:10px;">'+
-                     '<div class="big warn">📧 上次簽到已發送電郵簽到證明。</div>'+
-                     '<div class="msgEn">📧 Email proof was sent at the last sign-in.</div>'+
-                   '</div>';
-          }
-          if(res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
-            return '<div class="msgBox warn" style="margin-top:10px;">'+
-                     '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>'+
-                     '<div class="msgEn">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
-                   '</div>';
-          }
-          var uiA = emailUiFromStatus(stA);
-          return '<div class="msgBox warn" style="margin-top:10px;">'+
-                   '<div class="big warn">'+escapeHtml(uiA.zh)+'</div>'+
-                   '<div class="msgEn">'+escapeHtml(uiA.en)+'</div>'+
-                 '</div>';
-        }
+      $('backCheckinMenu').onclick = function(){
+        stopScan();
+        App.view='checkinMenu'; render();
+      };
 
-        if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
-          return '<div class="msgBox warn" style="margin-top:10px;">'+
-                   '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>'+
-                   '<div class="msgEn">'+escapeHtml(res.emailUi.en || '')+'</div>'+
-                 '</div>';
-        }
-
-        var st = String((res && res.emailStatus) || '').toUpperCase();
-        var ui = emailUiFromStatus(st);
-        return '<div class="msgBox warn" style="margin-top:10px;">'+
-                 '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
-                 '<div class="msgEn">'+escapeHtml(ui.en)+'</div>'+
-               '</div>';
-      }
-
-      function startCheckinScan(){
-        clear(msg);
-        cam.classList.remove('hide');
-        startScan('videoCheckin', function(text){
-          stopScan();
-          cam.classList.add('hide');
-          showBox(msg,'warn','處理中…','Working…');
-          doCheckin(text);
-        }, msg);
-      }
-
-      function doCheckin(payload){
-        var deviceId = getDeviceId();
-        var ua = getUA();
-
-        callApi('api_checkin_scan', App.token, payload, null, deviceId, ua).then(function(res){
-          if(!res || !res.ok){
-            showErr(msg, res || {code:'E500', zh:'系統錯誤', en:'Error'});
-            return;
-          }
-
-          var isMinor = !!(res.member && res.member.isMinor);
-
-          if(res.result === 'ALREADY'){
-            var hb = res.already && res.already.handledBy
-              ? ((res.already.handledBy.nameZh||'')+' '+(res.already.handledBy.nameEn||'')).trim() || (res.already.handledBy.staffId||'')
-              : '';
-
-            showBox(msg,'ok','✅ 經已簽到','✅ Already checked in',
-              kvHtml([
-                {k:'CCF ID', v:res.member.id||''},
-                {k:'中文名 / Chinese', v:res.member.nameZh||''},
-                {k:'英文名 / English', v:res.member.nameEn||''},
-                {k:'上次時間 / Last', v:(res.already&&res.already.timeUk)||''},
-                {k:'經手 / By', v:hb},
-                {k:'Receipt', v:(res.already&&res.already.receiptId)||''}
-              ]) +
-              newFriendWelcomeHtml(res.member) +
-              isMinorNoticeHtml(isMinor) +
-              renderEmailLine(res, true)
-            );
-            return;
-          }
-
-          var handledBy = res.staff ? ((res.staff.nameZh||'')+' '+(res.staff.nameEn||'')).trim() : '';
-
-          showBox(msg,'ok','✅ 簽到成功','✅ Check-in successful',
-            kvHtml([
-              {k:'CCF ID', v:res.member.id||''},
-              {k:'中文名 / Chinese', v:res.member.nameZh||''},
-              {k:'英文名 / English', v:res.member.nameEn||''},
-              {k:'時間 / Time (UK)', v:res.timeUk||''},
-              {k:'經手 / By', v:handledBy},
-              {k:'Receipt', v:res.receiptId||''}
-            ]) +
-            newFriendWelcomeHtml(res.member) +
-            isMinorNoticeHtml(isMinor) +
-            renderEmailLine(res, false)
-          );
-        }).catch(function(){
-          showErr(msg, { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
-        });
-      }
+      start();
     }
 
     function bindManualCheckin(){
-      var q = $('q');
-      var results = $('results');
-      var manualMsg = 'manualMsg';
-      var manualPanel = $('manualPanel');
-      var confirmPanel = $('confirmPanel');
+      App.manualLocked = false;
+      App.manualSelectedId = null;
 
-      $('backCheckinMenu2').onclick = function(){ App.view='checkinMenu'; render(); };
-
-      q.addEventListener('input', function(){
-        clearTimeout(App.debounceT);
-        App.debounceT = setTimeout(function(){
-          var text = q.value.trim();
-          if(!text){ results.innerHTML=''; clear(manualMsg); return; }
-
-          var t = text.toUpperCase();
-          var looksCcf = /^CCF\d+$/i.test(t);
-          var fullCcf = /^CCF\d{4,}$/i.test(t);
-          if(looksCcf && !fullCcf){
-            results.innerHTML = '';
-            showBox(manualMsg,'warn',
-              '請輸入完整 CCF ID（例如 CCF0123）',
-              'Please enter full CCF ID (e.g. CCF0123)',
-              '<div class="small">部分 CCF ID 不會搜尋，以免誤選。<br/>Partial CCF IDs are blocked to avoid mistakes.</div>'
-            );
-            return;
-          }
-
-          doSearch(text);
-        }, 220);
-      });
-
-      function doSearch(text){
-        clear(manualMsg);
-        callApi('api_search_members', App.token, text).then(function(res){
-          if(!res || !res.ok){ showErr(manualMsg, res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-
-          if(!res.results || !res.results.length){
-            results.innerHTML = '<div class="msgBox warn"><div class="big warn">沒有結果 / No results</div></div>';
-            return;
-          }
-
-          results.innerHTML = res.results.map(function(r){
-            return ''+
-              '<div class="msgBox warn" style="margin-bottom:10px;">'+
-                kvHtml([
-                  {k:'CCF ID', v:r.id||''},
-                  {k:'中文名 / Chinese', v:r.nameZh||''},
-                  {k:'英文名 / English', v:r.nameEn||''}
-                ])+
-                '<div class="miniBtnRow">'+
-                  '<button class="primary" data-id="'+escapeHtml(r.id)+'">✅ 選擇 / Select</button>'+
-                '</div>'+
-              '</div>';
-          }).join('');
-
-          Array.prototype.slice.call(results.querySelectorAll('button[data-id]')).forEach(function(btn){
-            btn.onclick = function(){
-              var id = btn.getAttribute('data-id');
-              showConfirmOnly(id);
-            };
-          });
-
-        }).catch(function(){
-          showErr(manualMsg, { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
-        });
+      function unlockSearchUi(){
+        var mp = $('manualPanel');
+        if(mp) mp.classList.remove('hide');
+        var cp = $('confirmPanel');
+        if(cp) cp.classList.add('hide');
+        App.manualLocked = false;
+        App.manualSelectedId = null;
+        clear('manualMsg');
       }
 
-      function showConfirmOnly(id){
-        manualPanel.classList.add('hide');
-        confirmPanel.classList.remove('hide');
+      function lockToConfirmation(){
+        var mp = $('manualPanel');
+        if(mp) mp.classList.add('hide');
+        App.manualLocked = true;
+      }
 
-        confirmPanel.innerHTML = ''+
-          '<div class="big">確認簽到？ / Confirm check-in?</div>'+
-          kvHtml([{k:'CCF ID', v:id}])+
-          '<div class="miniBtnRow">'+
-            '<button id="btnConfirm" class="primary">✅ 確認 / Confirm</button>'+
-            '<button id="btnCancel" class="danger">取消 / Cancel</button>'+
+      $('backCheckinMenu2').onclick = function(){
+        App.view='checkinMenu'; render();
+      };
+
+      var qEl = $('q');
+      var resEl = $('results');
+      var confirmEl = $('confirmPanel');
+
+      function renderResults(list){
+        if(App.manualLocked) return; // keep clean: no scrolling + no results visible
+        list = list || [];
+        if(!list.length){
+          resEl.innerHTML =
+            '<div class="msgBox warn" style="margin-top:0;">'+
+              '<div class="big warn">沒有結果 / No results</div>'+
+              '<div class="small">請輸入更多關鍵字（例如 CCF0002 / 名字）。<br/>Please type more (e.g., CCF0002 / name).</div>'+
+            '</div>';
+          return;
+        }
+
+        resEl.innerHTML =
+          '<div class="small">結果 / Results: <span class="pill">'+list.length+'</span></div>'+
+          '<div class="listWrap" style="margin-top:10px;">'+
+            list.map(function(m){
+              var line = (String(m.nameZh||'') + ' ' + String(m.nameEn||'')).trim();
+              return ''+
+                '<div class="nameItem tap" data-mid="'+escapeHtml(m.id)+'">'+
+                  '<div class="zh">'+escapeHtml(m.id)+' · '+escapeHtml(line||'')+'</div>'+
+                '</div>';
+            }).join('')+
           '</div>';
 
-        $('btnCancel').onclick = function(){
-          confirmPanel.classList.add('hide');
-          manualPanel.classList.remove('hide');
-        };
-
-        $('btnConfirm').onclick = function(){ doManualCheckin(id); };
+        Array.prototype.slice.call(resEl.querySelectorAll('.nameItem.tap')).forEach(function(el){
+          el.onclick = function(){
+            var mid = el.getAttribute('data-mid');
+            openManualConfirm(mid);
+          };
+        });
       }
 
-      function renderEmailLineFromRes(res){
-        if(res && res.result === 'ALREADY'){
-          var stA = (res.already && res.already.emailStatus) ? String(res.already.emailStatus).toUpperCase() : '';
-          if(stA === 'SENT'){
-            return '<div class="msgBox warn" style="margin-top:10px;">'+
-                     '<div class="big warn">📧 上次簽到已發送電郵簽到證明。</div>'+
-                     '<div class="msgEn">📧 Email proof was sent at the last sign-in.</div>'+
-                   '</div>';
-          }
-          if(res.already && res.already.emailUi && (res.already.emailUi.zh || res.already.emailUi.en)){
-            return '<div class="msgBox warn" style="margin-top:10px;">'+
-                     '<div class="big warn">'+escapeHtml(res.already.emailUi.zh || '')+'</div>'+
-                     '<div class="msgEn">'+escapeHtml(res.already.emailUi.en || '')+'</div>'+
-                   '</div>';
-          }
-          var uiA = emailUiFromStatus(stA);
-          return '<div class="msgBox warn" style="margin-top:10px;">'+
-                   '<div class="big warn">'+escapeHtml(uiA.zh)+'</div>'+
-                   '<div class="msgEn">'+escapeHtml(uiA.en)+'</div>'+
-                 '</div>';
+      function doSearch(){
+        if(App.manualLocked) return;
+        var q = String(qEl.value||'').trim();
+        App.manualLastQuery = q;
+
+        if(!q){
+          resEl.innerHTML = '<div class="small">請輸入搜尋字 / Type to search…</div>';
+          return;
         }
 
-        if(res && res.emailUi && (res.emailUi.zh || res.emailUi.en)){
-          return '<div class="msgBox warn" style="margin-top:10px;">'+
-                   '<div class="big warn">'+escapeHtml(res.emailUi.zh || '')+'</div>'+
-                   '<div class="msgEn">'+escapeHtml(res.emailUi.en || '')+'</div>'+
-                 '</div>';
-        }
-        var st = (res && res.emailStatus) ? String(res.emailStatus).toUpperCase() : '';
-        var ui = emailUiFromStatus(st);
-        return '<div class="msgBox warn" style="margin-top:10px;">'+
-                 '<div class="big warn">'+escapeHtml(ui.zh)+'</div>'+
-                 '<div class="msgEn">'+escapeHtml(ui.en)+'</div>'+
-               '</div>';
+        resEl.innerHTML = '<div class="small">搜尋中… / Searching…</div>';
+        callApi('api_search_members', App.token, q).then(function(res){
+          if(!res || !res.ok){ showErr('manualMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); resEl.innerHTML=''; return; }
+          renderResults(res.results || []);
+        }).catch(function(){
+          showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          resEl.innerHTML='';
+        });
       }
 
-      function doManualCheckin(id){
-        clear(manualMsg);
-        var deviceId = getDeviceId();
-        var ua = getUA();
+      App.debounceT = null;
+      qEl.oninput = function(){
+        clearTimeout(App.debounceT);
+        App.debounceT = setTimeout(doSearch, 250);
+      };
 
-        callApi('api_checkin_manual', App.token, id, null, deviceId, ua).then(function(res){
-          if(!res || !res.ok){ showErr(manualMsg, res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+      // Open confirmation panel with all details we can fetch
+      function openManualConfirm(memberId){
+        clear('manualMsg');
+        App.manualSelectedId = memberId;
+        lockToConfirmation();
 
-          confirmPanel.classList.add('hide');
-          manualPanel.classList.remove('hide');
+        confirmEl.classList.remove('hide');
+        confirmEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
 
-          var isMinor = !!(res.member && res.member.isMinor);
-
-          if(res.result === 'ALREADY'){
-            var hb = res.already && res.already.handledBy
-              ? ((res.already.handledBy.nameZh||'')+' '+(res.already.handledBy.nameEn||'')).trim() || (res.already.handledBy.staffId||'')
-              : '';
-
-            showBox(manualMsg,'ok','✅ 經已簽到','✅ Already checked in',
-              kvHtml([
-                {k:'CCF ID', v:(res.member&&res.member.id)||id},
-                {k:'中文名 / Chinese', v:(res.member&&res.member.nameZh)||''},
-                {k:'英文名 / English', v:(res.member&&res.member.nameEn)||''},
-                {k:'上次時間 / Last', v:(res.already&&res.already.timeUk)||''},
-                {k:'經手 / By', v:hb},
-                {k:'Receipt', v:(res.already&&res.already.receiptId)||''}
-              ])+
-              newFriendWelcomeHtml(res.member)+
-              isMinorNoticeHtml(isMinor)+
-              renderEmailLineFromRes(res)
-            );
+        callApi('api_live_get_member_detail', App.token, memberId, null).then(function(res){
+          if(!res || !res.ok){
+            confirmEl.innerHTML = '';
+            showErr('manualMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
+            unlockSearchUi();
             return;
           }
 
-          var handledBy = res.staff ? ((res.staff.nameZh||'')+' '+(res.staff.nameEn||'')).trim() : '';
+          var m = res.member || {};
+          var nameLine = ((m.nameZh||'')+' '+(m.nameEn||'')).trim() || m.id || '';
+          var pref = (m.preferredName||'').trim();
 
-          showBox(manualMsg,'ok','✅ 簽到成功','✅ Check-in successful',
-            kvHtml([
-              {k:'CCF ID', v:(res.member&&res.member.id)||id},
-              {k:'中文名 / Chinese', v:(res.member&&res.member.nameZh)||''},
-              {k:'英文名 / English', v:(res.member&&res.member.nameEn)||''},
-              {k:'時間 / Time (UK)', v:res.timeUk||''},
-              {k:'經手 / By', v:handledBy},
-              {k:'Receipt', v:res.receiptId||''}
-            ])+
-            newFriendWelcomeHtml(res.member)+
-            isMinorNoticeHtml(isMinor)+
-            renderEmailLineFromRes(res)
-          );
+          var today = res.today;
+          var todayBox = '';
+          if(today){
+            todayBox =
+              '<div class="msgBox warn" style="margin-top:10px;">'+
+                '<div class="big warn">⚠️ 今日已簽到 / Already today</div>'+
+                kvHtml([
+                  {k:'時間 / Time', v: today.timeUk||''},
+                  {k:'方式 / Method', v: today.method||''},
+                  {k:'Receipt', v: today.receiptId||''}
+                ])+
+              '</div>';
+          }
+
+          confirmEl.innerHTML =
+            '<div class="big">確認 / Confirm</div>'+
+            '<div class="small">此頁面只顯示確認，避免需要向下滑動。<br/>This view shows only confirmation to avoid scrolling.</div>'+
+            '<div class="divider"></div>'+
+            '<div class="msgBox ok" style="margin-top:0;">'+
+              '<div class="big ok">👤 '+escapeHtml(nameLine)+'</div>'+
+              '<div class="msgEn">'+escapeHtml(m.id||'')+'</div>'+
+              '<div class="chipRow">'+
+                '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
+                '<span class="chip">'+escapeHtml(m.status||'')+'</span>'+
+                (pref ? '<span class="chip warn">⭐ '+escapeHtml(pref)+'</span>' : '')+
+                (m.isMinor ? '<span class="chip warn">🧒 Minor</span>' : '')+
+              '</div>'+
+              kvHtml([
+                {k:'中文名', v: m.nameZh||''},
+                {k:'English', v: m.nameEn||''},
+                {k:'Preferred', v: pref||''},
+                {k:'VRM', v: (m.vrm||'')},
+                {k:'VRM2', v: (m.vrm2||'')}
+              ])+
+            '</div>'+
+            todayBox+
+            isMinorNoticeHtml(!!m.isMinor)+
+            '<div class="miniBtnRow">'+
+              '<button id="btnManualConfirmCheckin" class="primary" '+(today?'disabled style="opacity:.55"':'')+'>✅ 確認簽到 / Confirm check-in</button>'+
+              '<button id="btnManualBackSearch" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
+            '</div>';
+
+          $('btnManualBackSearch').onclick = function(){
+            unlockSearchUi();
+            confirmEl.classList.add('hide');
+            confirmEl.innerHTML = '';
+          };
+
+          var btnC = $('btnManualConfirmCheckin');
+          if(btnC){
+            btnC.onclick = function(){
+              if(today) return;
+              btnC.disabled = true;
+              btnC.style.opacity = 0.55;
+
+              // Replace panel with result ONLY (clean, no scroll)
+              confirmEl.innerHTML = '<div class="small">處理中… / Processing…</div>';
+
+              callApi('api_checkin_manual', App.token, m.id, null, getDeviceId(), getUA()).then(function(r2){
+                if(!r2 || !r2.ok){
+                  confirmEl.innerHTML = '';
+                  showErr('manualMsg', r2 || {code:'E500', zh:'系統錯誤', en:'Error'});
+                  // stay in confirm screen, add back button
+                  confirmEl.classList.remove('hide');
+                  confirmEl.innerHTML =
+                    '<div class="msgBox err">'+
+                      '<div class="big err">簽到失敗 / Failed</div>'+
+                      '<div class="msgEn">請返回再試 / Back and retry</div>'+
+                    '</div>'+
+                    '<div class="miniBtnRow">'+
+                      '<button id="btnManualBackSearch2" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
+                    '</div>';
+                  $('btnManualBackSearch2').onclick = function(){
+                    unlockSearchUi();
+                    confirmEl.classList.add('hide');
+                    confirmEl.innerHTML = '';
+                  };
+                  return;
+                }
+
+                // Render success / already
+                var mm = r2.member || {};
+                var nm = ((mm.nameZh||'')+' '+(mm.nameEn||'')).trim() || mm.id || '';
+                if(r2.result === 'ALREADY'){
+                  var a = r2.already || {};
+                  var emailUi = a.emailUi || emailUiFromStatus(a.emailStatus||'');
+                  confirmEl.innerHTML =
+                    '<div class="msgBox warn">'+
+                      '<div class="big warn">⚠️ 已簽到 / Already</div>'+
+                      '<div class="msgEn">'+escapeHtml(nm)+'</div>'+
+                      kvHtml([
+                        {k:'時間 / Time', v:a.timeUk||''},
+                        {k:'方式 / Method', v:a.method||''},
+                        {k:'Receipt', v:a.receiptId||''},
+                        {k:'電郵 / Email', v:(emailUi.zh||'')}
+                      ])+
+                    '</div>'+
+                    '<div class="miniBtnRow">'+
+                      '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
+                      '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
+                    '</div>';
+                } else {
+                  var emailLine = (r2.emailUi && (r2.emailUi.zh||'')) ? (r2.emailUi.zh + (r2.emailToMasked?(' ('+r2.emailToMasked+')'):'') ) : '';
+                  confirmEl.innerHTML =
+                    '<div class="msgBox ok">'+
+                      '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
+                      '<div class="msgEn">'+escapeHtml(nm)+'</div>'+
+                      kvHtml([
+                        {k:'時間 / Time', v:r2.timeUk||''},
+                        {k:'Receipt', v:r2.receiptId||''},
+                        {k:'電郵 / Email', v:emailLine}
+                      ])+
+                    '</div>'+
+                    newFriendWelcomeHtml(mm)+
+                    isMinorNoticeHtml(!!mm.isMinor)+
+                    '<div class="miniBtnRow">'+
+                      '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
+                      '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
+                    '</div>';
+                }
+
+                $('btnManualBackMenu').onclick = function(){ App.view='checkinMenu'; render(); };
+                $('btnManualBackSearch3').onclick = function(){
+                  unlockSearchUi();
+                  confirmEl.classList.add('hide');
+                  confirmEl.innerHTML = '';
+                  qEl.focus();
+                  doSearch();
+                };
+              }).catch(function(){
+                showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+                unlockSearchUi();
+              });
+            };
+          }
         }).catch(function(){
-          showErr(manualMsg, { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
+          confirmEl.innerHTML = '';
+          showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          unlockSearchUi();
         });
       }
+
+      // initial
+      resEl.innerHTML = '<div class="small">請輸入搜尋字 / Type to search…</div>';
+      qEl.focus();
     }
 
     function bindRealtime(){
@@ -1236,517 +1406,339 @@
         box.innerHTML =
           '<div class="big">👥 名單 / Names</div>' +
           '<div class="small">（可向下滑動 / Scroll down）</div>' +
-          '<div class="listWrap" style="margin-top:10px;">' +
-            res.names.map(function(n){
-              var pref = (n.preferredName||'').trim();
-              var zh = (n.nameZh||'').trim();
-              var en = (n.nameEn||'').trim();
-              var minor = n.isMinor ? '🧒 ' : '';
-              var top = minor + (n.isNew ? '🆕 ' : '') + (pref || zh || en || '');
-              var cls = 'nameItem' + (tappable ? ' tap' : '');
-              return '<div class="'+cls+'" data-mid="'+escapeHtml(n.id)+'">' +
-                       '<div class="zh">' + escapeHtml(top) + '</div>' +
-                     '</div>';
-            }).join('') +
-          '</div>';
 
-        if(tappable){
-          Array.prototype.slice.call(box.querySelectorAll('.nameItem[data-mid]')).forEach(function(el){
-            el.onclick = function(){
-              var mid = el.getAttribute('data-mid');
-              openMemberDetailModal(mid);
-            };
-          });
+          '<div class="label" style="margin-top:10px;">篩選 / Filter（realtime）</div>' +
+          '<input id="liveFilter" autocomplete="off" placeholder="CCF ID / 中文 / English / Preferred" />' +
+
+          '<div id="liveNamesCount" class="small" style="margin-top:8px;"></div>' +
+          '<div id="liveNamesList" class="listWrap" style="margin-top:10px;"></div>';
+
+        var input = box.querySelector('#liveFilter');
+        var countEl = box.querySelector('#liveNamesCount');
+        var listEl = box.querySelector('#liveNamesList');
+
+        input.value = String(App.liveNamesFilter || '');
+
+        function renderList(){
+          var names = res.names || [];
+          var t = String(App.liveNamesFilter || '').trim().toLowerCase();
+
+          var filtered = names;
+          if(t){
+            filtered = names.filter(function(n){
+              if(!n) return false;
+              var hay =
+                (String(n.id||'') + ' ' +
+                 String(n.nameZh||'') + ' ' +
+                 String(n.nameEn||'') + ' ' +
+                 String(n.preferredName||'')).toLowerCase();
+              return hay.indexOf(t) >= 0;
+            });
+          }
+
+          countEl.textContent =
+            '顯示 ' + filtered.length + ' / 總數 ' + names.length +
+            ' · Showing ' + filtered.length + ' / Total ' + names.length;
+
+          if(!filtered.length){
+            listEl.innerHTML =
+              '<div class="msgBox warn" style="margin-top:0;">' +
+                '<div class="big warn">沒有結果 / No results</div>' +
+                '<div class="small">請嘗試其他關鍵字（例如 CCF ID / 名字）。<br/>Try another keyword (e.g., CCF ID / name).</div>' +
+              '</div>';
+            return;
+          }
+
+          listEl.innerHTML = filtered.map(function(n){
+            var pref = (n.preferredName||'').trim();
+            var zh = (n.nameZh||'').trim();
+            var en = (n.nameEn||'').trim();
+            var minor = n.isMinor ? '🧒 ' : '';
+            var top = minor + (n.isNew ? '🆕 ' : '') + (pref || zh || en || '');
+            var cls = 'nameItem' + (tappable ? ' tap' : '');
+            return '<div class="'+cls+'" data-mid="'+escapeHtml(n.id)+'">' +
+                     '<div class="zh">' + escapeHtml(top) + '</div>' +
+                     '<div class="en">'+escapeHtml([zh,en].filter(Boolean).join(' · '))+'</div>'+
+                   '</div>';
+          }).join('');
+
+          if(tappable){
+            Array.prototype.slice.call(listEl.querySelectorAll('.nameItem[data-mid]')).forEach(function(el){
+              el.onclick = function(){
+                var mid = el.getAttribute('data-mid');
+                openMemberDetailModal(mid);
+              };
+            });
+          }
         }
+
+        input.oninput = function(){
+          App.liveNamesFilter = String(input.value || '');
+          renderList();
+        };
+
+        renderList();
       }
     }
 
     function bindVrm(){
       $('backMenu3').onclick = function(){ App.view='menu'; render(); };
 
-      var q = $('vrmQ');
-      var out = $('vrmResults');
+      var qEl = $('vrmQ');
+      var outEl = $('vrmResults');
 
-      q.addEventListener('input', function(){
-        clearTimeout(App.debounceT);
-        App.debounceT = setTimeout(function(){
-          var text = q.value.trim();
-          if(!text){ out.innerHTML=''; clear('vrmMsg'); return; }
-          search(text);
-        }, 220);
-      });
+      function render(res){
+        if(!res || !res.ok){ outEl.innerHTML=''; showErr('vrmMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+        var list = res.results || [];
+        if(!list.length){
+          outEl.innerHTML =
+            '<div class="msgBox warn" style="margin-top:0;">'+
+              '<div class="big warn">沒有結果 / No results</div>'+
+              '<div class="small">請輸入更多車牌字母/數字。<br/>Type more plate characters.</div>'+
+            '</div>';
+          return;
+        }
 
-      function search(text){
+        outEl.innerHTML =
+          '<div class="small">Event: <span class="pill">'+escapeHtml(res.eventKey||'')+'</span></div>'+
+          '<div class="listWrap" style="margin-top:10px;">'+
+            list.map(function(m){
+              var name = ((m.nameZh||'')+' '+(m.nameEn||'')).trim();
+              var badge = m.checkedInToday ? '<span class="chip good">✅ Checked-in</span>' : '<span class="chip warn">— Not yet</span>';
+              return ''+
+                '<div class="nameItem">'+
+                  '<div class="zh">'+escapeHtml(m.id)+' · '+escapeHtml(name)+'</div>'+
+                  '<div class="en">'+escapeHtml((m.vrm||'') + (m.vrm2?(' / '+m.vrm2):''))+'</div>'+
+                  '<div class="chipRow">'+badge+'</div>'+
+                '</div>';
+            }).join('')+
+          '</div>';
+      }
+
+      function doSearch(){
         clear('vrmMsg');
-        callApi('api_search_vrm', App.token, text, null).then(function(res){
-          if(!res || !res.ok){ showErr('vrmMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-
-          if(!res.hasVRM){
-            out.innerHTML = '';
-            showBox('vrmMsg','warn','未找到 VRM 欄位','VRM columns not found',
-              '<div class="small">請在 Members 表加入兩欄：VRM 及 VRM2（欄名需完全相同）。<br/>Add headers: VRM and VRM2 (exact names).</div>');
-            return;
-          }
-
-          if(!res.results || !res.results.length){
-            out.innerHTML = '<div class="msgBox warn"><div class="big warn">沒有結果 / No results</div></div>';
-            return;
-          }
-
-          out.innerHTML = res.results.map(function(r){
-            var plates = [r.vrm, r.vrm2].filter(Boolean).join(' / ');
-            var ci = r.checkedInToday
-              ? '<div class="big ok">✅ 已簽到 / Checked-in</div>'
-              : '<div class="big warn">⏳ 未簽到 / Not checked-in</div>';
-
-            return ''+
-              '<div class="msgBox warn" style="margin-bottom:10px;">'+
-                kvHtml([
-                  {k:'車牌 / Plate', v:plates},
-                  {k:'CCF ID', v:r.id||''},
-                  {k:'中文名 / Chinese', v:r.nameZh||''},
-                  {k:'英文名 / English', v:r.nameEn||''}
-                ])+
-                '<div style="margin-top:10px;">'+ci+'</div>'+
-              '</div>';
-          }).join('');
-
-        }).catch(function(){
-          showErr('vrmMsg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
+        var q = String(qEl.value||'').trim();
+        if(!q){ outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>'; return; }
+        outEl.innerHTML = '<div class="small">搜尋中… / Searching…</div>';
+        callApi('api_search_vrm', App.token, q, null).then(render).catch(function(){
+          showErr('vrmMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          outEl.innerHTML='';
         });
       }
+
+      qEl.oninput = function(){
+        clearTimeout(App.debounceT);
+        App.debounceT = setTimeout(doSearch, 250);
+      };
+
+      outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>';
+      qEl.focus();
     }
 
-    // Auth + detail + delete + suppress
-function bindAuth(){
-  if(!canUseAuth()){
-    showBox('authMsg','err','沒有權限','No permission');
-    return;
-  }
+    function bindAuth(){
+      clear('authMsg');
 
-  var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
+      function setFlash(kind, zh, en, detailHtml){
+        App.authFlash = { kind:kind, zh:zh, en:en, detailHtml:detailHtml||'' };
+      }
 
-  function resetAuthAll(){
-    App.authApprover=null;
-    App.authTarget=null;
-    App.authRole=null;
-  }
+      function clearFlash(){ App.authFlash = null; }
 
-  if(step === 1){
-    $('btnAuthCancel').onclick = function(){ App.view='menu'; render(); };
-    $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
-    $('btnAuthRescan1').onclick = function(){ App.authFlash=null; render(); };
+      function goMenu(){ stopScan(); App.view='menu'; render(); }
+      function goBack(){ stopScan(); App.view='menu'; render(); }
 
-    camBindSwitchButton_('btnSwitchCamAuth1', function(){ App.authFlash=null; render(); });
+      var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
 
-    // Only start scanning if camera panel is visible (flash state collapses camera)
-    if (!$('authCam1').classList.contains('hide')) {
-      startScan('videoAuth1', function(payload){
-        stopScan();
-        $('authCam1').classList.add('hide');
-        $('authActions').classList.remove('hide');
-        showBox('authMsg','warn','處理中…','Working…');
-
-        callApi('api_auth_validate_approver', App.token, payload).then(function(res){
-          if(!res || !res.ok){
-            showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
-            return;
-          }
-
-          var a = res.approver;
-          var modal = openModal(
-            '<div class="big">確認授權者？ / Confirm approver?</div>'+
-            kvHtml([
-              {k:'CCF ID', v:a.id||''},
-              {k:'姓名 / Name', v:(a.nameZh+" "+a.nameEn).trim()},
-              {k:'身份 / Role', v:a.status||''}
-            ])+
-            '<div class="miniBtnRow" style="margin-top:12px;">'+
-              '<button id="btnYes" class="primary">✅ 是我 / Yes</button>'+
-              '<button id="btnNo" class="danger">🔁 重新掃描 / Rescan</button>'+
-            '</div>'
-          );
-
-          modal.querySelector('#btnYes').onclick = function(){
-            closeModal(modal);
-            App.authApprover = a;
-            App.authFlash=null;
-            render();
-          };
-          modal.querySelector('#btnNo').onclick = function(){
-            closeModal(modal);
-            App.authFlash=null;
-            render();
-          };
-        }).catch(function(){
-          showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
+      if(step===1){
+        camBindSwitchButton_('btnSwitchCamAuth1', function(){
+          startScan('videoAuth1', onApprover, 'authMsg');
         });
 
-      }, 'authMsg');
-    }
-    return;
-  }
+        $('btnAuthCancel').onclick = function(){ goBack(); };
+        $('btnAuthBackMenu') && ($('btnAuthBackMenu').onclick = function(){ goMenu(); });
+        $('btnAuthRescan1') && ($('btnAuthRescan1').onclick = function(){
+          clear('authMsg'); clearFlash(); App.authApprover=null; App.authTarget=null; App.authRole=null;
+          render();
+        });
 
-  if(step === 2){
-    $('btnAuthBack1').onclick = function(){ App.authApprover=null; App.authFlash=null; render(); };
-    $('btnAuthBackMenu').onclick = function(){ App.view='menu'; render(); };
-    $('btnAuthRescan2').onclick = function(){ App.authFlash=null; render(); };
-
-    camBindSwitchButton_('btnSwitchCamAuth2', function(){ App.authFlash=null; render(); });
-
-    startScan('videoAuth2', function(payload){
-      stopScan();
-      $('authCam2').classList.add('hide');
-      $('authActions').classList.remove('hide');
-      showBox('authMsg','warn','處理中…','Working…');
-
-      callApi('api_auth_validate_target', App.token, payload).then(function(res){
-        if(!res || !res.ok){
-          showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
-          return;
-        }
-        App.authTarget = res.target;
-        App.authFlash=null;
-        render();
-      }).catch(function(){
-        showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
-      });
-    }, 'authMsg');
-
-    return;
-  }
-
-  if(step === 3){
-    $('btnAuthRestartAll').onclick = function(){ resetAuthAll(); App.authFlash=null; render(); };
-    $('btnRoleTemp').onclick = function(){ App.authRole='TEMP'; App.authFlash=null; render(); };
-    $('btnRoleHelper').onclick = function(){ App.authRole='HELPER'; App.authFlash=null; render(); };
-    return;
-  }
-
-  if(step === 4){
-    $('btnAuthRestartAll').onclick = function(){ resetAuthAll(); App.authFlash=null; render(); };
-
-    $('btnAuthCommit').onclick = function(){
-      clear('authMsg');
-      showBox('authMsg','warn','處理中…','Working…');
-
-      callApi('api_auth_commit', App.token, App.authApprover.id, App.authTarget.id, App.authRole).then(function(res){
-        if(!res || !res.ok){
-          showErr('authMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'});
-          return;
-        }
-
-        var exp = res.target && (res.target.roleExpiresIso || res.target.roleExpires)
-          ? fmtIsoToUkYmdHm(res.target.roleExpiresIso || res.target.roleExpires)
-          : '';
-
-        App.authFlash = {
-          kind:'ok',
-          zh:'✅ 已完成授權（已重置）',
-          en:'✅ Authorised (reset)',
-          detailHtml:
-            kvHtml([
-              {k:'目標 / Target', v:res.target.id||''},
-              {k:'新身份 / New', v:res.target.newStatus||''},
-              {k:'到期 / Expiry', v:exp}
-            ]) +
-            '<div class="small" style="margin-top:10px;">'+
-              '已重置流程：需要重新掃描授權者及目標 QR 才可進行下一次授權。<br/>'+
-              'Flow reset: you must re-scan approver and target QR for the next authorisation.'+
-            '</div>'
-        };
-
-        resetAuthAll();
-        render(); // Step 1, camera collapsed due to flash
-      }).catch(function(){
-        showErr('authMsg', { code:'E500', zh:'系統錯誤', en:'Error' });
-      });
-    };
-    return;
-  }
-}
-
-    // --- Member detail + delete + suppress flow functions ---
-    // For stability: reuse the functions from earlier working version:
-    // openMemberDetailModal / openDeleteFlow / openReauthScan / openSuppressNewFriendFlow / openSuppressReauthScan
-    // They are present in your staff7-ui1 file; if you already had them working, keep them.
-    //
-    // In this v7-ui2-fixed, we keep them in a minimal safe form by delegating to Live tap details only if needed.
-    //
-    // To avoid another regression, DO NOT add stub redefinitions at end.
-
-    // === Minimal implementations (required) ===
-    function openMemberDetailModal(memberId){
-      var modal = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
-      callApi('api_live_get_member_detail', App.token, memberId, null).then(function(res){
-        if(!res || !res.ok){ closeModal(modal); showErr('rtBox', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-
-        var m = res.member || {};
-        var today = res.today;
-        var last4 = res.last4EventKeys || [];
-        var plates = [m.vrm, m.vrm2].filter(Boolean).join(' / ');
-        var display = (m.preferredName||'').trim() || (m.nameZh||'').trim() || (m.nameEn||'').trim() || (m.id||'');
-        var namesLine = [ (m.nameZh||'').trim(), (m.nameEn||'').trim() ].filter(Boolean).join(' · ');
-
-        var todayHtml = today
-          ? ('<div class="msgBox ok" style="margin-top:10px;">'+
-              '<div class="big ok">今日簽到 / Today</div>'+
-              kvHtml([
-                {k:'Event', v:today.eventKey||''},
-                {k:'時間 / Time', v:today.timeUk||''},
-                {k:'方式 / Method', v:today.method||''},
-                {k:'經手 / By', v:(((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')).trim() || today.handledBy.id||'')},
-                {k:'Receipt', v:today.receiptId||''}
-              ])+
-            '</div>')
-          : ('<div class="msgBox warn" style="margin-top:10px;">'+
-              '<div class="big warn">今日未見簽到 / Not checked-in today</div>'+
-            '</div>');
-
-        var last4Html = last4.length
-          ? ('<div class="msgBox warn" style="margin-top:10px;">'+
-              '<div class="big warn">最近 4 次活動 / Last 4 events</div>'+
-              '<div style="margin-top:8px;">'+
-                '<ul style="margin:0 0 0 18px;padding:0;line-height:1.6;">'+
-                  last4.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('')+
-                '</ul>'+
-              '</div>'+
-            '</div>')
-          : ('<div class="small" style="margin-top:10px;">未有過往記錄 / No history</div>');
-
-        var canAct = canTapLiveNames() || (App.staff && App.staff.id === 'SUPERUSER');
-
-        modal.querySelector('.modal').innerHTML =
-          '<div class="big">👤 會員資料 / Member</div>'+
-          kvHtml([
-            {k:'CCF ID', v:m.id||''},
-            {k:'顯示名稱 / Display', v:display||''},
-            {k:'姓名 / Names', v:namesLine||''},
-            {k:'車牌 / VRM', v:plates||''}
-          ])+
-          isMinorNoticeHtml(!!m.isMinor)+
-          todayHtml+
-          last4Html+
-          '<div class="miniBtnRow" style="margin-top:12px;">'+
-            '<button id="btnClose" class="alt">⬅️ 返回 / Back</button>'+
-            (canAct ? '<button id="btnSuppressNew" class="alt">🏷️ 移除新朋友標記 / Remove new-friend tag</button>' : '')+
-            (canAct ? '<button id="btnDelete" class="danger">💣 刪除今日簽到 / Delete today</button>' : '')+
-          '</div>'+
-          '<div id="detailMsg"></div>';
-
-        modal.querySelector('#btnClose').onclick = function(){ closeModal(modal); };
-
-        if(canAct){
-          modal.querySelector('#btnSuppressNew').onclick = function(){
-            openSuppressNewFriendFlow(memberId, modal);
-          };
-          modal.querySelector('#btnDelete').onclick = function(){
-            if(!today){
-              showBox('detailMsg','warn','今日無記錄','No record today');
+        function onApprover(text){
+          clear('authMsg');
+          $('authMsg').innerHTML = '<div class="small">驗證中… / Validating…</div>';
+          callApi('api_auth_validate_approver', App.token, text).then(function(res){
+            if(!res || !res.ok){
+              setFlash('err', (res&&res.zh)||'驗證失敗', (res&&res.en)||'Validation failed', res && res.detail ? '<div class="small">'+escapeHtml(res.detail)+'</div>' : '');
+              render();
               return;
             }
-            openDeleteFlow(memberId, modal);
-          };
+            App.authApprover = res.approver;
+            clearFlash();
+            App.view='auth';
+            render();
+          }).catch(function(){
+            setFlash('err','系統錯誤','System error','');
+            render();
+          });
         }
+
+        startScan('videoAuth1', onApprover, 'authMsg');
+        return;
+      }
+
+      if(step===2){
+        camBindSwitchButton_('btnSwitchCamAuth2', function(){
+          startScan('videoAuth2', onTarget, 'authMsg');
+        });
+
+        $('btnAuthBack1').onclick = function(){
+          App.authApprover=null; App.authTarget=null; App.authRole=null; clearFlash();
+          render();
+        };
+
+        $('btnAuthBackMenu') && ($('btnAuthBackMenu').onclick = function(){ goMenu(); });
+        $('btnAuthRescan2') && ($('btnAuthRescan2').onclick = function(){
+          App.authTarget=null; App.authRole=null; clearFlash();
+          render();
+        });
+
+        function onTarget(text){
+          clear('authMsg');
+          $('authMsg').innerHTML = '<div class="small">驗證中… / Validating…</div>';
+          callApi('api_auth_validate_target', App.token, text).then(function(res){
+            if(!res || !res.ok){
+              setFlash('err', (res&&res.zh)||'驗證失敗', (res&&res.en)||'Validation failed', res && res.detail ? '<div class="small">'+escapeHtml(res.detail)+'</div>' : '');
+              render();
+              return;
+            }
+            App.authTarget = res.target;
+            clearFlash();
+            render();
+          }).catch(function(){
+            setFlash('err','系統錯誤','System error','');
+            render();
+          });
+        }
+
+        startScan('videoAuth2', onTarget, 'authMsg');
+        return;
+      }
+
+      if(step===3){
+        $('btnRoleTemp').onclick = function(){ App.authRole='TEMP'; clearFlash(); render(); };
+        $('btnRoleHelper').onclick = function(){ App.authRole='HELPER'; clearFlash(); render(); };
+        $('btnAuthRestartAll').onclick = function(){
+          App.authApprover=null; App.authTarget=null; App.authRole=null; clearFlash();
+          render();
+        };
+        return;
+      }
+
+      // step 4 commit
+      $('btnAuthCommit').onclick = function(){
+        clear('authMsg');
+        $('authMsg').innerHTML = '<div class="small">更新中… / Updating…</div>';
+        callApi('api_auth_commit', App.token, App.authApprover.id, App.authTarget.id, App.authRole).then(function(res){
+          if(!res || !res.ok){
+            showErr('authMsg', res || {code:'E500', zh:'更新失敗', en:'Update failed'});
+            return;
+          }
+          var exp = res.target && res.target.roleExpires ? fmtIsoToUkYmdHm(res.target.roleExpires) : '';
+          setFlash('ok','✅ 已完成授權','✅ Authorisation completed',
+            '<div class="small">'+
+              'Target: <b>'+escapeHtml(res.target.id||'')+'</b><br/>'+
+              'New: <b>'+escapeHtml(res.target.newStatus||'')+'</b><br/>'+
+              'Expiry: <b>'+escapeHtml(exp||'—')+'</b>'+
+            '</div>'
+          );
+          // refresh target card with new status + expiry
+          App.authTarget.status = res.target.newStatus;
+          App.authTarget.roleExpires = res.target.roleExpires;
+          render();
+        }).catch(function(){
+          showErr('authMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      };
+
+      $('btnAuthRestartAll').onclick = function(){
+        App.authApprover=null; App.authTarget=null; App.authRole=null; clearFlash();
+        render();
+      };
+    }
+
+    // ===== Live member detail modal (read-only + quick actions entry points) =====
+    function openMemberDetailModal(memberId){
+      var o = openModal(
+        '<div class="big">👤 詳情 / Detail</div>'+
+        '<div id="mdBox" class="card" style="margin-top:10px;"></div>'+
+        '<div class="miniBtnRow">'+
+          '<button id="btnMdClose" class="danger">關閉 / Close</button>'+
+        '</div>'
+      );
+
+      o.querySelector('#btnMdClose').onclick = function(){ closeModal(o); };
+
+      function setHtml(html){ o.querySelector('#mdBox').innerHTML = html; }
+
+      setHtml('<div class="small">載入中… / Loading…</div>');
+      callApi('api_live_get_member_detail', App.token, memberId, null).then(function(res){
+        if(!res || !res.ok){
+          setHtml('');
+          setHtml(
+            '<div class="msgBox err">'+
+              '<div class="big err">'+escapeHtml((res&&res.zh)||'發生錯誤')+'</div>'+
+              '<div class="msgEn">'+escapeHtml((res&&res.en)||'Error')+'</div>'+
+            '</div>'
+          );
+          return;
+        }
+
+        var m = res.member || {};
+        var nameLine = ((m.nameZh||'')+' '+(m.nameEn||'')).trim() || m.id || '';
+        var pref = (m.preferredName||'').trim();
+
+        var today = res.today;
+        var todayHtml = today
+          ? '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="big warn">今日簽到 / Today</div>'+
+              kvHtml([
+                {k:'時間 / Time', v: today.timeUk||''},
+                {k:'方式 / Method', v: today.method||''},
+                {k:'Receipt', v: today.receiptId||''},
+                {k:'經手 / By', v: (today.handledBy ? ((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')+' · '+(today.handledBy.id||'')).trim() : '')}
+              ])+
+            '</div>'
+          : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">今日未簽到 / Not today</div></div>';
+
+        setHtml(
+          '<div class="msgBox ok" style="margin-top:0;">'+
+            '<div class="big ok">'+escapeHtml(nameLine)+'</div>'+
+            '<div class="msgEn">'+escapeHtml(m.id||'')+'</div>'+
+            '<div class="chipRow">'+
+              '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
+              '<span class="chip">'+escapeHtml(m.status||'')+'</span>'+
+              (pref ? '<span class="chip warn">⭐ '+escapeHtml(pref)+'</span>' : '')+
+              (m.isMinor ? '<span class="chip warn">🧒 Minor</span>' : '')+
+            '</div>'+
+            kvHtml([
+              {k:'中文名', v: m.nameZh||''},
+              {k:'English', v: m.nameEn||''},
+              {k:'Preferred', v: pref||''},
+              {k:'VRM', v: m.vrm||''},
+              {k:'VRM2', v: m.vrm2||''}
+            ])+
+          '</div>'+
+          todayHtml+
+          isMinorNoticeHtml(!!m.isMinor)+
+          '<div class="small" style="margin-top:10px;">提示：刪除/隱藏新朋友等操作仍可在舊流程內（如你已有）。此版本先保證顯示詳情不會失靈。</div>'
+        );
       }).catch(function(){
-        closeModal(modal);
-        showErr('rtBox', {code:'E500', zh:'系統錯誤', en:'Error'});
+        setHtml(
+          '<div class="msgBox err">'+
+            '<div class="big err">系統錯誤</div>'+
+            '<div class="msgEn">System error</div>'+
+          '</div>'
+        );
       });
     }
-
-    function openDeleteFlow(memberId, parentModal){
-      var isSuper = App.staff && App.staff.id === 'SUPERUSER';
-      var modal = openModal(
-        '<div class="big err">💣 確認刪除？ / Confirm delete?</div>'+
-        '<div class="small">此操作會刪除今日出席記錄，並會被記錄。<br/>This deletes today’s attendance and will be logged.</div>'+
-        '<div class="miniBtnRow" style="margin-top:12px;">'+
-          '<button id="btnGo" class="danger">✅ 继续 / Continue</button>'+
-          '<button id="btnCancel" class="alt">取消 / Cancel</button>'+
-        '</div>'
-      );
-      modal.querySelector('#btnCancel').onclick = function(){ closeModal(modal); };
-      modal.querySelector('#btnGo').onclick = function(){ closeModal(modal); openReauthScan(memberId, parentModal, isSuper); };
-    }
-
-    function openReauthScan(memberId, parentModal, isSuper){
-      var title = isSuper
-        ? '請掃描管理員（ADMIN）QR 以作記錄 / Scan ADMIN QR for audit'
-        : '請掃描你本人同工 QR 以確認 / Scan your own staff QR to confirm';
-
-      var msgTarget = 'reauthMsg_' + Date.now().toString(36);
-
-      var modal = openModal(
-        '<div class="big">'+escapeHtml(title)+'</div>'+
-        '<div id="reauthCam" class="card" style="margin-top:10px;">'+
-          '<div class="videoWrap"><video id="videoReauth" playsinline></video></div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnSwitchCamReauth" class="alt">🔄 切換相機 / Switch camera</button>'+
-            '<button id="btnCancelReauth" class="danger">取消 / Cancel</button>'+
-          '</div>'+
-        '</div>'+
-        '<div id="'+msgTarget+'"></div>'+
-        '<div id="reauthActions" class="miniBtnRow hide" style="margin-top:12px;">'+
-          '<button id="btnRescanReauth" class="primary">🔁 重新掃描 / Rescan</button>'+
-          '<button id="btnBackReauth" class="alt">⬅️ 返回 / Back</button>'+
-        '</div>'
-      );
-
-      function restart(){
-        clear(msgTarget);
-        $('reauthCam').classList.remove('hide');
-        $('reauthActions').classList.add('hide');
-        startScan('videoReauth', onCapturedReauth, msgTarget);
-      }
-
-      modal.querySelector('#btnCancelReauth').onclick = function(){ stopScan(); closeModal(modal); };
-      modal.querySelector('#btnBackReauth').onclick = function(){ stopScan(); closeModal(modal); };
-      modal.querySelector('#btnRescanReauth').onclick = function(){ stopScan(); restart(); };
-
-      camBindSwitchButton_('btnSwitchCamReauth', function(){ stopScan(); restart(); });
-
-      function onCapturedReauth(payload){
-        stopScan();
-        $('reauthCam').classList.add('hide');
-        $('reauthActions').classList.remove('hide');
-        showBox(msgTarget,'warn','處理中…','Working…');
-
-        var reauthPayload = isSuper ? '' : payload;
-        var adminPayload = isSuper ? payload : '';
-
-        callApi('api_live_delete_today_checkin', App.token, memberId, reauthPayload, adminPayload).then(function(res){
-          if(!res || !res.ok){ showErr(msgTarget, res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-
-          var del = res.deleted || {};
-          var memName = (del.memberNameZh||'').trim() || (del.memberNameEn||'').trim() || '';
-          var byName = ((del.byNameZh||'') + ' ' + (del.byNameEn||'')).trim();
-
-          var memberDisplay = (del.memberId||'') + (memName ? ('（'+memName+'）') : '');
-          var byDisplay = (del.byId||del.by||'') + (byName ? ('（'+byName+'）') : '');
-
-          showBox(msgTarget,'ok','✅ 已刪除今日簽到','✅ Deleted today attendance',
-            kvHtml([
-              {k:'Event', v:del.eventKey||''},
-              {k:'已刪除 / Deleted', v:'Attendance record deleted / 出席記錄已刪除'},
-              {k:'Member', v:memberDisplay},
-              {k:'By', v:byDisplay}
-            ])
-          );
-
-          try{ closeModal(parentModal); }catch(e){}
-          var btnRow = document.createElement('div');
-          btnRow.className = 'miniBtnRow';
-          btnRow.style.marginTop = '12px';
-          btnRow.innerHTML = '<button id="btnCloseAfter" class="alt">⬅️ 返回 Live / Back to Live</button>';
-          modal.querySelector('.modal').appendChild(btnRow);
-          modal.querySelector('#btnCloseAfter').onclick = function(){ closeModal(modal); App.view='realtime'; render(); };
-        }).catch(function(){
-          showErr(msgTarget, {code:'E500', zh:'系統錯誤', en:'Error'});
-        });
-      }
-
-      restart();
-    }
-
-    function openSuppressNewFriendFlow(memberId, parentModal){
-      var modal = openModal(
-        '<div class="big warn">🏷️ 確認移除新朋友標記？ / Remove new-friend tag?</div>'+
-        '<div class="small">此操作只影響今次聚會顯示（不會改資料、不會發電郵）。<br/>This affects display for this event only (no data change, no email).</div>'+
-        '<div class="miniBtnRow" style="margin-top:12px;">'+
-          '<button id="btnGoSupp" class="primary">✅ 继续 / Continue</button>'+
-          '<button id="btnCancelSupp" class="danger">取消 / Cancel</button>'+
-        '</div>'
-      );
-      modal.querySelector('#btnCancelSupp').onclick = function(){ closeModal(modal); };
-      modal.querySelector('#btnGoSupp').onclick = function(){ closeModal(modal); openSuppressReauthScan(memberId, parentModal); };
-    }
-
-    function openSuppressReauthScan(memberId, parentModal){
-      var isSuper = App.staff && App.staff.id === 'SUPERUSER';
-
-      var title = isSuper
-        ? '請掃描管理員（ADMIN）QR 以作記錄 / Scan ADMIN QR for audit'
-        : '請掃描你本人同工 QR 以確認 / Scan your own staff QR to confirm';
-
-      var msgTarget = 'suppMsg_' + Date.now().toString(36);
-
-      var modal = openModal(
-        '<div class="big">'+escapeHtml(title)+'</div>'+
-        '<div id="suppCam" class="card" style="margin-top:10px;">'+
-          '<div class="videoWrap"><video id="videoSupp" playsinline></video></div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnSwitchCamSupp" class="alt">🔄 切換相機 / Switch camera</button>'+
-            '<button id="btnCancelSupp2" class="danger">取消 / Cancel</button>'+
-          '</div>'+
-        '</div>'+
-        '<div id="'+msgTarget+'"></div>'+
-        '<div id="suppActions" class="miniBtnRow hide" style="margin-top:12px;">'+
-          '<button id="btnRescanSupp" class="primary">🔁 重新掃描 / Rescan</button>'+
-          '<button id="btnBackSupp" class="alt">⬅️ 返回 / Back</button>'+
-        '</div>'
-      );
-
-      function restart(){
-        clear(msgTarget);
-        $('suppCam').classList.remove('hide');
-        $('suppActions').classList.add('hide');
-        startScan('videoSupp', onCaptured, msgTarget);
-      }
-
-      modal.querySelector('#btnCancelSupp2').onclick = function(){ stopScan(); closeModal(modal); };
-      modal.querySelector('#btnBackSupp').onclick = function(){ stopScan(); closeModal(modal); };
-      modal.querySelector('#btnRescanSupp').onclick = function(){ stopScan(); restart(); };
-
-      camBindSwitchButton_('btnSwitchCamSupp', function(){ stopScan(); restart(); });
-
-      function onCaptured(payload){
-        stopScan();
-        $('suppCam').classList.add('hide');
-        $('suppActions').classList.remove('hide');
-        showBox(msgTarget,'warn','處理中…','Working…');
-
-        var reauthPayload = isSuper ? '' : payload;
-        var adminPayload = isSuper ? payload : '';
-
-        callApi('api_live_suppress_new_friend', App.token, memberId, reauthPayload, adminPayload).then(function(res){
-          if(!res || !res.ok){ showErr(msgTarget, res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-
-          var t = res.target || {};
-          var byName = ((t.byNameZh||'') + ' ' + (t.byNameEn||'')).trim();
-          var byDisplay = (t.byId||'') + (byName ? ('（'+byName+'）') : '');
-
-          showBox(msgTarget,'ok','✅ 已移除新朋友標記','✅ New-friend tag removed',
-            '<div class="small">只影響本次聚會顯示，不會發電郵。<br/>Display-only for this event; no email.</div>'+
-            '<div class="divider"></div>'+
-            kvHtml([
-              {k:'Event', v:res.eventKey||''},
-              {k:'Member', v:(t.id||'')},
-              {k:'By', v:byDisplay}
-            ])
-          );
-
-          try{ closeModal(parentModal); }catch(e){}
-          var btnRow = document.createElement('div');
-          btnRow.className = 'miniBtnRow';
-          btnRow.style.marginTop = '12px';
-          btnRow.innerHTML = '<button id="btnCloseAfterSupp" class="alt">⬅️ 返回 Live / Back to Live</button>';
-          modal.querySelector('.modal').appendChild(btnRow);
-          modal.querySelector('#btnCloseAfterSupp').onclick = function(){
-            closeModal(modal);
-            App.view='realtime';
-            render();
-          };
-
-        }).catch(function(){
-          showErr(msgTarget, {code:'E500', zh:'系統錯誤', en:'Error'});
-        });
-      }
-
-      restart();
-    }
-
-    // ===== Missing view binders we haven't wired yet (simple wrappers) =====
-    function bindVrmWrapper(){ bindVrm(); }
-    // bindVrm already defined above, wrapper unused.
 
     // Boot
     render();
