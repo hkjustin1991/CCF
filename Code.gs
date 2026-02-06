@@ -182,6 +182,7 @@ function emailUiFromStatus_(status){
   return { zh:'電郵狀態：' + s, en:'Email status: ' + s };
 }
 
+
 /******** Members sheet detection (order-insensitive) ********/
 function getMembersSheet_() {
   const ss = openSs_();
@@ -1650,3 +1651,5 @@ function setMemberCell_(sh, cols, rowNumber, headerName, value){
   if (idx === undefined) return;
   sh.getRange(rowNumber, idx+1).setValue(value);
 }
+
+/* ===== END OF Code.gs (COMPLETE) ===== */
