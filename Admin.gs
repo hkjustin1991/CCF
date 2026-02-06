@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-02-08.admin5
+ * v2026-02-09.admin6
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-08.admin5';
+const ADMIN_VERSION = '2026-02-09.admin6';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -90,6 +90,7 @@ const ADMIN_GL_HELPER_ALLOWED_GROUPS = ['MEDIA','LOGISTIC','SUPPORT','WORSHIP'];
 
 // Serving planning
 const ADMIN_SERVING_MAX_WEEKS_AHEAD = 26;
+const ADMIN_SERVING_SHEET_NAME = 'Serving';
 
 // Cache
 const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
@@ -192,6 +193,30 @@ function api_admin_serving_event_keys(token, fromDate){
   const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
   admin_audit_(s.actor, 'SERVING_EVENT_KEYS', JSON.stringify({ from: String(fromDate||''), count: events.length }), 'serving');
   return { ok:true, events: events, maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD };
+}
+
+/**
+ * Serving planning matrix: events (rows) x positions (columns).
+ */
+function api_admin_serving_plan_matrix(token, fromDate){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  const matrix = admin_getServingPlanMatrix_(events);
+  admin_audit_(
+    s.actor,
+    'SERVING_PLAN_MATRIX',
+    JSON.stringify({ from: String(fromDate||''), events: events.length, positions: matrix.positions.length }),
+    'serving'
+  );
+  return {
+    ok:true,
+    events: matrix.events,
+    positions: matrix.positions,
+    cells: matrix.cells,
+    maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD
+  };
 }
 
 /**
@@ -902,6 +927,82 @@ function admin_getUpcomingSundayEventKeys_(fromDateYmd, weeksAhead){
     out.push({ eventKey: 'SundayService_' + ymd, dateYmd: ymd });
   }
   return out;
+}
+
+function admin_getServingSheet_(){
+  const ss = admin_openSs_();
+  return ss.getSheetByName(ADMIN_SERVING_SHEET_NAME) || null;
+}
+function admin_getServingColMap_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
+  const col = {};
+  headers.forEach((h,i)=>{ if (h) col[h]=i; });
+  return col;
+}
+function admin_getServingPlanMatrix_(events){
+  const eventList = Array.isArray(events) ? events : [];
+  const eventKeys = eventList.map(e => e.eventKey);
+  const eventSet = new Set(eventKeys);
+  const cells = {};
+  eventKeys.forEach(ev => { cells[ev] = {}; });
+
+  const sh = admin_getServingSheet_();
+  if (!sh){
+    return { events: eventList, positions: [], cells: cells };
+  }
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2){
+    return { events: eventList, positions: [], cells: cells };
+  }
+
+  const lastCol = sh.getLastColumn();
+  const col = admin_getServingColMap_(sh);
+  if (col.EventKey === undefined || col.Group === undefined || col.Position === undefined || col.MemberId === undefined){
+    return { events: eventList, positions: [], cells: cells };
+  }
+
+  const mi = admin_getMembersIndex_();
+  const byId = (mi && mi.byId) ? mi.byId : {};
+
+  const positionsMap = {};
+  const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
+  for (let i=0;i<data.length;i++){
+    const row = data[i];
+    const ev = String(row[col.EventKey] || '').trim();
+    if (!eventSet.has(ev)) continue;
+
+    const group = String(row[col.Group] || '').trim().toUpperCase();
+    const position = String(row[col.Position] || '').trim();
+    if (!group && !position) continue;
+    const posKey = group + '::' + position.toUpperCase();
+    if (!positionsMap[posKey]){
+      positionsMap[posKey] = { key: posKey, group: group, position: position };
+    }
+
+    const memberId = String(row[col.MemberId] || '').trim().toUpperCase();
+    const slot = (col.Slot !== undefined) ? String(row[col.Slot] || '').trim() : '';
+    const member = byId[memberId] || {};
+    const entry = {
+      memberId: memberId,
+      nameZh: String(member.nameZh || ''),
+      nameEn: String(member.nameEn || ''),
+      slot: slot
+    };
+
+    if (!cells[ev][posKey]) cells[ev][posKey] = [];
+    cells[ev][posKey].push(entry);
+  }
+
+  const positions = Object.keys(positionsMap)
+    .map(k => positionsMap[k])
+    .sort(function(a,b){
+      const g = String(a.group||'').localeCompare(String(b.group||''));
+      if (g !== 0) return g;
+      return String(a.position||'').localeCompare(String(b.position||''));
+    });
+
+  return { events: eventList, positions: positions, cells: cells };
 }
 
 // Bypass code from Script Properties

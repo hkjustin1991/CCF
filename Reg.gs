@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-01-31.reg2
+ * v2026-02-09.reg3
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-01-31.reg2';
+const REG_VERSION = '2026-02-09.reg3';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1233,6 +1233,27 @@ If you did not request this change, please contact Media Team ASAP.
 }
 
 /******** Utilities / wrappers ********/
+function regParseYmdUtc_(ymd){
+  const s = String(ymd || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10)));
+  return isNaN(d.getTime()) ? null : d;
+}
+function regFmtYmdUtc_(d){
+  if (!(d instanceof Date)) return '';
+  return Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+}
+function regIsSundayServiceKey_(ev){
+  return /^SundayService_\d{4}-\d{2}-\d{2}$/.test(String(ev||'').trim());
+}
+function regEventDateFromKeyUtc_(ev){
+  const s = String(ev||'').trim();
+  const m = s.match(/^SundayService_(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10)));
+  return isNaN(d.getTime()) ? null : d;
+}
 function regNow_(){
   try{ return (typeof nowUk_ === 'function') ? nowUk_() : new Date(); }catch(e){ return new Date(); }
 }
