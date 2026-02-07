@@ -64,7 +64,7 @@ const ALLOWED_STATUSES_FOR_CHECKIN = [
 const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP];
 
 // Privilege expiry configuration
-const HELPER_EXPIRY_DAYS = 7;
+const HELPER_EXPIRY_DAYS = 31;
 const TEMP_EXPIRY_DAYS = 2;
 
 // Optional Members columns used by Live Service Portal (auto-added if missing)
@@ -72,8 +72,13 @@ const MEMBERS_OPTIONAL_HEADERS = [
   'VRM','VRM2',
   'RoleExpires',
   'PreferredName',
-  'IsMinor'
+  'IsMinor',
+  'ServingGroups',
+  'ServingGLGroups'
 ];
+
+// Serving sheet (read-only in Live Service Portal)
+const SERVING_SHEET_NAME = 'Serving';
 
 /******** Web App Router ********/
 function doGet(e) {
@@ -103,6 +108,12 @@ function getDefaultEventKey_(){ return 'SundayService_' + fmtUk_(nowUk_(), 'yyyy
 
 function normalizeStatus_(s){ return String(s || '').trim().toUpperCase(); }
 function normalizeVrm_(s){ return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function parseGroupsCsv_(value){
+  return String(value || '')
+    .split(',')
+    .map(v => String(v || '').trim().toUpperCase())
+    .filter(Boolean);
+}
 
 // Staff bypass code from Script Properties (NEW)
 function getStaffBypassCode_(){
@@ -265,6 +276,8 @@ function getMembersIndex_() {
     const preferredName = ('PreferredName' in col) ? String(row[col['PreferredName']] || '').trim() : '';
     const isMinorRaw = ('IsMinor' in col) ? String(row[col['IsMinor']] || '').trim().toUpperCase() : '';
     const isMinor = (isMinorRaw === 'YES');
+    const servingGroups = ('ServingGroups' in col) ? parseGroupsCsv_(row[col['ServingGroups']]) : [];
+    const servingGlGroups = ('ServingGLGroups' in col) ? parseGroupsCsv_(row[col['ServingGLGroups']]) : [];
 
     byId[id] = {
       rowNumber: r + 2,
@@ -281,7 +294,9 @@ function getMembersIndex_() {
       notes: String(row[col['Notes']] || '').trim(),
       vrm: vrm1,
       vrm2: vrm2,
-      roleExpires: roleExpires ? roleExpires.toISOString() : ''
+      roleExpires: roleExpires ? roleExpires.toISOString() : '',
+      servingGroups: servingGroups,
+      servingGlGroups: servingGlGroups
     };
   }
 
@@ -348,6 +363,91 @@ function ensureActivityLogSheet_() {
     sh.getRange(1, 1, 1, 7).setFontWeight('bold');
   }
   return sh;
+}
+
+function getServingSheet_(){
+  const ss = openSs_();
+  return ss.getSheetByName(SERVING_SHEET_NAME) || null;
+}
+
+function getServingMatrix_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
+  const positions = [];
+  for (let i=1;i<headers.length;i++){
+    const parsed = parseServingHeader_(headers[i]);
+    positions.push({
+      colIndex: i + 1,
+      key: headers[i],
+      group: parsed.group,
+      position: parsed.position
+    });
+  }
+  return { eventCol: 1, positions: positions };
+}
+function parseServingHeader_(header){
+  const raw = String(header||'').trim();
+  if (!raw) return { group:'', position:'' };
+  if (raw.includes('::')){
+    const parts = raw.split('::');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('::')||'').trim() };
+  }
+  if (raw.includes(' - ')){
+    const parts = raw.split(' - ');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join(' - ')||'').trim() };
+  }
+  if (raw.includes('/')){
+    const parts = raw.split('/');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('/')||'').trim() };
+  }
+  return { group:'', position: raw };
+}
+function findServingEventRowIndex_(sh, eventKey){
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+  const values = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i=0;i<values.length;i++){
+    if (String(values[i][0]||'').trim() === eventKey) return i + 2;
+  }
+  return null;
+}
+function getServingForEvent_(eventKey, membersById, checkedInSet){
+  const sh = getServingSheet_();
+  if (!sh) return [];
+  const rowIndex = findServingEventRowIndex_(sh, eventKey);
+  if (!rowIndex) return [];
+
+  const lastCol = sh.getLastColumn();
+  if (lastCol < 2) return [];
+  const matrix = getServingMatrix_(sh);
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  const out = [];
+
+  matrix.positions.forEach(function(pos){
+    const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+    if (!raw) return;
+    if (isServingNaValue_(raw)) return;
+    const m = membersById[raw] || {};
+    out.push({
+      eventKey: eventKey,
+      group: pos.group,
+      position: pos.position,
+      slot: '',
+      memberId: raw,
+      nameZh: String(m.nameZh || ''),
+      nameEn: String(m.nameEn || ''),
+      checkedIn: checkedInSet.has(raw)
+    });
+  });
+
+  out.sort((a,b)=> {
+    const g = a.group.localeCompare(b.group);
+    if (g !== 0) return g;
+    const p = a.position.localeCompare(b.position);
+    if (p !== 0) return p;
+    return a.memberId.localeCompare(b.memberId);
+  });
+  return out;
 }
 
 // Healthcheck sheet ensure (NEW)
@@ -926,13 +1026,17 @@ function api_get_live_page(token, eventKeyOptional) {
     });
   }
 
+  const checkedInSet = new Set(ids);
+  const servingToday = getServingForEvent_(eventKey, members, checkedInSet);
+
   const payload = {
     ok:true,
     eventKey,
     checkedInCount: names.length,
     newCount: newCount,
     lastSignIn,
-    names
+    names,
+    servingToday
   };
 
   cache.put(cacheKey, JSON.stringify(payload), 15);
@@ -1080,6 +1184,9 @@ function api_auth_commit(token, approverId, targetId, newStatus){
 
   const stNew = normalizeStatus_(newStatus);
   if (![STATUS_HELPER, STATUS_TEMP].includes(stNew)) return { ok:false, code:'E422', zh:'授權類別不正確', en:'Invalid authorisation role.' };
+  if (stNew === STATUS_HELPER) {
+    return { ok:false, code:'E403', zh:'HELPER 只可於管理員平台授權', en:'HELPER can only be granted via the Admin portal.' };
+  }
 
   const mi = getMembersIndex_();
 

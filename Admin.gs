@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-01-27.admin4
+ * v2026-02-12.admin9
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -39,15 +39,16 @@
  *    • confirmation reason + QR re-scan (must match current session actor)
  *    • SUPERUSER must scan an ADMIN QR (and must match ADMIN member)
  * - Status change (STAFF also allowed):
- *    • dropdown STAFF/ACTIVE/DISABLED/PROVISIONAL/TEMP
- *    • TEMP via admin portal = 7 days (RoleExpiresISO)
+ *    • dropdown STAFF/ACTIVE/DISABLED/PROVISIONAL/TEMP/HELPER
+ *    • TEMP via admin portal = 2 days (RoleExpiresISO)
+ *    • HELPER via admin portal = 31 days (RoleExpiresISO)
  *    • QR re-scan confirmation (same rules as contact reveal)
  *    • Hard-stop: cannot change another ADMIN’s status (including ADMIN->ADMIN)
  * - Separate audit sheet: Admin_Activity logs actions
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-01-27.admin4';
+const ADMIN_VERSION = '2026-02-12.admin9';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -80,8 +81,17 @@ const ADMIN_FLAG_START_DATE_UTC = new Date(Date.UTC(2026, 3, 1)); // 2026-04-01 
 const ADMIN_FLAG_MIN_SERVICES = 6; // suppress if fewer services in denominator
 const ADMIN_FLAG_THRESHOLD = 0.5;  // <50%
 
-// TEMP via Admin portal
-const ADMIN_TEMP_DAYS = 7;
+// TEMP/HELPER via Admin portal
+const ADMIN_TEMP_DAYS = 2;
+const ADMIN_HELPER_DAYS = 31;
+
+// GL helper grant allowed groups
+const ADMIN_GL_HELPER_ALLOWED_GROUPS = ['MEDIA','LOGISTIC','SUPPORT','WORSHIP'];
+
+// Serving planning
+const ADMIN_SERVING_MAX_WEEKS_AHEAD = 26;
+const ADMIN_SERVING_SHEET_NAME = 'Serving';
+const ADMIN_SERVING_AWAY_SHEET_NAME = 'Serving_Away';
 
 // Cache
 const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
@@ -138,16 +148,21 @@ function api_admin_login(input){
 
   const st = admin_normStatus_(m.status);
   if (st === 'DISABLED') return admin_err_('E414','此帳號已停用','Account disabled.');
-  if (!(st === 'STAFF' || st === 'ADMIN')) {
+
+  const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
+  if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
     return admin_err_('E403','此管理平台只限已授權同工使用','Admin portal for authorised staff only.');
   }
   if (!m.key || String(m.key) !== parsed.key){
     return admin_err_('E418','Key 不相符（可能是舊 QR）','Key mismatch (possibly old QR).');
   }
 
-  const token = admin_newSession_({ id:m.id, role:st });
-  admin_audit_({id:m.id, role:st}, 'LOGIN', JSON.stringify({ via:'QR' }), '');
-  return { ok:true, token, actor:{ id:m.id, role:st } };
+  const role = (st === 'STAFF' || st === 'ADMIN') ? st : 'GL';
+  const actor = { id:m.id, role:role };
+  if (role === 'GL') actor.glGroups = glGroups;
+  const token = admin_newSession_(actor);
+  admin_audit_(actor, 'LOGIN', JSON.stringify({ via:'QR' }), '');
+  return { ok:true, token, actor: actor };
 }
 
 function api_admin_ping(token){
@@ -170,6 +185,206 @@ function api_admin_log(token, action, details, context){
 }
 
 /**
+ * Serving planning: upcoming Sunday event keys (max 26 weeks).
+ */
+function api_admin_serving_event_keys(token, fromDate){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
+  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  admin_audit_(s.actor, 'SERVING_EVENT_KEYS', JSON.stringify({ from: String(fromDate||''), count: events.length }), 'serving');
+  return { ok:true, events: events, maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD };
+}
+
+/**
+ * Serving planning matrix: events (rows) x positions (columns).
+ */
+function api_admin_serving_plan_matrix(token, fromDate){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
+  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  const matrix = admin_getServingPlanMatrix_(events);
+  admin_audit_(
+    s.actor,
+    'SERVING_PLAN_MATRIX',
+    JSON.stringify({ from: String(fromDate||''), events: events.length, positions: matrix.positions.length }),
+    'serving'
+  );
+  return {
+    ok:true,
+    events: matrix.events,
+    positions: matrix.positions,
+    cells: matrix.cells,
+    maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD
+  };
+}
+
+/**
+ * Serving event rows (for per-event edit UI).
+ */
+function api_admin_serving_event_rows(token, eventKey){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
+  const ev = String(eventKey||'').trim();
+  if (!admin_isSundayServiceKey_(ev)){
+    return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
+  }
+  const rows = admin_getServingForEvent_(ev, admin_getMembersIndex_().byId, new Set(), true);
+  return { ok:true, eventKey: ev, rows: rows };
+}
+
+/**
+ * Serving event save (replace rows for one event).
+ * rows: [{group, position, slot, memberId}]
+ */
+function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
+  const ev = String(eventKey||'').trim();
+  if (!admin_isSundayServiceKey_(ev)){
+    return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
+  }
+
+  const list = Array.isArray(rows) ? rows : [];
+  const cleaned = [];
+  for (const r of list){
+    const group = String(r.group||'').trim().toUpperCase();
+    const position = String(r.position||'').trim();
+    const slot = String(r.slot||'').trim();
+    const memberId = String(r.memberId||'').trim().toUpperCase();
+    if (!group && !position && !slot && !memberId) continue;
+    cleaned.push({ group, position, slot, memberId });
+  }
+
+  const evDate = admin_eventDateFromKey_(ev);
+  const conflicts = admin_checkServingAwayConflicts_(evDate, cleaned);
+  const role = String(s.actor.role||'').trim().toUpperCase();
+  const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
+  if (conflicts.length){
+    if (!canOverride){
+      return admin_err_('E409','事奉安排與離開期重疊','Serving assignment overlaps away period.');
+    }
+    if (!overrideAway){
+      return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, canOverride:true };
+    }
+  }
+
+  const matrix = admin_getServingMatrix_(sh);
+  if (!matrix.eventCol){
+    return admin_err_('E500','Serving 表格欄位錯誤','Serving sheet headers missing.');
+  }
+  const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+  if (rowIndex === null){
+    return admin_err_('E500','找不到活動列','Event row not found.');
+  }
+
+  const headerMap = admin_getServingMatrixHeaderMap_(sh);
+  const newCols = [];
+  cleaned.forEach(function(r){
+    const key = admin_makeServingHeaderKey_(r.group, r.position);
+    if (!headerMap[key]){
+      newCols.push({ key: key, group: r.group, position: r.position });
+    }
+  });
+  if (newCols.length){
+    const startCol = sh.getLastColumn() + 1;
+    sh.insertColumnsAfter(sh.getLastColumn(), newCols.length);
+    newCols.forEach(function(c, idx){
+      sh.getRange(1, startCol + idx).setValue(c.key);
+    });
+  }
+
+  const updatedHeaderMap = admin_getServingMatrixHeaderMap_(sh);
+  const lastCol = sh.getLastColumn();
+  const rowValues = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  for (let i=1;i<lastCol;i++){
+    rowValues[i] = '';
+  }
+  cleaned.forEach(function(r){
+    const key = admin_makeServingHeaderKey_(r.group, r.position);
+    const colIdx = updatedHeaderMap[key];
+    if (colIdx) rowValues[colIdx-1] = r.memberId || '';
+  });
+  sh.getRange(rowIndex, 1, 1, lastCol).setValues([rowValues]);
+
+  admin_audit_(
+    s.actor,
+    'SERVING_EVENT_SAVE',
+    JSON.stringify({ eventKey: ev, rows: cleaned.length, overrideAway: !!overrideAway }),
+    'serving'
+  );
+
+  return { ok:true, eventKey: ev, rows: cleaned.length };
+}
+
+/**
+ * Away period management (DD/MM/YYYY).
+ */
+function api_admin_set_away_period(token, memberId, fromDmy, toDmy){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+
+  const fromYmd = admin_parseDmyToYmd_(fromDmy);
+  const toYmd = admin_parseDmyToYmd_(toDmy);
+  if (fromDmy || toDmy){
+    if (!fromYmd || !toYmd){
+      return admin_err_('E422','日期格式錯誤（DD/MM/YYYY）','Invalid date format (DD/MM/YYYY).');
+    }
+    const from = admin_parseYmd_(fromYmd);
+    const to = admin_parseYmd_(toYmd);
+    if (!from || !to) return admin_err_('E422','日期格式錯誤（DD/MM/YYYY）','Invalid date format (DD/MM/YYYY).');
+    if (to.getTime() < from.getTime()){
+      return admin_err_('E423','結束日期不可早於開始日期','End date cannot be before start date.');
+    }
+  }
+
+  const sh = admin_ensureAwaySheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow >= 2){
+    const data = sh.getRange(2,1,lastRow-1,sh.getLastColumn()).getValues();
+    const kept = data.filter(row => String(row[0]||'').trim().toUpperCase() !== id);
+    sh.getRange(2,1,lastRow-1,sh.getLastColumn()).clearContent();
+    if (kept.length){
+      sh.getRange(2,1,kept.length,sh.getLastColumn()).setValues(kept);
+    }
+  }
+
+  if (fromYmd && toYmd){
+    sh.appendRow([
+      id,
+      fromYmd,
+      toYmd,
+      new Date(),
+      String(s.actor.id||''),
+      String(s.actor.role||'')
+    ]);
+  }
+
+  admin_audit_(
+    s.actor,
+    'SERVING_AWAY_SET',
+    JSON.stringify({ memberId: id, from: fromYmd || '', to: toYmd || '' }),
+    'serving'
+  );
+
+  return { ok:true, memberId: id, fromYmd: fromYmd || '', toYmd: toYmd || '' };
+}
+
+/**
  * Service stats series within date range (SundayService only).
  * Contract:
  * {
@@ -182,6 +397,8 @@ function api_admin_log(token, action, details, context){
 function api_admin_stats(token, fromDate, toDate){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
+  const glBlock = admin_requireNonGl_(s.actor);
+  if (glBlock) return glBlock;
 
   const range = admin_validateRange_(s.actor, fromDate, toDate);
   if (!range.ok) return range;
@@ -248,6 +465,8 @@ function api_admin_stats(token, fromDate, toDate){
 function api_admin_stats_rebuild(token){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
+  const glBlock = admin_requireNonGl_(s.actor);
+  if (glBlock) return glBlock;
 
   if (!(s.actor.role === 'ADMIN' || s.actor.role === 'SUPERUSER')){
     return admin_err_('E403','只有管理員可以重建統計快取','Only ADMIN can rebuild cache.');
@@ -270,6 +489,8 @@ function api_admin_stats_rebuild(token){
 function api_admin_event_detail(token, eventKey){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
+  const glBlock = admin_requireNonGl_(s.actor);
+  if (glBlock) return glBlock;
 
   const ev = String(eventKey||'').trim();
   if (!admin_isSundayServiceKey_(ev)){
@@ -314,6 +535,8 @@ function api_admin_event_detail(token, eventKey){
   const newCount = newMembers.length;
   const existingCount = Math.max(0, total - newCount);
 
+  const servingRows = admin_getServingForEvent_(ev, mi.byId, set);
+
   admin_audit_(s.actor, 'EVENT_DETAIL', JSON.stringify({eventKey: ev, total, new: newCount, existing: existingCount}), 'event');
 
   return {
@@ -324,7 +547,7 @@ function api_admin_event_detail(token, eventKey){
     lists:{ newMembers: newMembers, existingMembers: existingMembers },
     extras:{
       offering: null,
-      serving: null
+      serving: servingRows
     }
   };
 }
@@ -335,6 +558,8 @@ function api_admin_event_detail(token, eventKey){
 function api_admin_period_stats(token, fromDate, toDate){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
+  const glBlock = admin_requireNonGl_(s.actor);
+  if (glBlock) return glBlock;
 
   const range = admin_validateRange_(s.actor, fromDate, toDate);
   if (!range.ok) return range;
@@ -461,6 +686,8 @@ function api_admin_period_stats(token, fromDate, toDate){
 function api_admin_matrix(token, fromDate, toDate, q){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
+  const glBlock = admin_requireNonGl_(s.actor);
+  if (glBlock) return glBlock;
 
   const range = admin_validateRange_(s.actor, fromDate, toDate);
   if (!range.ok) return range;
@@ -639,6 +866,7 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
   const low = admin_getLowAttendanceFlagsCached_();
   const lowEnabled = !!low.enabled;
   const lowFlag = !!low.flagById[id];
+  const away = admin_getAwayPeriodForMember_(id);
 
   admin_audit_(s.actor, 'MEMBER_DETAIL', JSON.stringify({id:id, from:String(fromDate||''), to:String(toDate||'')}), 'member_detail');
 
@@ -663,6 +891,10 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
     lowAttendance:{
       enabled: lowEnabled,
       flag: lowFlag
+    },
+    away:{
+      from: away.fromYmd || '',
+      to: away.toYmd || ''
     }
   };
 }
@@ -674,6 +906,9 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
 function api_admin_member_contact_reveal(token, memberId, reason, reauthQrPayload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
+  if (String(s.actor.role||'').toUpperCase() === 'GL'){
+    return admin_err_('E403','群組長模式不可查看聯絡資料','GL mode cannot access contact details.');
+  }
 
   const id = String(memberId||'').trim().toUpperCase();
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
@@ -714,7 +949,7 @@ function api_admin_member_contact_reveal(token, memberId, reason, reauthQrPayloa
 
 /**
  * Status change (gated by reauth scan in UI).
- * Allowed: STAFF / ACTIVE / DISABLED / PROVISIONAL / TEMP (7 days)
+ * Allowed: STAFF / ACTIVE / DISABLED / PROVISIONAL / TEMP (2 days) / HELPER (31 days)
  *
  * Hard-stop:
  * - cannot change another ADMIN’s status (including ADMIN changing other admins)
@@ -727,7 +962,7 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
 
   const ns = admin_normStatus_(newStatus);
-  const allowed = ['STAFF','ACTIVE','DISABLED','PROVISIONAL','TEMP'];
+  const allowed = ['STAFF','ACTIVE','DISABLED','PROVISIONAL','TEMP','HELPER'];
   if (!allowed.includes(ns)){
     return admin_err_('E431','狀態不正確','Invalid status.');
   }
@@ -748,6 +983,27 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
 
   const oldStatusRaw = ms.getRange(rowNumber, col.Status+1).getValue();
   const oldStatus = admin_normStatus_(oldStatusRaw);
+  const actorRole = String(s.actor.role||'').trim().toUpperCase();
+
+  if (actorRole === 'GL' && ns !== 'HELPER'){
+    return admin_err_('E403','群組長只可授權 HELPER','GL can only grant HELPER.');
+  }
+
+  if (actorRole === 'GL'){
+    const actorGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+    const allowedActorGroups = actorGroups.filter(g => ADMIN_GL_HELPER_ALLOWED_GROUPS.includes(g));
+    if (!allowedActorGroups.length){
+      return admin_err_('E403','此群組長不允許授權 HELPER','This GL group cannot grant HELPER.');
+    }
+
+    const targetGroups = (col.ServingGroups !== undefined)
+      ? admin_parseGroupsCsv_(ms.getRange(rowNumber, col.ServingGroups+1).getValue())
+      : [];
+
+    if (!admin_hasGroupOverlap_(allowedActorGroups, targetGroups)){
+      return admin_err_('E403','只能授權本組成員','GL can only grant HELPER within their group.');
+    }
+  }
 
   // effective confirmer:
   // - normal: self id
@@ -770,12 +1026,13 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
   ms.getRange(rowNumber, col.Status+1).setValue(ns);
 
   let expiryIso = '';
-  if (ns === 'TEMP'){
-    const expiry = new Date(Date.now() + ADMIN_TEMP_DAYS*24*60*60*1000);
+  if (ns === 'TEMP' || ns === 'HELPER'){
+    const days = (ns === 'TEMP') ? ADMIN_TEMP_DAYS : ADMIN_HELPER_DAYS;
+    const expiry = new Date(Date.now() + days*24*60*60*1000);
     expiryIso = expiry.toISOString();
     ms.getRange(rowNumber, roleCol+1).setValue(expiryIso);
   } else {
-    // leaving TEMP -> clear expiry
+    // leaving TEMP/HELPER -> clear expiry
     if (roleCol !== null) ms.getRange(rowNumber, roleCol+1).setValue('');
   }
 
@@ -796,11 +1053,287 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
 function admin_openSs_(){ return SpreadsheetApp.openById(ADMIN_SPREADSHEET_ID); }
 function admin_nowIso_(){ return new Date().toISOString(); }
 function admin_normStatus_(s){ return String(s||'').trim().toUpperCase(); }
+function admin_parseGroupsCsv_(value){
+  return String(value || '')
+    .split(',')
+    .map(v => String(v || '').trim().toUpperCase())
+    .filter(Boolean);
+}
+function admin_hasGroupOverlap_(a, b){
+  const set = new Set(a || []);
+  return (b || []).some(g => set.has(g));
+}
 
 function admin_err_(code, zh, en, detail){
   const out = { ok:false, code:String(code||'E500'), zh:String(zh||'系統錯誤'), en:String(en||'System error') };
   if (detail) out.detail = String(detail);
   return out;
+}
+
+function admin_todayUkYmd_(){
+  return Utilities.formatDate(new Date(), ADMIN_TZ, 'yyyy-MM-dd');
+}
+function admin_isSunday_(d){
+  return d && d.getUTCDay && d.getUTCDay() === 0;
+}
+function admin_nextSunday_(d){
+  const out = new Date(d.getTime());
+  const day = out.getUTCDay();
+  const offset = (7 - day) % 7;
+  out.setUTCDate(out.getUTCDate() + offset);
+  return out;
+}
+function admin_getUpcomingSundayEventKeys_(fromDateYmd, weeksAhead){
+  const startYmd = String(fromDateYmd || '').trim() || admin_todayUkYmd_();
+  let start = admin_parseYmd_(startYmd);
+  if (!start) start = admin_parseYmd_(admin_todayUkYmd_());
+  if (!admin_isSunday_(start)) start = admin_nextSunday_(start);
+
+  const weeks = Math.max(0, Math.min(Number(weeksAhead || 0), ADMIN_SERVING_MAX_WEEKS_AHEAD));
+  const out = [];
+  for (let i = 0; i < weeks; i++){
+    const d = new Date(start.getTime());
+    d.setUTCDate(d.getUTCDate() + (i * 7));
+    if (!admin_isSunday_(d)) continue;
+    const ymd = admin_fmtYmd_(d);
+    out.push({ eventKey: 'SundayService_' + ymd, dateYmd: ymd });
+  }
+  return out;
+}
+
+function admin_getServingSheet_(){
+  const ss = admin_openSs_();
+  return ss.getSheetByName(ADMIN_SERVING_SHEET_NAME) || null;
+}
+function admin_ensureServingSheet_(){
+  const ss = admin_openSs_();
+  let sh = ss.getSheetByName(ADMIN_SERVING_SHEET_NAME);
+  if (!sh){
+    sh = ss.insertSheet(ADMIN_SERVING_SHEET_NAME);
+    sh.appendRow(['EventKey']);
+    sh.getRange(1,1,1,1).setFontWeight('bold');
+  }
+  return sh;
+}
+function admin_ensureServingEventKeys_(sh){
+  const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  for (let i=0;i<events.length;i++){
+    const row = 2 + i;
+    const current = String(sh.getRange(row, 1).getValue() || '').trim();
+    if (!current){
+      sh.getRange(row, 1).setValue(events[i].eventKey);
+    }
+  }
+}
+function admin_ensureAwaySheet_(){
+  const ss = admin_openSs_();
+  let sh = ss.getSheetByName(ADMIN_SERVING_AWAY_SHEET_NAME);
+  if (!sh){
+    sh = ss.insertSheet(ADMIN_SERVING_AWAY_SHEET_NAME);
+    sh.appendRow(['MemberId','FromYmd','ToYmd','UpdatedAt','UpdatedBy','UpdatedRole']);
+    sh.getRange(1,1,1,6).setFontWeight('bold');
+  }
+  return sh;
+}
+function admin_getAwayPeriodForMember_(memberId){
+  const sh = admin_ensureAwaySheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { fromYmd:'', toYmd:'' };
+  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  const id = String(memberId||'').trim().toUpperCase();
+  for (let i=0;i<data.length;i++){
+    if (String(data[i][0]||'').trim().toUpperCase() === id){
+      return { fromYmd: String(data[i][1]||'').trim(), toYmd: String(data[i][2]||'').trim() };
+    }
+  }
+  return { fromYmd:'', toYmd:'' };
+}
+function admin_getAwayPeriodsMap_(memberIds){
+  const out = {};
+  const ids = Array.isArray(memberIds) ? memberIds.map(x => String(x||'').trim().toUpperCase()).filter(Boolean) : [];
+  if (!ids.length) return out;
+  const sh = admin_ensureAwaySheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return out;
+  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  const set = new Set(ids);
+  for (let i=0;i<data.length;i++){
+    const id = String(data[i][0]||'').trim().toUpperCase();
+    if (!set.has(id)) continue;
+    out[id] = {
+      fromYmd: String(data[i][1]||'').trim(),
+      toYmd: String(data[i][2]||'').trim()
+    };
+  }
+  return out;
+}
+function admin_checkServingAwayConflicts_(eventDate, rows){
+  const out = [];
+  if (!eventDate) return out;
+  const ids = rows.map(r => String(r.memberId||'').trim().toUpperCase()).filter(Boolean);
+  const map = admin_getAwayPeriodsMap_(ids);
+  for (const r of rows){
+    const id = String(r.memberId||'').trim().toUpperCase();
+    if (!id) continue;
+    if (admin_isServingNaValue_(id)) continue;
+    const away = map[id];
+    if (!away || !away.fromYmd || !away.toYmd) continue;
+    const from = admin_parseYmd_(away.fromYmd);
+    const to = admin_parseYmd_(away.toYmd);
+    if (!from || !to) continue;
+    if (eventDate.getTime() >= from.getTime() && eventDate.getTime() <= to.getTime()){
+      out.push({ memberId: id, from: away.fromYmd, to: away.toYmd });
+    }
+  }
+  return out;
+}
+function admin_getServingMatrix_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
+  const positions = [];
+  for (let i=1;i<headers.length;i++){
+    const parsed = admin_parseServingHeader_(headers[i]);
+    positions.push({
+      colIndex: i + 1,
+      key: headers[i],
+      group: parsed.group,
+      position: parsed.position
+    });
+  }
+  return { eventCol: 1, positions: positions };
+}
+function admin_getServingMatrixHeaderMap_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
+  const map = {};
+  for (let i=1;i<headers.length;i++){
+    if (headers[i]) map[headers[i]] = i + 1;
+  }
+  return map;
+}
+function admin_makeServingHeaderKey_(group, position){
+  const g = String(group||'').trim().toUpperCase();
+  const p = String(position||'').trim();
+  if (g && p) return g + '::' + p;
+  if (p) return p;
+  return g || '';
+}
+function admin_parseServingHeader_(header){
+  const raw = String(header||'').trim();
+  if (!raw) return { group:'', position:'' };
+  if (raw.includes('::')){
+    const parts = raw.split('::');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('::')||'').trim() };
+  }
+  if (raw.includes(' - ')){
+    const parts = raw.split(' - ');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join(' - ')||'').trim() };
+  }
+  if (raw.includes('/')){
+    const parts = raw.split('/');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('/')||'').trim() };
+  }
+  return { group:'', position: raw };
+}
+function admin_findServingEventRowIndex_(sh, eventKey){
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+  const values = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i=0;i<values.length;i++){
+    if (String(values[i][0]||'').trim() === eventKey) return i + 2;
+  }
+  return null;
+}
+function admin_isServingNaValue_(value){
+  const v = String(value || '').trim().toUpperCase();
+  return (v === 'N/A' || v === 'NA');
+}
+function admin_isServingNaRow_(row){
+  return admin_isServingNaValue_(row.position) || admin_isServingNaValue_(row.slot) || admin_isServingNaValue_(row.memberId);
+}
+function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeNa){
+  const sh = admin_getServingSheet_();
+  if (!sh) return [];
+  const rowIndex = admin_findServingEventRowIndex_(sh, eventKey);
+  if (!rowIndex) return [];
+
+  const lastCol = sh.getLastColumn();
+  if (lastCol < 2) return [];
+  const matrix = admin_getServingMatrix_(sh);
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  const out = [];
+
+  matrix.positions.forEach(function(pos){
+    const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+    if (!raw) return;
+    const entry = {
+      eventKey: eventKey,
+      group: pos.group,
+      position: pos.position,
+      slot: '',
+      memberId: raw,
+      checkedIn: checkedInSet && checkedInSet.has(raw)
+    };
+    if (!includeNa && admin_isServingNaValue_(raw)) return;
+    const m = membersById[raw] || {};
+    entry.nameZh = String(m.nameZh || '');
+    entry.nameEn = String(m.nameEn || '');
+    out.push(entry);
+  });
+
+  out.sort((a,b)=>{
+    const g = String(a.group||'').localeCompare(String(b.group||''));
+    if (g !== 0) return g;
+    const p = String(a.position||'').localeCompare(String(b.position||''));
+    if (p !== 0) return p;
+    return String(a.memberId||'').localeCompare(String(b.memberId||''));
+  });
+  return out;
+}
+function admin_getServingPlanMatrix_(events){
+  const eventList = Array.isArray(events) ? events : [];
+  const eventKeys = eventList.map(e => e.eventKey);
+  const cells = {};
+  eventKeys.forEach(ev => { cells[ev] = {}; });
+
+  const sh = admin_getServingSheet_();
+  if (!sh){
+    return { events: eventList, positions: [], cells: cells };
+  }
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2){
+    return { events: eventList, positions: [], cells: cells };
+  }
+
+  const matrix = admin_getServingMatrix_(sh);
+  const positions = matrix.positions.map(function(pos){
+    return { key: pos.key, group: pos.group, position: pos.position };
+  });
+
+  const mi = admin_getMembersIndex_();
+  const byId = (mi && mi.byId) ? mi.byId : {};
+
+  eventKeys.forEach(function(ev){
+    const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+    if (!rowIndex) return;
+    const lastCol = sh.getLastColumn();
+    const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+    matrix.positions.forEach(function(pos){
+      const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+      if (!raw) return;
+      const member = byId[raw] || {};
+      const entry = {
+        memberId: raw,
+        nameZh: String(member.nameZh || ''),
+        nameEn: String(member.nameEn || ''),
+        slot: ''
+      };
+      if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
+      cells[ev][pos.key].push(entry);
+    });
+  });
+
+  return { events: eventList, positions: positions, cells: cells };
 }
 
 // Bypass code from Script Properties
@@ -835,6 +1368,13 @@ function admin_requireSession_(token){
   const sess = admin_getSession_(token);
   if (!sess || !sess.actor) return admin_err_('E401','登入已過期，請重新登入','Session expired. Please login again.');
   return { ok:true, actor: sess.actor };
+}
+function admin_requireNonGl_(actor){
+  const role = String(actor.role||'').trim().toUpperCase();
+  if (role === 'GL'){
+    return admin_err_('E403','群組長模式只限事奉功能','GL mode is serving-only.');
+  }
+  return null;
 }
 
 // Audit logging
@@ -904,6 +1444,13 @@ function admin_eventDateFromKey_(ev){
   if (!m) return null;
   const d = new Date(Date.UTC(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10)));
   return isNaN(d.getTime()) ? null : d;
+}
+function admin_parseDmyToYmd_(dmy){
+  const s = String(dmy||'').trim();
+  if (!s) return '';
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return '';
+  return m[3] + '-' + m[2] + '-' + m[1];
 }
 
 // QR parsing
@@ -999,7 +1546,9 @@ function admin_getMembersIndex_(){
         vrm: (col.VRM!==undefined) ? String(row[col.VRM]||'').trim() : '',
         vrm2:(col.VRM2!==undefined)? String(row[col.VRM2]||'').trim() : '',
         preferredName: (col.PreferredName!==undefined) ? String(row[col.PreferredName]||'').trim() : '',
-        memberSinceRaw: (col.Member_Since!==undefined) ? row[col.Member_Since] : ''
+        memberSinceRaw: (col.Member_Since!==undefined) ? row[col.Member_Since] : '',
+        servingGroups: (col.ServingGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGroups]) : [],
+        servingGLGroups: (col.ServingGLGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGLGroups]) : []
       };
     }
   }
@@ -1244,6 +1793,19 @@ function admin_verifyReauth_(actor, reauthQrPayload){
   if (parsed.id !== expected){
     return admin_err_('E431','請掃描你本人同工 QR 作確認（不可用其他同工）','Please scan your own staff QR to confirm (cannot use another staff).');
   }
+
+  const actorRole = String(actor.role||'').trim().toUpperCase();
+  if (actorRole === 'GL'){
+    const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
+    if (!glGroups.length){
+      return admin_err_('E403','此帳號沒有群組長權限','No GL privileges on this account.');
+    }
+    if (st === 'DISABLED'){
+      return admin_err_('E414','此帳號已停用','Account disabled.');
+    }
+    return { ok:true, confirmedBy: parsed.id, glGroups: glGroups };
+  }
+
   if (!(st === 'STAFF' || st === 'ADMIN')){
     return admin_err_('E403','此管理平台只限已授權同工使用','Admin portal for authorised staff only.');
   }
