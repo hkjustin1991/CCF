@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui6-serving-plan-matrix
-  For Admin.gs: v2026-02-09.admin6
+  UI VERSION TAG: admin2-ui8-serving-edit-away
+  For Admin.gs: v2026-02-11.admin8
   ============================================================
   -->
 
@@ -260,6 +260,31 @@
       var group = getServingGroupLabel_(pos.group);
       var position = String(pos.position || '').trim();
       return position ? (group + ' / ' + position) : group;
+    }
+    function ymdToDmy_(ymd){
+      var s = String(ymd||'').trim();
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return '';
+      return m[3] + '/' + m[2] + '/' + m[1];
+    }
+    function dmyToYmd_(dmy){
+      var s = String(dmy||'').trim();
+      var m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!m) return '';
+      return m[3] + '-' + m[2] + '-' + m[1];
+    }
+    function toggleDateInput_(input, toDateType){
+      if (!input) return;
+      if (toDateType){
+        var ymd = dmyToYmd_(input.value);
+        input.setAttribute('type','date');
+        if (ymd) input.value = ymd;
+      } else {
+        if (input.value){
+          input.value = ymdToDmy_(input.value) || input.value;
+        }
+        input.setAttribute('type','text');
+      }
     }
 
     function showBox(targetId, kind, titleZh, titleEn, detailHtml){
@@ -655,7 +680,6 @@
       return ''+
         '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
           '<div class="big">🧩 事奉排期 / Serving plan</div>'+
-          '<div class="small">只顯示主日（SundayService）及未來 26 週。<br/>Showing Sundays only, up to 26 weeks ahead.</div>'+
           '<div id="servingPlanList" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -715,6 +739,7 @@
               '<td class="servingPlanEvent">'+
                 '<div>'+escapeHtml(ev.eventKey||'')+'</div>'+
                 '<div class="small">'+escapeHtml(ev.dateYmd||'')+'</div>'+
+                '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'">✏️ 編輯 / Edit</button></div>'+
               '</td>'+
               rowCells +
             '</tr>';
@@ -727,9 +752,163 @@
               '<tbody>'+bodyHtml+'</tbody>'+
             '</table>'+
           '</div>';
+
+        Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
+          btn.onclick = function(){
+            openServingEditModal(btn.getAttribute('data-event'));
+          };
+        });
       }).catch(function(){
         listEl.innerHTML = '';
         showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+      });
+    }
+
+    function openServingEditModal(eventKey){
+      var ev = String(eventKey||'').trim();
+      var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
+
+      callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
+        if(!res || !res.ok){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          return;
+        }
+
+        var rows = (res.rows || []).map(function(r){
+          return {
+            group: String(r.group||'').trim().toUpperCase(),
+            position: String(r.position||'').trim(),
+            slot: String(r.slot||'').trim(),
+            memberId: String(r.memberId||'').trim().toUpperCase()
+          };
+        });
+
+        function renderRows_(){
+          if (!rows.length){
+            return '<div class="small">暫無事奉資料 / No serving rows</div>';
+          }
+          var h = '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
+            '<th>Group</th><th>Position</th><th>Slot</th><th>Member ID</th><th></th>'+
+            '</tr></thead><tbody>';
+          rows.forEach(function(r, idx){
+            h += '<tr>'+
+              '<td>'+escapeHtml(r.group)+'</td>'+
+              '<td>'+escapeHtml(r.position)+'</td>'+
+              '<td>'+escapeHtml(r.slot)+'</td>'+
+              '<td>'+escapeHtml(r.memberId)+'</td>'+
+              '<td><button class="btnDanger btnRemoveRow" data-idx="'+idx+'">刪除 / Remove</button></td>'+
+            '</tr>';
+          });
+          h += '</tbody></table></div>';
+          return h;
+        }
+
+        function bindRemove_(){
+          Array.prototype.slice.call(modal.querySelectorAll('.btnRemoveRow')).forEach(function(btn){
+            btn.onclick = function(){
+              var idx = parseInt(btn.getAttribute('data-idx'), 10);
+              rows.splice(idx, 1);
+              render();
+            };
+          });
+        }
+
+        function render(){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+            '<div class="small">'+escapeHtml(ev)+'</div>'+
+            '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="small">批量匯入格式：Group, Position, Slot, MemberId（CSV 或 Tab）。可輸入 N/A。</div>'+
+            '</div>'+
+            '<div class="kv" style="margin-top:10px;">'+
+              '<div>Group</div><div><input id="addGroup" /></div>'+
+              '<div>Position</div><div><input id="addPosition" /></div>'+
+              '<div>Slot</div><div><input id="addSlot" /></div>'+
+              '<div>Member ID</div><div><input id="addMember" placeholder="CCF0000 or N/A" /></div>'+
+            '</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnAddRow" class="btnPeriod">➕ 新增 / Add</button>'+
+            '</div>'+
+            '<div>'+renderRows_()+'</div>'+
+            '<div class="label" style="margin-top:10px;">Bulk import</div>'+
+            '<textarea id="bulkImport" placeholder="Group,Position,Slot,MemberId"></textarea>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnApplyImport" class="btnStats">⬆️ 匯入 / Import</button>'+
+              '<button id="btnSaveServing" class="btnMain">💾 儲存 / Save</button>'+
+              '<button id="btnCloseServing" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>'+
+            '<div id="servingEditMsg"></div>';
+
+          bindRemove_();
+
+          modal.querySelector('#btnCloseServing').onclick = function(){ closeModal(modal); };
+          modal.querySelector('#btnAddRow').onclick = function(){
+            rows.push({
+              group: String(modal.querySelector('#addGroup').value||'').trim().toUpperCase(),
+              position: String(modal.querySelector('#addPosition').value||'').trim(),
+              slot: String(modal.querySelector('#addSlot').value||'').trim(),
+              memberId: String(modal.querySelector('#addMember').value||'').trim().toUpperCase()
+            });
+            render();
+          };
+
+          modal.querySelector('#btnApplyImport').onclick = function(){
+            var raw = String(modal.querySelector('#bulkImport').value||'').trim();
+            if (!raw){ return; }
+            var lines = raw.split(/\r?\n/).filter(Boolean);
+            var parsed = [];
+            lines.forEach(function(line, idx){
+              var parts = line.split(/\t|,/).map(function(p){ return String(p||'').trim(); });
+              if (idx === 0 && /group/i.test(parts[0]||'') && /position/i.test(parts[1]||'')) return;
+              parsed.push({
+                group: String(parts[0]||'').trim().toUpperCase(),
+                position: String(parts[1]||'').trim(),
+                slot: String(parts[2]||'').trim(),
+                memberId: String(parts[3]||'').trim().toUpperCase()
+              });
+            });
+            rows = rows.concat(parsed);
+            render();
+          };
+
+          modal.querySelector('#btnSaveServing').onclick = function(){
+            clear('servingEditMsg');
+            callApi('api_admin_serving_event_save', App.token, ev, rows, false).then(function(res2){
+              if (!res2 || !res2.ok){
+                if (res2 && res2.code === 'E409' && res2.canOverride){
+                  if (confirm('事奉安排與離開期重疊，是否仍要儲存？')) {
+                    callApi('api_admin_serving_event_save', App.token, ev, rows, true).then(function(res3){
+                      if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                      showBox('servingEditMsg','ok','已儲存','Saved.');
+                    }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
+                  }
+                  return;
+                }
+                showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+                return;
+              }
+              showBox('servingEditMsg','ok','已儲存','Saved.');
+            }).catch(function(){
+              showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
+
+        render();
+      }).catch(function(){
+        modal.querySelector('.modal').innerHTML =
+          '<div class="big err">系統錯誤 / Error</div>'+
+          '<div class="small">System error</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+        modal.querySelector('#c').onclick = function(){ closeModal(modal); };
       });
     }
 
@@ -1078,7 +1257,12 @@
               // ✅ Clicking the x-axis label opens service stats dialog
               onClick: function(evt, elements, chart){
                 try{
-                  if(elements && elements.length) return;
+                  if(elements && elements.length){
+                    var barIndex = elements[0].index;
+                    var barLabel = chart.data.labels[barIndex];
+                    if (barLabel) openEventStatsModal('SundayService_' + barLabel);
+                    return;
+                  }
 
                   var p = chart.canvas.getBoundingClientRect();
                   var x = evt.native.clientX - p.left;
@@ -1257,6 +1441,29 @@
               arr.map(renderNameItem_).join('')+
             '</div>';
         }
+        function renderServingList_(rows){
+          if (!rows || !rows.length){
+            return '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
+          }
+
+          var html = '';
+          var currentGroup = '';
+          rows.forEach(function(r){
+            if (r.group !== currentGroup){
+              currentGroup = r.group;
+              html += '<div class="big" style="margin-top:10px;">'+escapeHtml(getServingGroupLabel_(currentGroup))+'</div>';
+            }
+            var who = r.nameEn || r.nameZh || r.memberId || '—';
+            var slot = r.slot ? (' · ' + r.slot) : '';
+            var status = r.checkedIn ? '✅' : '❌';
+            html += ''+
+              '<div class="nameItem">'+
+                '<div class="zh">'+escapeHtml(status+' '+(r.position||'')+slot)+'</div>'+
+                '<div class="en">'+escapeHtml(who)+'</div>'+
+              '</div>';
+          });
+          return '<div class="listWrap" style="margin-top:10px;">'+html+'</div>';
+        }
 
         var btnNew = (c.new > 0)
           ? '<button id="btnNew" class="btnMatrix">👥 新朋友名單 / New list ('+c.new+')</button>'
@@ -1264,6 +1471,8 @@
         var btnEx = (c.existing > 0)
           ? '<button id="btnEx" class="btnLookup">👥 舊朋友名單 / Existing list ('+c.existing+')</button>'
           : '';
+        var servingRows = (res.extras && res.extras.serving) ? res.extras.serving : [];
+        var btnServing = '<button id="btnServing" class="btnPeriod">🧩 事奉名單 / Serving list</button>';
 
         m.querySelector('.modal').innerHTML =
           '<div class="big">📊 Sunday service '+escapeHtml(res.dateYmd||'')+'</div>'+
@@ -1273,9 +1482,10 @@
             '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(c.existing||0))+'</b></div>'+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
-            btnNew + btnEx +
+            btnNew + btnEx + btnServing +
           '</div>'+
           '<div id="listBox"></div>'+
+          '<div id="servingBox"></div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -1292,6 +1502,9 @@
             m.querySelector('#listBox').innerHTML = renderList_(exList);
           };
         }
+        m.querySelector('#btnServing').onclick = function(){
+          m.querySelector('#servingBox').innerHTML = renderServingList_(servingRows);
+        };
 
       }).catch(function(){
         m.querySelector('.modal').innerHTML =
@@ -1320,6 +1533,7 @@
         var stats = res.stats || {};
         var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
         var low = res.lowAttendance || {};
+        var away = res.away || {};
 
         var statusDisplay = displayMemberStatusLabel(m.status||'');
 
@@ -1352,6 +1566,20 @@
             '</div>'
           : '';
 
+        var awayCard =
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">🏖️ 離開期 / Away period</div>'+
+            '<div class="kv">'+
+              '<div>開始 / From</div><div><input id="awayFrom" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from||''))+'" /></div>'+
+              '<div>結束 / To</div><div><input id="awayTo" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to||''))+'" /></div>'+
+            '</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
+              '<button id="btnAwayClear" class="btnBack">🧹 清除 / Clear</button>'+
+            '</div>'+
+            '<div id="awayMsg"></div>'+
+          '</div>';
+
         var attendanceCard = canStats
           ? '<div class="msgBox warn" style="margin-top:10px;">'+
               '<div class="big warn">🗓️ 出席記錄 / Attendance</div>'+
@@ -1378,6 +1606,7 @@
           '</div>'+
 
           statsCard+
+          awayCard+
           lowCard+
           attendanceCard+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
@@ -1411,6 +1640,38 @@
         modal.querySelector('#btnStatus').onclick = function(){
           openStatusFlow_(m.id, m.status||'');
         };
+
+        var awayFrom = modal.querySelector('#awayFrom');
+        var awayTo = modal.querySelector('#awayTo');
+        if (awayFrom && awayTo){
+          awayFrom.onfocus = function(){ toggleDateInput_(awayFrom, true); };
+          awayFrom.onblur = function(){ toggleDateInput_(awayFrom, false); };
+          awayTo.onfocus = function(){ toggleDateInput_(awayTo, true); };
+          awayTo.onblur = function(){ toggleDateInput_(awayTo, false); };
+
+          modal.querySelector('#btnAwaySave').onclick = function(){
+            var fromDmy = String(awayFrom.value||'').trim();
+            var toDmy = String(awayTo.value||'').trim();
+            clear('awayMsg');
+            callApi('api_admin_set_away_period', App.token, m.id, fromDmy, toDmy).then(function(res){
+              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              showBox('awayMsg','ok','已更新','Saved.');
+            }).catch(function(){
+              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+          modal.querySelector('#btnAwayClear').onclick = function(){
+            awayFrom.value = '';
+            awayTo.value = '';
+            clear('awayMsg');
+            callApi('api_admin_set_away_period', App.token, m.id, '', '').then(function(res){
+              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              showBox('awayMsg','ok','已清除','Cleared.');
+            }).catch(function(){
+              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
       }).catch(function(){
         closeModal(modal);
         showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
