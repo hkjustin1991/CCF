@@ -1,18 +1,17 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-02-11.admin8
+ * v2026-02-07.admin10
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
  * Login:
  * - STAFF/ADMIN via personal QR (CCF####|k...)
- * - SUPERUSER via secret bypass code stored in Script Properties:
- *     key: ADMIN_BYPASS_CODE
+ * - SUPERUSER via secret stored in Script Properties.
  *
  * IMPORTANT:
- * - Bypass code is NOT hard-coded in this file.
- * - UI must not display the bypass code.
+ * - Secret is NOT hard-coded in this file.
+ * - UI must not display the secret.
  *
  * Data sources:
  * - Members sheet (existing schema; first 11 headers match)
@@ -48,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-11.admin8';
+const ADMIN_VERSION = '2026-02-07.admin10';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -117,10 +116,10 @@ function doGetAdmin_(e){
 /**
  * Admin portal login:
  * - QR: must be STAFF or ADMIN (DISABLED/ACTIVE/etc rejected)
- * - bypass: SUPERUSER via Script Properties key ADMIN_BYPASS_CODE
+ * - SUPERUSER via Script Properties secret key
  *
- * IMPORTANT: if bypass fails and input is NOT a QR payload, return E401
- * (do NOT return QR-format error E416 for wrong bypass attempts).
+ * IMPORTANT: if secret login fails and input is NOT a QR payload, return E401
+ * (do NOT return QR-format error E416 for wrong secret attempts).
  */
 function api_admin_login(input){
   const raw = String(input || '').trim();
@@ -191,7 +190,8 @@ function api_admin_serving_event_keys(token, fromDate){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
-  admin_ensureServingSheet_();
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
   const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
   admin_audit_(s.actor, 'SERVING_EVENT_KEYS', JSON.stringify({ from: String(fromDate||''), count: events.length }), 'serving');
   return { ok:true, events: events, maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD };
@@ -204,7 +204,8 @@ function api_admin_serving_plan_matrix(token, fromDate){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
-  admin_ensureServingSheet_();
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
   const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
   const matrix = admin_getServingPlanMatrix_(events);
   admin_audit_(
@@ -229,12 +230,13 @@ function api_admin_serving_event_rows(token, eventKey){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
-  admin_ensureServingSheet_();
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
   const ev = String(eventKey||'').trim();
   if (!admin_isSundayServiceKey_(ev)){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
-  const rows = admin_getServingForEvent_(ev, admin_getMembersIndex_().byId, new Set());
+  const rows = admin_getServingForEvent_(ev, admin_getMembersIndex_().byId, new Set(), true);
   return { ok:true, eventKey: ev, rows: rows };
 }
 
@@ -246,7 +248,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
-  admin_ensureServingSheet_();
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
   const ev = String(eventKey||'').trim();
   if (!admin_isSundayServiceKey_(ev)){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
@@ -276,48 +279,52 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     }
   }
 
-  const sh = admin_getServingSheet_();
-  const lastRow = sh.getLastRow();
-  const lastCol = sh.getLastColumn();
-  const col = admin_getServingColMap_(sh);
-  if (col.EventKey === undefined || col.Group === undefined || col.Position === undefined || col.MemberId === undefined){
+  const matrix = admin_getServingMatrix_(sh);
+  if (!matrix.eventCol){
     return admin_err_('E500','Serving 表格欄位錯誤','Serving sheet headers missing.');
   }
-
-  const data = (lastRow >= 2) ? sh.getRange(2,1,lastRow-1,lastCol).getValues() : [];
-  const kept = [];
-  for (let i=0;i<data.length;i++){
-    const row = data[i];
-    const key = String(row[col.EventKey] || '').trim();
-    if (key !== ev) kept.push(row);
+  const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+  if (rowIndex === null){
+    return admin_err_('E500','找不到活動列','Event row not found.');
   }
 
-  const newRows = cleaned.map(function(r){
-    const row = new Array(lastCol).fill('');
-    row[col.EventKey] = ev;
-    row[col.Group] = r.group;
-    row[col.Position] = r.position;
-    if (col.Slot !== undefined) row[col.Slot] = r.slot;
-    row[col.MemberId] = r.memberId;
-    return row;
+  const headerMap = admin_getServingMatrixHeaderMap_(sh);
+  const newCols = [];
+  cleaned.forEach(function(r){
+    const key = admin_makeServingHeaderKey_(r.group, r.position);
+    if (!headerMap[key]){
+      newCols.push({ key: key, group: r.group, position: r.position });
+    }
   });
+  if (newCols.length){
+    const startCol = sh.getLastColumn() + 1;
+    sh.insertColumnsAfter(sh.getLastColumn(), newCols.length);
+    newCols.forEach(function(c, idx){
+      sh.getRange(1, startCol + idx).setValue(c.key);
+    });
+  }
 
-  const finalRows = kept.concat(newRows);
-  if (lastRow >= 2){
-    sh.getRange(2,1,lastRow-1,lastCol).clearContent();
+  const updatedHeaderMap = admin_getServingMatrixHeaderMap_(sh);
+  const lastCol = sh.getLastColumn();
+  const rowValues = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  for (let i=1;i<lastCol;i++){
+    rowValues[i] = '';
   }
-  if (finalRows.length){
-    sh.getRange(2,1,finalRows.length,lastCol).setValues(finalRows);
-  }
+  cleaned.forEach(function(r){
+    const key = admin_makeServingHeaderKey_(r.group, r.position);
+    const colIdx = updatedHeaderMap[key];
+    if (colIdx) rowValues[colIdx-1] = r.memberId || '';
+  });
+  sh.getRange(rowIndex, 1, 1, lastCol).setValues([rowValues]);
 
   admin_audit_(
     s.actor,
     'SERVING_EVENT_SAVE',
-    JSON.stringify({ eventKey: ev, rows: newRows.length, overrideAway: !!overrideAway }),
+    JSON.stringify({ eventKey: ev, rows: cleaned.length, overrideAway: !!overrideAway }),
     'serving'
   );
 
-  return { ok:true, eventKey: ev, rows: newRows.length };
+  return { ok:true, eventKey: ev, rows: cleaned.length };
 }
 
 /**
@@ -1102,10 +1109,20 @@ function admin_ensureServingSheet_(){
   let sh = ss.getSheetByName(ADMIN_SERVING_SHEET_NAME);
   if (!sh){
     sh = ss.insertSheet(ADMIN_SERVING_SHEET_NAME);
-    sh.appendRow(['EventKey','Group','Position','Slot','MemberId']);
-    sh.getRange(1,1,1,5).setFontWeight('bold');
+    sh.appendRow(['EventKey']);
+    sh.getRange(1,1,1,1).setFontWeight('bold');
   }
   return sh;
+}
+function admin_ensureServingEventKeys_(sh){
+  const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  for (let i=0;i<events.length;i++){
+    const row = 2 + i;
+    const current = String(sh.getRange(row, 1).getValue() || '').trim();
+    if (!current){
+      sh.getRange(row, 1).setValue(events[i].eventKey);
+    }
+  }
 }
 function admin_ensureAwaySheet_(){
   const ss = admin_openSs_();
@@ -1169,12 +1186,62 @@ function admin_checkServingAwayConflicts_(eventDate, rows){
   }
   return out;
 }
-function admin_getServingColMap_(sh){
+function admin_getServingMatrix_(sh){
   const lastCol = sh.getLastColumn();
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
-  const col = {};
-  headers.forEach((h,i)=>{ if (h) col[h]=i; });
-  return col;
+  const positions = [];
+  for (let i=1;i<headers.length;i++){
+    const parsed = admin_parseServingHeader_(headers[i]);
+    positions.push({
+      colIndex: i + 1,
+      key: headers[i],
+      group: parsed.group,
+      position: parsed.position
+    });
+  }
+  return { eventCol: 1, positions: positions };
+}
+function admin_getServingMatrixHeaderMap_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
+  const map = {};
+  for (let i=1;i<headers.length;i++){
+    if (headers[i]) map[headers[i]] = i + 1;
+  }
+  return map;
+}
+function admin_makeServingHeaderKey_(group, position){
+  const g = String(group||'').trim().toUpperCase();
+  const p = String(position||'').trim();
+  if (g && p) return g + '::' + p;
+  if (p) return p;
+  return g || '';
+}
+function admin_parseServingHeader_(header){
+  const raw = String(header||'').trim();
+  if (!raw) return { group:'', position:'' };
+  if (raw.includes('::')){
+    const parts = raw.split('::');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('::')||'').trim() };
+  }
+  if (raw.includes(' - ')){
+    const parts = raw.split(' - ');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join(' - ')||'').trim() };
+  }
+  if (raw.includes('/')){
+    const parts = raw.split('/');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('/')||'').trim() };
+  }
+  return { group:'', position: raw };
+}
+function admin_findServingEventRowIndex_(sh, eventKey){
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+  const values = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i=0;i<values.length;i++){
+    if (String(values[i][0]||'').trim() === eventKey) return i + 2;
+  }
+  return null;
 }
 function admin_isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();
@@ -1183,40 +1250,35 @@ function admin_isServingNaValue_(value){
 function admin_isServingNaRow_(row){
   return admin_isServingNaValue_(row.position) || admin_isServingNaValue_(row.slot) || admin_isServingNaValue_(row.memberId);
 }
-function admin_getServingForEvent_(eventKey, membersById, checkedInSet){
+function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeNa){
   const sh = admin_getServingSheet_();
   if (!sh) return [];
-  const lastRow = sh.getLastRow();
-  if (lastRow < 2) return [];
+  const rowIndex = admin_findServingEventRowIndex_(sh, eventKey);
+  if (!rowIndex) return [];
 
   const lastCol = sh.getLastColumn();
-  const col = admin_getServingColMap_(sh);
-  if (col.EventKey === undefined || col.Group === undefined || col.Position === undefined || col.MemberId === undefined) return [];
-
-  const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
+  if (lastCol < 2) return [];
+  const matrix = admin_getServingMatrix_(sh);
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
   const out = [];
-  for (let i=0;i<data.length;i++){
-    const row = data[i];
-    const ev = String(row[col.EventKey] || '').trim();
-    if (ev !== eventKey) continue;
 
-    const memberId = String(row[col.MemberId] || '').trim().toUpperCase();
+  matrix.positions.forEach(function(pos){
+    const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+    if (!raw) return;
     const entry = {
-      eventKey: ev,
-      group: String(row[col.Group] || '').trim().toUpperCase(),
-      position: String(row[col.Position] || '').trim(),
-      slot: (col.Slot !== undefined) ? String(row[col.Slot] || '').trim() : '',
-      memberId: memberId,
-      checkedIn: checkedInSet && checkedInSet.has(memberId)
+      eventKey: eventKey,
+      group: pos.group,
+      position: pos.position,
+      slot: '',
+      memberId: raw,
+      checkedIn: checkedInSet && checkedInSet.has(raw)
     };
-    if (admin_isServingNaRow_(entry)) continue;
-
-    const m = membersById[memberId] || {};
+    if (!includeNa && admin_isServingNaValue_(raw)) return;
+    const m = membersById[raw] || {};
     entry.nameZh = String(m.nameZh || '');
     entry.nameEn = String(m.nameEn || '');
-
     out.push(entry);
-  }
+  });
 
   out.sort((a,b)=>{
     const g = String(a.group||'').localeCompare(String(b.group||''));
@@ -1230,7 +1292,6 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet){
 function admin_getServingPlanMatrix_(events){
   const eventList = Array.isArray(events) ? events : [];
   const eventKeys = eventList.map(e => e.eventKey);
-  const eventSet = new Set(eventKeys);
   const cells = {};
   eventKeys.forEach(ev => { cells[ev] = {}; });
 
@@ -1243,51 +1304,33 @@ function admin_getServingPlanMatrix_(events){
     return { events: eventList, positions: [], cells: cells };
   }
 
-  const lastCol = sh.getLastColumn();
-  const col = admin_getServingColMap_(sh);
-  if (col.EventKey === undefined || col.Group === undefined || col.Position === undefined || col.MemberId === undefined){
-    return { events: eventList, positions: [], cells: cells };
-  }
+  const matrix = admin_getServingMatrix_(sh);
+  const positions = matrix.positions.map(function(pos){
+    return { key: pos.key, group: pos.group, position: pos.position };
+  });
 
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
 
-  const positionsMap = {};
-  const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
-  for (let i=0;i<data.length;i++){
-    const row = data[i];
-    const ev = String(row[col.EventKey] || '').trim();
-    if (!eventSet.has(ev)) continue;
-
-    const group = String(row[col.Group] || '').trim().toUpperCase();
-    const position = String(row[col.Position] || '').trim();
-    if (!group && !position) continue;
-    const posKey = group + '::' + position.toUpperCase();
-    if (!positionsMap[posKey]){
-      positionsMap[posKey] = { key: posKey, group: group, position: position };
-    }
-
-    const memberId = String(row[col.MemberId] || '').trim().toUpperCase();
-    const slot = (col.Slot !== undefined) ? String(row[col.Slot] || '').trim() : '';
-    const member = byId[memberId] || {};
-    const entry = {
-      memberId: memberId,
-      nameZh: String(member.nameZh || ''),
-      nameEn: String(member.nameEn || ''),
-      slot: slot
-    };
-
-    if (!cells[ev][posKey]) cells[ev][posKey] = [];
-    cells[ev][posKey].push(entry);
-  }
-
-  const positions = Object.keys(positionsMap)
-    .map(k => positionsMap[k])
-    .sort(function(a,b){
-      const g = String(a.group||'').localeCompare(String(b.group||''));
-      if (g !== 0) return g;
-      return String(a.position||'').localeCompare(String(b.position||''));
+  eventKeys.forEach(function(ev){
+    const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+    if (!rowIndex) return;
+    const lastCol = sh.getLastColumn();
+    const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+    matrix.positions.forEach(function(pos){
+      const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+      if (!raw) return;
+      const member = byId[raw] || {};
+      const entry = {
+        memberId: raw,
+        nameZh: String(member.nameZh || ''),
+        nameEn: String(member.nameEn || ''),
+        slot: ''
+      };
+      if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
+      cells[ev][pos.key].push(entry);
     });
+  });
 
   return { events: eventList, positions: positions, cells: cells };
 }

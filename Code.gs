@@ -6,9 +6,7 @@
  * ============================================================
  * CHANGELOG (staff8)
  * ============================================================
- * [1] SECURITY: hide staff bypass code (no hardcode)
- *     - Removed const BYPASS_CODE = '@9413'
- *     - Reads Script Properties key: STAFF_BYPASS_CODE
+ * [1] SECURITY: staff secret stored in Script Properties (no hardcode)
  *
  * [2] SEARCH: optimised CCF ID behaviour
  *     - "CCF" alone => no results
@@ -25,7 +23,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-02-02.staff8';
+const APP_VERSION = '2026-02-07.staff9';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -114,8 +112,12 @@ function parseGroupsCsv_(value){
     .map(v => String(v || '').trim().toUpperCase())
     .filter(Boolean);
 }
+function isServingNaValue_(value){
+  const v = String(value || '').trim().toUpperCase();
+  return (v === 'N/A' || v === 'NA');
+}
 
-// Staff bypass code from Script Properties (NEW)
+// Staff secret from Script Properties (NEW)
 function getStaffBypassCode_(){
   try{
     const p = PropertiesService.getScriptProperties();
@@ -370,44 +372,75 @@ function getServingSheet_(){
   return ss.getSheetByName(SERVING_SHEET_NAME) || null;
 }
 
-function getServingColMap_(sh){
+function getServingMatrix_(sh){
   const lastCol = sh.getLastColumn();
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
-  const col = {};
-  headers.forEach((h,i)=>{ if (h) col[h]=i; });
-  return col;
+  const positions = [];
+  for (let i=1;i<headers.length;i++){
+    const parsed = parseServingHeader_(headers[i]);
+    positions.push({
+      colIndex: i + 1,
+      key: headers[i],
+      group: parsed.group,
+      position: parsed.position
+    });
+  }
+  return { eventCol: 1, positions: positions };
 }
-
+function parseServingHeader_(header){
+  const raw = String(header||'').trim();
+  if (!raw) return { group:'', position:'' };
+  if (raw.includes('::')){
+    const parts = raw.split('::');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('::')||'').trim() };
+  }
+  if (raw.includes(' - ')){
+    const parts = raw.split(' - ');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join(' - ')||'').trim() };
+  }
+  if (raw.includes('/')){
+    const parts = raw.split('/');
+    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('/')||'').trim() };
+  }
+  return { group:'', position: raw };
+}
+function findServingEventRowIndex_(sh, eventKey){
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+  const values = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i=0;i<values.length;i++){
+    if (String(values[i][0]||'').trim() === eventKey) return i + 2;
+  }
+  return null;
+}
 function getServingForEvent_(eventKey, membersById, checkedInSet){
   const sh = getServingSheet_();
   if (!sh) return [];
-  const lastRow = sh.getLastRow();
-  if (lastRow < 2) return [];
+  const rowIndex = findServingEventRowIndex_(sh, eventKey);
+  if (!rowIndex) return [];
 
   const lastCol = sh.getLastColumn();
-  const col = getServingColMap_(sh);
-  if (col.EventKey === undefined || col.Group === undefined || col.Position === undefined || col.MemberId === undefined) return [];
-
-  const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
+  if (lastCol < 2) return [];
+  const matrix = getServingMatrix_(sh);
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
   const out = [];
-  for (let i=0;i<data.length;i++){
-    const row = data[i];
-    const ev = String(row[col.EventKey] || '').trim();
-    if (ev !== eventKey) continue;
-    const memberId = String(row[col.MemberId] || '').trim().toUpperCase();
-    if (!memberId) continue;
-    const m = membersById[memberId] || {};
+
+  matrix.positions.forEach(function(pos){
+    const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+    if (!raw) return;
+    if (isServingNaValue_(raw)) return;
+    const m = membersById[raw] || {};
     out.push({
-      eventKey: ev,
-      group: String(row[col.Group] || '').trim().toUpperCase(),
-      position: String(row[col.Position] || '').trim().toUpperCase(),
-      slot: (col.Slot !== undefined) ? String(row[col.Slot] || '').trim() : '',
-      memberId: memberId,
+      eventKey: eventKey,
+      group: pos.group,
+      position: pos.position,
+      slot: '',
+      memberId: raw,
       nameZh: String(m.nameZh || ''),
       nameEn: String(m.nameEn || ''),
-      checkedIn: checkedInSet.has(memberId)
+      checkedIn: checkedInSet.has(raw)
     });
-  }
+  });
 
   out.sort((a,b)=> {
     const g = a.group.localeCompare(b.group);
