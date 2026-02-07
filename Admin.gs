@@ -88,9 +88,27 @@ const ADMIN_HELPER_DAYS = 31;
 const ADMIN_GL_HELPER_ALLOWED_GROUPS = ['MEDIA','LOGISTIC','SUPPORT','WORSHIP'];
 
 // Serving planning
-const ADMIN_SERVING_MAX_WEEKS_AHEAD = 26;
+const ADMIN_SERVING_MONTHS_AHEAD = 7;
 const ADMIN_SERVING_SHEET_NAME = 'Serving';
 const ADMIN_SERVING_AWAY_SHEET_NAME = 'Serving_Away';
+const ADMIN_SERVING_POSITIONS = [
+  '主領',
+  '和唱',
+  '司琴',
+  '樂器',
+  'PPT製作',
+  'PPT投影',
+  '影音',
+  '埸務',
+  '茶水',
+  '招待',
+  '關顧員',
+  '聖餐襄禮',
+  '讀經員',
+  '祈禱員',
+  '點算奉獻',
+  '其他'
+];
 
 // Cache
 const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
@@ -184,7 +202,7 @@ function api_admin_log(token, action, details, context){
 }
 
 /**
- * Serving planning: upcoming Sunday event keys (max 26 weeks).
+ * Serving planning: upcoming Sunday event keys.
  */
 function api_admin_serving_event_keys(token, fromDate){
   const s = admin_requireSession_(token);
@@ -192,9 +210,9 @@ function api_admin_serving_event_keys(token, fromDate){
 
   const sh = admin_ensureServingSheet_();
   admin_ensureServingEventKeys_(sh);
-  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MONTHS_AHEAD);
   admin_audit_(s.actor, 'SERVING_EVENT_KEYS', JSON.stringify({ from: String(fromDate||''), count: events.length }), 'serving');
-  return { ok:true, events: events, maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD };
+  return { ok:true, events: events, maxMonths: ADMIN_SERVING_MONTHS_AHEAD };
 }
 
 /**
@@ -206,7 +224,7 @@ function api_admin_serving_plan_matrix(token, fromDate){
 
   const sh = admin_ensureServingSheet_();
   admin_ensureServingEventKeys_(sh);
-  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  const events = admin_getUpcomingSundayEventKeys_(fromDate, ADMIN_SERVING_MONTHS_AHEAD);
   const matrix = admin_getServingPlanMatrix_(events);
   admin_audit_(
     s.actor,
@@ -219,7 +237,7 @@ function api_admin_serving_plan_matrix(token, fromDate){
     events: matrix.events,
     positions: matrix.positions,
     cells: matrix.cells,
-    maxWeeks: ADMIN_SERVING_MAX_WEEKS_AHEAD
+    maxMonths: ADMIN_SERVING_MONTHS_AHEAD
   };
 }
 
@@ -236,13 +254,14 @@ function api_admin_serving_event_rows(token, eventKey){
   if (!admin_isSundayServiceKey_(ev)){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
-  const rows = admin_getServingForEvent_(ev, admin_getMembersIndex_().byId, new Set(), true);
-  return { ok:true, eventKey: ev, rows: rows };
+  const positions = admin_getServingMatrix_(sh).positions.map(p => p.key);
+  const values = admin_getServingValuesForEvent_(ev);
+  return { ok:true, eventKey: ev, positions: positions, values: values };
 }
 
 /**
  * Serving event save (replace rows for one event).
- * rows: [{group, position, slot, memberId}]
+ * rows: [{position, value}]
  */
 function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const s = admin_requireSession_(token);
@@ -258,16 +277,16 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const list = Array.isArray(rows) ? rows : [];
   const cleaned = [];
   for (const r of list){
-    const group = String(r.group||'').trim().toUpperCase();
     const position = String(r.position||'').trim();
-    const slot = String(r.slot||'').trim();
-    const memberId = String(r.memberId||'').trim().toUpperCase();
-    if (!group && !position && !slot && !memberId) continue;
-    cleaned.push({ group, position, slot, memberId });
+    const valueRaw = String(r.value||'').trim();
+    if (!position && !valueRaw) continue;
+    cleaned.push({ position, value: valueRaw });
   }
 
   const evDate = admin_eventDateFromKey_(ev);
-  const conflicts = admin_checkServingAwayConflicts_(evDate, cleaned);
+  const conflicts = admin_checkServingAwayConflicts_(evDate, cleaned.map(function(r){
+    return { memberId: r.value };
+  }));
   const role = String(s.actor.role||'').trim().toUpperCase();
   const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
   if (conflicts.length){
@@ -291,9 +310,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const headerMap = admin_getServingMatrixHeaderMap_(sh);
   const newCols = [];
   cleaned.forEach(function(r){
-    const key = admin_makeServingHeaderKey_(r.group, r.position);
-    if (!headerMap[key]){
-      newCols.push({ key: key, group: r.group, position: r.position });
+    if (!headerMap[r.position]){
+      newCols.push({ key: r.position });
     }
   });
   if (newCols.length){
@@ -311,9 +329,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     rowValues[i] = '';
   }
   cleaned.forEach(function(r){
-    const key = admin_makeServingHeaderKey_(r.group, r.position);
-    const colIdx = updatedHeaderMap[key];
-    if (colIdx) rowValues[colIdx-1] = r.memberId || '';
+    const colIdx = updatedHeaderMap[r.position];
+    if (colIdx) rowValues[colIdx-1] = r.value || '';
   });
   sh.getRange(rowIndex, 1, 1, lastCol).setValues([rowValues]);
 
@@ -1082,18 +1099,20 @@ function admin_nextSunday_(d){
   out.setUTCDate(out.getUTCDate() + offset);
   return out;
 }
-function admin_getUpcomingSundayEventKeys_(fromDateYmd, weeksAhead){
+function admin_getUpcomingSundayEventKeys_(fromDateYmd, monthsAhead){
   const startYmd = String(fromDateYmd || '').trim() || admin_todayUkYmd_();
   let start = admin_parseYmd_(startYmd);
   if (!start) start = admin_parseYmd_(admin_todayUkYmd_());
   if (!admin_isSunday_(start)) start = admin_nextSunday_(start);
 
-  const weeks = Math.max(0, Math.min(Number(weeksAhead || 0), ADMIN_SERVING_MAX_WEEKS_AHEAD));
+  const months = Math.max(0, Math.min(Number(monthsAhead || 0), ADMIN_SERVING_MONTHS_AHEAD));
+  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months, start.getUTCDate()));
   const out = [];
-  for (let i = 0; i < weeks; i++){
+  for (let i = 0; i < 370; i++){
     const d = new Date(start.getTime());
     d.setUTCDate(d.getUTCDate() + (i * 7));
     if (!admin_isSunday_(d)) continue;
+    if (d.getTime() >= end.getTime()) break;
     const ymd = admin_fmtYmd_(d);
     out.push({ eventKey: 'SundayService_' + ymd, dateYmd: ymd });
   }
@@ -1109,13 +1128,14 @@ function admin_ensureServingSheet_(){
   let sh = ss.getSheetByName(ADMIN_SERVING_SHEET_NAME);
   if (!sh){
     sh = ss.insertSheet(ADMIN_SERVING_SHEET_NAME);
-    sh.appendRow(['EventKey']);
-    sh.getRange(1,1,1,1).setFontWeight('bold');
+    sh.appendRow(['EventKey'].concat(ADMIN_SERVING_POSITIONS));
+    sh.getRange(1,1,1,1 + ADMIN_SERVING_POSITIONS.length).setFontWeight('bold');
   }
+  admin_ensureServingHeaders_(sh);
   return sh;
 }
 function admin_ensureServingEventKeys_(sh){
-  const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), ADMIN_SERVING_MAX_WEEKS_AHEAD);
+  const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), ADMIN_SERVING_MONTHS_AHEAD);
   for (let i=0;i<events.length;i++){
     const row = 2 + i;
     const current = String(sh.getRange(row, 1).getValue() || '').trim();
@@ -1123,6 +1143,21 @@ function admin_ensureServingEventKeys_(sh){
       sh.getRange(row, 1).setValue(events[i].eventKey);
     }
   }
+}
+function admin_ensureServingHeaders_(sh){
+  const existing = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(v => String(v||'').trim());
+  if (!existing[0]) existing[0] = 'EventKey';
+  const desired = ['EventKey'].concat(ADMIN_SERVING_POSITIONS);
+  let needUpdate = false;
+  desired.forEach(function(label, idx){
+    if (existing[idx] !== label){
+      needUpdate = true;
+    }
+  });
+  if (!needUpdate && existing.length >= desired.length) return;
+  sh.getRange(1,1,1,Math.max(existing.length, desired.length)).clearContent();
+  sh.getRange(1,1,1,desired.length).setValues([desired]);
+  sh.getRange(1,1,1,desired.length).setFontWeight('bold');
 }
 function admin_ensureAwaySheet_(){
   const ss = admin_openSs_();
@@ -1191,12 +1226,11 @@ function admin_getServingMatrix_(sh){
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
   const positions = [];
   for (let i=1;i<headers.length;i++){
-    const parsed = admin_parseServingHeader_(headers[i]);
     positions.push({
       colIndex: i + 1,
       key: headers[i],
-      group: parsed.group,
-      position: parsed.position
+      group: '',
+      position: headers[i]
     });
   }
   return { eventCol: 1, positions: positions };
@@ -1220,18 +1254,6 @@ function admin_makeServingHeaderKey_(group, position){
 function admin_parseServingHeader_(header){
   const raw = String(header||'').trim();
   if (!raw) return { group:'', position:'' };
-  if (raw.includes('::')){
-    const parts = raw.split('::');
-    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('::')||'').trim() };
-  }
-  if (raw.includes(' - ')){
-    const parts = raw.split(' - ');
-    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join(' - ')||'').trim() };
-  }
-  if (raw.includes('/')){
-    const parts = raw.split('/');
-    return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('/')||'').trim() };
-  }
   return { group:'', position: raw };
 }
 function admin_findServingEventRowIndex_(sh, eventKey){
@@ -1263,18 +1285,20 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
   const out = [];
 
   matrix.positions.forEach(function(pos){
-    const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+    const raw = String(row[pos.colIndex-1] || '').trim();
     if (!raw) return;
+    const rawUpper = raw.toUpperCase();
     const entry = {
       eventKey: eventKey,
-      group: pos.group,
+      group: '',
       position: pos.position,
       slot: '',
-      memberId: raw,
-      checkedIn: checkedInSet && checkedInSet.has(raw)
+      memberId: rawUpper,
+      rawValue: raw,
+      checkedIn: checkedInSet && checkedInSet.has(rawUpper)
     };
-    if (!includeNa && admin_isServingNaValue_(raw)) return;
-    const m = membersById[raw] || {};
+    if (!includeNa && admin_isServingNaValue_(rawUpper)) return;
+    const m = membersById[rawUpper] || {};
     entry.nameZh = String(m.nameZh || '');
     entry.nameEn = String(m.nameEn || '');
     out.push(entry);
@@ -1287,6 +1311,21 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
     if (p !== 0) return p;
     return String(a.memberId||'').localeCompare(String(b.memberId||''));
   });
+  return out;
+}
+function admin_getServingValuesForEvent_(eventKey){
+  const sh = admin_getServingSheet_();
+  if (!sh) return {};
+  const rowIndex = admin_findServingEventRowIndex_(sh, eventKey);
+  if (!rowIndex) return {};
+  const lastCol = sh.getLastColumn();
+  if (lastCol < 2) return {};
+  const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(v => String(v||'').trim());
+  const out = {};
+  for (let i=1;i<headers.length;i++){
+    out[headers[i]] = String(row[i] || '').trim();
+  }
   return out;
 }
 function admin_getServingPlanMatrix_(events){
@@ -1318,11 +1357,13 @@ function admin_getServingPlanMatrix_(events){
     const lastCol = sh.getLastColumn();
     const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
     matrix.positions.forEach(function(pos){
-      const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+      const raw = String(row[pos.colIndex-1] || '').trim();
       if (!raw) return;
-      const member = byId[raw] || {};
+      const rawUpper = raw.toUpperCase();
+      const member = byId[rawUpper] || {};
       const entry = {
-        memberId: raw,
+        memberId: rawUpper,
+        rawValue: raw,
         nameZh: String(member.nameZh || ''),
         nameEn: String(member.nameEn || ''),
         slot: ''
