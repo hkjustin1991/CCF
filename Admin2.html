@@ -9,6 +9,14 @@
   <meta http-equiv="Expires" content="0" />
   <title>CCF Admin Portal</title>
 
+  <!--
+  ============================================================
+  FILE: Admin2.html (Admin Portal UI)
+  UI VERSION TAG: admin2-ui8-serving-edit-away
+  For Admin.gs: v2026-02-07.admin10
+  ============================================================
+  -->
+
   <style>
     :root{
       --bg:#f5f7ff; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
@@ -106,6 +114,28 @@
     .chip.bad{border-color:rgba(217,60,94,0.25);background:#fff1f4;color:#9f1239}
     .flag{margin-left:6px;font-weight:950}
 
+    .servingPlanTable th,
+    .servingPlanTable td{
+      white-space:normal;
+      vertical-align:top;
+    }
+    .servingPlanCell{
+      min-width:160px;
+    }
+    .servingPlanEvent{
+      min-width:180px;
+      font-weight:900;
+    }
+    .servingPlanEntry{
+      font-size:12px;
+      margin-top:4px;
+      padding:4px 6px;
+      border:1px solid var(--border);
+      border-radius:10px;
+      background:#fff;
+      color:var(--muted);
+    }
+
     /* list items (same feel as staff live list) */
     .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
     .nameItem{
@@ -180,7 +210,7 @@
     var App = {
       token:null,
       actor:null, // {id, role, nameZh, nameEn}
-      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period
+      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan
       debounceT:null,
       clockTimer:null,
 
@@ -212,6 +242,49 @@
       s = String(s || '');
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
               .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    var SERVING_GROUP_LABELS = {
+      MEDIA: '影像大師',
+      WORSHIP: '敬拜聯盟',
+      LOGISTIC: '後勤特工',
+      SUPPORT: '聖工支援',
+      FINANCE: '財務公司'
+    };
+    function getServingGroupLabel_(group){
+      var key = String(group || '').trim().toUpperCase();
+      return SERVING_GROUP_LABELS[key] || key || '—';
+    }
+    function servingPositionLabel_(pos){
+      if (!pos) return '—';
+      var group = getServingGroupLabel_(pos.group);
+      var position = String(pos.position || '').trim();
+      return position ? (group + ' / ' + position) : group;
+    }
+    function ymdToDmy_(ymd){
+      var s = String(ymd||'').trim();
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return '';
+      return m[3] + '/' + m[2] + '/' + m[1];
+    }
+    function dmyToYmd_(dmy){
+      var s = String(dmy||'').trim();
+      var m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!m) return '';
+      return m[3] + '-' + m[2] + '-' + m[1];
+    }
+    function toggleDateInput_(input, toDateType){
+      if (!input) return;
+      if (toDateType){
+        var ymd = dmyToYmd_(input.value);
+        input.setAttribute('type','date');
+        if (ymd) input.value = ymd;
+      } else {
+        if (input.value){
+          input.value = ymdToDmy_(input.value) || input.value;
+        }
+        input.setAttribute('type','text');
+      }
     }
 
     function showBox(targetId, kind, titleZh, titleEn, detailHtml){
@@ -251,6 +324,10 @@
       if(!App.actor) return false;
       var r = String(App.actor.role||'').toUpperCase();
       return (r === 'ADMIN' || r === 'SUPERUSER');
+    }
+    function roleIsGl(){
+      if(!App.actor) return false;
+      return String(App.actor.role||'').toUpperCase() === 'GL';
     }
 
     function getTodayYmdUk(){
@@ -303,6 +380,8 @@
       if (st === 'ACTIVE') return 'Member';
       if (st === 'ADMIN') return 'staff';
       if (st === 'STAFF') return 'STAFF';
+      if (st === 'HELPER') return 'HELPER';
+      if (st === 'TEMP') return 'TEMP';
       return st || '';
     }
 
@@ -490,6 +569,32 @@
       var id = (App.actor && App.actor.id) ? App.actor.id : '';
       var nameLine = (en || zh) ? ((en||zh) + (zh && en ? (' / ' + zh) : '')) : '';
 
+      if (roleIsGl()){
+        return ''+
+          '<div class="card">'+
+            '<div class="big">👋 歡迎 / Welcome</div>'+
+            '<div class="small">'+
+              'CCF ID：<b>'+escapeHtml(id)+'</b><br/>' +
+              (nameLine ? ('姓名 / Name：<b>'+escapeHtml(nameLine)+'</b><br/>') : '')+
+              '群組長模式：只限事奉相關功能。<br/>' +
+              'GL mode: serving-only access.'+
+            '</div>'+
+            '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="big warn">🕒 英國時間 / UK time</div>'+
+              '<div style="margin-top:6px;font-size:20px;font-weight:950;"><span id="ukClock">--:--:--</span></div>'+
+            '</div>'+
+          '</div>'+
+          '<div class="card">'+
+            '<div class="big">📌 主選單 / Main menu</div>'+
+            '<div class="menuGrid">'+
+              '<button id="goLookupGl" class="btnMain">🔎 成員查詢（HELPER 授權）/ Member lookup (HELPER)</button>'+
+              '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
+            '</div>'+
+            '<div class="divider"></div>'+
+            '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+          '</div>';
+      }
+
       return ''+
         '<div class="card">'+
           '<div class="big">👋 歡迎 / Welcome</div>'+
@@ -516,7 +621,7 @@
           '<div class="menuGrid">'+
             '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
             '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
-            '<button class="btnGhost" disabled>🧩 事奉 / Serving（coming soon）</button>'+
+            '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
           '</div>'+
           '<div class="divider"></div>'+
@@ -525,7 +630,20 @@
     }
 
     function bindMenu(){
-      $('goAttendance').onclick = function(){ logAction('OPEN_ATT_HOME','', 'nav'); App.view='attendanceHome'; render(); };
+      var glLookup = $('goLookupGl');
+      if (glLookup){
+        glLookup.onclick = function(){ logAction('OPEN_LOOKUP_GL','', 'nav'); App.view='memberLookup'; render(); };
+      }
+
+      var goServingPlan = $('goServingPlan');
+      if (goServingPlan){
+        goServingPlan.onclick = function(){ logAction('OPEN_SERVING_PLAN','', 'nav'); App.view='servingPlan'; render(); };
+      }
+
+      var goAttendance = $('goAttendance');
+      if (goAttendance){
+        goAttendance.onclick = function(){ logAction('OPEN_ATT_HOME','', 'nav'); App.view='attendanceHome'; render(); };
+      }
       $('btnLogout').onclick = function(){
         logAction('LOGOUT','', 'nav');
         App.token=null; App.actor=null;
@@ -556,6 +674,242 @@
       $('goStats').onclick = function(){ logAction('OPEN_STATS','', 'nav'); App.view='stats'; render(); };
       $('goPeriod').onclick = function(){ logAction('OPEN_PERIOD','', 'nav'); App.view='period'; render(); };
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
+    }
+
+    function viewServingPlan(){
+      return ''+
+        '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
+          '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+          '<div id="servingPlanList" style="margin-top:10px;"></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="servingPlanMsg"></div>'+
+        '</div>';
+    }
+
+    function bindServingPlan(){
+      $('backServingPlan').onclick = function(){ App.view='menu'; render(); };
+
+      var listEl = $('servingPlanList');
+      listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
+
+      callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()).then(function(res){
+        if(!res || !res.ok){
+          listEl.innerHTML = '';
+          showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          return;
+        }
+        var events = res.events || [];
+        var positions = res.positions || [];
+        if(!events.length){
+          listEl.innerHTML =
+            '<div class="msgBox warn">'+
+              '<div class="big warn">暫無記錄 / No events</div>'+
+            '</div>';
+          return;
+        }
+        if(!positions.length){
+          listEl.innerHTML =
+            '<div class="msgBox warn">'+
+              '<div class="big warn">暫無事奉資料 / No serving rows</div>'+
+            '</div>';
+          return;
+        }
+
+        var headerHtml = positions.map(function(pos){
+          return '<th class="servingPlanCell">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
+        }).join('');
+
+        var bodyHtml = events.map(function(ev){
+          var rowCells = positions.map(function(pos){
+            var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+            if(!cell || !cell.length){
+              return '<td class="servingPlanCell">—</td>';
+            }
+            var entries = cell.map(function(entry){
+              var name = entry.nameEn || entry.nameZh || entry.memberId || '—';
+              var slot = entry.slot ? (' · ' + entry.slot) : '';
+              return '<div class="servingPlanEntry">'+escapeHtml(name + slot)+'</div>';
+            }).join('');
+            return '<td class="servingPlanCell">'+entries+'</td>';
+          }).join('');
+          return ''+
+            '<tr>'+
+              '<td class="servingPlanEvent">'+
+                '<div>'+escapeHtml(ev.eventKey||'')+'</div>'+
+                '<div class="small">'+escapeHtml(ev.dateYmd||'')+'</div>'+
+                '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'">✏️ 編輯 / Edit</button></div>'+
+              '</td>'+
+              rowCells +
+            '</tr>';
+        }).join('');
+
+        listEl.innerHTML =
+          '<div class="tableWrap">'+
+            '<table class="servingPlanTable">'+
+              '<thead><tr><th class="servingPlanEvent">Event ID</th>'+headerHtml+'</tr></thead>'+
+              '<tbody>'+bodyHtml+'</tbody>'+
+            '</table>'+
+          '</div>';
+
+        Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
+          btn.onclick = function(){
+            openServingEditModal(btn.getAttribute('data-event'));
+          };
+        });
+      }).catch(function(){
+        listEl.innerHTML = '';
+        showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+      });
+    }
+
+    function openServingEditModal(eventKey){
+      var ev = String(eventKey||'').trim();
+      var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
+
+      callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
+        if(!res || !res.ok){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          return;
+        }
+
+        var rows = (res.rows || []).map(function(r){
+          return {
+            group: String(r.group||'').trim().toUpperCase(),
+            position: String(r.position||'').trim(),
+            slot: String(r.slot||'').trim(),
+            memberId: String(r.memberId||'').trim().toUpperCase()
+          };
+        });
+
+        function renderRows_(){
+          if (!rows.length){
+            return '<div class="small">暫無事奉資料 / No serving rows</div>';
+          }
+          var h = '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
+            '<th>Group</th><th>Position</th><th>Slot</th><th>Member ID</th><th></th>'+
+            '</tr></thead><tbody>';
+          rows.forEach(function(r, idx){
+            h += '<tr>'+
+              '<td>'+escapeHtml(r.group)+'</td>'+
+              '<td>'+escapeHtml(r.position)+'</td>'+
+              '<td>'+escapeHtml(r.slot)+'</td>'+
+              '<td>'+escapeHtml(r.memberId)+'</td>'+
+              '<td><button class="btnDanger btnRemoveRow" data-idx="'+idx+'">刪除 / Remove</button></td>'+
+            '</tr>';
+          });
+          h += '</tbody></table></div>';
+          return h;
+        }
+
+        function bindRemove_(){
+          Array.prototype.slice.call(modal.querySelectorAll('.btnRemoveRow')).forEach(function(btn){
+            btn.onclick = function(){
+              var idx = parseInt(btn.getAttribute('data-idx'), 10);
+              rows.splice(idx, 1);
+              render();
+            };
+          });
+        }
+
+        function render(){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+            '<div class="small">'+escapeHtml(ev)+'</div>'+
+            '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="small">批量匯入格式：Group, Position, Slot, MemberId（CSV 或 Tab）。可輸入 N/A。</div>'+
+            '</div>'+
+            '<div class="kv" style="margin-top:10px;">'+
+              '<div>Group</div><div><input id="addGroup" /></div>'+
+              '<div>Position</div><div><input id="addPosition" /></div>'+
+              '<div>Slot</div><div><input id="addSlot" /></div>'+
+              '<div>Member ID</div><div><input id="addMember" placeholder="CCF0000 or N/A" /></div>'+
+            '</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnAddRow" class="btnPeriod">➕ 新增 / Add</button>'+
+            '</div>'+
+            '<div>'+renderRows_()+'</div>'+
+            '<div class="label" style="margin-top:10px;">Bulk import</div>'+
+            '<textarea id="bulkImport" placeholder="Group,Position,Slot,MemberId"></textarea>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnApplyImport" class="btnStats">⬆️ 匯入 / Import</button>'+
+              '<button id="btnSaveServing" class="btnMain">💾 儲存 / Save</button>'+
+              '<button id="btnCloseServing" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>'+
+            '<div id="servingEditMsg"></div>';
+
+          bindRemove_();
+
+          modal.querySelector('#btnCloseServing').onclick = function(){ closeModal(modal); };
+          modal.querySelector('#btnAddRow').onclick = function(){
+            rows.push({
+              group: String(modal.querySelector('#addGroup').value||'').trim().toUpperCase(),
+              position: String(modal.querySelector('#addPosition').value||'').trim(),
+              slot: String(modal.querySelector('#addSlot').value||'').trim(),
+              memberId: String(modal.querySelector('#addMember').value||'').trim().toUpperCase()
+            });
+            render();
+          };
+
+          modal.querySelector('#btnApplyImport').onclick = function(){
+            var raw = String(modal.querySelector('#bulkImport').value||'').trim();
+            if (!raw){ return; }
+            var lines = raw.split(/\r?\n/).filter(Boolean);
+            var parsed = [];
+            lines.forEach(function(line, idx){
+              var parts = line.split(/\t|,/).map(function(p){ return String(p||'').trim(); });
+              if (idx === 0 && /group/i.test(parts[0]||'') && /position/i.test(parts[1]||'')) return;
+              parsed.push({
+                group: String(parts[0]||'').trim().toUpperCase(),
+                position: String(parts[1]||'').trim(),
+                slot: String(parts[2]||'').trim(),
+                memberId: String(parts[3]||'').trim().toUpperCase()
+              });
+            });
+            rows = rows.concat(parsed);
+            render();
+          };
+
+          modal.querySelector('#btnSaveServing').onclick = function(){
+            clear('servingEditMsg');
+            callApi('api_admin_serving_event_save', App.token, ev, rows, false).then(function(res2){
+              if (!res2 || !res2.ok){
+                if (res2 && res2.code === 'E409' && res2.canOverride){
+                  if (confirm('事奉安排與離開期重疊，是否仍要儲存？')) {
+                    callApi('api_admin_serving_event_save', App.token, ev, rows, true).then(function(res3){
+                      if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                      showBox('servingEditMsg','ok','已儲存','Saved.');
+                    }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
+                  }
+                  return;
+                }
+                showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+                return;
+              }
+              showBox('servingEditMsg','ok','已儲存','Saved.');
+            }).catch(function(){
+              showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
+
+        render();
+      }).catch(function(){
+        modal.querySelector('.modal').innerHTML =
+          '<div class="big err">系統錯誤 / Error</div>'+
+          '<div class="small">System error</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+        modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+      });
     }
 
     function viewMatrix(){
@@ -903,7 +1257,12 @@
               // ✅ Clicking the x-axis label opens service stats dialog
               onClick: function(evt, elements, chart){
                 try{
-                  if(elements && elements.length) return;
+                  if(elements && elements.length){
+                    var barIndex = elements[0].index;
+                    var barLabel = chart.data.labels[barIndex];
+                    if (barLabel) openEventStatsModal('SundayService_' + barLabel);
+                    return;
+                  }
 
                   var p = chart.canvas.getBoundingClientRect();
                   var x = evt.native.clientX - p.left;
@@ -1082,6 +1441,29 @@
               arr.map(renderNameItem_).join('')+
             '</div>';
         }
+        function renderServingList_(rows){
+          if (!rows || !rows.length){
+            return '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
+          }
+
+          var html = '';
+          var currentGroup = '';
+          rows.forEach(function(r){
+            if (r.group !== currentGroup){
+              currentGroup = r.group;
+              html += '<div class="big" style="margin-top:10px;">'+escapeHtml(getServingGroupLabel_(currentGroup))+'</div>';
+            }
+            var who = r.nameEn || r.nameZh || r.memberId || '—';
+            var slot = r.slot ? (' · ' + r.slot) : '';
+            var status = r.checkedIn ? '✅' : '❌';
+            html += ''+
+              '<div class="nameItem">'+
+                '<div class="zh">'+escapeHtml(status+' '+(r.position||'')+slot)+'</div>'+
+                '<div class="en">'+escapeHtml(who)+'</div>'+
+              '</div>';
+          });
+          return '<div class="listWrap" style="margin-top:10px;">'+html+'</div>';
+        }
 
         var btnNew = (c.new > 0)
           ? '<button id="btnNew" class="btnMatrix">👥 新朋友名單 / New list ('+c.new+')</button>'
@@ -1089,6 +1471,8 @@
         var btnEx = (c.existing > 0)
           ? '<button id="btnEx" class="btnLookup">👥 舊朋友名單 / Existing list ('+c.existing+')</button>'
           : '';
+        var servingRows = (res.extras && res.extras.serving) ? res.extras.serving : [];
+        var btnServing = '<button id="btnServing" class="btnPeriod">🧩 事奉名單 / Serving list</button>';
 
         m.querySelector('.modal').innerHTML =
           '<div class="big">📊 Sunday service '+escapeHtml(res.dateYmd||'')+'</div>'+
@@ -1098,9 +1482,10 @@
             '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(c.existing||0))+'</b></div>'+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
-            btnNew + btnEx +
+            btnNew + btnEx + btnServing +
           '</div>'+
           '<div id="listBox"></div>'+
+          '<div id="servingBox"></div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -1117,6 +1502,9 @@
             m.querySelector('#listBox').innerHTML = renderList_(exList);
           };
         }
+        m.querySelector('#btnServing').onclick = function(){
+          m.querySelector('#servingBox').innerHTML = renderServingList_(servingRows);
+        };
 
       }).catch(function(){
         m.querySelector('.modal').innerHTML =
@@ -1145,6 +1533,7 @@
         var stats = res.stats || {};
         var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
         var low = res.lowAttendance || {};
+        var away = res.away || {};
 
         var statusDisplay = displayMemberStatusLabel(m.status||'');
 
@@ -1158,12 +1547,54 @@
         }
 
         var attList = att.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('');
+        var canContact = !roleIsGl();
+        var canStats = !roleIsGl();
+
+        var topBtns = '<div class="modalTopBtns">'+
+          (canContact ? '<button id="btnContact" class="btnPink">📇 查看聯絡/車牌 / View contact/VRM</button>' : '')+
+          '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>'+
+        '</div>';
+
+        var statsCard = canStats
+          ? '<div class="msgBox ok" style="margin-top:10px;">'+
+              '<div class="big ok">📌 統計 / Stats</div>'+
+              '<div class="kv">'+
+                '<div>出席 / Attended</div><div>'+escapeHtml(String(stats.attended||0))+' / '+escapeHtml(String(stats.total||0))+'</div>'+
+                '<div>百分比 / Percent</div><div>'+escapeHtml(String(stats.percent||0))+'%</div>'+
+                '<div>起算日 / Denom start</div><div>'+escapeHtml(String(stats.denomStart||''))+'</div>'+
+              '</div>'+
+            '</div>'
+          : '';
+
+        var awayCard =
+          '<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div class="big warn">🏖️ 離開期 / Away period</div>'+
+            '<div class="kv">'+
+              '<div>開始 / From</div><div><input id="awayFrom" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from||''))+'" /></div>'+
+              '<div>結束 / To</div><div><input id="awayTo" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to||''))+'" /></div>'+
+            '</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
+              '<button id="btnAwayClear" class="btnBack">🧹 清除 / Clear</button>'+
+            '</div>'+
+            '<div id="awayMsg"></div>'+
+          '</div>';
+
+        var attendanceCard = canStats
+          ? '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="big warn">🗓️ 出席記錄 / Attendance</div>'+
+              '<div class="small">('+escapeHtml(String(att.length))+' records)</div>'+
+              '<div class="miniBtnRow">'+
+                '<button id="btnToggleAtt" class="btnBack">▶ 展開 / Expand</button>'+
+              '</div>'+
+              '<div id="attBox" class="hide" style="margin-top:10px;">'+
+                '<ul style="margin:0;padding-left:18px;white-space:normal;">'+attList+'</ul>'+
+              '</div>'+
+            '</div>'
+          : '';
 
         modal.querySelector('.modal').innerHTML =
-          '<div class="modalTopBtns">'+
-            '<button id="btnContact" class="btnPink">📇 查看聯絡/車牌 / View contact/VRM</button>'+
-            '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>'+
-          '</div>'+
+          topBtns +
           '<div class="big">👤 會員 / Member</div>'+
           '<div class="kv">'+
             '<div>CCF ID</div><div><b>'+escapeHtml(m.id||'')+'</b>'+(low.enabled && low.flag ? ' <span class="flag">〽️</span>' : '')+'</div>'+
@@ -1174,28 +1605,10 @@
             '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
           '</div>'+
 
-          '<div class="msgBox ok" style="margin-top:10px;">'+
-            '<div class="big ok">📌 統計 / Stats</div>'+
-            '<div class="kv">'+
-              '<div>出席 / Attended</div><div>'+escapeHtml(String(stats.attended||0))+' / '+escapeHtml(String(stats.total||0))+'</div>'+
-              '<div>百分比 / Percent</div><div>'+escapeHtml(String(stats.percent||0))+'%</div>'+
-              '<div>起算日 / Denom start</div><div>'+escapeHtml(String(stats.denomStart||''))+'</div>'+
-            '</div>'+
-          '</div>'+
-
+          statsCard+
+          awayCard+
           lowCard+
-
-          '<div class="msgBox warn" style="margin-top:10px;">'+
-            '<div class="big warn">🗓️ 出席記錄 / Attendance</div>'+
-            '<div class="small">('+escapeHtml(String(att.length))+' records)</div>'+
-            '<div class="miniBtnRow">'+
-              '<button id="btnToggleAtt" class="btnBack">▶ 展開 / Expand</button>'+
-            '</div>'+
-            '<div id="attBox" class="hide" style="margin-top:10px;">'+
-              '<ul style="margin:0;padding-left:18px;white-space:normal;">'+attList+'</ul>'+
-            '</div>'+
-          '</div>'+
-
+          attendanceCard+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="btnClose" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
@@ -1203,24 +1616,62 @@
 
         modal.querySelector('#btnClose').onclick = function(){ closeModal(modal); };
 
-        modal.querySelector('#btnToggleAtt').onclick = function(){
-          var box = modal.querySelector('#attBox');
-          var btn = modal.querySelector('#btnToggleAtt');
-          if(box.classList.contains('hide')){
-            box.classList.remove('hide');
-            btn.textContent = '▼ 收起 / Collapse';
-          } else {
-            box.classList.add('hide');
-            btn.textContent = '▶ 展開 / Expand';
-          }
-        };
+        var toggleAtt = modal.querySelector('#btnToggleAtt');
+        if (toggleAtt){
+          toggleAtt.onclick = function(){
+            var box = modal.querySelector('#attBox');
+            var btn = modal.querySelector('#btnToggleAtt');
+            if(box.classList.contains('hide')){
+              box.classList.remove('hide');
+              btn.textContent = '▼ 收起 / Collapse';
+            } else {
+              box.classList.add('hide');
+              btn.textContent = '▶ 展開 / Expand';
+            }
+          };
+        }
 
-        modal.querySelector('#btnContact').onclick = function(){
-          openContactFlow_(m.id);
-        };
+        var btnContact = modal.querySelector('#btnContact');
+        if (btnContact){
+          btnContact.onclick = function(){
+            openContactFlow_(m.id);
+          };
+        }
         modal.querySelector('#btnStatus').onclick = function(){
           openStatusFlow_(m.id, m.status||'');
         };
+
+        var awayFrom = modal.querySelector('#awayFrom');
+        var awayTo = modal.querySelector('#awayTo');
+        if (awayFrom && awayTo){
+          awayFrom.onfocus = function(){ toggleDateInput_(awayFrom, true); };
+          awayFrom.onblur = function(){ toggleDateInput_(awayFrom, false); };
+          awayTo.onfocus = function(){ toggleDateInput_(awayTo, true); };
+          awayTo.onblur = function(){ toggleDateInput_(awayTo, false); };
+
+          modal.querySelector('#btnAwaySave').onclick = function(){
+            var fromDmy = String(awayFrom.value||'').trim();
+            var toDmy = String(awayTo.value||'').trim();
+            clear('awayMsg');
+            callApi('api_admin_set_away_period', App.token, m.id, fromDmy, toDmy).then(function(res){
+              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              showBox('awayMsg','ok','已更新','Saved.');
+            }).catch(function(){
+              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+          modal.querySelector('#btnAwayClear').onclick = function(){
+            awayFrom.value = '';
+            awayTo.value = '';
+            clear('awayMsg');
+            callApi('api_admin_set_away_period', App.token, m.id, '', '').then(function(res){
+              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              showBox('awayMsg','ok','已清除','Cleared.');
+            }).catch(function(){
+              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
       }).catch(function(){
         closeModal(modal);
         showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
@@ -1253,6 +1704,20 @@
     function openStatusFlow_(memberId, currentStatus){
       logAction('CLICK_STATUS', memberId, 'status');
 
+      var options = '';
+      if (roleIsGl()){
+        options =
+          '<option value="HELPER">HELPER（31 days / 31 日）</option>';
+      } else {
+        options =
+          '<option value="ACTIVE">Member（ACTIVE）</option>'+
+          '<option value="PROVISIONAL">PROVISIONAL</option>'+
+          '<option value="DISABLED">DISABLED</option>'+
+          '<option value="TEMP">TEMP（2 days / 2 日）</option>'+
+          '<option value="HELPER">HELPER（31 days / 31 日）</option>'+
+          '<option value="STAFF">STAFF</option>';
+      }
+
       var m = openModal(
         '<div class="big">🛠 更改狀態 / Change status</div>'+
         '<div class="small">選擇新狀態後，需要再次掃描你本人同工 QR 作確認。所有操作會被記錄。<br/>Select new status then re-scan your own staff QR to confirm. All actions are logged.</div>'+
@@ -1260,11 +1725,7 @@
           '<div>目前 / Current</div><div><span class="chip">'+escapeHtml(displayMemberStatusLabel(currentStatus))+'</span></div>'+
           '<div>新狀態 / New</div><div>'+
             '<select id="newStatus">'+
-              '<option value="ACTIVE">Member（ACTIVE）</option>'+
-              '<option value="PROVISIONAL">PROVISIONAL</option>'+
-              '<option value="DISABLED">DISABLED</option>'+
-              '<option value="TEMP">TEMP（7 days / 7 日）</option>'+
-              '<option value="STAFF">STAFF</option>'+
+              options+
             '</select>'+
           '</div>'+
         '</div>'+
@@ -1367,6 +1828,7 @@
       if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); return; }
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); return; }
       if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); return; }
+      if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); return; }
       if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); return; }
       if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); return; }
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); return; }
