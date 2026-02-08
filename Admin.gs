@@ -1714,6 +1714,7 @@ function admin_eventDateFromKey_(ev){
 function admin_parseDmyToYmd_(dmy){
   const s = String(dmy||'').trim();
   if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return '';
   return m[3] + '-' + m[2] + '-' + m[1];

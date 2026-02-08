@@ -287,7 +287,8 @@
       to:null,
 
       chart:null,
-      matrixState:null
+      matrixState:null,
+      servingPlanOpenGroups:{}
     };
 
     function $(id){ return document.getElementById(id); }
@@ -919,29 +920,17 @@
             return;
           }
 
-          var headerHtml = positions.map(function(pos){
-            var groupKey = POSITION_GROUP[pos.position] || '';
-            return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
-          }).join('');
-
-          var monthMap = {};
-          var monthKeys = [];
-          events.forEach(function(ev){
-            var parts = parseYmdParts_(ev.dateYmd);
-            if (!parts) return;
-            var key = parts.m;
-            if (!monthMap[key]){
-              monthMap[key] = [];
-              monthKeys.push(key);
-            }
-            monthMap[key].push(ev);
-          });
-
-          var monthHtml = monthKeys.map(function(monthKey, idx){
-            var bodyHtml = monthMap[monthKey].map(function(ev){
-              var rowCells = positions.map(function(pos){
+          var groupOrder = ['worship','media','logistic','support','finance'];
+          var groupSections = groupOrder.map(function(groupKey){
+            var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
+            var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
+            if (!groupPositions.length) return '';
+            var headerHtml = groupPositions.map(function(pos){
+              return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
+            }).join('');
+            var bodyHtml = events.map(function(ev){
+              var rowCells = groupPositions.map(function(pos){
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
-                var groupKey = POSITION_GROUP[pos.position] || '';
                 if(!cell || !cell.length){
                   return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'"></td>';
                 }
@@ -961,12 +950,13 @@
                   rowCells +
                 '</tr>';
             }).join('');
+            var isOpen = !!App.servingPlanOpenGroups[groupKey];
             return ''+
-              '<div class="monthSection" data-month="'+monthKey+'">'+
-                '<div class="msgBox warn clickable monthHeader">'+
-                  '<div class="big warn">'+escapeHtml(monthLabel_(monthKey))+'</div>'+
-                '</div>'+
-                '<div class="monthBody '+(idx===0?'':'hide')+'">'+
+              '<div class="monthSection" data-group="'+groupKey+'">'+
+                '<button class="btnPeriod servingGroupToggle '+badge.cls+'" data-group="'+groupKey+'">'+
+                  badge.zh + ' / ' + badge.en + (isOpen ? ' ▲' : ' ▼')+
+                '</button>'+
+                '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
                   '<div class="tableWrap">'+
                     '<table class="servingPlanTable">'+
                       '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
@@ -977,7 +967,7 @@
               '</div>';
           }).join('');
 
-          listEl.innerHTML = monthHtml;
+          listEl.innerHTML = groupSections;
           attachScrollControls_(listEl);
 
           Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
@@ -985,14 +975,11 @@
               openServingEditModal(btn.getAttribute('data-event'));
             };
           });
-          Array.prototype.slice.call(listEl.querySelectorAll('.monthHeader')).forEach(function(header){
-            header.onclick = function(){
-              var section = header.closest('.monthSection');
-              Array.prototype.slice.call(listEl.querySelectorAll('.monthBody')).forEach(function(body){
-                body.classList.add('hide');
-              });
-              var body = section.querySelector('.monthBody');
-              if (body) body.classList.remove('hide');
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupToggle')).forEach(function(btn){
+            btn.onclick = function(){
+              var key = String(btn.getAttribute('data-group')||'');
+              App.servingPlanOpenGroups[key] = !App.servingPlanOpenGroups[key];
+              loadServingPlan();
             };
           });
         }).catch(function(){
@@ -1046,6 +1033,14 @@
           if (!groupKey || groupKey === 'other') return false;
           var groups = Array.isArray(m.groups) ? m.groups : [];
           return groups.some(function(g){ return normalizeGroup_(g) === groupKey; });
+        }
+        function buildMemberOptions_(groupKey){
+          var opts = '<option value="">選擇 / Select</option>';
+          members.forEach(function(m){
+            if (!memberMatchesGroup_(m, groupKey)) return;
+            opts += '<option value="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</option>';
+          });
+          return opts;
         }
         function extractMemberId_(token){
           var m = String(token||'').match(/CCF\\d{4}/i);
@@ -1118,9 +1113,10 @@
               h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
-                     '<button type="button" class="btnBack assignAdd" data-pos="'+escapeHtml(pos)+'">➕ 加入 / Add</button>'+
+                     '<button type="button" class="btnBack assignSelectToggle" data-pos="'+escapeHtml(pos)+'">選擇 / Select</button>'+
                      '<button type="button" class="btnBack assignNa" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
                    '</div>'+
+                   '<select class="inputMini assignSelect hide" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
             }
             h += '</td></tr>';
@@ -1208,29 +1204,29 @@
               values[key] = String(input.value||'').trim();
             };
           });
-          Array.prototype.slice.call(modal.querySelectorAll('.assignAdd')).forEach(function(btn){
-            btn.onclick = function(){
-              var pos = String(btn.getAttribute('data-pos')||'');
-              var input = modal.querySelector('.assignInput[data-pos="'+pos+'"]');
-              var query = input ? String(input.value||'').trim() : '';
-              if (!query) return;
-              var matchedId = extractMemberId_(query);
-              if (matchedId){
-                addAssigned_(pos, matchedId);
-                if (input) input.value = '';
-                return;
-              }
-              var list = getSuggestions_(pos, query);
-              if (list.length === 1){
-                addAssigned_(pos, list[0].id);
-                if (input) input.value = '';
-              }
-            };
-          });
           Array.prototype.slice.call(modal.querySelectorAll('.assignNa')).forEach(function(btn){
             btn.onclick = function(){
               var pos = String(btn.getAttribute('data-pos')||'');
               addAssigned_(pos, 'N/A');
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignSelectToggle')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              var sel = modal.querySelector('.assignSelect[data-pos="'+pos+'"]');
+              if (!sel) return;
+              sel.classList.toggle('hide');
+              if (!sel.classList.contains('hide')) sel.focus();
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignSelect')).forEach(function(sel){
+            sel.onchange = function(){
+              var pos = String(sel.getAttribute('data-pos')||'');
+              var val = String(sel.value||'').trim();
+              if (!val) return;
+              addAssigned_(pos, val);
+              sel.value = '';
+              sel.classList.add('hide');
             };
           });
           Array.prototype.slice.call(modal.querySelectorAll('.assignList')).forEach(function(box){
@@ -1247,6 +1243,25 @@
               var pos = String(input.getAttribute('data-pos')||'');
               var query = String(input.value||'').trim();
               renderSuggestions_(pos, query);
+            };
+            input.onkeydown = function(ev){
+              if (!ev || ev.key !== 'Enter') return;
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              if (!query) return;
+              var matchedId = extractMemberId_(query);
+              if (matchedId){
+                addAssigned_(pos, matchedId);
+                input.value = '';
+                renderSuggestions_(pos, '');
+                return;
+              }
+              var list = getSuggestions_(pos, query);
+              if (list.length === 1){
+                addAssigned_(pos, list[0].id);
+                input.value = '';
+                renderSuggestions_(pos, '');
+              }
             };
           });
         }
@@ -1983,20 +1998,26 @@
             '</div>'
           : '';
 
+        var awaySummary = '';
+        if (!away.from1 && !away.to1 && !away.from2 && !away.to2){
+          awaySummary = '<div class="small">目前沒有未來請假 / Currently no future absence.</div>';
+        } else {
+          var lines = [];
+          if (away.from1 || away.to1){
+            lines.push('Holiday 1: ' + escapeHtml(ymdToDmy_(away.from1||'') || '') + ' - ' + escapeHtml(ymdToDmy_(away.to1||'') || ''));
+          }
+          if (away.from2 || away.to2){
+            lines.push('Holiday 2: ' + escapeHtml(ymdToDmy_(away.from2||'') || '') + ' - ' + escapeHtml(ymdToDmy_(away.to2||'') || ''));
+          }
+          awaySummary = '<div class="small">'+lines.join('<br/>')+'</div>';
+        }
         var awayCard =
           '<div class="msgBox warn" style="margin-top:10px;">'+
-            '<div class="big warn">🏖️ 離開期 / Away period</div>'+
-            '<div class="kv">'+
-              '<div>開始 1 / From 1</div><div><input id="awayFrom1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from1||''))+'" /></div>'+
-              '<div>結束 1 / To 1</div><div><input id="awayTo1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to1||''))+'" /></div>'+
-              '<div>開始 2 / From 2</div><div><input id="awayFrom2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from2||''))+'" /></div>'+
-              '<div>結束 2 / To 2</div><div><input id="awayTo2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to2||''))+'" /></div>'+
-            '</div>'+
+            '<div class="big warn">🏖️ 請假 / Absence</div>'+
+            awaySummary+
             '<div class="miniBtnRow">'+
-              '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
-              '<button id="btnAwayClear" class="btnBack">🧹 清除 / Clear</button>'+
+              '<button id="btnAbsence" class="btnPeriod">請假 / Absence</button>'+
             '</div>'+
-            '<div id="awayMsg"></div>'+
           '</div>';
 
         var attendanceCard = canStats
@@ -2063,49 +2084,78 @@
           openStatusFlow_(m.id, m.status||'');
         };
 
-        var awayFrom1 = modal.querySelector('#awayFrom1');
-        var awayTo1 = modal.querySelector('#awayTo1');
-        var awayFrom2 = modal.querySelector('#awayFrom2');
-        var awayTo2 = modal.querySelector('#awayTo2');
-        if (awayFrom1 && awayTo1 && awayFrom2 && awayTo2){
-          [awayFrom1, awayTo1, awayFrom2, awayTo2].forEach(function(el){
-            el.onfocus = function(){ toggleDateInput_(el, true); };
-            el.onblur = function(){ toggleDateInput_(el, false); };
-          });
+        var btnAbsence = modal.querySelector('#btnAbsence');
+        if (btnAbsence){
+          btnAbsence.onclick = function(){
+            var absModal = openModal(
+              '<div class="big">🏖️ 請假 / Absence</div>'+
+              '<div class="small">Holiday 1 / 假期一</div>'+
+              '<div class="kv">'+
+                '<div>Holiday 1 From / 假期一開始</div><div><input id="awayFrom1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from1||''))+'" /></div>'+
+                '<div>Holiday 1 To / 假期一結束</div><div><input id="awayTo1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to1||''))+'" /></div>'+
+              '</div>'+
+              '<div class="small" style="margin-top:10px;">Holiday 2 / 假期二</div>'+
+              '<div class="kv">'+
+                '<div>Holiday 2 From / 假期二開始</div><div><input id="awayFrom2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from2||''))+'" /></div>'+
+                '<div>Holiday 2 To / 假期二結束</div><div><input id="awayTo2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to2||''))+'" /></div>'+
+              '</div>'+
+              '<div class="miniBtnRow">'+
+                '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
+                '<button id="btnAwayClear" class="btnBack">🧹 清除 / Clear</button>'+
+                '<button id="btnAwayClose" class="btnBack">⬅️ 返回 / Back</button>'+
+              '</div>'+
+              '<div id="awayMsg"></div>'
+            );
 
-          modal.querySelector('#btnAwaySave').onclick = function(){
-            var fromDmy1 = String(awayFrom1.value||'').trim();
-            var toDmy1 = String(awayTo1.value||'').trim();
-            var fromDmy2 = String(awayFrom2.value||'').trim();
-            var toDmy2 = String(awayTo2.value||'').trim();
-            if ((fromDmy1 && !toDmy1) || (!fromDmy1 && toDmy1) || (fromDmy2 && !toDmy2) || (!fromDmy2 && toDmy2)){
-              showBox('awayMsg','err','請填寫完整日期','Please complete both from/to dates.');
-              return;
-            }
-            clear('awayMsg');
-            callApi('api_admin_set_away_period', App.token, m.id, fromDmy1, toDmy1, fromDmy2, toDmy2).then(function(res){
-              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-              awayFrom1.value = ymdToDmy_(res.from1||'') || '';
-              awayTo1.value = ymdToDmy_(res.to1||'') || '';
-              awayFrom2.value = ymdToDmy_(res.from2||'') || '';
-              awayTo2.value = ymdToDmy_(res.to2||'') || '';
-              showBox('awayMsg','ok','已更新','Saved.');
-            }).catch(function(){
-              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            var awayFrom1 = absModal.querySelector('#awayFrom1');
+            var awayTo1 = absModal.querySelector('#awayTo1');
+            var awayFrom2 = absModal.querySelector('#awayFrom2');
+            var awayTo2 = absModal.querySelector('#awayTo2');
+            [awayFrom1, awayTo1, awayFrom2, awayTo2].forEach(function(el){
+              el.onfocus = function(){ toggleDateInput_(el, true); };
+              el.onblur = function(){ toggleDateInput_(el, false); };
             });
-          };
-          modal.querySelector('#btnAwayClear').onclick = function(){
-            awayFrom1.value = '';
-            awayTo1.value = '';
-            awayFrom2.value = '';
-            awayTo2.value = '';
-            clear('awayMsg');
-            callApi('api_admin_set_away_period', App.token, m.id, '', '', '', '').then(function(res){
-              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-              showBox('awayMsg','ok','已清除','Cleared.');
-            }).catch(function(){
-              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-            });
+
+            absModal.querySelector('#btnAwayClose').onclick = function(){ closeModal(absModal); };
+            absModal.querySelector('#btnAwaySave').onclick = function(){
+              var fromDmy1 = String(awayFrom1.value||'').trim();
+              var toDmy1 = String(awayTo1.value||'').trim();
+              var fromDmy2 = String(awayFrom2.value||'').trim();
+              var toDmy2 = String(awayTo2.value||'').trim();
+              if ((fromDmy1 && !toDmy1) || (!fromDmy1 && toDmy1) || (fromDmy2 && !toDmy2) || (!fromDmy2 && toDmy2)){
+                showBox('awayMsg','err','請填寫完整日期','Please complete both from/to dates.');
+                return;
+              }
+              clear('awayMsg');
+              callApi('api_admin_set_away_period', App.token, m.id, fromDmy1, toDmy1, fromDmy2, toDmy2).then(function(res){
+                if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                away.from1 = res.from1 || '';
+                away.to1 = res.to1 || '';
+                away.from2 = res.from2 || '';
+                away.to2 = res.to2 || '';
+                showBox('awayMsg','ok','已更新','Saved.');
+              }).catch(function(){
+                showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+              });
+            };
+            absModal.querySelector('#btnAwayClear').onclick = function(){
+              awayFrom1.value = '';
+              awayTo1.value = '';
+              awayFrom2.value = '';
+              awayTo2.value = '';
+              clear('awayMsg');
+              callApi('api_admin_set_away_period', App.token, m.id, '', '', '', '').then(function(res){
+                if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                away.from1 = '';
+                away.to1 = '';
+                away.from2 = '';
+                away.to2 = '';
+                showBox('awayMsg','ok','已清除','Cleared.');
+              }).catch(function(){
+                showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+              });
+            };
+            attachScrollControls_(absModal);
           };
         }
       }).catch(function(){
