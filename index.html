@@ -7,12 +7,12 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CCF Live Service Portal</title>
+  <title>CCF Live Service Portal / 粵語基督徒團契</title>
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff8-ui1 (restored full functions + self-check)
-   * For Code.gs: v2026-02-02.staff8
+   * UI VERSION: staff10-ui1 (restored full functions + self-check)
+   * For Code.gs: v2026-02-08.staff10
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -47,6 +47,16 @@
     .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
     .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
     .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
+    .staffBanner{
+      font-size:var(--fs-big);
+      font-weight:900;
+      margin-top:8px;
+      padding:6px 12px;
+      border-radius:999px;
+      background:#eef4ff;
+      border:1px solid rgba(40,90,200,0.18);
+      display:inline-block;
+    }
 
     input,button{
       width:100%;
@@ -63,6 +73,8 @@
     button.danger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}
     button.blue{ background:#eef4ff; border-color:rgba(40,90,200,0.18); }
     button.orange{ background:#fff6e6; border-color:rgba(200,132,0,0.35); }
+    .btnSmall{padding:8px 12px;font-size:var(--fs-small);border-radius:999px;width:auto}
+    .topRow{display:flex;justify-content:space-between;align-items:center;gap:10px}
 
     .menuGrid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
     .menuGrid button{ min-height: 62px; }
@@ -73,6 +85,7 @@
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
+    .msgBox.already{border-color:rgba(26,168,108,0.25);background:#f2fff9}
     .msgBox.err{border-color:rgba(217,60,94,0.35);background:#fff1f4}
     .msgBox.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6}
     .ok{color:var(--good)} .err{color:var(--bad)} .warn{color:var(--warn)}
@@ -110,8 +123,27 @@
     .chipRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .chip{font-size:var(--fs-small);padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--muted)}
     .chip.good{border-color:rgba(26,168,108,0.35);background:#edfff6;color:var(--good)}
+    .chip.goodLight{border-color:rgba(26,168,108,0.25);background:#f2fff9;color:var(--good)}
     .chip.bad{border-color:rgba(217,60,94,0.35);background:#fff1f4;color:var(--bad)}
     .chip.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6;color:var(--warn)}
+
+    .scrollControls{
+      position:sticky;
+      bottom:8px;
+      display:flex;
+      justify-content:flex-end;
+      gap:6px;
+      margin-top:8px;
+      z-index:5;
+    }
+    .scrollBtn{
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      cursor:pointer;
+    }
 
     @media (pointer: coarse){
       button{ min-height: 56px; }
@@ -126,14 +158,14 @@
   <div class="wrap">
     <header class="topbar">
       <div>
-        <div class="title">CCF Live Service Portal</div>
+        <div class="title">CCF Live Service Portal / 粵語基督徒團契</div>
         <div class="sub">同工專用 / Staff only</div>
         <div class="hint">
           請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff8-ui1</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff10-ui1</span></div>
     </header>
 
     <main id="app"></main>
@@ -155,6 +187,7 @@
       liveNamesOpen:false,
       liveData:null,
       liveNamesFilter:'',
+      eventKey:'',
       stable:{ value:null, count:0, firstTs:0 },
 
       // Auth flow
@@ -188,18 +221,91 @@
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
               .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
     }
+    function formatPreferredName_(pref){
+      var p = String(pref||'').trim();
+      return p ? ('(' + p + ')') : '';
+    }
+    function formatMemberName_(m){
+      m = m || {};
+      var zh = String(m.nameZh||'').trim();
+      var en = String(m.nameEn||'').trim();
+      var pref = formatPreferredName_(m.preferredName);
+      var parts = [zh, en].filter(Boolean).join(' ');
+      if (parts && pref) return parts + ' ' + pref;
+      if (!parts && pref) return pref;
+      return parts || '';
+    }
+    function formatMemberNameLine_(zh, en, pref){
+      var parts = [String(zh||'').trim(), String(en||'').trim()].filter(Boolean).join(' ');
+      var p = formatPreferredName_(pref);
+      if (parts && p) return parts + ' ' + p;
+      if (!parts && p) return p;
+      return parts || '';
+    }
+    function formatHandledBy_(handled){
+      if (!handled) return '';
+      var zh = String(handled.nameZh||'').trim();
+      var en = String(handled.nameEn||'').trim();
+      return [zh, en].filter(Boolean).join(' ');
+    }
+    function setEventKeyLine_(id){
+      var el = $(id);
+      if (!el) return;
+      el.textContent = App.eventKey ? ('活動 / Event: ' + App.eventKey) : '';
+    }
+    function ensureEventKey_(cb){
+      if (App.eventKey){ if (cb) cb(); return; }
+      callApi('api_get_live_page', App.token, null).then(function(res){
+        if (res && res.ok){
+          App.eventKey = res.eventKey || '';
+          setEventKeyLine_('checkinEventKey');
+          setEventKeyLine_('scanEventKey');
+          setEventKeyLine_('manualEventKey');
+        }
+        if (cb) cb();
+      }).catch(function(){
+        if (cb) cb();
+      });
+    }
 
     var SERVING_GROUP_LABELS = {
-      MEDIA: 'Media — Media Master / 影像大師',
-      WORSHIP: 'Worship — Worship Alliance / 敬拜聯盟',
-      LOGISTIC: 'Logistic — Logistic Specialist / 後勤特工',
-      SUPPORT: 'Support — Divine Supporter / 聖工支援隊',
-      FINANCE: 'Finance — Finance Dept / 財務公司'
+      MEDIA: 'Media Master / 影像大師',
+      WORSHIP: 'Worship Alliance / 敬拜聯盟',
+      LOGISTIC: 'Logistic Specialist / 後勤特工',
+      SUPPORT: 'Divine Supporter / 聖工支援隊',
+      FINANCE: 'Finance Dept / 財務公司'
+    };
+    var SERVING_POSITION_LABELS = {
+      Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
+      Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
+      Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
+      Worship_Pianist:      { zh:'司琴', en:'Pianist' },
+      Worship_Drum:         { zh:'鼓手', en:'Drummer' },
+      Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
+      Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+      Media_AV:             { zh:'影音', en:'Audio Visual' },
+      Media_PPT:            { zh:'投影', en:'PPT' },
+      Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
+      Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+      Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
+      Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
+      Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
+      Logistic_Welcome:     { zh:'接待', en:'Welcome / Seating' },
+      Logistic_Venue:       { zh:'場務', en:'Venue / Setup / Cleanup' },
+      Logistic_Refreshment: { zh:'茶水', en:'Refreshments' },
+      Finance_Offering:     { zh:'財務', en:'Offering / Finance' },
+      Other:                { zh:'其他', en:'Other' }
     };
 
     function getServingGroupLabel_(group){
       var key = String(group || '').trim().toUpperCase();
       return SERVING_GROUP_LABELS[key] || key;
+    }
+    function getServingPositionLabel_(pos){
+      var key = String(pos || '').trim();
+      var label = SERVING_POSITION_LABELS[key];
+      if (!label) return key;
+      return label.en + ' / ' + label.zh;
     }
     function isServingNaValue_(value){
       var v = String(value || '').trim().toUpperCase();
@@ -232,6 +338,23 @@
       );
     }
 
+    function attachScrollControls_(root){
+      var scope = root || document;
+      var targets = Array.prototype.slice.call(scope.querySelectorAll('.listWrap, .card, .modal'));
+      targets.forEach(function(el){
+        if (el.querySelector('.scrollControls')) return;
+        if (el.scrollHeight <= el.clientHeight) return;
+        var ctrl = document.createElement('div');
+        ctrl.className = 'scrollControls';
+        ctrl.innerHTML =
+          '<button type="button" class="scrollBtn scrollUp">▲</button>'+
+          '<button type="button" class="scrollBtn scrollDown">▼</button>';
+        ctrl.querySelector('.scrollUp').onclick = function(){ el.scrollBy({ top: -180, behavior: 'smooth' }); };
+        ctrl.querySelector('.scrollDown').onclick = function(){ el.scrollBy({ top: 180, behavior: 'smooth' }); };
+        el.appendChild(ctrl);
+      });
+    }
+
     function openModal(html){
       var o = document.createElement('div');
       o.className = 'overlay';
@@ -256,6 +379,11 @@
       var zh = App.staff.nameZh || '';
       var en = App.staff.nameEn || '';
       return (zh + ' ' + en).trim() || App.staff.id;
+    }
+    function staffBannerHtml_(){
+      var name = staffDisplayName();
+      if (!name) return '';
+      return '<div class="staffBanner">👤 ' + escapeHtml(name) + '</div>';
     }
 
     function canTapLiveNames(){
@@ -423,6 +551,14 @@
       }
       resetStability();
     }
+    function toggleVideoWrap_(videoId, show){
+      var v = $(videoId);
+      if (!v) return;
+      var wrap = v.closest('.videoWrap');
+      if (!wrap) return;
+      if (show) wrap.classList.remove('hide');
+      else wrap.classList.add('hide');
+    }
 
     function startScan(videoId, onCaptured, msgTarget){
       stopScan();
@@ -430,6 +566,7 @@
         showErr(msgTarget, { code:'E420', zh:'此裝置不支援相機', en:'Camera not supported' });
         return;
       }
+      toggleVideoWrap_(videoId, true);
 
       var constraintsPreferred = camBuildPreferredConstraints_();
       var constraintsFacingFallback = { video: { facingMode: { ideal:'environment' } }, audio:false };
@@ -565,14 +702,14 @@
       }
 
       var root = $('app');
-      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); restoreSession(); return; }
-      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); return; }
-      if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); return; }
-      if(App.view==='scanCheckin'){ root.innerHTML = viewScanCheckin(); bindScanCheckin(); return; }
-      if(App.view==='manualCheckin'){ root.innerHTML = viewManualCheckin(); bindManualCheckin(); return; }
-      if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); return; }
-      if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); return; }
-      if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); return; }
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); restoreSession(); attachScrollControls_(root); return; }
+      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); attachScrollControls_(root); return; }
+      if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); attachScrollControls_(root); return; }
+      if(App.view==='scanCheckin'){ root.innerHTML = viewScanCheckin(); bindScanCheckin(); attachScrollControls_(root); return; }
+      if(App.view==='manualCheckin'){ root.innerHTML = viewManualCheckin(); bindManualCheckin(); attachScrollControls_(root); return; }
+      if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); attachScrollControls_(root); return; }
+      if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); attachScrollControls_(root); return; }
+      if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); attachScrollControls_(root); return; }
     }
 
     // ===== Views =====
@@ -612,23 +749,27 @@
 
       return ''+
         '<div class="card">'+
-          '<div class="big">👋 已登入 / Logged in</div>'+
-          kvHtml([
-            {k:'同工 / Staff', v:staffDisplayName()},
-            {k:'身份 / Role', v:(isSuper ? 'SUPERUSER' : st)}
-          ])+
+          '<div class="topRow">'+
+            '<div class="big">👋 已登入 / Logged in</div>'+
+            '<div>'+
+              '<button id="btnLogoutTop" class="danger btnSmall">🚪 登出 / Logout</button>'+
+            '</div>'+
+          '</div>'+
+          staffBannerHtml_()+
         '</div>'+
         '<div class="card">'+
           '<div class="big">📌 主選單 / Main menu</div>'+
-          '<div class="menuGrid">'+
-            '<button id="goCheckin" class="primary">✅ 簽到 / Check-in</button>'+
-            '<button id="goRealtime" class="blue">📊 即時情況 / Live</button>'+
-            '<button id="goVrm" class="blue">🚗 車牌搜尋 / Car reg</button>'+
-            (showAuth ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button>' : '<button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>')+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="goCheckin" class="primary" style="flex:1 1 100%;min-height:74px;">✅ 簽到 / Check-in</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            (showAuth ? '<button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>' : '')+
-            '<button id="btnLogout" class="danger">🚪 登出 / Logout</button>'+
+            '<button id="goRealtime" class="blue">📊 即時情況 / Live</button>'+
+            '<button id="goVrm" class="blue">🚗 車牌搜尋 / Car reg</button>'+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            (showAuth
+              ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button><button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>'
+              : '<button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>')+
           '</div>'+
           '<div id="menuMsg"></div>'+
         '</div>';
@@ -638,6 +779,8 @@
       return ''+
         '<div class="card">'+
           '<div class="big">✅ 簽到 / Check-in</div>'+
+          staffBannerHtml_()+
+          '<div class="small" id="checkinEventKey"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="goScanCheckin" class="primary">📷 掃描 QR 卡 / Scan QR badge</button>'+
           '</div>'+
@@ -652,6 +795,8 @@
       return ''+
         '<div class="card">'+
           '<div class="big">📷 掃描簽到 / Scan check-in</div>'+
+          staffBannerHtml_()+
+          '<div class="small" id="scanEventKey"></div>'+
           '<div id="scanCam" class="card" style="margin-top:10px;">'+
             '<div class="videoWrap"><video id="videoCheckin" playsinline></video></div>'+
             '<div class="miniBtnRow">'+
@@ -671,6 +816,8 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🔎 手動搜尋 / Manual search</div>'+
+          staffBannerHtml_()+
+          '<div class="small" id="manualEventKey"></div>'+
           '<div class="small">Name / 中文名 / English / Preferred name / Email / CCF ID</div>'+
           '<div id="manualPanel" class="card" style="margin-top:10px;">'+
             '<div class="label">搜尋 / Search</div>'+
@@ -689,6 +836,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">📊 即時情況 / Live</div>'+
+          staffBannerHtml_()+
           '<div class="small">英國時間 / UK time: <span class="pill" id="liveClock">--:--:--</span></div>'+
           '<div id="rtBox" class="card" style="margin-top:10px;"></div>'+
           '<div id="rtServingBox" class="card" style="margin-top:10px;"></div>'+
@@ -705,6 +853,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🚗 車牌搜尋 / Car reg</div>'+
+          staffBannerHtml_()+
           '<div class="card" style="margin-top:10px;">'+
             '<div class="label">車牌 / Plate</div>'+
             '<input id="vrmQ" autocomplete="off" placeholder="例如：AB12CDE" />'+
@@ -822,6 +971,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🔐 授權 / Authorise</div>'+
+          staffBannerHtml_()+
           '<div class="small">Step '+step+' / 4</div>'+
         '</div>'+
         '<div class="card">'+body+'</div>';
@@ -831,15 +981,15 @@
     function openSelfCheckModal(){
       var o = openModal(
         '<div class="big">🩺 自我檢查 / Self-check</div>'+
-        '<div class="small">Back-end checks only. Some forward functions may still be problematic. Feedback to Media team appreciated.</div>'+
+        staffBannerHtml_()+
+        '<div class="small">Back-end checks only. Feedback to Media team appreciated.</div>'+
         '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
         '<div class="miniBtnRow">'+
-          '<button id="btnScRun" class="primary">▶️ 開始檢查 / Run checks</button>'+
-          '<button id="btnScWrite" class="orange">✍️ 寫入測試 / Write test</button>'+
           '<button id="btnScConfirm" class="orange">✅ 同工確認 / Staff confirm</button>'+
           '<button id="btnScClose" class="danger">關閉 / Close</button>'+
         '</div>'
       );
+      attachScrollControls_(o);
 
       function setBusy(msg){
         var b = o.querySelector('#scBox');
@@ -884,34 +1034,6 @@
 
       o.querySelector('#btnScClose').onclick = function(){ closeModal(o); };
 
-      o.querySelector('#btnScRun').onclick = function(){
-        setBusy('更新中… / Running…');
-        callApi('api_selfcheck_readonly', App.token).then(renderChecks).catch(function(){
-          var b = o.querySelector('#scBox');
-          showErrInto(b, {code:'E500', zh:'系統錯誤', en:'System error'});
-        });
-      };
-
-      o.querySelector('#btnScWrite').onclick = function(){
-        setBusy('寫入測試中… / Write testing…');
-        callApi('api_selfcheck_write_test', App.token, getDeviceId(), getUA()).then(function(res){
-          var b = o.querySelector('#scBox');
-          if(res && res.ok){
-            b.innerHTML =
-              '<div class="msgBox ok">'+
-                '<div class="big ok">'+escapeHtml(res.zh||'完成')+'</div>'+
-                '<div class="msgEn">'+escapeHtml(res.en||'Done')+'</div>'+
-                '<div class="small" style="margin-top:8px;">Event: '+escapeHtml(res.eventKey||'')+'</div>'+
-              '</div>';
-          } else {
-            showErrInto(b, res || {code:'E500', zh:'寫入測試失敗', en:'Write test failed'});
-          }
-        }).catch(function(){
-          var b = o.querySelector('#scBox');
-          showErrInto(b, {code:'E500', zh:'系統錯誤', en:'System error'});
-        });
-      };
-
       o.querySelector('#btnScConfirm').onclick = function(){
         setBusy('記錄中… / Logging…');
         callApi('api_selfcheck_mark_completed', App.token, getDeviceId(), getUA()).then(function(res){
@@ -933,7 +1055,11 @@
       };
 
       // Auto-run once
-      o.querySelector('#btnScRun').click();
+      setBusy('更新中… / Running…');
+      callApi('api_selfcheck_readonly', App.token).then(renderChecks).catch(function(){
+        var b = o.querySelector('#scBox');
+        showErrInto(b, {code:'E500', zh:'系統錯誤', en:'System error'});
+      });
     }
 
     // ===== Bindings =====
@@ -953,6 +1079,7 @@
         });
 
         function onCapturedLogin(text){
+          toggleVideoWrap_('videoLogin', false);
           $('loginCam').classList.add('hide');
           callApi('api_login', text).then(function(res){
             if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
@@ -991,10 +1118,12 @@
       $('goVrm').onclick = function(){ App.view='vrm'; render(); };
       if ($('goAuth')) $('goAuth').onclick = function(){ App.view='auth'; render(); };
       if ($('goSelfcheck')) $('goSelfcheck').onclick = function(){ openSelfCheckModal(); };
-      $('btnLogout').onclick = function(){ logout(); };
+      if ($('btnLogoutTop')) $('btnLogoutTop').onclick = function(){ logout(); };
     }
 
     function bindCheckinMenu(){
+      ensureEventKey_();
+      setEventKeyLine_('checkinEventKey');
       $('goScanCheckin').onclick = function(){ App.view='scanCheckin'; render(); };
       $('goManualCheckin').onclick = function(){ App.view='manualCheckin'; render(); };
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
@@ -1002,30 +1131,30 @@
 
     function bindScanCheckin(){
       clear('scanMsg');
+      ensureEventKey_();
+      setEventKeyLine_('scanEventKey');
 
       function renderCheckinResult(res){
         var box = $('scanMsg');
         if(!res || !res.ok){ box.innerHTML=''; showErr('scanMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
 
         var m = res.member || {};
-        var nameLine = ((m.nameZh||'') + ' ' + (m.nameEn||'')).trim() || m.id || '';
-        var pref = (m.preferredName||'').trim();
+        var nameLine = formatMemberName_(m) || m.id || '';
         var chips = '<div class="chipRow">'+
           '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
-          '<span class="chip">'+escapeHtml(res.status||'')+'</span>'+
-          (res.result==='OK' ? '<span class="chip good">✅ OK</span>' : '<span class="chip warn">⚠️ ALREADY</span>')+
-          (pref ? '<span class="chip warn">⭐ '+escapeHtml(pref)+'</span>' : '')+
+          (res.result==='OK' ? '<span class="chip good">✅ OK</span>' : '<span class="chip goodLight">✅ Already</span>')+
         '</div>';
 
         if(res.result === 'ALREADY'){
           var a = res.already || {};
           var emailUi = a.emailUi || emailUiFromStatus(a.emailStatus||'');
           box.innerHTML =
-            '<div class="msgBox warn">'+
-              '<div class="big warn">⚠️ 已簽到 / Already checked-in</div>'+
+            '<div class="msgBox already">'+
+              '<div class="big ok">✅ 已簽到 / Already checked-in</div>'+
               '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
               chips+
               kvHtml([
+                {k:'經手 / By', v: formatHandledBy_(a.handledBy)},
                 {k:'時間 / Time', v:(a.timeUk||'')},
                 {k:'方式 / Method', v:(a.method||'')},
                 {k:'Receipt', v:(a.receiptId||'')},
@@ -1037,12 +1166,41 @@
         }
 
         var emailLine = (res.emailUi && (res.emailUi.zh || res.emailUi.en)) ? (res.emailUi.zh + ' ' + (res.emailToMasked ? ('('+res.emailToMasked+')') : '')) : '';
+        var isSelf = App.staff && m.id && (String(App.staff.id||'').toUpperCase() === String(m.id||'').toUpperCase());
+        if (isSelf){
+          var selfTitleZh = '✅ 已完成自助簽到';
+          var selfTitleEn = '✅ Self check-in confirmed';
+          var selfBodyZh =
+            '多謝你在 CCF 的事奉與付出！\n' +
+            '你已成功為自己完成簽到。\n\n' +
+            '活動：'+(res.eventKey||'')+'\n' +
+            '時間（英國）：'+(res.timeUk||'')+'\n' +
+            '收據：'+(res.receiptId||'')+'\n\n' +
+            '如需更正或有任何問題，請聯絡接待／影音同工。願主祝福你今日的服事！';
+          var selfBodyEn =
+            'Thank you for serving at CCF!\n' +
+            'Your self check-in has been recorded successfully.\n\n' +
+            'Event: '+(res.eventKey||'')+'\n' +
+            'Time (UK): '+(res.timeUk||'')+'\n' +
+            'Receipt: '+(res.receiptId||'')+'\n\n' +
+            'If anything needs correcting, please contact the Welcome/Media team. God bless your service today!';
+          box.innerHTML =
+            '<div class="msgBox ok">'+
+              '<div class="big ok">'+escapeHtml(selfTitleZh)+'</div>'+
+              '<div class="msgEn">'+escapeHtml(selfTitleEn)+'</div>'+
+              '<div class="small" style="white-space:pre-line;margin-top:8px;">'+escapeHtml(selfBodyZh)+'</div>'+
+              '<div class="small" style="white-space:pre-line;margin-top:8px;">'+escapeHtml(selfBodyEn)+'</div>'+
+            '</div>';
+          return;
+        }
+
         box.innerHTML =
           '<div class="msgBox ok">'+
             '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
             '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
             chips+
             kvHtml([
+              {k:'經手 / By', v: formatHandledBy_(res.staff)},
               {k:'時間 / Time', v:(res.timeUk||'')},
               {k:'Receipt', v:(res.receiptId||'')},
               {k:'電郵 / Email', v: emailLine }
@@ -1054,6 +1212,9 @@
 
       function onCaptured(text){
         clear('scanMsg');
+        toggleVideoWrap_('videoCheckin', false);
+        var cam = $('scanCam');
+        if (cam) cam.classList.add('hide');
         $('scanMsg').innerHTML = '<div class="small">處理中… / Processing…</div>';
         callApi('api_checkin_scan', App.token, text, null, getDeviceId(), getUA()).then(renderCheckinResult).catch(function(){
           showErr('scanMsg', {code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.'});
@@ -1062,6 +1223,8 @@
 
       function start(){
         clear('scanMsg');
+        var cam = $('scanCam');
+        if (cam) cam.classList.remove('hide');
         startScan('videoCheckin', onCaptured, 'scanMsg');
       }
 
@@ -1089,6 +1252,8 @@
     function bindManualCheckin(){
       App.manualLocked = false;
       App.manualSelectedId = null;
+      ensureEventKey_();
+      setEventKeyLine_('manualEventKey');
 
       function unlockSearchUi(){
         var mp = $('manualPanel');
@@ -1130,7 +1295,7 @@
           '<div class="small">結果 / Results: <span class="pill">'+list.length+'</span></div>'+
           '<div class="listWrap" style="margin-top:10px;">'+
             list.map(function(m){
-              var line = (String(m.nameZh||'') + ' ' + String(m.nameEn||'')).trim();
+              var line = formatMemberNameLine_(m.nameZh, m.nameEn, m.preferredName);
               return ''+
                 '<div class="nameItem tap" data-mid="'+escapeHtml(m.id)+'">'+
                   '<div class="zh">'+escapeHtml(m.id)+' · '+escapeHtml(line||'')+'</div>'+
@@ -1190,16 +1355,17 @@
           }
 
           var m = res.member || {};
-          var nameLine = ((m.nameZh||'')+' '+(m.nameEn||'')).trim() || m.id || '';
+          var nameLine = formatMemberName_(m) || m.id || '';
           var pref = (m.preferredName||'').trim();
 
           var today = res.today;
           var todayBox = '';
           if(today){
             todayBox =
-              '<div class="msgBox warn" style="margin-top:10px;">'+
-                '<div class="big warn">⚠️ 今日已簽到 / Already today</div>'+
+              '<div class="msgBox already" style="margin-top:10px;">'+
+                '<div class="big ok">✅ 今日已簽到 / Already today</div>'+
                 kvHtml([
+                  {k:'經手 / By', v: formatHandledBy_(today.handledBy)},
                   {k:'時間 / Time', v: today.timeUk||''},
                   {k:'方式 / Method', v: today.method||''},
                   {k:'Receipt', v: today.receiptId||''}
@@ -1216,8 +1382,6 @@
               '<div class="msgEn">'+escapeHtml(m.id||'')+'</div>'+
               '<div class="chipRow">'+
                 '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
-                '<span class="chip">'+escapeHtml(m.status||'')+'</span>'+
-                (pref ? '<span class="chip warn">⭐ '+escapeHtml(pref)+'</span>' : '')+
                 (m.isMinor ? '<span class="chip warn">🧒 Minor</span>' : '')+
               '</div>'+
               kvHtml([
@@ -1275,15 +1439,16 @@
 
                 // Render success / already
                 var mm = r2.member || {};
-                var nm = ((mm.nameZh||'')+' '+(mm.nameEn||'')).trim() || mm.id || '';
+                var nm = formatMemberName_(mm) || mm.id || '';
                 if(r2.result === 'ALREADY'){
                   var a = r2.already || {};
                   var emailUi = a.emailUi || emailUiFromStatus(a.emailStatus||'');
                   confirmEl.innerHTML =
-                    '<div class="msgBox warn">'+
-                      '<div class="big warn">⚠️ 已簽到 / Already</div>'+
+                    '<div class="msgBox already">'+
+                      '<div class="big ok">✅ 已簽到 / Already</div>'+
                       '<div class="msgEn">'+escapeHtml(nm)+'</div>'+
                       kvHtml([
+                        {k:'經手 / By', v: formatHandledBy_(a.handledBy)},
                         {k:'時間 / Time', v:a.timeUk||''},
                         {k:'方式 / Method', v:a.method||''},
                         {k:'Receipt', v:a.receiptId||''},
@@ -1301,6 +1466,7 @@
                       '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
                       '<div class="msgEn">'+escapeHtml(nm)+'</div>'+
                       kvHtml([
+                        {k:'經手 / By', v: formatHandledBy_(r2.staff)},
                         {k:'時間 / Time', v:r2.timeUk||''},
                         {k:'Receipt', v:r2.receiptId||''},
                         {k:'電郵 / Email', v:emailLine}
@@ -1356,10 +1522,14 @@
         callApi('api_get_live_page', App.token, null).then(function(res){
           if(!res || !res.ok){ box.innerHTML=''; showErr('rtBox', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
           App.liveData = res;
+          App.eventKey = res.eventKey || App.eventKey || '';
+          setEventKeyLine_('checkinEventKey');
+          setEventKeyLine_('scanEventKey');
+          setEventKeyLine_('manualEventKey');
 
           var last = res.lastSignIn
             ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div class="msgEn">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
-            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">OK sign, please welcome and check in the first person</div></div>';
+            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">請歡迎並為會眾簽到！ / Please welcome and sign in members!</div></div>';
 
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });
@@ -1371,14 +1541,13 @@
                 '<div class="big warn">🆕 新朋友 / New friends ('+escapeHtml(newFriends.length)+')</div>'+
                 '<div class="listWrap" style="margin-top:10px;">'+
                   newFriends.map(function(n){
-                    var pref = (n.preferredName||'').trim();
                     var zh = (n.nameZh||'').trim();
                     var en = (n.nameEn||'').trim();
-                    var line2 = [zh, en].filter(Boolean).join(' · ');
+                    var pref = (n.preferredName||'').trim();
+                    var line = formatMemberNameLine_(zh, en, pref) || n.id || '';
                     return ''+
                       '<div class="nameItem">'+
-                        '<div class="zh">🆕 ' + (n.isMinor ? '🧒 ' : '') + (pref ? (hiPref(pref)+' ') : '') + '</div>'+
-                        '<div class="en">'+escapeHtml(line2)+'</div>'+
+                        '<div class="zh">🆕 ' + (n.isMinor ? '🧒 ' : '') + escapeHtml(line) + '</div>'+
                       '</div>';
                   }).join('')+
                 '</div>'+
@@ -1408,6 +1577,7 @@
           showErr('rtBox', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
         });
       }
+      App.refreshLive = refresh;
 
       function toggleNames(){
         App.liveNamesOpen = !App.liveNamesOpen;
@@ -1478,11 +1648,10 @@
             var zh = (n.nameZh||'').trim();
             var en = (n.nameEn||'').trim();
             var minor = n.isMinor ? '🧒 ' : '';
-            var top = minor + (n.isNew ? '🆕 ' : '') + (pref || zh || en || '');
+            var top = minor + (n.isNew ? '🆕 ' : '') + (formatMemberNameLine_(zh, en, pref) || n.id || '');
             var cls = 'nameItem' + (tappable ? ' tap' : '');
             return '<div class="'+cls+'" data-mid="'+escapeHtml(n.id)+'">' +
                      '<div class="zh">' + escapeHtml(top) + '</div>' +
-                     '<div class="en">'+escapeHtml([zh,en].filter(Boolean).join(' · '))+'</div>'+
                    '</div>';
           }).join('');
 
@@ -1502,6 +1671,7 @@
         };
 
         renderList();
+        attachScrollControls_(box);
       }
 
       function renderServing(res){
@@ -1530,62 +1700,43 @@
             var icon = allOk ? '✅' : '❌';
             var isOpen = (openGroup === key);
             var openMark = isOpen ? ' ▲' : ' ▼';
-            return '<span class="chip '+cls+' servingGroupChip" data-group="'+key+'">'+icon+' '+key+openMark+'</span>';
+            var label = getServingGroupLabel_(key);
+            return '<span class="chip '+cls+' servingGroupChip" data-group="'+key+'">'+icon+' '+escapeHtml(label)+openMark+'</span>';
           }).join('') +
           '</div>';
 
         var expandedHtml = '';
         if (openGroup){
           var groupRows = list.filter(function(r){ return String(r.group||'').toUpperCase() === openGroup; });
-          var pending = groupRows.filter(function(r){ return !isServingNaRow_(r) && !r.checkedIn; });
-          if (!pending.length){
-            expandedHtml =
-              '<div class="msgBox ok" style="margin-top:10px;">'+
-                '<div class="big ok">✅ '+escapeHtml(openGroup)+' 全部已簽到 / All checked-in</div>'+
-              '</div>';
-          } else {
-            expandedHtml =
-              '<div class="msgBox warn" style="margin-top:10px;">'+
-                '<div class="big warn">❌ '+escapeHtml(openGroup)+' 未簽到 / Not yet</div>'+
-                '<div class="listWrap" style="margin-top:10px;">'+
-                  pending.map(function(row){
+          expandedHtml =
+            '<div class="listWrap" style="margin-top:10px;">'+
+              (groupRows.length
+                ? groupRows.map(function(row){
                     var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
-                    var roleLine = [row.position, row.slot].filter(Boolean).join(' · ');
+                    var roleLine = getServingPositionLabel_(row.position);
+                    var isNa = isServingNaRow_(row);
+                    var statusChip = isNa
+                      ? '<span class="chip warn">N/A</span>'
+                      : (row.checkedIn
+                        ? '<span class="chip goodLight">✅ 已簽到 / Checked-in</span>'
+                        : '<span class="chip bad">❌ 未簽到 / Not yet</span>');
                     return ''+
                       '<div class="nameItem">'+
                         '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
                         '<div class="en">'+escapeHtml(roleLine)+'</div>'+
+                        '<div class="chipRow" style="margin-top:8px;">'+statusChip+'</div>'+
                       '</div>';
-                  }).join('')+
-                '</div>'+
-              '</div>';
-          }
+                  }).join('')
+                : '<div class="msgBox warn" style="margin-top:0;"><div class="big warn">暫無記錄 / No serving records</div></div>')+
+            '</div>';
         }
 
         box.innerHTML =
           '<div class="big">🧩 事奉 / Serving today</div>' +
           '<div class="small">共 ' + list.length + ' 位 / Total ' + list.length + '</div>' +
           summaryHtml +
-          expandedHtml +
-          '<div class="listWrap" style="margin-top:10px;">' +
-            list.map(function(row){
-              var groupLabel = getServingGroupLabel_(row.group);
-              var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
-              var roleLine = [groupLabel, row.position, row.slot].filter(Boolean).join(' · ');
-              var isNa = isServingNaRow_(row);
-              var statusChip = isNa
-                ? '<span class="chip warn">N/A</span>'
-                : (row.checkedIn
-                  ? '<span class="chip good">✅ 已簽到 / Checked-in</span>'
-                  : '<span class="chip bad">❌ 未簽到 / Not yet</span>');
-              return ''+
-                '<div class="nameItem">'+
-                  '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
-                  '<div class="en">'+escapeHtml(roleLine)+'</div>'+
-                  '<div class="chipRow" style="margin-top:8px;">'+statusChip+'</div>'+
-                '</div>';
-            }).join('') +
-          '</div>';
+          expandedHtml;
+        attachScrollControls_(box);
 
         Array.prototype.slice.call(box.querySelectorAll('.servingGroupChip')).forEach(function(el){
           el.onclick = function(){
@@ -1598,12 +1749,19 @@
     }
 
     function bindVrm(){
-      $('backMenu3').onclick = function(){ App.view='menu'; render(); };
+      App.vrmActive = true;
+      $('backMenu3').onclick = function(){
+        App.vrmActive = false;
+        clearTimeout(App.debounceT);
+        App.view='menu';
+        render();
+      };
 
       var qEl = $('vrmQ');
       var outEl = $('vrmResults');
 
       function render(res){
+        if (!App.vrmActive || App.view !== 'vrm') return;
         if(!res || !res.ok){ outEl.innerHTML=''; showErr('vrmMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
         var list = res.results || [];
         if(!list.length){
@@ -1619,12 +1777,13 @@
           '<div class="small">Event: <span class="pill">'+escapeHtml(res.eventKey||'')+'</span></div>'+
           '<div class="listWrap" style="margin-top:10px;">'+
             list.map(function(m){
-              var name = ((m.nameZh||'')+' '+(m.nameEn||'')).trim();
-              var badge = m.checkedInToday ? '<span class="chip good">✅ Checked-in</span>' : '<span class="chip warn">— Not yet</span>';
+              var name = formatMemberNameLine_(m.nameZh, m.nameEn, m.preferredName);
+              var vrmLine = [m.vrm||'', m.vrm2||''].filter(Boolean).join(' / ');
+              var badge = m.checkedInToday ? '<span class="chip goodLight">✅ Checked-in</span>' : '<span class="chip warn">— Not yet</span>';
               return ''+
                 '<div class="nameItem">'+
-                  '<div class="zh">'+escapeHtml(m.id)+' · '+escapeHtml(name)+'</div>'+
-                  '<div class="en">'+escapeHtml((m.vrm||'') + (m.vrm2?(' / '+m.vrm2):''))+'</div>'+
+                  '<div class="big">'+escapeHtml(vrmLine||'')+'</div>'+
+                  '<div class="zh" style="margin-top:6px;">'+escapeHtml(m.id)+' · '+escapeHtml(name)+'</div>'+
                   '<div class="chipRow">'+badge+'</div>'+
                 '</div>';
             }).join('')+
@@ -1632,11 +1791,13 @@
       }
 
       function doSearch(){
+        if (!App.vrmActive || App.view !== 'vrm') return;
         clear('vrmMsg');
         var q = String(qEl.value||'').trim();
         if(!q){ outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>'; return; }
         outEl.innerHTML = '<div class="small">搜尋中… / Searching…</div>';
         callApi('api_search_vrm', App.token, q, null).then(render).catch(function(){
+          if (!App.vrmActive || App.view !== 'vrm') return;
           showErr('vrmMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
           outEl.innerHTML='';
         });
@@ -1679,6 +1840,7 @@
 
         function onApprover(text){
           clear('authMsg');
+          toggleVideoWrap_('videoAuth1', false);
           $('authMsg').innerHTML = '<div class="small">驗證中… / Validating…</div>';
           callApi('api_auth_validate_approver', App.token, text).then(function(res){
             if(!res || !res.ok){
@@ -1718,6 +1880,7 @@
 
         function onTarget(text){
           clear('authMsg');
+          toggleVideoWrap_('videoAuth2', false);
           $('authMsg').innerHTML = '<div class="small">驗證中… / Validating…</div>';
           callApi('api_auth_validate_target', App.token, text).then(function(res){
             if(!res || !res.ok){
@@ -1793,6 +1956,16 @@
       o.querySelector('#btnMdClose').onclick = function(){ closeModal(o); };
 
       function setHtml(html){ o.querySelector('#mdBox').innerHTML = html; }
+      function showErrInto(containerEl, res){
+        var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
+        var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+        containerEl.innerHTML =
+          '<div class="msgBox err">'+
+            '<div class="big err">'+escapeHtml((res && res.zh) || '發生錯誤')+code+'</div>'+
+            '<div class="msgEn">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            (detail ? ('<div style="margin-top:10px;">'+detail+'</div>') : '')+
+          '</div>';
+      }
 
       setHtml('<div class="small">載入中… / Loading…</div>');
       callApi('api_live_get_member_detail', App.token, memberId, null).then(function(res){
@@ -1808,7 +1981,7 @@
         }
 
         var m = res.member || {};
-        var nameLine = ((m.nameZh||'')+' '+(m.nameEn||'')).trim() || m.id || '';
+        var nameLine = formatMemberName_(m) || m.id || '';
         var pref = (m.preferredName||'').trim();
 
         var today = res.today;
@@ -1819,7 +1992,7 @@
                 {k:'時間 / Time', v: today.timeUk||''},
                 {k:'方式 / Method', v: today.method||''},
                 {k:'Receipt', v: today.receiptId||''},
-                {k:'經手 / By', v: (today.handledBy ? ((today.handledBy.nameZh||'')+' '+(today.handledBy.nameEn||'')+' · '+(today.handledBy.id||'')).trim() : '')}
+                {k:'經手 / By', v: formatHandledBy_(today.handledBy)}
               ])+
             '</div>'
           : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">今日未簽到 / Not today</div></div>';
@@ -1830,8 +2003,6 @@
             '<div class="msgEn">'+escapeHtml(m.id||'')+'</div>'+
             '<div class="chipRow">'+
               '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
-              '<span class="chip">'+escapeHtml(m.status||'')+'</span>'+
-              (pref ? '<span class="chip warn">⭐ '+escapeHtml(pref)+'</span>' : '')+
               (m.isMinor ? '<span class="chip warn">🧒 Minor</span>' : '')+
             '</div>'+
             kvHtml([
@@ -1843,9 +2014,48 @@
             ])+
           '</div>'+
           todayHtml+
-          isMinorNoticeHtml(!!m.isMinor)+
-          '<div class="small" style="margin-top:10px;">提示：刪除/隱藏新朋友等操作仍可在舊流程內（如你已有）。此版本先保證顯示詳情不會失靈。</div>'
+          isMinorNoticeHtml(!!m.isMinor)
         );
+
+        var actionBox = document.createElement('div');
+        actionBox.className = 'miniBtnRow';
+        actionBox.innerHTML =
+          '<button id="btnMdHandle" class="orange">✅ 已接待 / Mark handled</button>'+
+          '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>';
+        o.querySelector('#mdBox').appendChild(actionBox);
+        attachScrollControls_(o);
+
+        var btnHandle = o.querySelector('#btnMdHandle');
+        var btnUndo = o.querySelector('#btnMdUndo');
+        if (!today){
+          if (btnHandle) btnHandle.disabled = true;
+          if (btnUndo) btnUndo.disabled = true;
+        }
+        if (btnHandle){
+          btnHandle.onclick = function(){
+            if (!today) return;
+            callApi('api_newfriend_mark_handled', App.token, memberId, (today && today.eventKey) ? today.eventKey : null).then(function(res2){
+              if(!res2 || !res2.ok){ setHtml(''); showErrInto(o.querySelector('#mdBox'), res2 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              if (App.refreshLive) App.refreshLive();
+              closeModal(o);
+            }).catch(function(){
+              showErrInto(o.querySelector('#mdBox'), {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
+        if (btnUndo){
+          btnUndo.onclick = function(){
+            if (!today) return;
+            if(!confirm('確認要刪除此會員今日簽到？ / Confirm undo check-in?')) return;
+            callApi('api_checkin_delete', App.token, memberId, (today && today.eventKey) ? today.eventKey : null).then(function(res2){
+              if(!res2 || !res2.ok){ setHtml(''); showErrInto(o.querySelector('#mdBox'), res2 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              if (App.refreshLive) App.refreshLive();
+              closeModal(o);
+            }).catch(function(){
+              showErrInto(o.querySelector('#mdBox'), {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
       }).catch(function(){
         setHtml(
           '<div class="msgBox err">'+
