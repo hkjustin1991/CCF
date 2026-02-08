@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-08.admin11';
+const ADMIN_VERSION = '2026-02-08.admin13';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.

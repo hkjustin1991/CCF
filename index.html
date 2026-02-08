@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff10-ui1 (restored full functions + self-check)
-   * For Code.gs: v2026-02-08.staff10
+   * UI VERSION: staff12-ui1 (restored full functions + self-check)
+   * For Code.gs: v2026-02-08.staff12
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -165,7 +165,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff10-ui1</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff12-ui1</span></div>
     </header>
 
     <main id="app"></main>
@@ -693,6 +693,7 @@
       if(App.intervalId){ clearInterval(App.intervalId); App.intervalId=null; }
       if(App.clockTimer){ clearInterval(App.clockTimer); App.clockTimer=null; }
       clearTimeout(App.debounceT);
+      if (App.view !== 'vrm') App.vrmActive = false;
 
       if(App.view !== 'auth'){
         App.authApprover=null;
@@ -1753,8 +1754,11 @@
 
     function bindVrm(){
       App.vrmActive = true;
+      App.vrmToken = (App.vrmToken || 0) + 1;
+      var token = App.vrmToken;
       $('backMenu3').onclick = function(){
         App.vrmActive = false;
+        App.vrmToken = (App.vrmToken || 0) + 1;
         clearTimeout(App.debounceT);
         App.view='menu';
         render();
@@ -1764,7 +1768,7 @@
       var outEl = $('vrmResults');
 
       function render(res){
-        if (!App.vrmActive || App.view !== 'vrm') return;
+        if (!App.vrmActive || App.view !== 'vrm' || token !== App.vrmToken) return;
         if(!res || !res.ok){ outEl.innerHTML=''; showErr('vrmMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
         var list = res.results || [];
         if(!list.length){
@@ -1794,13 +1798,13 @@
       }
 
       function doSearch(){
-        if (!App.vrmActive || App.view !== 'vrm') return;
+        if (!App.vrmActive || App.view !== 'vrm' || token !== App.vrmToken) return;
         clear('vrmMsg');
         var q = String(qEl.value||'').trim();
         if(!q){ outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>'; return; }
         outEl.innerHTML = '<div class="small">搜尋中… / Searching…</div>';
         callApi('api_search_vrm', App.token, q, null).then(render).catch(function(){
-          if (!App.vrmActive || App.view !== 'vrm') return;
+          if (!App.vrmActive || App.view !== 'vrm' || token !== App.vrmToken) return;
           showErr('vrmMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
           outEl.innerHTML='';
         });
@@ -1994,6 +1998,13 @@
         var m = res.member || {};
         var nameLine = formatMemberName_(m) || m.id || '';
         var pref = (m.preferredName||'').trim();
+        var lastEvents = Array.isArray(res.last4EventKeys) ? res.last4EventKeys : [];
+        var lastEventsHtml = lastEvents.length
+          ? '<div class="msgBox warn" style="margin-top:10px;">'+
+              '<div class="big warn">最近 4 次 / Last 4</div>'+
+              '<div class="small">'+escapeHtml(lastEvents.join(' · '))+'</div>'+
+            '</div>'
+          : '';
 
         var today = res.today;
         var todayHtml = today
@@ -2025,26 +2036,24 @@
             ])+
           '</div>'+
           todayHtml+
+          lastEventsHtml+
           isMinorNoticeHtml(!!m.isMinor)
         );
 
         var actionBox = document.createElement('div');
         actionBox.className = 'miniBtnRow';
         actionBox.innerHTML =
-          '<button id="btnMdHandle" class="orange">✅ 已接待 / Mark handled</button>'+
+          (m.isNewFriend ? '<button id="btnMdRemoveNew" class="orange">🧹 移除新朋友 / Remove new friend</button>' : '')+
           '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>';
         o.querySelector('#mdBox').appendChild(actionBox);
         attachScrollControls_(o);
 
-        var btnHandle = o.querySelector('#btnMdHandle');
+        var btnRemoveNew = o.querySelector('#btnMdRemoveNew');
         var btnUndo = o.querySelector('#btnMdUndo');
-        if (!today){
-          if (btnHandle) btnHandle.disabled = true;
-          if (btnUndo) btnUndo.disabled = true;
-        }
-        if (btnHandle){
-          btnHandle.onclick = function(){
-            if (!today) return;
+        if (!today && btnUndo) btnUndo.disabled = true;
+        if (btnRemoveNew){
+          btnRemoveNew.onclick = function(){
+            if (!confirm('確認移除新朋友標記？ / Confirm remove new friend flag?')) return;
             callApi('api_newfriend_mark_handled', App.token, memberId, (today && today.eventKey) ? today.eventKey : null).then(function(res2){
               if(!res2 || !res2.ok){ setHtml(''); showErrInto(o.querySelector('#mdBox'), res2 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
               if (App.refreshLive) App.refreshLive();
@@ -2058,13 +2067,7 @@
           btnUndo.onclick = function(){
             if (!today) return;
             if(!confirm('確認要刪除此會員今日簽到？ / Confirm undo check-in?')) return;
-            callApi('api_checkin_delete', App.token, memberId, (today && today.eventKey) ? today.eventKey : null).then(function(res2){
-              if(!res2 || !res2.ok){ setHtml(''); showErrInto(o.querySelector('#mdBox'), res2 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-              if (App.refreshLive) App.refreshLive();
-              closeModal(o);
-            }).catch(function(){
-              showErrInto(o.querySelector('#mdBox'), {code:'E500', zh:'系統錯誤', en:'System error'});
-            });
+            openUndoConfirm_(memberId, today.eventKey || null);
           };
         }
       }).catch(function(){
@@ -2075,6 +2078,64 @@
           '</div>'
         );
       });
+    }
+
+    function openUndoConfirm_(memberId, eventKey){
+      var isSuper = App.staff && App.staff.id === 'SUPERUSER';
+      var modal = openModal(
+        '<div class="big">🧹 刪除簽到 / Undo check-in</div>'+
+        '<div class="small">此操作需要同工/管理員確認。<br/>Staff/Admin confirmation required.</div>'+
+        (isSuper
+          ? '<div class="small" style="margin-top:8px;">SUPERUSER 可直接確認 / SUPERUSER can proceed.</div>'
+          : '<div class="card" id="undoCam" style="margin-top:10px;">'+
+              '<div class="videoWrap"><video id="videoUndo" playsinline></video></div>'+
+              '<div class="miniBtnRow">'+
+                '<button id="btnSwitchCamUndo" class="alt">🔄 切換相機 / Switch camera</button>'+
+                '<button id="btnStopUndo" class="danger">⏹ 停止相機 / Stop</button>'+
+              '</div>'+
+            '</div>'
+        )+
+        '<div class="miniBtnRow" style="margin-top:10px;">'+
+          (isSuper ? '<button id="btnUndoConfirm" class="danger">確認刪除 / Confirm</button>' : '')+
+          '<button id="btnUndoClose" class="btnBack">⬅️ 返回 / Back</button>'+
+        '</div>'+
+        '<div id="undoMsg"></div>'
+      );
+
+      function closeAll(){ try{ closeModal(modal); }catch(e){} }
+
+      modal.querySelector('#btnUndoClose').onclick = function(){ stopScan(); closeAll(); };
+      if (isSuper){
+        modal.querySelector('#btnUndoConfirm').onclick = function(){
+          showBox('undoMsg','warn','更新中…','Processing…');
+          callApi('api_live_delete_today_checkin', App.token, memberId, null, null).then(function(res){
+            if(!res || !res.ok){ showErr('undoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            if (App.refreshLive) App.refreshLive();
+            closeAll();
+          }).catch(function(){
+            showErr('undoMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        };
+        return;
+      }
+
+      function handleScan(payload){
+        if (!payload) return;
+        stopScan();
+        showBox('undoMsg','warn','更新中…','Processing…');
+        callApi('api_live_delete_today_checkin', App.token, memberId, payload, null).then(function(res){
+          if(!res || !res.ok){ showErr('undoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if (App.refreshLive) App.refreshLive();
+          closeAll();
+        }).catch(function(){
+          showErr('undoMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+
+      camBindSwitchButton_('btnSwitchCamUndo', function(){ startScan('videoUndo', handleScan, 'undoMsg'); });
+      modal.querySelector('#btnStopUndo').onclick = function(){ stopScan(); };
+      startScan('videoUndo', handleScan, 'undoMsg');
+      attachScrollControls_(modal);
     }
 
     // Boot

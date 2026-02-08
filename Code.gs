@@ -23,7 +23,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-02-08.staff10';
+const APP_VERSION = '2026-02-08.staff12';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -1384,6 +1384,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
   let today = null;
   const eventKeys = [];
+  let hadPriorEvent = false;
 
   if (lastRow >= 2){
     const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
@@ -1394,6 +1395,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       const mid = String(row[2]||'').trim();
       if (mid !== id) continue;
 
+      if (ev && ev !== eventKey) hadPriorEvent = true;
       if (!today && ev === eventKey){
         const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
         today = {
@@ -1423,7 +1425,13 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       isMinor: !!m.isMinor,
       vrm: m.vrm||'',
       vrm2: m.vrm2||'',
-      status: normalizeStatus_(m.status)
+      status: normalizeStatus_(m.status),
+      isNewFriend: (function(){
+        const stNorm = normalizeStatus_(m.status);
+        const isNewHistory = (!hadPriorEvent && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
+        if (!isNewHistory) return false;
+        return !isNewFriendSuppressed_(eventKey, id);
+      })()
     },
     today: today,
     last4EventKeys: eventKeys
@@ -1452,32 +1460,41 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   let byNameEn = staff.nameEn||'';
 
   if (staff.isSuper){
-    const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-    if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+    if (adminQrPayloadOptional){
+      const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
 
-    const admin = mi.byId[parsed.id];
-    if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
+      const admin = mi.byId[parsed.id];
+      if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
-    const admSt = normalizeStatus_(admin.status);
-    if (admSt !== STATUS_ADMIN){
-      return {
-        ok:false,
-        code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
-      };
+      const admSt = normalizeStatus_(admin.status);
+      if (admSt !== STATUS_ADMIN){
+        return {
+          ok:false,
+          code:'E491',
+          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
+          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        };
+      }
+      if (!admin.key || admin.key !== parsed.key){
+        return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
+      }
+
+      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
+      auditNameZh = admin.nameZh || 'ADMIN';
+      auditNameEn = admin.nameEn || 'ADMIN';
+
+      byId = admin.id;
+      byNameZh = admin.nameZh || '';
+      byNameEn = admin.nameEn || '';
+    } else {
+      auditLabel = 'SUPERUSER';
+      auditNameZh = staff.nameZh || 'SUPERUSER';
+      auditNameEn = staff.nameEn || 'SUPERUSER';
+      byId = staff.id;
+      byNameZh = staff.nameZh || '';
+      byNameEn = staff.nameEn || '';
     }
-    if (!admin.key || admin.key !== parsed.key){
-      return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
-    }
-
-    auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-    auditNameZh = admin.nameZh || 'ADMIN';
-    auditNameEn = admin.nameEn || 'ADMIN';
-
-    byId = admin.id;
-    byNameZh = admin.nameZh || '';
-    byNameEn = admin.nameEn || '';
 
   } else {
     const parsed = parseQrPayloadStrict_(reauthQrPayload);

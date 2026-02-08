@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui9-serving-edit-away
-  For Admin.gs: v2026-02-08.admin11
+  UI VERSION TAG: admin2-ui11-serving-edit-away
+  For Admin.gs: v2026-02-08.admin13
   ============================================================
   -->
 
@@ -881,7 +881,7 @@
       return ''+
         '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
           '<div class="big">🧩 事奉排期 / Serving plan</div>'+
-          '<div class="small">輸入 CCF ID、N/A 或留空。其他欄位可輸入文字備註。<br/>Use CCF ID, N/A, or leave blank. The Other field can contain text.</div>'+
+          '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
           '<div id="servingPlanList" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -921,6 +921,32 @@
           }
 
           var groupOrder = ['worship','media','logistic','support','finance'];
+          var monthMap = {};
+          var monthKeys = [];
+          events.forEach(function(ev){
+            var parts = parseYmdParts_(ev.dateYmd);
+            if (!parts) return;
+            var key = parts.m;
+            if (!monthMap[key]){
+              monthMap[key] = [];
+              monthKeys.push(key);
+            }
+            monthMap[key].push(ev);
+          });
+          monthKeys.sort(function(a,b){ return a - b; });
+          if (!App.servingPlanMonth && monthKeys.length){
+            App.servingPlanMonth = monthKeys[0];
+          }
+          var monthButtons = monthKeys.map(function(m){
+            var active = (String(App.servingPlanMonth) === String(m));
+            var cls = active ? 'btnMain' : 'btnBack';
+            return '<button class="'+cls+' monthPick" data-month="'+m+'">'+escapeHtml(monthLabel_(m))+'</button>';
+          }).join('');
+          var monthNavHtml =
+            '<div class="miniBtnRow" style="margin-top:6px;">'+
+              monthButtons+
+            '</div>';
+          var viewEvents = monthMap[App.servingPlanMonth] || [];
           var groupSections = groupOrder.map(function(groupKey){
             var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
             var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
@@ -928,7 +954,7 @@
             var headerHtml = groupPositions.map(function(pos){
               return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
             }).join('');
-            var bodyHtml = events.map(function(ev){
+            var bodyHtml = viewEvents.map(function(ev){
               var rowCells = groupPositions.map(function(pos){
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
                 if(!cell || !cell.length){
@@ -967,7 +993,7 @@
               '</div>';
           }).join('');
 
-          listEl.innerHTML = groupSections;
+          listEl.innerHTML = monthNavHtml + groupSections;
           attachScrollControls_(listEl);
 
           Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
@@ -979,6 +1005,13 @@
             btn.onclick = function(){
               var key = String(btn.getAttribute('data-group')||'');
               App.servingPlanOpenGroups[key] = !App.servingPlanOpenGroups[key];
+              loadServingPlan();
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
+            btn.onclick = function(){
+              var monthKey = String(btn.getAttribute('data-month')||'');
+              App.servingPlanMonth = monthKey;
               loadServingPlan();
             };
           });
@@ -1113,10 +1146,9 @@
               h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
-                     '<button type="button" class="btnBack assignSelectToggle" data-pos="'+escapeHtml(pos)+'">選擇 / Select</button>'+
-                     '<button type="button" class="btnBack assignNa" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
+                     '<button type="button" class="btnBack assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
                    '</div>'+
-                   '<select class="inputMini assignSelect hide" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(groupKey)+'</select>'+
+                   '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
             }
             h += '</td></tr>';
@@ -1210,15 +1242,6 @@
               addAssigned_(pos, 'N/A');
             };
           });
-          Array.prototype.slice.call(modal.querySelectorAll('.assignSelectToggle')).forEach(function(btn){
-            btn.onclick = function(){
-              var pos = String(btn.getAttribute('data-pos')||'');
-              var sel = modal.querySelector('.assignSelect[data-pos="'+pos+'"]');
-              if (!sel) return;
-              sel.classList.toggle('hide');
-              if (!sel.classList.contains('hide')) sel.focus();
-            };
-          });
           Array.prototype.slice.call(modal.querySelectorAll('.assignSelect')).forEach(function(sel){
             sel.onchange = function(){
               var pos = String(sel.getAttribute('data-pos')||'');
@@ -1226,7 +1249,6 @@
               if (!val) return;
               addAssigned_(pos, val);
               sel.value = '';
-              sel.classList.add('hide');
             };
           });
           Array.prototype.slice.call(modal.querySelectorAll('.assignList')).forEach(function(box){
