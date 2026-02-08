@@ -92,23 +92,81 @@ const ADMIN_SERVING_MONTHS_AHEAD = 7;
 const ADMIN_SERVING_SHEET_NAME = 'Serving';
 const ADMIN_SERVING_AWAY_SHEET_NAME = 'Serving_Away';
 const ADMIN_SERVING_POSITIONS = [
-  '主領',
-  '和唱',
-  '司琴',
-  '樂器',
-  'PPT製作',
-  'PPT投影',
-  '影音',
-  '埸務',
-  '茶水',
-  '招待',
-  '關顧員',
-  '聖餐襄禮',
-  '讀經員',
-  '祈禱員',
-  '點算奉獻',
-  '其他'
+  'Worship_Lead',
+  'Worship_Singer_1',
+  'Worship_Singer_2',
+  'Worship_Pianist',
+  'Worship_Drum',
+  'Worship_Instrument_1',
+  'Worship_Instrument_2',
+  'Media_AV',
+  'Media_PPT',
+  'Media_PPTBuild',
+  'Support_BibleReader',
+  'Support_Prayer',
+  'Support_Communion',
+  'Support_Care',
+  'Logistic_Welcome',
+  'Logistic_Venue',
+  'Logistic_Refreshment',
+  'Finance_Offering',
+  'Other'
 ];
+const ADMIN_SERVING_POSITION_LABELS = {
+  Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
+  Worship_Singer_1:     { zh:'敬拜和唱 1', en:'Worship Singer 1' },
+  Worship_Singer_2:     { zh:'敬拜和唱 2', en:'Worship Singer 2' },
+  Worship_Pianist:      { zh:'司琴', en:'Pianist' },
+  Worship_Drum:         { zh:'鼓手', en:'Drummer' },
+  Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
+  Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+  Media_AV:             { zh:'影音', en:'Audio / Visual' },
+  Media_PPT:            { zh:'PPT投影', en:'PPT Projection' },
+  Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
+  Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+  Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
+  Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
+  Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
+  Logistic_Welcome:     { zh:'接待', en:'Welcome / Seating' },
+  Logistic_Venue:       { zh:'場務', en:'Venue / Setup / Cleanup' },
+  Logistic_Refreshment: { zh:'茶水', en:'Refreshments' },
+  Finance_Offering:     { zh:'財務', en:'Offering / Finance' },
+  Other:                { zh:'其他', en:'Other' }
+};
+const ADMIN_SERVING_POSITION_GROUP = {
+  Worship_Lead:         'worship',
+  Worship_Singer_1:     'worship',
+  Worship_Singer_2:     'worship',
+  Worship_Pianist:      'worship',
+  Worship_Drum:         'worship',
+  Worship_Instrument_1: 'worship',
+  Worship_Instrument_2: 'worship',
+  Media_AV:             'media',
+  Media_PPT:            'media',
+  Media_PPTBuild:       'media',
+  Support_BibleReader:  'support',
+  Support_Prayer:       'support',
+  Support_Communion:    'support',
+  Support_Care:         'support',
+  Logistic_Welcome:     'logistic',
+  Logistic_Venue:       'logistic',
+  Logistic_Refreshment: 'logistic',
+  Finance_Offering:     'finance',
+  Other:                'other'
+};
+const ADMIN_SERVING_POSITION_MAX = {
+  Media_AV: 2,
+  Media_PPTBuild: 2,
+  Support_Communion: 2,
+  Support_Care: 2,
+  Logistic_Welcome: 2,
+  Logistic_Venue: 2,
+  Logistic_Refreshment: 2,
+  Finance_Offering: 3
+};
+const ADMIN_SERVING_POSITION_MIN = {
+  Finance_Offering: 2
+};
 
 // Cache
 const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
@@ -254,9 +312,16 @@ function api_admin_serving_event_rows(token, eventKey){
   if (!admin_isSundayServiceKey_(ev)){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
-  const positions = admin_getServingMatrix_(sh).positions.map(p => p.key);
+  const positions = ADMIN_SERVING_POSITIONS.slice();
   const values = admin_getServingValuesForEvent_(ev);
-  return { ok:true, eventKey: ev, positions: positions, values: values };
+  const mi = admin_getMembersIndex_();
+  const members = Object.keys(mi.byId).map(function(id){
+    const m = mi.byId[id];
+    const groups = (m.servingGroups || []).concat(m.servingGLGroups || []).filter(Boolean);
+    return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', groups: groups };
+  });
+  members.sort(function(a,b){ return a.id.localeCompare(b.id); });
+  return { ok:true, eventKey: ev, positions: positions, values: values, members: members };
 }
 
 /**
@@ -276,19 +341,75 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
 
   const list = Array.isArray(rows) ? rows : [];
   const cleaned = [];
+  const allowed = new Set(ADMIN_SERVING_POSITIONS);
   for (const r of list){
     const position = String(r.position||'').trim();
     const valueRaw = String(r.value||'').trim();
     if (!position && !valueRaw) continue;
+    if (!allowed.has(position)) continue;
     cleaned.push({ position, value: valueRaw });
   }
 
+  const duplicateMap = {};
+  const worshipDuplicates = new Set();
+  const duplicateDetails = [];
+  const memberIdsForAway = [];
+  const invalidGroupAssignments = [];
+  const mi = admin_getMembersIndex_();
+  const membersById = mi.byId || {};
+
+  for (const r of cleaned){
+    const ids = admin_extractMemberIdsFromServingValue_(r.value);
+    const maxAllowed = ADMIN_SERVING_POSITION_MAX[r.position] || 1;
+    if (ids.length > maxAllowed){
+      return admin_err_('E409','崗位人數超出上限','Too many people for this position.');
+    }
+    const minAllowed = ADMIN_SERVING_POSITION_MIN[r.position] || 0;
+    if (minAllowed && ids.length > 0 && ids.length < minAllowed){
+      return admin_err_('E409','崗位人數不足','Not enough people for this position.');
+    }
+    ids.forEach(function(id){
+      const groupKey = ADMIN_SERVING_POSITION_GROUP[r.position] || '';
+      if (!admin_memberHasServingGroup_(membersById[id], groupKey)){
+        invalidGroupAssignments.push({ memberId: id, position: r.position, group: groupKey });
+      }
+      memberIdsForAway.push(id);
+      if (!duplicateMap[id]) duplicateMap[id] = [];
+      duplicateMap[id].push(r.position);
+    });
+  }
+
+  Object.keys(duplicateMap).forEach(function(id){
+    const positions = duplicateMap[id] || [];
+    if (positions.length <= 1) return;
+    const hasWorship = positions.some(function(p){ return (ADMIN_SERVING_POSITION_GROUP[p] || '') === 'worship'; });
+    if (hasWorship) worshipDuplicates.add(id);
+    duplicateDetails.push({ memberId: id, positions: positions });
+  });
+
   const evDate = admin_eventDateFromKey_(ev);
-  const conflicts = admin_checkServingAwayConflicts_(evDate, cleaned.map(function(r){
-    return { memberId: r.value };
-  }));
+  let conflicts = [];
+  if (memberIdsForAway.length){
+    conflicts = admin_checkServingAwayConflicts_(evDate, memberIdsForAway.map(function(id){
+      return { memberId: id };
+    }));
+  }
   const role = String(s.actor.role||'').trim().toUpperCase();
   const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
+  if (invalidGroupAssignments.length){
+    return admin_err_('E409','成員不屬於該事奉組別','Member is not in the required serving group.');
+  }
+  if (worshipDuplicates.size){
+    return admin_err_('E409','敬拜崗位不可重覆同一會員','Worship positions cannot be duplicated for the same member.');
+  }
+  if (duplicateDetails.length){
+    if (!canOverride){
+      return admin_err_('E409','同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.');
+    }
+    if (!overrideAway){
+      return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, canOverride:true };
+    }
+  }
   if (conflicts.length){
     if (!canOverride){
       return admin_err_('E409','事奉安排與離開期重疊','Serving assignment overlaps away period.');
@@ -305,21 +426,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const rowIndex = admin_findServingEventRowIndex_(sh, ev);
   if (rowIndex === null){
     return admin_err_('E500','找不到活動列','Event row not found.');
-  }
-
-  const headerMap = admin_getServingMatrixHeaderMap_(sh);
-  const newCols = [];
-  cleaned.forEach(function(r){
-    if (!headerMap[r.position]){
-      newCols.push({ key: r.position });
-    }
-  });
-  if (newCols.length){
-    const startCol = sh.getLastColumn() + 1;
-    sh.insertColumnsAfter(sh.getLastColumn(), newCols.length);
-    newCols.forEach(function(c, idx){
-      sh.getRange(1, startCol + idx).setValue(c.key);
-    });
   }
 
   const updatedHeaderMap = admin_getServingMatrixHeaderMap_(sh);
@@ -345,59 +451,76 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
 }
 
 /**
- * Away period management (DD/MM/YYYY).
+ * Away period management (DD/MM/YYYY) x2.
  */
-function api_admin_set_away_period(token, memberId, fromDmy, toDmy){
+function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, toDmy2){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
   const id = String(memberId||'').trim().toUpperCase();
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
 
-  const fromYmd = admin_parseDmyToYmd_(fromDmy);
-  const toYmd = admin_parseDmyToYmd_(toDmy);
-  if (fromDmy || toDmy){
+  const fromYmd1 = admin_parseDmyToYmd_(fromDmy1);
+  const toYmd1 = admin_parseDmyToYmd_(toDmy1);
+  const fromYmd2 = admin_parseDmyToYmd_(fromDmy2);
+  const toYmd2 = admin_parseDmyToYmd_(toDmy2);
+
+  function validatePair(fromYmd, toYmd, labelZh, labelEn){
+    if (!fromYmd && !toYmd) return { ok:true };
     if (!fromYmd || !toYmd){
-      return admin_err_('E422','日期格式錯誤（DD/MM/YYYY）','Invalid date format (DD/MM/YYYY).');
+      return admin_err_('E422', labelZh, labelEn);
     }
     const from = admin_parseYmd_(fromYmd);
     const to = admin_parseYmd_(toYmd);
-    if (!from || !to) return admin_err_('E422','日期格式錯誤（DD/MM/YYYY）','Invalid date format (DD/MM/YYYY).');
+    if (!from || !to) return admin_err_('E422', labelZh, labelEn);
     if (to.getTime() < from.getTime()){
       return admin_err_('E423','結束日期不可早於開始日期','End date cannot be before start date.');
     }
+    return { ok:true };
   }
 
-  const sh = admin_ensureAwaySheet_();
-  const lastRow = sh.getLastRow();
-  if (lastRow >= 2){
-    const data = sh.getRange(2,1,lastRow-1,sh.getLastColumn()).getValues();
-    const kept = data.filter(row => String(row[0]||'').trim().toUpperCase() !== id);
-    sh.getRange(2,1,lastRow-1,sh.getLastColumn()).clearContent();
-    if (kept.length){
-      sh.getRange(2,1,kept.length,sh.getLastColumn()).setValues(kept);
-    }
-  }
+  const v1 = validatePair(fromYmd1, toYmd1, '第 1 期日期格式錯誤（DD/MM/YYYY）', 'Period 1 date format invalid (DD/MM/YYYY).');
+  if (!v1.ok) return v1;
+  const v2 = validatePair(fromYmd2, toYmd2, '第 2 期日期格式錯誤（DD/MM/YYYY）', 'Period 2 date format invalid (DD/MM/YYYY).');
+  if (!v2.ok) return v2;
 
-  if (fromYmd && toYmd){
-    sh.appendRow([
-      id,
-      fromYmd,
-      toYmd,
-      new Date(),
-      String(s.actor.id||''),
-      String(s.actor.role||'')
-    ]);
-  }
+  const mi = admin_getMembersIndex_();
+  const m = mi.byId[id];
+  if (!m) return admin_err_('E412','找不到此會員','Member not found.');
+
+  const sh = admin_findMembersSheet_();
+  if (!sh) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+  const col = admin_getMembersColMap_(sh);
+  admin_ensureAwayColumns_(sh, col);
+  const rowNumber = m.rowNumber || admin_findMemberRowById_(sh, col, id);
+  if (!rowNumber) return admin_err_('E500','找不到會員列','Member row not found.');
+
+  const periods = [];
+  if (fromYmd1 && toYmd1) periods.push({ from: fromYmd1, to: toYmd1 });
+  if (fromYmd2 && toYmd2) periods.push({ from: fromYmd2, to: toYmd2 });
+  periods.sort(function(a,b){
+    const da = admin_parseYmd_(a.from); const db = admin_parseYmd_(b.from);
+    if (!da || !db) return 0;
+    return da.getTime() - db.getTime();
+  });
+
+  const p1 = periods[0] || { from:'', to:'' };
+  const p2 = periods[1] || { from:'', to:'' };
+
+  sh.getRange(rowNumber, col.AwayFrom1+1).setValue(p1.from || '');
+  sh.getRange(rowNumber, col.AwayTo1+1).setValue(p1.to || '');
+  sh.getRange(rowNumber, col.AwayFrom2+1).setValue(p2.from || '');
+  sh.getRange(rowNumber, col.AwayTo2+1).setValue(p2.to || '');
 
   admin_audit_(
     s.actor,
     'SERVING_AWAY_SET',
-    JSON.stringify({ memberId: id, from: fromYmd || '', to: toYmd || '' }),
+    JSON.stringify({ memberId: id, from1: p1.from||'', to1: p1.to||'', from2: p2.from||'', to2: p2.to||'' }),
     'serving'
   );
 
-  return { ok:true, memberId: id, fromYmd: fromYmd || '', toYmd: toYmd || '' };
+  admin_clearMembersCache_();
+  return { ok:true, memberId: id, from1: p1.from||'', to1: p1.to||'', from2: p2.from||'', to2: p2.to||'' };
 }
 
 /**
@@ -810,6 +933,8 @@ function api_admin_member_search(token, q){
       nameZh: m.nameZh||'',
       nameEn: m.nameEn||'',
       status: st,
+      servingGroups: m.servingGroups || [],
+      servingGLGroups: m.servingGLGroups || [],
       lowFlag: !!flags.flagById[m.id],
       lowFlagZh: flags.flagById[m.id] ? '出席偏低：建議關顧跟進' : '',
       lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : ''
@@ -895,7 +1020,9 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       nameEn: m.nameEn||'',
       preferredName: pref || '',
       status: admin_normStatus_(m.status||''),
-      memberSince: memberSinceYmd || ''
+      memberSince: memberSinceYmd || '',
+      servingGroups: m.servingGroups || [],
+      servingGLGroups: m.servingGLGroups || []
     },
     attendance:{ attendedEventKeys: attendedSorted },
     stats:{
@@ -909,8 +1036,10 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       flag: lowFlag
     },
     away:{
-      from: away.fromYmd || '',
-      to: away.toYmd || ''
+      from1: away.fromYmd || '',
+      to1: away.toYmd || '',
+      from2: away.from2Ymd || '',
+      to2: away.to2Ymd || ''
     }
   };
 }
@@ -1101,18 +1230,20 @@ function admin_nextSunday_(d){
 }
 function admin_getUpcomingSundayEventKeys_(fromDateYmd, monthsAhead){
   const startYmd = String(fromDateYmd || '').trim() || admin_todayUkYmd_();
-  let start = admin_parseYmd_(startYmd);
-  if (!start) start = admin_parseYmd_(admin_todayUkYmd_());
+  let base = admin_parseYmd_(startYmd);
+  if (!base) base = admin_parseYmd_(admin_todayUkYmd_());
+  let start = base;
   if (!admin_isSunday_(start)) start = admin_nextSunday_(start);
 
   const months = Math.max(0, Math.min(Number(monthsAhead || 0), ADMIN_SERVING_MONTHS_AHEAD));
-  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months, start.getUTCDate()));
+  const endMonthStart = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + months, 1));
+  const endExclusive = new Date(Date.UTC(endMonthStart.getUTCFullYear(), endMonthStart.getUTCMonth() + 1, 1));
   const out = [];
   for (let i = 0; i < 370; i++){
     const d = new Date(start.getTime());
     d.setUTCDate(d.getUTCDate() + (i * 7));
     if (!admin_isSunday_(d)) continue;
-    if (d.getTime() >= end.getTime()) break;
+    if (d.getTime() >= endExclusive.getTime()) break;
     const ymd = admin_fmtYmd_(d);
     out.push({ eventKey: 'SundayService_' + ymd, dateYmd: ymd });
   }
@@ -1128,7 +1259,7 @@ function admin_ensureServingSheet_(){
   let sh = ss.getSheetByName(ADMIN_SERVING_SHEET_NAME);
   if (!sh){
     sh = ss.insertSheet(ADMIN_SERVING_SHEET_NAME);
-    sh.appendRow(['EventKey'].concat(ADMIN_SERVING_POSITIONS));
+    sh.appendRow(['EventKey'].concat(ADMIN_SERVING_POSITIONS.map(admin_servingHeaderLabel_)));
     sh.getRange(1,1,1,1 + ADMIN_SERVING_POSITIONS.length).setFontWeight('bold');
   }
   admin_ensureServingHeaders_(sh);
@@ -1147,7 +1278,7 @@ function admin_ensureServingEventKeys_(sh){
 function admin_ensureServingHeaders_(sh){
   const existing = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(v => String(v||'').trim());
   if (!existing[0]) existing[0] = 'EventKey';
-  const desired = ['EventKey'].concat(ADMIN_SERVING_POSITIONS);
+  const desired = ['EventKey'].concat(ADMIN_SERVING_POSITIONS.map(admin_servingHeaderLabel_));
   let needUpdate = false;
   desired.forEach(function(label, idx){
     if (existing[idx] !== label){
@@ -1169,37 +1300,102 @@ function admin_ensureAwaySheet_(){
   }
   return sh;
 }
+function admin_normalizeAwayPeriod_(fromYmd, toYmd){
+  const f = String(fromYmd||'').trim();
+  const t = String(toYmd||'').trim();
+  if (!f && !t) return { fromYmd:'', toYmd:'' };
+  return { fromYmd: f || t, toYmd: t || f };
+}
 function admin_getAwayPeriodForMember_(memberId){
-  const sh = admin_ensureAwaySheet_();
-  const lastRow = sh.getLastRow();
-  if (lastRow < 2) return { fromYmd:'', toYmd:'' };
-  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  const mi = admin_getMembersIndex_();
   const id = String(memberId||'').trim().toUpperCase();
-  for (let i=0;i<data.length;i++){
-    if (String(data[i][0]||'').trim().toUpperCase() === id){
-      return { fromYmd: String(data[i][1]||'').trim(), toYmd: String(data[i][2]||'').trim() };
-    }
-  }
-  return { fromYmd:'', toYmd:'' };
+  const m = mi.byId[id];
+  if (!m) return { periods: [], fromYmd:'', toYmd:'', from2Ymd:'', to2Ymd:'' };
+  const p1 = admin_normalizeAwayPeriod_(m.awayFrom1, m.awayTo1);
+  const p2 = admin_normalizeAwayPeriod_(m.awayFrom2, m.awayTo2);
+  const periods = [p1, p2].filter(p => p.fromYmd || p.toYmd);
+  return {
+    periods: periods,
+    fromYmd: p1.fromYmd || '',
+    toYmd: p1.toYmd || '',
+    from2Ymd: p2.fromYmd || '',
+    to2Ymd: p2.toYmd || ''
+  };
 }
 function admin_getAwayPeriodsMap_(memberIds){
   const out = {};
   const ids = Array.isArray(memberIds) ? memberIds.map(x => String(x||'').trim().toUpperCase()).filter(Boolean) : [];
   if (!ids.length) return out;
-  const sh = admin_ensureAwaySheet_();
-  const lastRow = sh.getLastRow();
-  if (lastRow < 2) return out;
-  const data = sh.getRange(2,1,lastRow-1,3).getValues();
-  const set = new Set(ids);
-  for (let i=0;i<data.length;i++){
-    const id = String(data[i][0]||'').trim().toUpperCase();
-    if (!set.has(id)) continue;
+  const mi = admin_getMembersIndex_();
+  ids.forEach(function(id){
+    const m = mi.byId[id];
+    if (!m) return;
+    const p1 = admin_normalizeAwayPeriod_(m.awayFrom1, m.awayTo1);
+    const p2 = admin_normalizeAwayPeriod_(m.awayFrom2, m.awayTo2);
     out[id] = {
-      fromYmd: String(data[i][1]||'').trim(),
-      toYmd: String(data[i][2]||'').trim()
+      periods: [p1, p2].filter(p => p.fromYmd || p.toYmd)
     };
-  }
+  });
   return out;
+}
+function admin_servingHeaderLabel_(key){
+  const label = ADMIN_SERVING_POSITION_LABELS[key];
+  if (!label) return key;
+  return key + ' / ' + label.zh + ' / ' + label.en;
+}
+function admin_servingLabelToKeyMap_(){
+  const map = {};
+  ADMIN_SERVING_POSITIONS.forEach(function(k){
+    const label = ADMIN_SERVING_POSITION_LABELS[k];
+    if (label){
+      map[label.zh] = k;
+      map[label.en] = k;
+    }
+  });
+  return map;
+}
+const ADMIN_SERVING_LABEL_TO_KEY = admin_servingLabelToKeyMap_();
+function admin_extractServingKey_(header){
+  const raw = String(header||'').trim();
+  if (!raw) return '';
+  if (ADMIN_SERVING_POSITIONS.indexOf(raw) >= 0) return raw;
+  const slash = raw.split('/');
+  const first = String(slash[0]||'').trim();
+  if (ADMIN_SERVING_POSITIONS.indexOf(first) >= 0) return first;
+  const byLabel = ADMIN_SERVING_LABEL_TO_KEY[raw];
+  if (byLabel) return byLabel;
+  for (const key in ADMIN_SERVING_LABEL_TO_KEY){
+    if (raw.indexOf(key) >= 0) return ADMIN_SERVING_LABEL_TO_KEY[key];
+  }
+  return raw;
+}
+function admin_splitServingValues_(raw){
+  const s = String(raw||'').trim();
+  if (!s) return [];
+  return s.split(/[,/]/).map(x => String(x||'').trim()).filter(Boolean);
+}
+function admin_extractMemberIdsFromServingValue_(raw){
+  return admin_splitServingValues_(raw).map(function(v){
+    const up = String(v||'').trim().toUpperCase();
+    if (!/^CCF\d{4}$/.test(up)) return '';
+    if (admin_isServingNaValue_(up)) return '';
+    return up;
+  }).filter(Boolean);
+}
+function admin_normalizeServingGroup_(g){
+  const key = String(g||'').trim().toUpperCase();
+  if (key === 'WORSHIP') return 'worship';
+  if (key === 'MEDIA') return 'media';
+  if (key === 'LOGISTIC') return 'logistic';
+  if (key === 'SUPPORT') return 'support';
+  if (key === 'FINANCE') return 'finance';
+  return '';
+}
+function admin_memberHasServingGroup_(member, groupKey){
+  if (!groupKey || groupKey === 'other') return true;
+  if (!member) return false;
+  const groups = (member.servingGroups || []).concat(member.servingGLGroups || []);
+  return groups.some(function(g){ return admin_normalizeServingGroup_(g) === groupKey; });
 }
 function admin_checkServingAwayConflicts_(eventDate, rows){
   const out = [];
@@ -1211,28 +1407,35 @@ function admin_checkServingAwayConflicts_(eventDate, rows){
     if (!id) continue;
     if (admin_isServingNaValue_(id)) continue;
     const away = map[id];
-    if (!away || !away.fromYmd || !away.toYmd) continue;
-    const from = admin_parseYmd_(away.fromYmd);
-    const to = admin_parseYmd_(away.toYmd);
-    if (!from || !to) continue;
-    if (eventDate.getTime() >= from.getTime() && eventDate.getTime() <= to.getTime()){
-      out.push({ memberId: id, from: away.fromYmd, to: away.toYmd });
-    }
+    if (!away || !away.periods || !away.periods.length) continue;
+    away.periods.forEach(function(p){
+      if (!p.fromYmd || !p.toYmd) return;
+      const from = admin_parseYmd_(p.fromYmd);
+      const to = admin_parseYmd_(p.toYmd);
+      if (!from || !to) return;
+      if (eventDate.getTime() >= from.getTime() && eventDate.getTime() <= to.getTime()){
+        out.push({ memberId: id, from: p.fromYmd, to: p.toYmd });
+      }
+    });
   }
   return out;
 }
 function admin_getServingMatrix_(sh){
   const lastCol = sh.getLastColumn();
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
-  const positions = [];
+  const headerMap = {};
   for (let i=1;i<headers.length;i++){
-    positions.push({
-      colIndex: i + 1,
-      key: headers[i],
-      group: '',
-      position: headers[i]
-    });
+    const key = admin_extractServingKey_(headers[i]);
+    if (key) headerMap[key] = i + 1;
   }
+  const positions = ADMIN_SERVING_POSITIONS.map(function(key){
+    return {
+      colIndex: headerMap[key] || null,
+      key: key,
+      group: ADMIN_SERVING_POSITION_GROUP[key] || '',
+      position: key
+    };
+  });
   return { eventCol: 1, positions: positions };
 }
 function admin_getServingMatrixHeaderMap_(sh){
@@ -1240,7 +1443,8 @@ function admin_getServingMatrixHeaderMap_(sh){
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(h => String(h||'').trim());
   const map = {};
   for (let i=1;i<headers.length;i++){
-    if (headers[i]) map[headers[i]] = i + 1;
+    const key = admin_extractServingKey_(headers[i]);
+    if (key) map[key] = i + 1;
   }
   return map;
 }
@@ -1285,23 +1489,27 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
   const out = [];
 
   matrix.positions.forEach(function(pos){
+    if (!pos.colIndex) return;
     const raw = String(row[pos.colIndex-1] || '').trim();
     if (!raw) return;
-    const rawUpper = raw.toUpperCase();
-    const entry = {
-      eventKey: eventKey,
-      group: '',
-      position: pos.position,
-      slot: '',
-      memberId: rawUpper,
-      rawValue: raw,
-      checkedIn: checkedInSet && checkedInSet.has(rawUpper)
-    };
-    if (!includeNa && admin_isServingNaValue_(rawUpper)) return;
-    const m = membersById[rawUpper] || {};
-    entry.nameZh = String(m.nameZh || '');
-    entry.nameEn = String(m.nameEn || '');
-    out.push(entry);
+    const values = admin_splitServingValues_(raw);
+    values.forEach(function(val){
+      const rawUpper = String(val||'').trim().toUpperCase();
+      const entry = {
+        eventKey: eventKey,
+        group: pos.group,
+        position: pos.position,
+        slot: '',
+        memberId: rawUpper,
+        rawValue: val,
+        checkedIn: checkedInSet && checkedInSet.has(rawUpper)
+      };
+      if (!includeNa && admin_isServingNaValue_(rawUpper)) return;
+      const m = membersById[rawUpper] || {};
+      entry.nameZh = String(m.nameZh || '');
+      entry.nameEn = String(m.nameEn || '');
+      out.push(entry);
+    });
   });
 
   out.sort((a,b)=>{
@@ -1324,7 +1532,9 @@ function admin_getServingValuesForEvent_(eventKey){
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(v => String(v||'').trim());
   const out = {};
   for (let i=1;i<headers.length;i++){
-    out[headers[i]] = String(row[i] || '').trim();
+    const key = admin_extractServingKey_(headers[i]);
+    if (!key) continue;
+    out[key] = String(row[i] || '').trim();
   }
   return out;
 }
@@ -1357,19 +1567,23 @@ function admin_getServingPlanMatrix_(events){
     const lastCol = sh.getLastColumn();
     const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
     matrix.positions.forEach(function(pos){
+      if (!pos.colIndex) return;
       const raw = String(row[pos.colIndex-1] || '').trim();
       if (!raw) return;
-      const rawUpper = raw.toUpperCase();
-      const member = byId[rawUpper] || {};
-      const entry = {
-        memberId: rawUpper,
-        rawValue: raw,
-        nameZh: String(member.nameZh || ''),
-        nameEn: String(member.nameEn || ''),
-        slot: ''
-      };
-      if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
-      cells[ev][pos.key].push(entry);
+      const values = admin_splitServingValues_(raw);
+      values.forEach(function(val){
+        const rawUpper = String(val||'').trim().toUpperCase();
+        const member = byId[rawUpper] || {};
+        const entry = {
+          memberId: rawUpper,
+          rawValue: val,
+          nameZh: String(member.nameZh || ''),
+          nameEn: String(member.nameEn || ''),
+          slot: ''
+        };
+        if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
+        cells[ev][pos.key].push(entry);
+      });
     });
   });
 
@@ -1547,6 +1761,18 @@ function admin_ensureRoleExpiresIsoColumn_(sh, col){
   col.RoleExpiresISO = newCol - 1;
   return col.RoleExpiresISO;
 }
+function admin_ensureAwayColumns_(sh, col){
+  const fields = ['AwayFrom1','AwayTo1','AwayFrom2','AwayTo2'];
+  fields.forEach(function(field){
+    if (col[field] !== undefined) return;
+    const lastCol = sh.getLastColumn();
+    sh.insertColumnAfter(lastCol);
+    const newCol = lastCol + 1;
+    sh.getRange(1, newCol).setValue(field).setFontWeight('bold');
+    col[field] = newCol - 1;
+  });
+  return col;
+}
 
 // Members index cache (includes preferredName + memberSince)
 function admin_clearMembersCache_(){
@@ -1588,7 +1814,11 @@ function admin_getMembersIndex_(){
         preferredName: (col.PreferredName!==undefined) ? String(row[col.PreferredName]||'').trim() : '',
         memberSinceRaw: (col.Member_Since!==undefined) ? row[col.Member_Since] : '',
         servingGroups: (col.ServingGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGroups]) : [],
-        servingGLGroups: (col.ServingGLGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGLGroups]) : []
+        servingGLGroups: (col.ServingGLGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGLGroups]) : [],
+        awayFrom1: (col.AwayFrom1!==undefined) ? String(row[col.AwayFrom1]||'').trim() : '',
+        awayTo1: (col.AwayTo1!==undefined) ? String(row[col.AwayTo1]||'').trim() : '',
+        awayFrom2: (col.AwayFrom2!==undefined) ? String(row[col.AwayFrom2]||'').trim() : '',
+        awayTo2: (col.AwayTo2!==undefined) ? String(row[col.AwayTo2]||'').trim() : ''
       };
     }
   }

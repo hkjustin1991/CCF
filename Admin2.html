@@ -115,6 +115,22 @@
     .chip{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted);background:#fff}
     .chip.bad{border-color:rgba(217,60,94,0.25);background:#fff1f4;color:#9f1239}
     .flag{margin-left:6px;font-weight:950}
+    .groupBadge{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:800;
+      margin-right:6px;
+      color:#0d1b3d;
+      border:1px solid var(--border);
+      background:#fff;
+    }
+    .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.25);color:#8a1230}
+    .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.25);color:#1a3d9a}
+    .groupBadge.logistic{background:#fff0d9;border-color:rgba(200,132,0,0.35);color:#8a5a00}
+    .groupBadge.support{background:#fff7d6;border-color:rgba(202,155,0,0.35);color:#7a5b00}
+    .groupBadge.finance{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
 
     .servingPlanTable th,
     .servingPlanTable td{
@@ -258,22 +274,63 @@
       return SERVING_GROUP_LABELS[key] || key || '—';
     }
     var SERVING_POSITION_LABELS = {
-      '主領': { zh:'主領', en:'Lead worship' },
-      '和唱': { zh:'和唱', en:'Vocal support' },
-      '司琴': { zh:'司琴', en:'Pianist' },
-      '樂器': { zh:'樂器', en:'Instrumentalist' },
-      'PPT製作': { zh:'PPT製作', en:'PPT prep' },
-      'PPT投影': { zh:'PPT投影', en:'PPT operator' },
-      '影音': { zh:'影音', en:'Media' },
-      '埸務': { zh:'埸務', en:'Setup' },
-      '茶水': { zh:'茶水', en:'Refreshments' },
-      '招待': { zh:'招待', en:'Welcome' },
-      '關顧員': { zh:'關顧員', en:'Care' },
-      '聖餐襄禮': { zh:'聖餐襄禮', en:'Communion' },
-      '讀經員': { zh:'讀經員', en:'Scripture reader' },
-      '祈禱員': { zh:'祈禱員', en:'Prayer' },
-      '點算奉獻': { zh:'點算奉獻', en:'Offering count' },
-      '其他': { zh:'其他', en:'Other' }
+      Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
+      Worship_Singer_1:     { zh:'敬拜和唱 1', en:'Worship Singer 1' },
+      Worship_Singer_2:     { zh:'敬拜和唱 2', en:'Worship Singer 2' },
+      Worship_Pianist:      { zh:'司琴', en:'Pianist' },
+      Worship_Drum:         { zh:'鼓手', en:'Drummer' },
+      Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
+      Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+      Media_AV:             { zh:'影音', en:'Audio / Visual' },
+      Media_PPT:            { zh:'PPT投影', en:'PPT Projection' },
+      Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
+      Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+      Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
+      Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
+      Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
+      Logistic_Welcome:     { zh:'接待', en:'Welcome / Seating' },
+      Logistic_Venue:       { zh:'場務', en:'Venue / Setup / Cleanup' },
+      Logistic_Refreshment: { zh:'茶水', en:'Refreshments' },
+      Finance_Offering:     { zh:'財務', en:'Offering / Finance' },
+      Other:                { zh:'其他', en:'Other' }
+    };
+    var POSITION_GROUP = {
+      Worship_Lead: 'worship',
+      Worship_Singer_1: 'worship',
+      Worship_Singer_2: 'worship',
+      Worship_Pianist: 'worship',
+      Worship_Drum: 'worship',
+      Worship_Instrument_1: 'worship',
+      Worship_Instrument_2: 'worship',
+      Media_AV: 'media',
+      Media_PPT: 'media',
+      Media_PPTBuild: 'media',
+      Support_BibleReader: 'support',
+      Support_Prayer: 'support',
+      Support_Communion: 'support',
+      Support_Care: 'support',
+      Logistic_Welcome: 'logistic',
+      Logistic_Venue: 'logistic',
+      Logistic_Refreshment: 'logistic',
+      Finance_Offering: 'finance',
+      Other: 'other'
+    };
+    var POSITION_MAX = {
+      Media_AV: 2,
+      Media_PPTBuild: 2,
+      Support_Communion: 2,
+      Support_Care: 2,
+      Logistic_Welcome: 2,
+      Logistic_Venue: 2,
+      Logistic_Refreshment: 2,
+      Finance_Offering: 3
+    };
+    var SERVING_GROUP_BADGES = {
+      worship: { zh:'敬拜', en:'Worship', cls:'groupBadge worship' },
+      media: { zh:'影像', en:'Media', cls:'groupBadge media' },
+      logistic: { zh:'後勤', en:'Logistics', cls:'groupBadge logistic' },
+      support: { zh:'支援', en:'Support', cls:'groupBadge support' },
+      finance: { zh:'財務', en:'Finance', cls:'groupBadge finance' }
     };
     function servingPositionLabel_(pos){
       if (!pos) return '—';
@@ -407,6 +464,28 @@
       if (st === 'TEMP') return 'TEMP';
       return st || '';
     }
+    function normalizeServingGroupKey_(g){
+      var key = String(g||'').trim().toUpperCase();
+      if (key === 'WORSHIP') return 'worship';
+      if (key === 'MEDIA') return 'media';
+      if (key === 'LOGISTIC') return 'logistic';
+      if (key === 'SUPPORT') return 'support';
+      if (key === 'FINANCE') return 'finance';
+      return '';
+    }
+    function renderServingGroupBadges_(groups){
+      var list = Array.isArray(groups) ? groups : [];
+      var seen = {};
+      var html = list.map(function(g){
+        var key = normalizeServingGroupKey_(g);
+        if (!key || seen[key]) return '';
+        seen[key] = true;
+        var label = SERVING_GROUP_BADGES[key];
+        if (!label) return '';
+        return '<span class="'+label.cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+      }).filter(Boolean).join('');
+      return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
+    }
 
     function eventDateYmdFromKey(ev){
       var m = String(ev||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
@@ -437,9 +516,8 @@
       var hasName = entry.nameZh || entry.nameEn;
       var nameLine = '';
       if (hasName){
-        nameLine = (entry.nameEn && entry.nameZh)
-          ? (' ' + entry.nameEn + ' / ' + entry.nameZh)
-          : (' ' + (entry.nameEn || entry.nameZh));
+        var names = [entry.nameZh, entry.nameEn].filter(Boolean).join(' / ');
+        nameLine = names ? (' ' + names) : '';
       }
       return upper + nameLine;
     }
@@ -747,109 +825,113 @@
       $('backServingPlan').onclick = function(){ App.view='menu'; render(); };
 
       var listEl = $('servingPlanList');
-      listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
+      function loadServingPlan(){
+        listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
 
-      callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()).then(function(res){
-        if(!res || !res.ok){
-          listEl.innerHTML = '';
-          showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
-          return;
-        }
-        var events = res.events || [];
-        var positions = res.positions || [];
-        if(!events.length){
-          listEl.innerHTML =
-            '<div class="msgBox warn">'+
-              '<div class="big warn">暫無記錄 / No events</div>'+
-            '</div>';
-          return;
-        }
-        if(!positions.length){
-          listEl.innerHTML =
-            '<div class="msgBox warn">'+
-              '<div class="big warn">暫無事奉資料 / No serving rows</div>'+
-            '</div>';
-          return;
-        }
-
-        var headerHtml = positions.map(function(pos){
-          return '<th class="servingPlanCell">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
-        }).join('');
-
-        var monthMap = {};
-        var monthKeys = [];
-        events.forEach(function(ev){
-          var parts = parseYmdParts_(ev.dateYmd);
-          if (!parts) return;
-          var key = parts.m;
-          if (!monthMap[key]){
-            monthMap[key] = [];
-            monthKeys.push(key);
+        callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()).then(function(res){
+          if(!res || !res.ok){
+            listEl.innerHTML = '';
+            showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+            return;
           }
-          monthMap[key].push(ev);
-        });
+          var events = res.events || [];
+          var positions = res.positions || [];
+          if(!events.length){
+            listEl.innerHTML =
+              '<div class="msgBox warn">'+
+                '<div class="big warn">暫無記錄 / No events</div>'+
+              '</div>';
+            return;
+          }
+          if(!positions.length){
+            listEl.innerHTML =
+              '<div class="msgBox warn">'+
+                '<div class="big warn">暫無事奉資料 / No serving rows</div>'+
+              '</div>';
+            return;
+          }
 
-        var monthHtml = monthKeys.map(function(monthKey, idx){
-          var bodyHtml = monthMap[monthKey].map(function(ev){
-            var rowCells = positions.map(function(pos){
-              var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
-              if(!cell || !cell.length){
-                return '<td class="servingPlanCell"></td>';
-              }
-              var entries = cell.map(function(entry){
-                var label = formatServingEntry_(entry);
-                if (!label) return '';
-                return '<div class="servingPlanEntry">'+escapeHtml(label)+'</div>';
-              }).filter(Boolean).join('');
-              return '<td class="servingPlanCell">'+entries+'</td>';
+          var headerHtml = positions.map(function(pos){
+            return '<th class="servingPlanCell">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
+          }).join('');
+
+          var monthMap = {};
+          var monthKeys = [];
+          events.forEach(function(ev){
+            var parts = parseYmdParts_(ev.dateYmd);
+            if (!parts) return;
+            var key = parts.m;
+            if (!monthMap[key]){
+              monthMap[key] = [];
+              monthKeys.push(key);
+            }
+            monthMap[key].push(ev);
+          });
+
+          var monthHtml = monthKeys.map(function(monthKey, idx){
+            var bodyHtml = monthMap[monthKey].map(function(ev){
+              var rowCells = positions.map(function(pos){
+                var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+                if(!cell || !cell.length){
+                  return '<td class="servingPlanCell"></td>';
+                }
+                var entries = cell.map(function(entry){
+                  var label = formatServingEntry_(entry);
+                  if (!label) return '';
+                  return '<div class="servingPlanEntry">'+escapeHtml(label)+'</div>';
+                }).filter(Boolean).join('');
+                return '<td class="servingPlanCell">'+entries+'</td>';
+              }).join('');
+              return ''+
+                '<tr>'+
+                  '<td class="servingPlanEvent">'+
+                    '<div>'+escapeHtml(eventLabel_(ev))+'</div>'+
+                    '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'">✏️ 編輯 / Edit</button></div>'+
+                  '</td>'+
+                  rowCells +
+                '</tr>';
             }).join('');
             return ''+
-              '<tr>'+
-                '<td class="servingPlanEvent">'+
-                  '<div>'+escapeHtml(eventLabel_(ev))+'</div>'+
-                  '<div class="small">'+escapeHtml(ev.eventKey||'')+'</div>'+
-                  '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'">✏️ 編輯 / Edit</button></div>'+
-                '</td>'+
-                rowCells +
-              '</tr>';
-          }).join('');
-          return ''+
-            '<div class="monthSection" data-month="'+monthKey+'">'+
-              '<div class="msgBox warn clickable monthHeader">'+
-                '<div class="big warn">'+escapeHtml(monthLabel_(monthKey))+'</div>'+
-              '</div>'+
-              '<div class="monthBody '+(idx===0?'':'hide')+'">'+
-                '<div class="tableWrap">'+
-                  '<table class="servingPlanTable">'+
-                    '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
-                    '<tbody>'+bodyHtml+'</tbody>'+
-                  '</table>'+
+              '<div class="monthSection" data-month="'+monthKey+'">'+
+                '<div class="msgBox warn clickable monthHeader">'+
+                  '<div class="big warn">'+escapeHtml(monthLabel_(monthKey))+'</div>'+
                 '</div>'+
-              '</div>'+
-            '</div>';
-        }).join('');
+                '<div class="monthBody '+(idx===0?'':'hide')+'">'+
+                  '<div class="tableWrap">'+
+                    '<table class="servingPlanTable">'+
+                      '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
+                      '<tbody>'+bodyHtml+'</tbody>'+
+                    '</table>'+
+                  '</div>'+
+                '</div>'+
+              '</div>';
+          }).join('');
 
-        listEl.innerHTML = monthHtml;
+          listEl.innerHTML = monthHtml;
 
-        Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
-          btn.onclick = function(){
-            openServingEditModal(btn.getAttribute('data-event'));
-          };
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
+            btn.onclick = function(){
+              openServingEditModal(btn.getAttribute('data-event'));
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.monthHeader')).forEach(function(header){
+            header.onclick = function(){
+              var section = header.closest('.monthSection');
+              Array.prototype.slice.call(listEl.querySelectorAll('.monthBody')).forEach(function(body){
+                body.classList.add('hide');
+              });
+              var body = section.querySelector('.monthBody');
+              if (body) body.classList.remove('hide');
+            };
+          });
+        }).catch(function(){
+          listEl.innerHTML = '';
+          showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
-        Array.prototype.slice.call(listEl.querySelectorAll('.monthHeader')).forEach(function(header){
-          header.onclick = function(){
-            var section = header.closest('.monthSection');
-            Array.prototype.slice.call(listEl.querySelectorAll('.monthBody')).forEach(function(body){
-              body.classList.add('hide');
-            });
-            var body = section.querySelector('.monthBody');
-            if (body) body.classList.remove('hide');
-          };
-        });
-      }).catch(function(){
-        listEl.innerHTML = '';
-        showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-      });
+      }
+
+      App.refreshServingPlan = loadServingPlan;
+      loadServingPlan();
     }
 
     function openServingEditModal(eventKey){
@@ -870,31 +952,100 @@
 
         var positions = Array.isArray(res.positions) ? res.positions : [];
         var values = res.values || {};
+        var members = Array.isArray(res.members) ? res.members : [];
+
+        function splitServingValues_(raw){
+          var s = String(raw||'').trim();
+          if (!s) return [];
+          return s.split(/[,/]/).map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+        }
+        function normalizeGroup_(g){
+          var key = String(g||'').trim().toUpperCase();
+          if (key === 'WORSHIP') return 'worship';
+          if (key === 'MEDIA') return 'media';
+          if (key === 'LOGISTIC') return 'logistic';
+          if (key === 'SUPPORT') return 'support';
+          if (key === 'FINANCE') return 'finance';
+          return '';
+        }
+        function memberMatchesGroup_(m, groupKey){
+          if (!groupKey || groupKey === 'other') return false;
+          var groups = Array.isArray(m.groups) ? m.groups : [];
+          return groups.some(function(g){ return normalizeGroup_(g) === groupKey; });
+        }
+        function buildMemberOptions_(groupKey, selected){
+          var opts = '<option value="">—</option><option value="N/A">N/A</option>';
+          var hasSelected = false;
+          members.forEach(function(m){
+            if (!memberMatchesGroup_(m, groupKey)) return;
+            var label = m.id + ' ' + [m.nameZh, m.nameEn].filter(Boolean).join(' / ');
+            var sel = (String(selected||'') === m.id) ? ' selected' : '';
+            if (sel) hasSelected = true;
+            opts += '<option value="'+escapeHtml(m.id)+'"'+sel+'>'+escapeHtml(label)+'</option>';
+          });
+          if (selected && selected !== 'N/A' && !hasSelected){
+            opts += '<option value="'+escapeHtml(selected)+'" selected>'+escapeHtml(selected)+'</option>';
+          }
+          if (selected === 'N/A') opts = opts.replace('value="N/A"', 'value="N/A" selected');
+          return opts;
+        }
 
         function renderRows_(){
           if (!positions.length){
             return '<div class="small">暫無事奉資料 / No serving rows</div>';
           }
           var h = '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
-            '<th>事奉崗位 / Position</th><th>CCF ID / 值</th>'+
+            '<th>事奉崗位 / Position</th><th>安排 / Assignment</th>'+
             '</tr></thead><tbody>';
           positions.forEach(function(pos){
             var value = String(values[pos] || '');
-            var isOther = String(pos||'') === '其他';
+            var groupKey = POSITION_GROUP[pos] || '';
+            var maxCount = POSITION_MAX[pos] || 1;
+            var isOther = String(pos||'') === 'Other';
+            var assigned = splitServingValues_(value);
             h += '<tr>'+
               '<td>'+escapeHtml(servingPositionLabel_({ position: pos }))+'</td>'+
-              '<td>'+(isOther
-                ? '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(value)+'</textarea>'
-                : '<input class="inputMini" data-pos="'+escapeHtml(pos)+'" value="'+escapeHtml(value)+'" placeholder="CCF0000 or N/A" />')+
-              '</td>'+
-            '</tr>';
+              '<td>';
+            if (isOther){
+              h += '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(value)+'</textarea>';
+            } else {
+              for (var i=0;i<maxCount;i++){
+                var selected = assigned[i] || '';
+                h += '<select class="inputMini" data-pos="'+escapeHtml(pos)+'" data-idx="'+i+'">'+
+                  buildMemberOptions_(groupKey, selected) +
+                '</select>';
+              }
+            }
+            h += '</td></tr>';
           });
           h += '</tbody></table></div>';
           return h;
         }
 
+        function updateValuesForPosition_(pos){
+          var selects = Array.prototype.slice.call(modal.querySelectorAll('select[data-pos="'+pos+'"]'));
+          if (selects.length){
+            var vals = selects.map(function(s){ return String(s.value||'').trim(); }).filter(Boolean);
+            if (vals.indexOf('N/A') >= 0){
+              values[pos] = 'N/A';
+              selects.forEach(function(s, idx){ s.value = (idx === 0 ? 'N/A' : ''); });
+              return;
+            }
+            values[pos] = vals.join(', ');
+            return;
+          }
+          var ta = modal.querySelector('[data-pos="'+pos+'"]');
+          if (ta) values[pos] = String(ta.value||'').trim();
+        }
+
         function bindInputs_(){
-          Array.prototype.slice.call(modal.querySelectorAll('[data-pos]')).forEach(function(input){
+          Array.prototype.slice.call(modal.querySelectorAll('select[data-pos]')).forEach(function(sel){
+            sel.onchange = function(){
+              var key = String(sel.getAttribute('data-pos')||'');
+              updateValuesForPosition_(key);
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('textarea[data-pos]')).forEach(function(input){
             input.oninput = function(){
               var key = String(input.getAttribute('data-pos')||'');
               values[key] = String(input.value||'').trim();
@@ -925,12 +1076,23 @@
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.canOverride){
                   var detail = '';
+                  var titleZh = '事奉安排需要確認';
+                  var titleEn = 'Serving assignment needs confirmation.';
                   if (res2.conflicts && res2.conflicts.length){
+                    titleZh = '事奉安排與離開期重疊';
+                    titleEn = 'Serving assignment overlaps away period.';
                     detail = res2.conflicts.map(function(c){
                       return escapeHtml(c.memberId) + ' (' + escapeHtml(c.from) + ' - ' + escapeHtml(c.to) + ')';
                     }).join('<br/>');
                   }
-                  showBox('servingEditMsg','warn','事奉安排與離開期重疊','Serving assignment overlaps away period.', detail);
+                  if (res2.duplicates && res2.duplicates.length){
+                    titleZh = '同一會員重覆崗位';
+                    titleEn = 'Duplicate serving assignments.';
+                    detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
+                      return escapeHtml(d.memberId) + ' → ' + escapeHtml((d.positions||[]).join(', '));
+                    }).join('<br/>');
+                  }
+                  showBox('servingEditMsg','warn', titleZh, titleEn, detail);
                   var btn = document.createElement('button');
                   btn.className = 'btnDanger';
                   btn.textContent = '仍然儲存 / Override';
@@ -938,6 +1100,8 @@
                     callApi('api_admin_serving_event_save', App.token, ev, payload, true).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
                       showBox('servingEditMsg','ok','已儲存','Saved.');
+                      closeModal(modal);
+                      if (App.refreshServingPlan) App.refreshServingPlan();
                     }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
                   };
                   var msg = $('servingEditMsg');
@@ -948,6 +1112,8 @@
                 return;
               }
               showBox('servingEditMsg','ok','已儲存','Saved.');
+              closeModal(modal);
+              if (App.refreshServingPlan) App.refreshServingPlan();
             }).catch(function(){
               showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
             });
@@ -1114,11 +1280,6 @@
       return ''+
         '<div class="card" style="border-color:rgba(200,132,0,0.35);background:#fffaf0;">'+
           '<div class="big">🔎 個人查詢 / Member lookup</div>'+
-          '<div class="kv">'+
-            '<div>開始 / From</div><div><input id="from2" type="date" /></div>'+
-            '<div>結束 / To</div><div><input id="to2" type="date" /></div>'+
-          '</div>'+
-          '<div class="divider"></div>'+
           '<div class="label">輸入 / Input</div>'+
           '<input id="mq" placeholder="CCF ID / 中文 / English" />'+
           '<div id="mResults" style="margin-top:10px;"></div>'+
@@ -1130,8 +1291,6 @@
     }
 
     function bindMemberLookup(){
-      $('from2').value = App.from;
-      $('to2').value = App.to || getTodayYmdUk();
       $('backAttendance2').onclick = function(){ App.view='attendanceHome'; render(); };
 
       var input = $('mq');
@@ -1174,6 +1333,7 @@
             var flagLine = r.lowFlag
               ? ('<div class="small" style="margin-top:6px;">〽️ '+escapeHtml(r.lowFlagZh||'')+'<br/>'+escapeHtml(r.lowFlagEn||'')+'</div>')
               : '';
+            var groupsHtml = renderServingGroupBadges_((r.servingGroups||[]).concat(r.servingGLGroups||[]));
 
             return ''+
               '<div class="msgBox warn" style="margin-bottom:10px;">'+
@@ -1183,6 +1343,7 @@
                   '<div>English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
                   '<div>狀態 / Status</div><div>'+statusChip+'</div>'+
                 '</div>'+
+                groupsHtml+
                 flagLine+
                 '<div class="miniBtnRow">'+
                   '<button class="btnLookup" data-mid="'+escapeHtml(r.id)+'">查看 / View</button>'+
@@ -1193,8 +1354,8 @@
           Array.prototype.slice.call($('mResults').querySelectorAll('button[data-mid]')).forEach(function(btn){
             btn.onclick = function(){
               var mid = btn.getAttribute('data-mid');
-              var from = $('from2').value;
-              var to = $('to2').value;
+              var from = App.from;
+              var to = App.to || getTodayYmdUk();
               var v = validateRangeClient(from, to);
               if(!v.ok){ showBox('memberMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
               openMemberDetail(mid, from, to);
@@ -1624,8 +1785,10 @@
           '<div class="msgBox warn" style="margin-top:10px;">'+
             '<div class="big warn">🏖️ 離開期 / Away period</div>'+
             '<div class="kv">'+
-              '<div>開始 / From</div><div><input id="awayFrom" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from||''))+'" /></div>'+
-              '<div>結束 / To</div><div><input id="awayTo" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to||''))+'" /></div>'+
+              '<div>開始 1 / From 1</div><div><input id="awayFrom1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from1||''))+'" /></div>'+
+              '<div>結束 1 / To 1</div><div><input id="awayTo1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to1||''))+'" /></div>'+
+              '<div>開始 2 / From 2</div><div><input id="awayFrom2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from2||''))+'" /></div>'+
+              '<div>結束 2 / To 2</div><div><input id="awayTo2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to2||''))+'" /></div>'+
             '</div>'+
             '<div class="miniBtnRow">'+
               '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
@@ -1647,6 +1810,8 @@
             '</div>'
           : '';
 
+        var groupsHtml = renderServingGroupBadges_((m.servingGroups||[]).concat(m.servingGLGroups||[]));
+
         modal.querySelector('.modal').innerHTML =
           topBtns +
           '<div class="big">👤 會員 / Member</div>'+
@@ -1658,6 +1823,7 @@
             '<div>Member since</div><div>'+escapeHtml(m.memberSince||'')+'</div>'+
             '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
           '</div>'+
+          (groupsHtml || '')+
 
           statsCard+
           awayCard+
@@ -1695,30 +1861,44 @@
           openStatusFlow_(m.id, m.status||'');
         };
 
-        var awayFrom = modal.querySelector('#awayFrom');
-        var awayTo = modal.querySelector('#awayTo');
-        if (awayFrom && awayTo){
-          awayFrom.onfocus = function(){ toggleDateInput_(awayFrom, true); };
-          awayFrom.onblur = function(){ toggleDateInput_(awayFrom, false); };
-          awayTo.onfocus = function(){ toggleDateInput_(awayTo, true); };
-          awayTo.onblur = function(){ toggleDateInput_(awayTo, false); };
+        var awayFrom1 = modal.querySelector('#awayFrom1');
+        var awayTo1 = modal.querySelector('#awayTo1');
+        var awayFrom2 = modal.querySelector('#awayFrom2');
+        var awayTo2 = modal.querySelector('#awayTo2');
+        if (awayFrom1 && awayTo1 && awayFrom2 && awayTo2){
+          [awayFrom1, awayTo1, awayFrom2, awayTo2].forEach(function(el){
+            el.onfocus = function(){ toggleDateInput_(el, true); };
+            el.onblur = function(){ toggleDateInput_(el, false); };
+          });
 
           modal.querySelector('#btnAwaySave').onclick = function(){
-            var fromDmy = String(awayFrom.value||'').trim();
-            var toDmy = String(awayTo.value||'').trim();
+            var fromDmy1 = String(awayFrom1.value||'').trim();
+            var toDmy1 = String(awayTo1.value||'').trim();
+            var fromDmy2 = String(awayFrom2.value||'').trim();
+            var toDmy2 = String(awayTo2.value||'').trim();
+            if ((fromDmy1 && !toDmy1) || (!fromDmy1 && toDmy1) || (fromDmy2 && !toDmy2) || (!fromDmy2 && toDmy2)){
+              showBox('awayMsg','err','請填寫完整日期','Please complete both from/to dates.');
+              return;
+            }
             clear('awayMsg');
-            callApi('api_admin_set_away_period', App.token, m.id, fromDmy, toDmy).then(function(res){
+            callApi('api_admin_set_away_period', App.token, m.id, fromDmy1, toDmy1, fromDmy2, toDmy2).then(function(res){
               if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              awayFrom1.value = ymdToDmy_(res.from1||'') || '';
+              awayTo1.value = ymdToDmy_(res.to1||'') || '';
+              awayFrom2.value = ymdToDmy_(res.from2||'') || '';
+              awayTo2.value = ymdToDmy_(res.to2||'') || '';
               showBox('awayMsg','ok','已更新','Saved.');
             }).catch(function(){
               showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
             });
           };
           modal.querySelector('#btnAwayClear').onclick = function(){
-            awayFrom.value = '';
-            awayTo.value = '';
+            awayFrom1.value = '';
+            awayTo1.value = '';
+            awayFrom2.value = '';
+            awayTo2.value = '';
             clear('awayMsg');
-            callApi('api_admin_set_away_period', App.token, m.id, '', '').then(function(res){
+            callApi('api_admin_set_away_period', App.token, m.id, '', '', '', '').then(function(res){
               if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
               showBox('awayMsg','ok','已清除','Cleared.');
             }).catch(function(){
