@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui8-serving-edit-away
-  For Admin.gs: v2026-02-07.admin10
+  UI VERSION TAG: admin2-ui9-serving-edit-away
+  For Admin.gs: v2026-02-08.admin11
   ============================================================
   -->
 
@@ -126,11 +126,62 @@
       border:1px solid var(--border);
       background:#fff;
     }
-    .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.25);color:#8a1230}
-    .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.25);color:#1a3d9a}
-    .groupBadge.logistic{background:#fff0d9;border-color:rgba(200,132,0,0.35);color:#8a5a00}
-    .groupBadge.support{background:#fff7d6;border-color:rgba(202,155,0,0.35);color:#7a5b00}
-    .groupBadge.finance{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
+    .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
+    .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
+    .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
+    .groupBadge.support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
+    .groupBadge.finance{background:#fff2cc;border-color:rgba(202,155,0,0.45);color:#7a5b00}
+
+    .posGroup-worship{background:#fff0f3}
+    .posGroup-media{background:#f0f6ff}
+    .posGroup-logistic{background:#f7efe4}
+    .posGroup-support{background:#ecfff6}
+    .posGroup-finance{background:#fff6d8}
+
+    .scrollControls{
+      position:sticky;
+      bottom:8px;
+      display:flex;
+      justify-content:flex-end;
+      gap:6px;
+      margin-top:8px;
+      z-index:5;
+    }
+    .scrollBtn{
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      cursor:pointer;
+    }
+    .assignList{display:flex;flex-wrap:wrap;gap:6px}
+    .assignChip{
+      border:1px solid var(--border);
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      background:#fff;
+      display:flex;
+      gap:6px;
+      align-items:center;
+    }
+    .assignChip button{
+      border:none;
+      background:transparent;
+      cursor:pointer;
+      color:#d93c5e;
+      font-weight:900;
+    }
+    .suggestList{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px}
+    .suggestBtn{
+      border:1px solid var(--border);
+      background:#f8f9ff;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      cursor:pointer;
+    }
 
     .servingPlanTable th,
     .servingPlanTable td{
@@ -263,11 +314,11 @@
     }
 
     var SERVING_GROUP_LABELS = {
-      MEDIA: '影像大師',
-      WORSHIP: '敬拜聯盟',
-      LOGISTIC: '後勤特工',
-      SUPPORT: '聖工支援',
-      FINANCE: '財務公司'
+      MEDIA: 'Media Master / 影像大師',
+      WORSHIP: 'Worship Alliance / 敬拜聯盟',
+      LOGISTIC: 'Logistic Specialist / 後勤特工',
+      SUPPORT: 'Divine Supporter / 聖工支援隊',
+      FINANCE: 'Finance Dept / 財務公司'
     };
     function getServingGroupLabel_(group){
       var key = String(group || '').trim().toUpperCase();
@@ -275,14 +326,14 @@
     }
     var SERVING_POSITION_LABELS = {
       Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
-      Worship_Singer_1:     { zh:'敬拜和唱 1', en:'Worship Singer 1' },
-      Worship_Singer_2:     { zh:'敬拜和唱 2', en:'Worship Singer 2' },
+      Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
+      Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
       Worship_Pianist:      { zh:'司琴', en:'Pianist' },
       Worship_Drum:         { zh:'鼓手', en:'Drummer' },
       Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
       Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
-      Media_AV:             { zh:'影音', en:'Audio / Visual' },
-      Media_PPT:            { zh:'PPT投影', en:'PPT Projection' },
+      Media_AV:             { zh:'影音', en:'Audio Visual' },
+      Media_PPT:            { zh:'投影', en:'PPT' },
       Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
       Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
       Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
@@ -326,11 +377,11 @@
       Finance_Offering: 3
     };
     var SERVING_GROUP_BADGES = {
-      worship: { zh:'敬拜', en:'Worship', cls:'groupBadge worship' },
-      media: { zh:'影像', en:'Media', cls:'groupBadge media' },
-      logistic: { zh:'後勤', en:'Logistics', cls:'groupBadge logistic' },
-      support: { zh:'支援', en:'Support', cls:'groupBadge support' },
-      finance: { zh:'財務', en:'Finance', cls:'groupBadge finance' }
+      worship: { zh:'敬拜聯盟', en:'Worship Alliance', cls:'groupBadge worship' },
+      media: { zh:'影像大師', en:'Media Master', cls:'groupBadge media' },
+      logistic: { zh:'後勤特工', en:'Logistic Specialist', cls:'groupBadge logistic' },
+      support: { zh:'聖工支援隊', en:'Divine Supporter', cls:'groupBadge support' },
+      finance: { zh:'財務公司', en:'Finance Dept', cls:'groupBadge finance' }
     };
     function servingPositionLabel_(pos){
       if (!pos) return '—';
@@ -388,6 +439,23 @@
         escapeHtml((res && res.en) || 'System error'),
         detail
       );
+    }
+
+    function attachScrollControls_(root){
+      var scope = root || document;
+      var targets = Array.prototype.slice.call(scope.querySelectorAll('.listWrap, .modal, .tableWrap'));
+      targets.forEach(function(el){
+        if (el.querySelector('.scrollControls')) return;
+        if (el.scrollHeight <= el.clientHeight) return;
+        var ctrl = document.createElement('div');
+        ctrl.className = 'scrollControls';
+        ctrl.innerHTML =
+          '<button type="button" class="scrollBtn scrollUp">▲</button>'+
+          '<button type="button" class="scrollBtn scrollDown">▼</button>';
+        ctrl.querySelector('.scrollUp').onclick = function(){ el.scrollBy({ top: -180, behavior: 'smooth' }); };
+        ctrl.querySelector('.scrollDown').onclick = function(){ el.scrollBy({ top: 180, behavior: 'smooth' }); };
+        el.appendChild(ctrl);
+      });
     }
 
     function openModal(html){
@@ -852,7 +920,8 @@
           }
 
           var headerHtml = positions.map(function(pos){
-            return '<th class="servingPlanCell">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
+            var groupKey = POSITION_GROUP[pos.position] || '';
+            return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
           }).join('');
 
           var monthMap = {};
@@ -872,15 +941,16 @@
             var bodyHtml = monthMap[monthKey].map(function(ev){
               var rowCells = positions.map(function(pos){
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+                var groupKey = POSITION_GROUP[pos.position] || '';
                 if(!cell || !cell.length){
-                  return '<td class="servingPlanCell"></td>';
+                  return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'"></td>';
                 }
                 var entries = cell.map(function(entry){
                   var label = formatServingEntry_(entry);
                   if (!label) return '';
                   return '<div class="servingPlanEntry">'+escapeHtml(label)+'</div>';
                 }).filter(Boolean).join('');
-                return '<td class="servingPlanCell">'+entries+'</td>';
+                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+entries+'</td>';
               }).join('');
               return ''+
                 '<tr>'+
@@ -908,6 +978,7 @@
           }).join('');
 
           listEl.innerHTML = monthHtml;
+          attachScrollControls_(listEl);
 
           Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
             btn.onclick = function(){
@@ -953,11 +1024,14 @@
         var positions = Array.isArray(res.positions) ? res.positions : [];
         var values = res.values || {};
         var members = Array.isArray(res.members) ? res.members : [];
+        var memberMap = {};
+        var assignedMap = {};
+        members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
 
         function splitServingValues_(raw){
           var s = String(raw||'').trim();
           if (!s) return [];
-          return s.split(/[,/]/).map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+          return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
         }
         function normalizeGroup_(g){
           var key = String(g||'').trim().toUpperCase();
@@ -973,21 +1047,56 @@
           var groups = Array.isArray(m.groups) ? m.groups : [];
           return groups.some(function(g){ return normalizeGroup_(g) === groupKey; });
         }
-        function buildMemberOptions_(groupKey, selected){
-          var opts = '<option value="">—</option><option value="N/A">N/A</option>';
-          var hasSelected = false;
-          members.forEach(function(m){
-            if (!memberMatchesGroup_(m, groupKey)) return;
-            var label = m.id + ' ' + [m.nameZh, m.nameEn].filter(Boolean).join(' / ');
-            var sel = (String(selected||'') === m.id) ? ' selected' : '';
-            if (sel) hasSelected = true;
-            opts += '<option value="'+escapeHtml(m.id)+'"'+sel+'>'+escapeHtml(label)+'</option>';
-          });
-          if (selected && selected !== 'N/A' && !hasSelected){
-            opts += '<option value="'+escapeHtml(selected)+'" selected>'+escapeHtml(selected)+'</option>';
+        function extractMemberId_(token){
+          var m = String(token||'').match(/CCF\\d{4}/i);
+          return m ? String(m[0]||'').toUpperCase() : '';
+        }
+        function preferredNameForSheet_(m){
+          if (!m) return '';
+          var pref = String(m.preferredName||'').trim();
+          if (pref) return pref;
+          var en = String(m.nameEn||'').trim();
+          if (en) return en;
+          return String(m.nameZh||'').trim();
+        }
+        function formatServingToken_(memberId){
+          var m = memberMap[String(memberId||'').toUpperCase()];
+          if (!m) return String(memberId||'');
+          var name = preferredNameForSheet_(m);
+          return m.id + (name ? (' ('+name+')') : '');
+        }
+        function memberLabel_(m){
+          if (!m) return '';
+          var pref = String(m.preferredName||'').trim();
+          var zh = String(m.nameZh||'').trim();
+          var en = String(m.nameEn||'').trim();
+          return m.id + ' ' + [zh, en].filter(Boolean).join(' ') + (pref ? (' ('+pref+')') : '');
+        }
+        function isNaToken_(token){
+          var up = String(token||'').trim().toUpperCase();
+          return (up === 'N/A' || up === 'NA');
+        }
+
+        positions.forEach(function(pos){
+          var initial = splitServingValues_(values[pos] || '');
+          assignedMap[pos] = initial.map(function(token){
+            if (isNaToken_(token)) return 'N/A';
+            var id = extractMemberId_(token);
+            return id ? formatServingToken_(id) : token;
+          }).filter(Boolean);
+        });
+
+        function renderAssignedList_(pos){
+          var list = assignedMap[pos] || [];
+          if (!list.length){
+            return '<div class="small">—</div>';
           }
-          if (selected === 'N/A') opts = opts.replace('value="N/A"', 'value="N/A" selected');
-          return opts;
+          return list.map(function(token, idx){
+            return '<span class="assignChip" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">'+
+              '<span>'+escapeHtml(token)+'</span>'+
+              '<button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">×</button>'+
+            '</span>';
+          }).join('');
         }
 
         function renderRows_(){
@@ -998,23 +1107,21 @@
             '<th>事奉崗位 / Position</th><th>安排 / Assignment</th>'+
             '</tr></thead><tbody>';
           positions.forEach(function(pos){
-            var value = String(values[pos] || '');
             var groupKey = POSITION_GROUP[pos] || '';
-            var maxCount = POSITION_MAX[pos] || 1;
             var isOther = String(pos||'') === 'Other';
-            var assigned = splitServingValues_(value);
             h += '<tr>'+
-              '<td>'+escapeHtml(servingPositionLabel_({ position: pos }))+'</td>'+
+              '<td class="posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_({ position: pos }))+'</td>'+
               '<td>';
             if (isOther){
-              h += '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(value)+'</textarea>';
+              h += '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(String(values[pos] || ''))+'</textarea>';
             } else {
-              for (var i=0;i<maxCount;i++){
-                var selected = assigned[i] || '';
-                h += '<select class="inputMini" data-pos="'+escapeHtml(pos)+'" data-idx="'+i+'">'+
-                  buildMemberOptions_(groupKey, selected) +
-                '</select>';
-              }
+              h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
+                   '<div class="miniBtnRow" style="margin-top:8px;">'+
+                     '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
+                     '<button type="button" class="btnBack assignAdd" data-pos="'+escapeHtml(pos)+'">➕ 加入 / Add</button>'+
+                     '<button type="button" class="btnBack assignNa" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
+                   '</div>'+
+                   '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
             }
             h += '</td></tr>';
           });
@@ -1022,33 +1129,124 @@
           return h;
         }
 
-        function updateValuesForPosition_(pos){
-          var selects = Array.prototype.slice.call(modal.querySelectorAll('select[data-pos="'+pos+'"]'));
-          if (selects.length){
-            var vals = selects.map(function(s){ return String(s.value||'').trim(); }).filter(Boolean);
-            if (vals.indexOf('N/A') >= 0){
-              values[pos] = 'N/A';
-              selects.forEach(function(s, idx){ s.value = (idx === 0 ? 'N/A' : ''); });
-              return;
-            }
-            values[pos] = vals.join(', ');
+        function syncValue_(pos){
+          if (String(pos||'') === 'Other'){
+            var ta = modal.querySelector('[data-pos="'+pos+'"]');
+            if (ta) values[pos] = String(ta.value||'').trim();
             return;
           }
-          var ta = modal.querySelector('[data-pos="'+pos+'"]');
-          if (ta) values[pos] = String(ta.value||'').trim();
+          values[pos] = (assignedMap[pos] || []).join(', ');
+        }
+        function refreshAssigned_(pos){
+          var box = modal.querySelector('.assignList[data-pos="'+pos+'"]');
+          if (box) box.innerHTML = renderAssignedList_(pos);
+          syncValue_(pos);
+        }
+        function addAssigned_(pos, memberId){
+          var token = String(memberId||'').trim();
+          if (!token) return;
+          if (isNaToken_(token)){
+            assignedMap[pos] = ['N/A'];
+            refreshAssigned_(pos);
+            return;
+          }
+          var id = extractMemberId_(token) || token.toUpperCase();
+          if (!id) return;
+          var current = assignedMap[pos] || [];
+          if (current.some(function(t){ return extractMemberId_(t) === id; })) return;
+          assignedMap[pos] = current.filter(function(t){ return !isNaToken_(t); });
+          assignedMap[pos].push(formatServingToken_(id));
+          refreshAssigned_(pos);
+        }
+        function removeAssigned_(pos, idx){
+          var current = assignedMap[pos] || [];
+          current.splice(idx, 1);
+          assignedMap[pos] = current;
+          refreshAssigned_(pos);
+        }
+        function getSuggestions_(pos, query){
+          var groupKey = POSITION_GROUP[pos] || '';
+          var q = String(query||'').trim().toLowerCase();
+          if (!q) return [];
+          return members.filter(function(m){
+            if (!memberMatchesGroup_(m, groupKey)) return false;
+            var hay = [
+              String(m.id||''),
+              String(m.nameZh||''),
+              String(m.nameEn||''),
+              String(m.preferredName||'')
+            ].join(' ').toLowerCase();
+            return hay.indexOf(q) >= 0;
+          }).slice(0, 8);
+        }
+        function renderSuggestions_(pos, query){
+          var wrap = modal.querySelector('.suggestList[data-pos="'+pos+'"]');
+          if (!wrap) return;
+          var list = getSuggestions_(pos, query);
+          if (!query || !list.length){
+            wrap.innerHTML = '';
+            return;
+          }
+          wrap.innerHTML = list.map(function(m){
+            return '<button type="button" class="suggestBtn" data-pos="'+escapeHtml(pos)+'" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
+          }).join('');
+          Array.prototype.slice.call(wrap.querySelectorAll('button[data-id]')).forEach(function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-id')||'');
+              addAssigned_(pos, id);
+              var input = modal.querySelector('.assignInput[data-pos="'+pos+'"]');
+              if (input) input.value = '';
+              wrap.innerHTML = '';
+            };
+          });
         }
 
         function bindInputs_(){
-          Array.prototype.slice.call(modal.querySelectorAll('select[data-pos]')).forEach(function(sel){
-            sel.onchange = function(){
-              var key = String(sel.getAttribute('data-pos')||'');
-              updateValuesForPosition_(key);
-            };
-          });
           Array.prototype.slice.call(modal.querySelectorAll('textarea[data-pos]')).forEach(function(input){
             input.oninput = function(){
               var key = String(input.getAttribute('data-pos')||'');
               values[key] = String(input.value||'').trim();
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignAdd')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              var input = modal.querySelector('.assignInput[data-pos="'+pos+'"]');
+              var query = input ? String(input.value||'').trim() : '';
+              if (!query) return;
+              var matchedId = extractMemberId_(query);
+              if (matchedId){
+                addAssigned_(pos, matchedId);
+                if (input) input.value = '';
+                return;
+              }
+              var list = getSuggestions_(pos, query);
+              if (list.length === 1){
+                addAssigned_(pos, list[0].id);
+                if (input) input.value = '';
+              }
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignNa')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              addAssigned_(pos, 'N/A');
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignList')).forEach(function(box){
+            box.onclick = function(e){
+              var target = e && e.target ? e.target : null;
+              if (!target || target.tagName !== 'BUTTON') return;
+              var pos = String(target.getAttribute('data-pos')||'');
+              var idx = parseInt(String(target.getAttribute('data-idx')||'0'), 10);
+              if (!isNaN(idx)) removeAssigned_(pos, idx);
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignInput')).forEach(function(input){
+            input.oninput = function(){
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              renderSuggestions_(pos, query);
             };
           });
         }
@@ -1089,7 +1287,10 @@
                     titleZh = '同一會員重覆崗位';
                     titleEn = 'Duplicate serving assignments.';
                     detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                      return escapeHtml(d.memberId) + ' → ' + escapeHtml((d.positions||[]).join(', '));
+                      var posLabels = (d.positions||[]).map(function(p){
+                        return servingPositionLabel_({ position: p });
+                      });
+                      return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
                     }).join('<br/>');
                   }
                   showBox('servingEditMsg','warn', titleZh, titleEn, detail);
@@ -1118,6 +1319,7 @@
               showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
             });
           };
+          attachScrollControls_(modal);
         }
 
         render();
@@ -2059,14 +2261,14 @@
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
 
-      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); return; }
-      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); return; }
-      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); return; }
-      if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); return; }
-      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); return; }
-      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); return; }
-      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); return; }
-      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); return; }
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); attachScrollControls_(root); return; }
+      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); attachScrollControls_(root); return; }
+      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); attachScrollControls_(root); return; }
+      if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); attachScrollControls_(root); return; }
+      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); attachScrollControls_(root); return; }
+      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); attachScrollControls_(root); return; }
+      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
+      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
     }
 
     /* init */

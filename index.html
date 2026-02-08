@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff8-ui1 (restored full functions + self-check)
-   * For Code.gs: v2026-02-02.staff8
+   * UI VERSION: staff10-ui1 (restored full functions + self-check)
+   * For Code.gs: v2026-02-08.staff10
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -47,6 +47,16 @@
     .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
     .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
     .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
+    .staffBanner{
+      font-size:var(--fs-big);
+      font-weight:900;
+      margin-top:8px;
+      padding:6px 12px;
+      border-radius:999px;
+      background:#eef4ff;
+      border:1px solid rgba(40,90,200,0.18);
+      display:inline-block;
+    }
 
     input,button{
       width:100%;
@@ -117,6 +127,24 @@
     .chip.bad{border-color:rgba(217,60,94,0.35);background:#fff1f4;color:var(--bad)}
     .chip.warn{border-color:rgba(200,132,0,0.35);background:#fff6e6;color:var(--warn)}
 
+    .scrollControls{
+      position:sticky;
+      bottom:8px;
+      display:flex;
+      justify-content:flex-end;
+      gap:6px;
+      margin-top:8px;
+      z-index:5;
+    }
+    .scrollBtn{
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      cursor:pointer;
+    }
+
     @media (pointer: coarse){
       button{ min-height: 56px; }
     }
@@ -137,7 +165,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff8-ui1</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff10-ui1</span></div>
     </header>
 
     <main id="app"></main>
@@ -241,16 +269,43 @@
     }
 
     var SERVING_GROUP_LABELS = {
-      MEDIA: 'Media — Media Master / 影像大師',
-      WORSHIP: 'Worship — Worship Alliance / 敬拜聯盟',
-      LOGISTIC: 'Logistic — Logistic Specialist / 後勤特工',
-      SUPPORT: 'Support — Divine Supporter / 聖工支援隊',
-      FINANCE: 'Finance — Finance Dept / 財務公司'
+      MEDIA: 'Media Master / 影像大師',
+      WORSHIP: 'Worship Alliance / 敬拜聯盟',
+      LOGISTIC: 'Logistic Specialist / 後勤特工',
+      SUPPORT: 'Divine Supporter / 聖工支援隊',
+      FINANCE: 'Finance Dept / 財務公司'
+    };
+    var SERVING_POSITION_LABELS = {
+      Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
+      Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
+      Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
+      Worship_Pianist:      { zh:'司琴', en:'Pianist' },
+      Worship_Drum:         { zh:'鼓手', en:'Drummer' },
+      Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
+      Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+      Media_AV:             { zh:'影音', en:'Audio Visual' },
+      Media_PPT:            { zh:'投影', en:'PPT' },
+      Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
+      Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+      Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
+      Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
+      Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
+      Logistic_Welcome:     { zh:'接待', en:'Welcome / Seating' },
+      Logistic_Venue:       { zh:'場務', en:'Venue / Setup / Cleanup' },
+      Logistic_Refreshment: { zh:'茶水', en:'Refreshments' },
+      Finance_Offering:     { zh:'財務', en:'Offering / Finance' },
+      Other:                { zh:'其他', en:'Other' }
     };
 
     function getServingGroupLabel_(group){
       var key = String(group || '').trim().toUpperCase();
       return SERVING_GROUP_LABELS[key] || key;
+    }
+    function getServingPositionLabel_(pos){
+      var key = String(pos || '').trim();
+      var label = SERVING_POSITION_LABELS[key];
+      if (!label) return key;
+      return label.en + ' / ' + label.zh;
     }
     function isServingNaValue_(value){
       var v = String(value || '').trim().toUpperCase();
@@ -283,6 +338,23 @@
       );
     }
 
+    function attachScrollControls_(root){
+      var scope = root || document;
+      var targets = Array.prototype.slice.call(scope.querySelectorAll('.listWrap, .card, .modal'));
+      targets.forEach(function(el){
+        if (el.querySelector('.scrollControls')) return;
+        if (el.scrollHeight <= el.clientHeight) return;
+        var ctrl = document.createElement('div');
+        ctrl.className = 'scrollControls';
+        ctrl.innerHTML =
+          '<button type="button" class="scrollBtn scrollUp">▲</button>'+
+          '<button type="button" class="scrollBtn scrollDown">▼</button>';
+        ctrl.querySelector('.scrollUp').onclick = function(){ el.scrollBy({ top: -180, behavior: 'smooth' }); };
+        ctrl.querySelector('.scrollDown').onclick = function(){ el.scrollBy({ top: 180, behavior: 'smooth' }); };
+        el.appendChild(ctrl);
+      });
+    }
+
     function openModal(html){
       var o = document.createElement('div');
       o.className = 'overlay';
@@ -307,6 +379,11 @@
       var zh = App.staff.nameZh || '';
       var en = App.staff.nameEn || '';
       return (zh + ' ' + en).trim() || App.staff.id;
+    }
+    function staffBannerHtml_(){
+      var name = staffDisplayName();
+      if (!name) return '';
+      return '<div class="staffBanner">👤 ' + escapeHtml(name) + '</div>';
     }
 
     function canTapLiveNames(){
@@ -625,14 +702,14 @@
       }
 
       var root = $('app');
-      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); restoreSession(); return; }
-      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); return; }
-      if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); return; }
-      if(App.view==='scanCheckin'){ root.innerHTML = viewScanCheckin(); bindScanCheckin(); return; }
-      if(App.view==='manualCheckin'){ root.innerHTML = viewManualCheckin(); bindManualCheckin(); return; }
-      if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); return; }
-      if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); return; }
-      if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); return; }
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); restoreSession(); attachScrollControls_(root); return; }
+      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); attachScrollControls_(root); return; }
+      if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); attachScrollControls_(root); return; }
+      if(App.view==='scanCheckin'){ root.innerHTML = viewScanCheckin(); bindScanCheckin(); attachScrollControls_(root); return; }
+      if(App.view==='manualCheckin'){ root.innerHTML = viewManualCheckin(); bindManualCheckin(); attachScrollControls_(root); return; }
+      if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); attachScrollControls_(root); return; }
+      if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); attachScrollControls_(root); return; }
+      if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); attachScrollControls_(root); return; }
     }
 
     // ===== Views =====
@@ -675,10 +752,10 @@
           '<div class="topRow">'+
             '<div class="big">👋 已登入 / Logged in</div>'+
             '<div>'+
-              '<span class="pill">'+escapeHtml(staffDisplayName())+'</span>'+
-              '<button id="btnLogoutTop" class="danger btnSmall" style="margin-left:8px;">🚪 登出 / Logout</button>'+
+              '<button id="btnLogoutTop" class="danger btnSmall">🚪 登出 / Logout</button>'+
             '</div>'+
           '</div>'+
+          staffBannerHtml_()+
         '</div>'+
         '<div class="card">'+
           '<div class="big">📌 主選單 / Main menu</div>'+
@@ -702,6 +779,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">✅ 簽到 / Check-in</div>'+
+          staffBannerHtml_()+
           '<div class="small" id="checkinEventKey"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="goScanCheckin" class="primary">📷 掃描 QR 卡 / Scan QR badge</button>'+
@@ -717,6 +795,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">📷 掃描簽到 / Scan check-in</div>'+
+          staffBannerHtml_()+
           '<div class="small" id="scanEventKey"></div>'+
           '<div id="scanCam" class="card" style="margin-top:10px;">'+
             '<div class="videoWrap"><video id="videoCheckin" playsinline></video></div>'+
@@ -737,6 +816,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🔎 手動搜尋 / Manual search</div>'+
+          staffBannerHtml_()+
           '<div class="small" id="manualEventKey"></div>'+
           '<div class="small">Name / 中文名 / English / Preferred name / Email / CCF ID</div>'+
           '<div id="manualPanel" class="card" style="margin-top:10px;">'+
@@ -756,6 +836,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">📊 即時情況 / Live</div>'+
+          staffBannerHtml_()+
           '<div class="small">英國時間 / UK time: <span class="pill" id="liveClock">--:--:--</span></div>'+
           '<div id="rtBox" class="card" style="margin-top:10px;"></div>'+
           '<div id="rtServingBox" class="card" style="margin-top:10px;"></div>'+
@@ -772,6 +853,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🚗 車牌搜尋 / Car reg</div>'+
+          staffBannerHtml_()+
           '<div class="card" style="margin-top:10px;">'+
             '<div class="label">車牌 / Plate</div>'+
             '<input id="vrmQ" autocomplete="off" placeholder="例如：AB12CDE" />'+
@@ -889,6 +971,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big">🔐 授權 / Authorise</div>'+
+          staffBannerHtml_()+
           '<div class="small">Step '+step+' / 4</div>'+
         '</div>'+
         '<div class="card">'+body+'</div>';
@@ -898,6 +981,7 @@
     function openSelfCheckModal(){
       var o = openModal(
         '<div class="big">🩺 自我檢查 / Self-check</div>'+
+        staffBannerHtml_()+
         '<div class="small">Back-end checks only. Feedback to Media team appreciated.</div>'+
         '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
         '<div class="miniBtnRow">'+
@@ -905,6 +989,7 @@
           '<button id="btnScClose" class="danger">關閉 / Close</button>'+
         '</div>'
       );
+      attachScrollControls_(o);
 
       function setBusy(msg){
         var b = o.querySelector('#scBox');
@@ -1444,7 +1529,7 @@
 
           var last = res.lastSignIn
             ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div class="msgEn">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
-            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">OK sign，我會用第一人稱歡迎並簽到 / OK sign, I will welcome and check in the first person</div></div>';
+            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">請歡迎並為會眾簽到！ / Please welcome and sign in members!</div></div>';
 
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });
@@ -1586,6 +1671,7 @@
         };
 
         renderList();
+        attachScrollControls_(box);
       }
 
       function renderServing(res){
@@ -1614,62 +1700,43 @@
             var icon = allOk ? '✅' : '❌';
             var isOpen = (openGroup === key);
             var openMark = isOpen ? ' ▲' : ' ▼';
-            return '<span class="chip '+cls+' servingGroupChip" data-group="'+key+'">'+icon+' '+key+openMark+'</span>';
+            var label = getServingGroupLabel_(key);
+            return '<span class="chip '+cls+' servingGroupChip" data-group="'+key+'">'+icon+' '+escapeHtml(label)+openMark+'</span>';
           }).join('') +
           '</div>';
 
         var expandedHtml = '';
         if (openGroup){
           var groupRows = list.filter(function(r){ return String(r.group||'').toUpperCase() === openGroup; });
-          var pending = groupRows.filter(function(r){ return !isServingNaRow_(r) && !r.checkedIn; });
-          if (!pending.length){
-            expandedHtml =
-              '<div class="msgBox ok" style="margin-top:10px;">'+
-                '<div class="big ok">✅ '+escapeHtml(openGroup)+' 全部已簽到 / All checked-in</div>'+
-              '</div>';
-          } else {
-            expandedHtml =
-              '<div class="msgBox warn" style="margin-top:10px;">'+
-                '<div class="big warn">❌ '+escapeHtml(openGroup)+' 未簽到 / Not yet</div>'+
-                '<div class="listWrap" style="margin-top:10px;">'+
-                  pending.map(function(row){
+          expandedHtml =
+            '<div class="listWrap" style="margin-top:10px;">'+
+              (groupRows.length
+                ? groupRows.map(function(row){
                     var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
-                    var roleLine = [row.position, row.slot].filter(Boolean).join(' · ');
+                    var roleLine = getServingPositionLabel_(row.position);
+                    var isNa = isServingNaRow_(row);
+                    var statusChip = isNa
+                      ? '<span class="chip warn">N/A</span>'
+                      : (row.checkedIn
+                        ? '<span class="chip goodLight">✅ 已簽到 / Checked-in</span>'
+                        : '<span class="chip bad">❌ 未簽到 / Not yet</span>');
                     return ''+
                       '<div class="nameItem">'+
                         '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
                         '<div class="en">'+escapeHtml(roleLine)+'</div>'+
+                        '<div class="chipRow" style="margin-top:8px;">'+statusChip+'</div>'+
                       '</div>';
-                  }).join('')+
-                '</div>'+
-              '</div>';
-          }
+                  }).join('')
+                : '<div class="msgBox warn" style="margin-top:0;"><div class="big warn">暫無記錄 / No serving records</div></div>')+
+            '</div>';
         }
 
         box.innerHTML =
           '<div class="big">🧩 事奉 / Serving today</div>' +
           '<div class="small">共 ' + list.length + ' 位 / Total ' + list.length + '</div>' +
           summaryHtml +
-          expandedHtml +
-          '<div class="listWrap" style="margin-top:10px;">' +
-            list.map(function(row){
-              var groupLabel = getServingGroupLabel_(row.group);
-              var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
-              var roleLine = [groupLabel, row.position, row.slot].filter(Boolean).join(' · ');
-              var isNa = isServingNaRow_(row);
-              var statusChip = isNa
-                ? '<span class="chip warn">N/A</span>'
-                : (row.checkedIn
-                  ? '<span class="chip goodLight">✅ 已簽到 / Checked-in</span>'
-                  : '<span class="chip bad">❌ 未簽到 / Not yet</span>');
-              return ''+
-                '<div class="nameItem">'+
-                  '<div class="zh">'+escapeHtml(nameLine || row.memberId)+'</div>'+
-                  '<div class="en">'+escapeHtml(roleLine)+'</div>'+
-                  '<div class="chipRow" style="margin-top:8px;">'+statusChip+'</div>'+
-                '</div>';
-            }).join('') +
-          '</div>';
+          expandedHtml;
+        attachScrollControls_(box);
 
         Array.prototype.slice.call(box.querySelectorAll('.servingGroupChip')).forEach(function(el){
           el.onclick = function(){
@@ -1694,6 +1761,7 @@
       var outEl = $('vrmResults');
 
       function render(res){
+        if (!App.vrmActive || App.view !== 'vrm') return;
         if(!res || !res.ok){ outEl.innerHTML=''; showErr('vrmMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
         var list = res.results || [];
         if(!list.length){
@@ -1729,6 +1797,7 @@
         if(!q){ outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>'; return; }
         outEl.innerHTML = '<div class="small">搜尋中… / Searching…</div>';
         callApi('api_search_vrm', App.token, q, null).then(render).catch(function(){
+          if (!App.vrmActive || App.view !== 'vrm') return;
           showErr('vrmMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
           outEl.innerHTML='';
         });
@@ -1954,6 +2023,7 @@
           '<button id="btnMdHandle" class="orange">✅ 已接待 / Mark handled</button>'+
           '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>';
         o.querySelector('#mdBox').appendChild(actionBox);
+        attachScrollControls_(o);
 
         var btnHandle = o.querySelector('#btnMdHandle');
         var btnUndo = o.querySelector('#btnMdUndo');

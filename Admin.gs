@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-07.admin10';
+const ADMIN_VERSION = '2026-02-08.admin11';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -114,14 +114,14 @@ const ADMIN_SERVING_POSITIONS = [
 ];
 const ADMIN_SERVING_POSITION_LABELS = {
   Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
-  Worship_Singer_1:     { zh:'敬拜和唱 1', en:'Worship Singer 1' },
-  Worship_Singer_2:     { zh:'敬拜和唱 2', en:'Worship Singer 2' },
+  Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
+  Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
   Worship_Pianist:      { zh:'司琴', en:'Pianist' },
   Worship_Drum:         { zh:'鼓手', en:'Drummer' },
   Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
   Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
-  Media_AV:             { zh:'影音', en:'Audio / Visual' },
-  Media_PPT:            { zh:'PPT投影', en:'PPT Projection' },
+  Media_AV:             { zh:'影音', en:'Audio Visual' },
+  Media_PPT:            { zh:'投影', en:'PPT' },
   Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
   Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
   Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
@@ -167,6 +167,11 @@ const ADMIN_SERVING_POSITION_MAX = {
 const ADMIN_SERVING_POSITION_MIN = {
   Finance_Offering: 2
 };
+function admin_servingPositionLabel_(pos){
+  const label = ADMIN_SERVING_POSITION_LABELS[pos];
+  if (label) return label.en + ' / ' + label.zh;
+  return String(pos || '');
+}
 
 // Cache
 const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
@@ -318,7 +323,7 @@ function api_admin_serving_event_rows(token, eventKey){
   const members = Object.keys(mi.byId).map(function(id){
     const m = mi.byId[id];
     const groups = (m.servingGroups || []).concat(m.servingGLGroups || []).filter(Boolean);
-    return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', groups: groups };
+    return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', preferredName: m.preferredName||'', groups: groups };
   });
   members.sort(function(a,b){ return a.id.localeCompare(b.id); });
   return { ok:true, eventKey: ev, positions: positions, values: values, members: members };
@@ -351,7 +356,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   }
 
   const duplicateMap = {};
-  const worshipDuplicates = new Set();
   const duplicateDetails = [];
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
@@ -362,7 +366,12 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     const ids = admin_extractMemberIdsFromServingValue_(r.value);
     const maxAllowed = ADMIN_SERVING_POSITION_MAX[r.position] || 1;
     if (ids.length > maxAllowed){
-      return admin_err_('E409','崗位人數超出上限','Too many people for this position.');
+      return admin_err_(
+        'E409',
+        '崗位人數超出上限',
+        'Too many people for this position.',
+        admin_servingPositionLabel_(r.position) + ': ' + ids.join(', ')
+      );
     }
     const minAllowed = ADMIN_SERVING_POSITION_MIN[r.position] || 0;
     if (minAllowed && ids.length > 0 && ids.length < minAllowed){
@@ -382,9 +391,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   Object.keys(duplicateMap).forEach(function(id){
     const positions = duplicateMap[id] || [];
     if (positions.length <= 1) return;
-    const hasWorship = positions.some(function(p){ return (ADMIN_SERVING_POSITION_GROUP[p] || '') === 'worship'; });
-    if (hasWorship) worshipDuplicates.add(id);
-    duplicateDetails.push({ memberId: id, positions: positions });
+    duplicateDetails.push({ memberId: id, positions: positions.slice(0, 2) });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -399,12 +406,13 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   if (invalidGroupAssignments.length){
     return admin_err_('E409','成員不屬於該事奉組別','Member is not in the required serving group.');
   }
-  if (worshipDuplicates.size){
-    return admin_err_('E409','敬拜崗位不可重覆同一會員','Worship positions cannot be duplicated for the same member.');
-  }
   if (duplicateDetails.length){
     if (!canOverride){
-      return admin_err_('E409','同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.');
+      const detail = duplicateDetails.map(function(d){
+        const labels = (d.positions || []).map(admin_servingPositionLabel_);
+        return d.memberId + ': ' + labels.join(', ');
+      }).join(' | ');
+      return admin_err_('E409','同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.', detail);
     }
     if (!overrideAway){
       return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, canOverride:true };
@@ -1372,14 +1380,16 @@ function admin_extractServingKey_(header){
 function admin_splitServingValues_(raw){
   const s = String(raw||'').trim();
   if (!s) return [];
-  return s.split(/[,/]/).map(x => String(x||'').trim()).filter(Boolean);
+  return s.split(',').map(x => String(x||'').trim()).filter(Boolean);
 }
 function admin_extractMemberIdsFromServingValue_(raw){
   return admin_splitServingValues_(raw).map(function(v){
-    const up = String(v||'').trim().toUpperCase();
-    if (!/^CCF\d{4}$/.test(up)) return '';
-    if (admin_isServingNaValue_(up)) return '';
-    return up;
+    const token = String(v||'').trim();
+    if (!token) return '';
+    if (admin_isServingNaValue_(token)) return '';
+    const matched = token.match(/CCF\d{4}/i);
+    if (matched && matched[0]) return matched[0].toUpperCase();
+    return '';
   }).filter(Boolean);
 }
 function admin_normalizeServingGroup_(g){
@@ -1572,10 +1582,12 @@ function admin_getServingPlanMatrix_(events){
       if (!raw) return;
       const values = admin_splitServingValues_(raw);
       values.forEach(function(val){
-        const rawUpper = String(val||'').trim().toUpperCase();
-        const member = byId[rawUpper] || {};
+        const token = String(val||'').trim();
+        const matched = token.match(/CCF\d{4}/i);
+        const memberId = matched ? matched[0].toUpperCase() : '';
+        const member = memberId ? (byId[memberId] || {}) : {};
         const entry = {
-          memberId: rawUpper,
+          memberId: memberId,
           rawValue: val,
           nameZh: String(member.nameZh || ''),
           nameEn: String(member.nameEn || ''),

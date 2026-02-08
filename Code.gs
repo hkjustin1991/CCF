@@ -23,7 +23,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-02-07.staff9';
+const APP_VERSION = '2026-02-08.staff10';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -441,7 +441,7 @@ function parseServingHeader_(header){
 function parseServingMemberIds_(raw){
   const s = String(raw||'').trim();
   if (!s) return [];
-  return s.split(/[,/]/).map(v => String(v||'').trim()).filter(Boolean);
+  return s.split(',').map(v => String(v||'').trim()).filter(Boolean);
 }
 function findServingEventRowIndex_(sh, eventKey){
   const lastRow = sh.getLastRow();
@@ -473,7 +473,9 @@ function getServingForEvent_(eventKey, membersById, checkedInSet){
     entries.forEach(function(entry){
       if (!entry) return;
       if (isServingNaValue_(entry)) return;
-      const memberId = String(entry || '').trim().toUpperCase();
+      const matched = String(entry || '').trim().match(/CCF\d{4}/i);
+      const memberId = matched ? matched[0].toUpperCase() : String(entry || '').trim().toUpperCase();
+      if (!memberId) return;
       const m = membersById[memberId] || {};
       out.push({
         eventKey: eventKey,
