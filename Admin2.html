@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui12-serving-quick-edit
+  UI VERSION TAG: admin2-ui13-serving-fixes
   For Admin.gs: v2026-02-08.admin13
   ============================================================
   -->
@@ -2144,20 +2144,34 @@
             return '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
           }
 
+          function formatServingName_(r){
+            var pref = String(r.preferredName||'').trim();
+            var en = String(r.nameEn||'').trim();
+            var zh = String(r.nameZh||'').trim();
+            return [pref, en, zh].filter(Boolean).join(' / ');
+          }
+          function servingBadgeHtml_(groupKey){
+            var badge = SERVING_GROUP_BADGES[normalizeServingGroupKey_(groupKey)] || null;
+            if (!badge) return escapeHtml(getServingGroupLabel_(groupKey));
+            return '<span class="'+badge.cls+'">'+escapeHtml(badge.zh)+' / '+escapeHtml(badge.en)+'</span>';
+          }
+
           var html = '';
           var currentGroup = '';
           rows.forEach(function(r){
             if (r.group !== currentGroup){
               currentGroup = r.group;
-              html += '<div class="big" style="margin-top:10px;">'+escapeHtml(getServingGroupLabel_(currentGroup))+'</div>';
+              html += '<div class="big" style="margin-top:10px;">'+servingBadgeHtml_(currentGroup)+'</div>';
             }
-            var who = r.nameEn || r.nameZh || r.memberId || '—';
+            var who = formatServingName_(r);
             var slot = r.slot ? (' · ' + r.slot) : '';
             var status = r.checkedIn ? '✅' : '❌';
+            var posLabel = servingPositionLabel_({ position: r.position, group: r.group });
+            var idLine = r.memberId || '—';
             html += ''+
               '<div class="nameItem">'+
-                '<div class="zh">'+escapeHtml(status+' '+(r.position||'')+slot)+'</div>'+
-                '<div class="en">'+escapeHtml(who)+'</div>'+
+                '<div class="zh">'+escapeHtml(status+' '+posLabel+slot)+'</div>'+
+                '<div class="en">'+escapeHtml(idLine+(who ? (' · '+who) : ''))+'</div>'+
               '</div>';
           });
           return '<div class="listWrap" style="margin-top:10px;">'+html+'</div>';
@@ -2193,14 +2207,17 @@
         if (c.new > 0){
           m.querySelector('#btnNew').onclick = function(){
             m.querySelector('#listBox').innerHTML = renderList_(newList);
+            m.querySelector('#servingBox').innerHTML = '';
           };
         }
         if (c.existing > 0){
           m.querySelector('#btnEx').onclick = function(){
             m.querySelector('#listBox').innerHTML = renderList_(exList);
+            m.querySelector('#servingBox').innerHTML = '';
           };
         }
         m.querySelector('#btnServing').onclick = function(){
+          m.querySelector('#listBox').innerHTML = '';
           m.querySelector('#servingBox').innerHTML = renderServingList_(servingRows);
         };
 
@@ -2357,13 +2374,13 @@
               '<div class="big">🏖️ 請假 / Absence</div>'+
               '<div class="small">Holiday 1 / 假期一</div>'+
               '<div class="kv">'+
-                '<div>Holiday 1 From / 假期一開始</div><div><input id="awayFrom1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from1||''))+'" /></div>'+
-                '<div>Holiday 1 To / 假期一結束</div><div><input id="awayTo1" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to1||''))+'" /></div>'+
+                '<div>Holiday 1 From / 假期一開始</div><div><input id="awayFrom1" type="date" value="'+escapeHtml(away.from1||'')+'" /></div>'+
+                '<div>Holiday 1 To / 假期一結束</div><div><input id="awayTo1" type="date" value="'+escapeHtml(away.to1||'')+'" /></div>'+
               '</div>'+
               '<div class="small" style="margin-top:10px;">Holiday 2 / 假期二</div>'+
               '<div class="kv">'+
-                '<div>Holiday 2 From / 假期二開始</div><div><input id="awayFrom2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from2||''))+'" /></div>'+
-                '<div>Holiday 2 To / 假期二結束</div><div><input id="awayTo2" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to2||''))+'" /></div>'+
+                '<div>Holiday 2 From / 假期二開始</div><div><input id="awayFrom2" type="date" value="'+escapeHtml(away.from2||'')+'" /></div>'+
+                '<div>Holiday 2 To / 假期二結束</div><div><input id="awayTo2" type="date" value="'+escapeHtml(away.to2||'')+'" /></div>'+
               '</div>'+
               '<div class="miniBtnRow">'+
                 '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
@@ -2377,17 +2394,12 @@
             var awayTo1 = absModal.querySelector('#awayTo1');
             var awayFrom2 = absModal.querySelector('#awayFrom2');
             var awayTo2 = absModal.querySelector('#awayTo2');
-            [awayFrom1, awayTo1, awayFrom2, awayTo2].forEach(function(el){
-              el.onfocus = function(){ toggleDateInput_(el, true); };
-              el.onblur = function(){ toggleDateInput_(el, false); };
-            });
-
             absModal.querySelector('#btnAwayClose').onclick = function(){ closeModal(absModal); };
             absModal.querySelector('#btnAwaySave').onclick = function(){
-              var fromDmy1 = String(awayFrom1.value||'').trim();
-              var toDmy1 = String(awayTo1.value||'').trim();
-              var fromDmy2 = String(awayFrom2.value||'').trim();
-              var toDmy2 = String(awayTo2.value||'').trim();
+              var fromDmy1 = ymdToDmy_(String(awayFrom1.value||'').trim());
+              var toDmy1 = ymdToDmy_(String(awayTo1.value||'').trim());
+              var fromDmy2 = ymdToDmy_(String(awayFrom2.value||'').trim());
+              var toDmy2 = ymdToDmy_(String(awayTo2.value||'').trim());
               if ((fromDmy1 && !toDmy1) || (!fromDmy1 && toDmy1) || (fromDmy2 && !toDmy2) || (!fromDmy2 && toDmy2)){
                 showBox('awayMsg','err','請填寫完整日期','Please complete both from/to dates.');
                 return;

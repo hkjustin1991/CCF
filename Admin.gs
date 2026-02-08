@@ -1505,19 +1505,22 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
     const values = admin_splitServingValues_(raw);
     values.forEach(function(val){
       const rawUpper = String(val||'').trim().toUpperCase();
+      const ids = admin_extractMemberIdsFromServingValue_(val);
+      const memberId = ids && ids.length ? ids[0] : rawUpper;
       const entry = {
         eventKey: eventKey,
         group: pos.group,
         position: pos.position,
         slot: '',
-        memberId: rawUpper,
+        memberId: memberId,
         rawValue: val,
-        checkedIn: checkedInSet && checkedInSet.has(rawUpper)
+        checkedIn: checkedInSet && !!(ids && ids.length) && checkedInSet.has(memberId)
       };
       if (!includeNa && admin_isServingNaValue_(rawUpper)) return;
-      const m = membersById[rawUpper] || {};
+      const m = membersById[memberId] || {};
       entry.nameZh = String(m.nameZh || '');
       entry.nameEn = String(m.nameEn || '');
+      entry.preferredName = String(m.preferredName || '');
       out.push(entry);
     });
   });

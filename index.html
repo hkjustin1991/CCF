@@ -694,6 +694,9 @@
       if(App.clockTimer){ clearInterval(App.clockTimer); App.clockTimer=null; }
       clearTimeout(App.debounceT);
       if (App.view !== 'vrm'){
+        if (App.vrmActive){
+          App.vrmToken = (App.vrmToken || 0) + 1;
+        }
         App.vrmActive = false;
         clearTimeout(App.vrmDebounceT);
       }
@@ -1816,6 +1819,10 @@
       qEl.oninput = function(){
         clearTimeout(App.vrmDebounceT);
         App.vrmDebounceT = setTimeout(doSearch, 250);
+      };
+      qEl.onkeydown = function(ev){
+        if (!ev || ev.key !== 'Enter') return;
+        doSearch();
       };
       qEl.onkeydown = function(ev){
         if (!ev || ev.key !== 'Enter') return;
