@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui8-serving-edit-away
-  For Admin.gs: v2026-02-07.admin10
+  UI VERSION TAG: admin2-ui13-serving-fixes
+  For Admin.gs: v2026-02-08.admin13
   ============================================================
   -->
 
@@ -57,6 +57,8 @@
 
     button{cursor:pointer;font-weight:900;box-shadow:0 6px 14px rgba(10,30,80,0.06)}
     button:disabled{opacity:.45;cursor:not-allowed}
+    .btnMini{font-size:14px;padding:10px;border-radius:12px}
+    .inputMini{font-size:14px;padding:10px;border-radius:12px}
 
     /* Color system (distinct functions) */
     .btnMain{background:#e9fff4;border-color:rgba(26,168,108,0.25)}          /* light green */
@@ -113,6 +115,73 @@
     .chip{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted);background:#fff}
     .chip.bad{border-color:rgba(217,60,94,0.25);background:#fff1f4;color:#9f1239}
     .flag{margin-left:6px;font-weight:950}
+    .groupBadge{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:800;
+      margin-right:6px;
+      color:#0d1b3d;
+      border:1px solid var(--border);
+      background:#fff;
+    }
+    .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
+    .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
+    .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
+    .groupBadge.support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
+    .groupBadge.finance{background:#fff2cc;border-color:rgba(202,155,0,0.45);color:#7a5b00}
+
+    .posGroup-worship{background:#fff0f3}
+    .posGroup-media{background:#f0f6ff}
+    .posGroup-logistic{background:#f7efe4}
+    .posGroup-support{background:#ecfff6}
+    .posGroup-finance{background:#fff6d8}
+
+    .scrollControls{
+      position:sticky;
+      bottom:8px;
+      display:flex;
+      justify-content:flex-end;
+      gap:6px;
+      margin-top:8px;
+      z-index:5;
+    }
+    .scrollBtn{
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      cursor:pointer;
+    }
+    .assignList{display:flex;flex-wrap:wrap;gap:6px}
+    .assignChip{
+      border:1px solid var(--border);
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      background:#fff;
+      display:flex;
+      gap:6px;
+      align-items:center;
+    }
+    .assignChip button{
+      border:none;
+      background:transparent;
+      cursor:pointer;
+      color:#d93c5e;
+      font-weight:900;
+    }
+    .suggestList{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px}
+    .suggestBtn{
+      border:1px solid var(--border);
+      background:#f8f9ff;
+      border-radius:999px;
+      padding:4px 8px;
+      font-size:12px;
+      cursor:pointer;
+    }
 
     .servingPlanTable th,
     .servingPlanTable td{
@@ -218,7 +287,8 @@
       to:null,
 
       chart:null,
-      matrixState:null
+      matrixState:null,
+      servingPlanOpenGroups:{}
     };
 
     function $(id){ return document.getElementById(id); }
@@ -245,21 +315,84 @@
     }
 
     var SERVING_GROUP_LABELS = {
-      MEDIA: '影像大師',
-      WORSHIP: '敬拜聯盟',
-      LOGISTIC: '後勤特工',
-      SUPPORT: '聖工支援',
-      FINANCE: '財務公司'
+      MEDIA: 'Media Master / 影像大師',
+      WORSHIP: 'Worship Alliance / 敬拜聯盟',
+      LOGISTIC: 'Logistic Specialist / 後勤特工',
+      SUPPORT: 'Divine Supporter / 聖工支援隊',
+      FINANCE: 'Finance Dept / 財務公司'
     };
     function getServingGroupLabel_(group){
       var key = String(group || '').trim().toUpperCase();
       return SERVING_GROUP_LABELS[key] || key || '—';
     }
+    var SERVING_POSITION_LABELS = {
+      Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
+      Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
+      Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
+      Worship_Pianist:      { zh:'司琴', en:'Pianist' },
+      Worship_Drum:         { zh:'鼓手', en:'Drummer' },
+      Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
+      Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+      Media_AV:             { zh:'影音', en:'Audio Visual' },
+      Media_PPT:            { zh:'投影', en:'PPT' },
+      Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
+      Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+      Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
+      Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
+      Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
+      Logistic_Welcome:     { zh:'接待', en:'Welcome / Seating' },
+      Logistic_Venue:       { zh:'場務', en:'Venue / Setup / Cleanup' },
+      Logistic_Refreshment: { zh:'茶水', en:'Refreshments' },
+      Finance_Offering:     { zh:'財務', en:'Offering / Finance' },
+      Other:                { zh:'其他', en:'Other' }
+    };
+    var POSITION_GROUP = {
+      Worship_Lead: 'worship',
+      Worship_Singer_1: 'worship',
+      Worship_Singer_2: 'worship',
+      Worship_Pianist: 'worship',
+      Worship_Drum: 'worship',
+      Worship_Instrument_1: 'worship',
+      Worship_Instrument_2: 'worship',
+      Media_AV: 'media',
+      Media_PPT: 'media',
+      Media_PPTBuild: 'media',
+      Support_BibleReader: 'support',
+      Support_Prayer: 'support',
+      Support_Communion: 'support',
+      Support_Care: 'support',
+      Logistic_Welcome: 'logistic',
+      Logistic_Venue: 'logistic',
+      Logistic_Refreshment: 'logistic',
+      Finance_Offering: 'finance',
+      Other: 'other'
+    };
+    var POSITION_MAX = {
+      Media_AV: 2,
+      Media_PPTBuild: 2,
+      Support_Communion: 2,
+      Support_Care: 2,
+      Logistic_Welcome: 2,
+      Logistic_Venue: 2,
+      Logistic_Refreshment: 2,
+      Finance_Offering: 3
+    };
+    var SERVING_GROUP_BADGES = {
+      worship: { zh:'敬拜聯盟', en:'Worship Alliance', cls:'groupBadge worship' },
+      media: { zh:'影像大師', en:'Media Master', cls:'groupBadge media' },
+      logistic: { zh:'後勤特工', en:'Logistic Specialist', cls:'groupBadge logistic' },
+      support: { zh:'聖工支援隊', en:'Divine Supporter', cls:'groupBadge support' },
+      finance: { zh:'財務公司', en:'Finance Dept', cls:'groupBadge finance' },
+      other: { zh:'其他', en:'Other', cls:'groupBadge' }
+    };
     function servingPositionLabel_(pos){
       if (!pos) return '—';
+      var key = String(pos.position || pos.key || '').trim();
+      var label = SERVING_POSITION_LABELS[key];
+      if (label) return label.zh + ' / ' + label.en;
       var group = getServingGroupLabel_(pos.group);
       var position = String(pos.position || '').trim();
-      return position ? (group + ' / ' + position) : group;
+      return position ? (position + (group ? (' / ' + group) : '')) : (group || '—');
     }
     function ymdToDmy_(ymd){
       var s = String(ymd||'').trim();
@@ -308,6 +441,23 @@
         escapeHtml((res && res.en) || 'System error'),
         detail
       );
+    }
+
+    function attachScrollControls_(root){
+      var scope = root || document;
+      var targets = Array.prototype.slice.call(scope.querySelectorAll('.listWrap, .modal, .tableWrap'));
+      targets.forEach(function(el){
+        if (el.querySelector('.scrollControls')) return;
+        if (el.scrollHeight <= el.clientHeight) return;
+        var ctrl = document.createElement('div');
+        ctrl.className = 'scrollControls';
+        ctrl.innerHTML =
+          '<button type="button" class="scrollBtn scrollUp">▲</button>'+
+          '<button type="button" class="scrollBtn scrollDown">▼</button>';
+        ctrl.querySelector('.scrollUp').onclick = function(){ el.scrollBy({ top: -180, behavior: 'smooth' }); };
+        ctrl.querySelector('.scrollDown').onclick = function(){ el.scrollBy({ top: 180, behavior: 'smooth' }); };
+        el.appendChild(ctrl);
+      });
     }
 
     function openModal(html){
@@ -384,10 +534,107 @@
       if (st === 'TEMP') return 'TEMP';
       return st || '';
     }
+    function normalizeServingGroupKey_(g){
+      var key = String(g||'').trim().toUpperCase();
+      if (key === 'WORSHIP') return 'worship';
+      if (key === 'MEDIA') return 'media';
+      if (key === 'LOGISTIC') return 'logistic';
+      if (key === 'SUPPORT') return 'support';
+      if (key === 'FINANCE') return 'finance';
+      return '';
+    }
+    function renderServingGroupBadges_(groups){
+      var list = Array.isArray(groups) ? groups : [];
+      var seen = {};
+      var html = list.map(function(g){
+        var key = normalizeServingGroupKey_(g);
+        if (!key || seen[key]) return '';
+        seen[key] = true;
+        var label = SERVING_GROUP_BADGES[key];
+        if (!label) return '';
+        return '<span class="'+label.cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+      }).filter(Boolean).join('');
+      return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
+    }
 
     function eventDateYmdFromKey(ev){
       var m = String(ev||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
       return m ? m[1] : '';
+    }
+    function parseYmdParts_(ymd){
+      var m = String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return null;
+      return { y:+m[1], m:+m[2], d:+m[3] };
+    }
+    function monthLabel_(monthNum){
+      var en = new Date(Date.UTC(2026, monthNum-1, 1)).toLocaleString('en', { month:'short' });
+      return monthNum + '月 / ' + en;
+    }
+    function eventLabel_(ev){
+      var parts = parseYmdParts_(ev.dateYmd);
+      if (!parts) return escapeHtml(ev.eventKey||'');
+      var en = new Date(Date.UTC(2026, parts.m-1, 1)).toLocaleString('en', { month:'short' });
+      return parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d;
+    }
+    function formatServingEntry_(entry){
+      var raw = String(entry.rawValue || entry.memberId || '').trim();
+      if (!raw) return '';
+      var upper = raw.toUpperCase();
+      if (upper === 'N/A' || upper === 'NA') return 'N/A';
+      var isCcf = /^CCF\d{4}$/.test(upper);
+      if (!isCcf) return raw;
+      var hasName = entry.nameZh || entry.nameEn;
+      var nameLine = '';
+      if (hasName){
+        var names = [entry.nameZh, entry.nameEn].filter(Boolean).join(' / ');
+        nameLine = names ? (' ' + names) : '';
+      }
+      return upper + nameLine;
+    }
+    function splitServingValues_(raw){
+      var s = String(raw||'').trim();
+      if (!s) return [];
+      return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+    }
+    function extractMemberId_(token){
+      var m = String(token||'').match(/CCF\\d{4}/i);
+      return m ? String(m[0]||'').toUpperCase() : '';
+    }
+    function preferredNameForSheet_(m){
+      if (!m) return '';
+      var pref = String(m.preferredName||'').trim();
+      if (pref) return pref;
+      var en = String(m.nameEn||'').trim();
+      if (en) return en;
+      return String(m.nameZh||'').trim();
+    }
+    function memberLabel_(m){
+      if (!m) return '';
+      var pref = String(m.preferredName||'').trim();
+      var zh = String(m.nameZh||'').trim();
+      var en = String(m.nameEn||'').trim();
+      return m.id + ' ' + [zh, en].filter(Boolean).join(' ') + (pref ? (' ('+pref+')') : '');
+    }
+    function formatServingToken_(memberMap, memberId){
+      var m = memberMap[String(memberId||'').toUpperCase()];
+      if (!m) return String(memberId||'');
+      var name = preferredNameForSheet_(m);
+      return m.id + (name ? (' ('+name+')') : '');
+    }
+    function memberMatchesGroup_(member, groupKey){
+      if (!groupKey || groupKey === 'other') return true;
+      if (!member) return false;
+      var groups = Array.isArray(member.groups) ? member.groups : [];
+      return groups.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
+    }
+    function buildMemberOptions_(members, groupKey){
+      var list = Array.isArray(members) ? members : [];
+      var opts = '<option value="">選擇 / Select</option>';
+      list.forEach(function(m){
+        if (!memberMatchesGroup_(m, groupKey)) return;
+        opts += '<option value="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</option>';
+      });
+      return opts;
     }
 
     /* ---------- Login (no camera here; QR login via server is handled elsewhere) ---------- */
@@ -396,14 +643,14 @@
         '<div class="card">'+
           '<div class="big">🔐 登入 / Login</div>'+
           '<div class="small">請掃描你自己的同工 QR 登入。<br/>Please scan your own staff QR to login.</div>'+
+          '<div class="miniBtnRow" style="margin-top:8px;">'+
+            '<button id="btnScanLogin" class="btnMain">📷 掃描 QR / Scan QR</button>'+
+          '</div>'+
           '<div class="divider"></div>'+
           '<div class="label">授權登入 / Authorised login</div>'+
-          '<input id="internalField" type="password" autocomplete="off" />'+
+          '<input id="internalField" type="password" autocomplete="off" class="inputMini" />'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+
-            '<button id="btnInternal" class="btnBack">OK</button>'+
-          '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnScanLogin" class="btnMain">📷 掃描 QR / Scan QR</button>'+
+            '<button id="btnInternal" class="btnBack btnMini">OK</button>'+
           '</div>'+
           '<div id="loginMsg"></div>'+
         '</div>';
@@ -680,6 +927,7 @@
       return ''+
         '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
           '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+          '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
           '<div id="servingPlanList" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -692,80 +940,149 @@
       $('backServingPlan').onclick = function(){ App.view='menu'; render(); };
 
       var listEl = $('servingPlanList');
-      listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
+      function loadServingPlan(){
+        listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
 
-      callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()).then(function(res){
-        if(!res || !res.ok){
-          listEl.innerHTML = '';
-          showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
-          return;
-        }
-        var events = res.events || [];
-        var positions = res.positions || [];
-        if(!events.length){
-          listEl.innerHTML =
-            '<div class="msgBox warn">'+
-              '<div class="big warn">暫無記錄 / No events</div>'+
-            '</div>';
-          return;
-        }
-        if(!positions.length){
-          listEl.innerHTML =
-            '<div class="msgBox warn">'+
-              '<div class="big warn">暫無事奉資料 / No serving rows</div>'+
-            '</div>';
-          return;
-        }
+        callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()).then(function(res){
+          if(!res || !res.ok){
+            listEl.innerHTML = '';
+            showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+            return;
+          }
+          var events = res.events || [];
+          var positions = res.positions || [];
+          if(!events.length){
+            listEl.innerHTML =
+              '<div class="msgBox warn">'+
+                '<div class="big warn">暫無記錄 / No events</div>'+
+              '</div>';
+            return;
+          }
+          if(!positions.length){
+            listEl.innerHTML =
+              '<div class="msgBox warn">'+
+                '<div class="big warn">暫無事奉資料 / No serving rows</div>'+
+              '</div>';
+            return;
+          }
 
-        var headerHtml = positions.map(function(pos){
-          return '<th class="servingPlanCell">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
-        }).join('');
-
-        var bodyHtml = events.map(function(ev){
-          var rowCells = positions.map(function(pos){
-            var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
-            if(!cell || !cell.length){
-              return '<td class="servingPlanCell">—</td>';
+          var groupOrder = ['worship','media','logistic','support','finance','other'];
+          var monthMap = {};
+          var monthKeys = [];
+          events.forEach(function(ev){
+            var parts = parseYmdParts_(ev.dateYmd);
+            if (!parts) return;
+            var key = parts.m;
+            if (!monthMap[key]){
+              monthMap[key] = [];
+              monthKeys.push(key);
             }
-            var entries = cell.map(function(entry){
-              var name = entry.nameEn || entry.nameZh || entry.memberId || '—';
-              var slot = entry.slot ? (' · ' + entry.slot) : '';
-              return '<div class="servingPlanEntry">'+escapeHtml(name + slot)+'</div>';
-            }).join('');
-            return '<td class="servingPlanCell">'+entries+'</td>';
+            monthMap[key].push(ev);
+          });
+          monthKeys.sort(function(a,b){ return a - b; });
+          if (!App.servingPlanMonth && monthKeys.length){
+            App.servingPlanMonth = monthKeys[0];
+          }
+          var monthButtons = monthKeys.map(function(m){
+            var active = (String(App.servingPlanMonth) === String(m));
+            var cls = active ? 'btnMain' : 'btnBack';
+            return '<button class="'+cls+' monthPick" data-month="'+m+'">'+escapeHtml(monthLabel_(m))+'</button>';
           }).join('');
-          return ''+
-            '<tr>'+
-              '<td class="servingPlanEvent">'+
-                '<div>'+escapeHtml(ev.eventKey||'')+'</div>'+
-                '<div class="small">'+escapeHtml(ev.dateYmd||'')+'</div>'+
-                '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'">✏️ 編輯 / Edit</button></div>'+
-              '</td>'+
-              rowCells +
-            '</tr>';
-        }).join('');
+          var monthNavHtml =
+            '<div class="miniBtnRow" style="margin-top:6px;">'+
+              monthButtons+
+            '</div>';
+          var viewEvents = monthMap[App.servingPlanMonth] || [];
+          var groupSections = groupOrder.map(function(groupKey){
+            var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
+            var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
+            if (!groupPositions.length) return '';
+            var headerHtml = groupPositions.map(function(pos){
+              return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
+            }).join('');
+            var bodyHtml = viewEvents.map(function(ev){
+              var rowCells = groupPositions.map(function(pos){
+                var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+                if(!cell || !cell.length){
+                  return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'"></td>';
+                }
+                var entries = cell.map(function(entry, idx){
+                  var label = formatServingEntry_(entry);
+                  if (!label) return '';
+                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
+                  return ''+
+                    '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
+                      escapeHtml(label)+
+                    '</button>';
+                }).filter(Boolean).join('');
+                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+entries+'</td>';
+              }).join('');
+              return ''+
+                '<tr>'+
+                  '<td class="servingPlanEvent">'+
+                    '<div>'+escapeHtml(eventLabel_(ev))+'</div>'+
+                    '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(groupKey)+'">✏️ 編輯 / Edit</button></div>'+
+                  '</td>'+
+                  rowCells +
+                '</tr>';
+            }).join('');
+            var isOpen = !!App.servingPlanOpenGroups[groupKey];
+            return ''+
+              '<div class="monthSection" data-group="'+groupKey+'">'+
+                '<button class="btnPeriod servingGroupToggle '+badge.cls+'" data-group="'+groupKey+'">'+
+                  badge.zh + ' / ' + badge.en + (isOpen ? ' ▲' : ' ▼')+
+                '</button>'+
+                '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
+                  '<div class="tableWrap">'+
+                    '<table class="servingPlanTable">'+
+                      '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
+                      '<tbody>'+bodyHtml+'</tbody>'+
+                    '</table>'+
+                  '</div>'+
+                '</div>'+
+              '</div>';
+          }).join('');
 
-        listEl.innerHTML =
-          '<div class="tableWrap">'+
-            '<table class="servingPlanTable">'+
-              '<thead><tr><th class="servingPlanEvent">Event ID</th>'+headerHtml+'</tr></thead>'+
-              '<tbody>'+bodyHtml+'</tbody>'+
-            '</table>'+
-          '</div>';
+          listEl.innerHTML = monthNavHtml + groupSections;
+          attachScrollControls_(listEl);
 
-        Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
-          btn.onclick = function(){
-            openServingEditModal(btn.getAttribute('data-event'));
-          };
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
+            btn.onclick = function(){
+              openServingEditModal(btn.getAttribute('data-event'), btn.getAttribute('data-group'));
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingPlanEntry')).forEach(function(btn){
+            btn.onclick = function(){
+              openServingQuickEdit_(btn.getAttribute('data-event'), btn.getAttribute('data-position'), btn.getAttribute('data-idx'), btn.getAttribute('data-raw'), btn.getAttribute('data-group'));
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupToggle')).forEach(function(btn){
+            btn.onclick = function(){
+              var key = String(btn.getAttribute('data-group')||'');
+              App.servingPlanOpenGroups[key] = !App.servingPlanOpenGroups[key];
+              loadServingPlan();
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
+            btn.onclick = function(){
+              var monthKey = String(btn.getAttribute('data-month')||'');
+              App.servingPlanMonth = monthKey;
+              loadServingPlan();
+            };
+          });
+        }).catch(function(){
+          listEl.innerHTML = '';
+          showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
-      }).catch(function(){
-        listEl.innerHTML = '';
-        showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-      });
+      }
+
+      App.refreshServingPlan = loadServingPlan;
+      loadServingPlan();
     }
 
-    function openServingEditModal(eventKey){
+    function openServingEditModal(eventKey, groupKey){
       var ev = String(eventKey||'').trim();
+      var filterGroupKey = String(groupKey||'').trim();
       var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
@@ -780,41 +1097,282 @@
           return;
         }
 
-        var rows = (res.rows || []).map(function(r){
-          return {
-            group: String(r.group||'').trim().toUpperCase(),
-            position: String(r.position||'').trim(),
-            slot: String(r.slot||'').trim(),
-            memberId: String(r.memberId||'').trim().toUpperCase()
-          };
+        var positions = Array.isArray(res.positions) ? res.positions : [];
+        var displayPositions = filterGroupKey
+          ? positions.filter(function(pos){ return (POSITION_GROUP[pos] || '') === filterGroupKey; })
+          : positions.slice();
+        var values = res.values || {};
+        var members = Array.isArray(res.members) ? res.members : [];
+        var memberMap = {};
+        var assignedMap = {};
+        members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
+
+        function isNaToken_(token){
+          var up = String(token||'').trim().toUpperCase();
+          return (up === 'N/A' || up === 'NA');
+        }
+
+        displayPositions.forEach(function(pos){
+          var initial = splitServingValues_(values[pos] || '');
+          assignedMap[pos] = initial.map(function(token){
+            if (isNaToken_(token)) return 'N/A';
+            var id = extractMemberId_(token);
+            return id ? formatServingToken_(memberMap, id) : token;
+          }).filter(Boolean);
         });
 
+        function renderAssignedList_(pos){
+          var list = assignedMap[pos] || [];
+          if (!list.length){
+            return '<div class="small">—</div>';
+          }
+          return list.map(function(token, idx){
+            return '<span class="assignChip" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">'+
+              '<span>'+escapeHtml(token)+'</span>'+
+              '<button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">×</button>'+
+            '</span>';
+          }).join('');
+        }
+
         function renderRows_(){
-          if (!rows.length){
+          if (!displayPositions.length){
             return '<div class="small">暫無事奉資料 / No serving rows</div>';
           }
           var h = '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
-            '<th>Group</th><th>Position</th><th>Slot</th><th>Member ID</th><th></th>'+
+            '<th>事奉崗位 / Position</th><th>安排 / Assignment</th>'+
             '</tr></thead><tbody>';
-          rows.forEach(function(r, idx){
+          displayPositions.forEach(function(pos){
+            var groupKey = POSITION_GROUP[pos] || '';
+            var isOther = String(pos||'') === 'Other';
             h += '<tr>'+
-              '<td>'+escapeHtml(r.group)+'</td>'+
-              '<td>'+escapeHtml(r.position)+'</td>'+
-              '<td>'+escapeHtml(r.slot)+'</td>'+
-              '<td>'+escapeHtml(r.memberId)+'</td>'+
-              '<td><button class="btnDanger btnRemoveRow" data-idx="'+idx+'">刪除 / Remove</button></td>'+
-            '</tr>';
+              '<td class="posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_({ position: pos }))+'</td>'+
+              '<td>';
+            if (isOther){
+              h += '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(String(values[pos] || ''))+'</textarea>'+
+                   '<div class="miniBtnRow" style="margin-top:8px;">'+
+                     '<input class="inputMini otherInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名 / 備註" />'+
+                     '<button type="button" class="btnBack otherAdd btnSmall" data-pos="'+escapeHtml(pos)+'">加入 / Add</button>'+
+                   '</div>'+
+                   '<select class="inputMini otherSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, 'other')+'</select>'+
+                   '<div class="suggestList otherSuggest" data-pos="'+escapeHtml(pos)+'"></div>';
+            } else {
+              h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
+                   '<div class="miniBtnRow" style="margin-top:8px;">'+
+                     '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
+                     '<button type="button" class="btnBack assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
+                   '</div>'+
+                   '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, groupKey)+'</select>'+
+                   '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
+            }
+            h += '</td></tr>';
           });
           h += '</tbody></table></div>';
           return h;
         }
 
-        function bindRemove_(){
-          Array.prototype.slice.call(modal.querySelectorAll('.btnRemoveRow')).forEach(function(btn){
+        function syncValue_(pos){
+          if (String(pos||'') === 'Other'){
+            var ta = modal.querySelector('[data-pos="'+pos+'"]');
+            if (ta) values[pos] = String(ta.value||'').trim();
+            return;
+          }
+          values[pos] = (assignedMap[pos] || []).join(', ');
+        }
+        function refreshAssigned_(pos){
+          var box = modal.querySelector('.assignList[data-pos="'+pos+'"]');
+          if (box) box.innerHTML = renderAssignedList_(pos);
+          syncValue_(pos);
+        }
+        function addAssigned_(pos, memberId){
+          var token = String(memberId||'').trim();
+          if (!token) return;
+          if (isNaToken_(token)){
+            assignedMap[pos] = ['N/A'];
+            refreshAssigned_(pos);
+            return;
+          }
+          var id = extractMemberId_(token) || token.toUpperCase();
+          if (!id) return;
+          var current = assignedMap[pos] || [];
+          if (current.some(function(t){ return extractMemberId_(t) === id; })) return;
+          assignedMap[pos] = current.filter(function(t){ return !isNaToken_(t); });
+          assignedMap[pos].push(formatServingToken_(memberMap, id));
+          refreshAssigned_(pos);
+        }
+        function removeAssigned_(pos, idx){
+          var current = assignedMap[pos] || [];
+          current.splice(idx, 1);
+          assignedMap[pos] = current;
+          refreshAssigned_(pos);
+        }
+        function getSuggestions_(pos, query){
+          var groupKey = POSITION_GROUP[pos] || '';
+          var q = String(query||'').trim().toLowerCase();
+          if (!q) return [];
+          return members.filter(function(m){
+            if (!memberMatchesGroup_(m, groupKey)) return false;
+            var hay = [
+              String(m.id||''),
+              String(m.nameZh||''),
+              String(m.nameEn||''),
+              String(m.preferredName||'')
+            ].join(' ').toLowerCase();
+            return hay.indexOf(q) >= 0;
+          }).slice(0, 8);
+        }
+        function renderSuggestions_(pos, query){
+          var wrap = modal.querySelector('.suggestList[data-pos="'+pos+'"]');
+          if (!wrap) return;
+          var list = getSuggestions_(pos, query);
+          if (!query || !list.length){
+            wrap.innerHTML = '';
+            return;
+          }
+          wrap.innerHTML = list.map(function(m){
+            return '<button type="button" class="suggestBtn" data-pos="'+escapeHtml(pos)+'" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
+          }).join('');
+          Array.prototype.slice.call(wrap.querySelectorAll('button[data-id]')).forEach(function(btn){
             btn.onclick = function(){
-              var idx = parseInt(btn.getAttribute('data-idx'), 10);
-              rows.splice(idx, 1);
-              render();
+              var id = String(btn.getAttribute('data-id')||'');
+              addAssigned_(pos, id);
+              var input = modal.querySelector('.assignInput[data-pos="'+pos+'"]');
+              if (input) input.value = '';
+              wrap.innerHTML = '';
+            };
+          });
+        }
+        function appendOtherValue_(pos, token){
+          var ta = modal.querySelector('textarea[data-pos="'+pos+'"]');
+          if (!ta) return;
+          var current = splitServingValues_(String(ta.value||''));
+          if (token && current.indexOf(token) === -1) current.push(token);
+          ta.value = current.filter(Boolean).join(', ');
+          values[pos] = String(ta.value||'').trim();
+        }
+        function renderOtherSuggestions_(pos, query){
+          var wrap = modal.querySelector('.otherSuggest[data-pos="'+pos+'"]');
+          if (!wrap) return;
+          var list = getSuggestions_(pos, query);
+          if (!query || !list.length){
+            wrap.innerHTML = '';
+            return;
+          }
+          wrap.innerHTML = list.map(function(m){
+            return '<button type="button" class="suggestBtn" data-pos="'+escapeHtml(pos)+'" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
+          }).join('');
+          Array.prototype.slice.call(wrap.querySelectorAll('button[data-id]')).forEach(function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-id')||'');
+              appendOtherValue_(pos, formatServingToken_(memberMap, id));
+              var input = modal.querySelector('.otherInput[data-pos="'+pos+'"]');
+              if (input) input.value = '';
+              wrap.innerHTML = '';
+            };
+          });
+        }
+
+        function bindInputs_(){
+          Array.prototype.slice.call(modal.querySelectorAll('textarea[data-pos]')).forEach(function(input){
+            input.oninput = function(){
+              var key = String(input.getAttribute('data-pos')||'');
+              values[key] = String(input.value||'').trim();
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignNa')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              addAssigned_(pos, 'N/A');
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignSelect')).forEach(function(sel){
+            sel.onchange = function(){
+              var pos = String(sel.getAttribute('data-pos')||'');
+              var val = String(sel.value||'').trim();
+              if (!val) return;
+              addAssigned_(pos, val);
+              sel.value = '';
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignList')).forEach(function(box){
+            box.onclick = function(e){
+              var target = e && e.target ? e.target : null;
+              if (!target || target.tagName !== 'BUTTON') return;
+              var pos = String(target.getAttribute('data-pos')||'');
+              var idx = parseInt(String(target.getAttribute('data-idx')||'0'), 10);
+              if (!isNaN(idx)) removeAssigned_(pos, idx);
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignInput')).forEach(function(input){
+            input.oninput = function(){
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              renderSuggestions_(pos, query);
+            };
+            input.onkeydown = function(ev){
+              if (!ev || ev.key !== 'Enter') return;
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              if (!query) return;
+              var matchedId = extractMemberId_(query);
+              if (matchedId){
+                addAssigned_(pos, matchedId);
+                input.value = '';
+                renderSuggestions_(pos, '');
+                return;
+              }
+              var list = getSuggestions_(pos, query);
+              if (list.length === 1){
+                addAssigned_(pos, list[0].id);
+                input.value = '';
+                renderSuggestions_(pos, '');
+              }
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.otherAdd')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              var input = modal.querySelector('.otherInput[data-pos="'+pos+'"]');
+              if (!input) return;
+              var token = String(input.value||'').trim();
+              if (!token) return;
+              appendOtherValue_(pos, token);
+              input.value = '';
+              renderOtherSuggestions_(pos, '');
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.otherSelect')).forEach(function(sel){
+            sel.onchange = function(){
+              var pos = String(sel.getAttribute('data-pos')||'');
+              var val = String(sel.value||'').trim();
+              if (!val) return;
+              appendOtherValue_(pos, formatServingToken_(memberMap, val));
+              sel.value = '';
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.otherInput')).forEach(function(input){
+            input.oninput = function(){
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              renderOtherSuggestions_(pos, query);
+            };
+            input.onkeydown = function(ev){
+              if (!ev || ev.key !== 'Enter') return;
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              if (!query) return;
+              var matchedId = extractMemberId_(query);
+              if (matchedId){
+                appendOtherValue_(pos, formatServingToken_(memberMap, matchedId));
+                input.value = '';
+                renderOtherSuggestions_(pos, '');
+                return;
+              }
+              var list = getSuggestions_(pos, query);
+              if (list.length === 1){
+                appendOtherValue_(pos, formatServingToken_(memberMap, list[0].id));
+                input.value = '';
+                renderOtherSuggestions_(pos, '');
+              }
             };
           });
         }
@@ -823,84 +1381,229 @@
           modal.querySelector('.modal').innerHTML =
             '<div class="big">🧩 事奉排期 / Serving plan</div>'+
             '<div class="small">'+escapeHtml(ev)+'</div>'+
-            '<div class="msgBox warn" style="margin-top:10px;">'+
-              '<div class="small">批量匯入格式：Group, Position, Slot, MemberId（CSV 或 Tab）。可輸入 N/A。</div>'+
-            '</div>'+
-            '<div class="kv" style="margin-top:10px;">'+
-              '<div>Group</div><div><input id="addGroup" /></div>'+
-              '<div>Position</div><div><input id="addPosition" /></div>'+
-              '<div>Slot</div><div><input id="addSlot" /></div>'+
-              '<div>Member ID</div><div><input id="addMember" placeholder="CCF0000 or N/A" /></div>'+
-            '</div>'+
-            '<div class="miniBtnRow">'+
-              '<button id="btnAddRow" class="btnPeriod">➕ 新增 / Add</button>'+
-            '</div>'+
             '<div>'+renderRows_()+'</div>'+
-            '<div class="label" style="margin-top:10px;">Bulk import</div>'+
-            '<textarea id="bulkImport" placeholder="Group,Position,Slot,MemberId"></textarea>'+
             '<div class="miniBtnRow">'+
-              '<button id="btnApplyImport" class="btnStats">⬆️ 匯入 / Import</button>'+
               '<button id="btnSaveServing" class="btnMain">💾 儲存 / Save</button>'+
               '<button id="btnCloseServing" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>'+
             '<div id="servingEditMsg"></div>';
 
-          bindRemove_();
+          bindInputs_();
 
           modal.querySelector('#btnCloseServing').onclick = function(){ closeModal(modal); };
-          modal.querySelector('#btnAddRow').onclick = function(){
-            rows.push({
-              group: String(modal.querySelector('#addGroup').value||'').trim().toUpperCase(),
-              position: String(modal.querySelector('#addPosition').value||'').trim(),
-              slot: String(modal.querySelector('#addSlot').value||'').trim(),
-              memberId: String(modal.querySelector('#addMember').value||'').trim().toUpperCase()
-            });
-            render();
-          };
-
-          modal.querySelector('#btnApplyImport').onclick = function(){
-            var raw = String(modal.querySelector('#bulkImport').value||'').trim();
-            if (!raw){ return; }
-            var lines = raw.split(/\r?\n/).filter(Boolean);
-            var parsed = [];
-            lines.forEach(function(line, idx){
-              var parts = line.split(/\t|,/).map(function(p){ return String(p||'').trim(); });
-              if (idx === 0 && /group/i.test(parts[0]||'') && /position/i.test(parts[1]||'')) return;
-              parsed.push({
-                group: String(parts[0]||'').trim().toUpperCase(),
-                position: String(parts[1]||'').trim(),
-                slot: String(parts[2]||'').trim(),
-                memberId: String(parts[3]||'').trim().toUpperCase()
-              });
-            });
-            rows = rows.concat(parsed);
-            render();
-          };
-
           modal.querySelector('#btnSaveServing').onclick = function(){
             clear('servingEditMsg');
-            callApi('api_admin_serving_event_save', App.token, ev, rows, false).then(function(res2){
+            var payload = positions.map(function(pos){
+              return { position: pos, value: String(values[pos] || '').trim() };
+            });
+            callApi('api_admin_serving_event_save', App.token, ev, payload, false).then(function(res2){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.canOverride){
-                  if (confirm('事奉安排與離開期重疊，是否仍要儲存？')) {
-                    callApi('api_admin_serving_event_save', App.token, ev, rows, true).then(function(res3){
+                  var detail = '';
+                  var titleZh = '事奉安排需要確認';
+                  var titleEn = 'Serving assignment needs confirmation.';
+                  if (res2.conflicts && res2.conflicts.length){
+                    titleZh = '事奉安排與離開期重疊';
+                    titleEn = 'Serving assignment overlaps away period.';
+                    detail = res2.conflicts.map(function(c){
+                      return escapeHtml(c.memberId) + ' (' + escapeHtml(c.from) + ' - ' + escapeHtml(c.to) + ')';
+                    }).join('<br/>');
+                  }
+                  if (res2.duplicates && res2.duplicates.length){
+                    titleZh = '同一會員重覆崗位';
+                    titleEn = 'Duplicate serving assignments.';
+                    detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
+                      var posLabels = (d.positions||[]).map(function(p){
+                        return servingPositionLabel_({ position: p });
+                      });
+                      return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
+                    }).join('<br/>');
+                  }
+                  showBox('servingEditMsg','warn', titleZh, titleEn, detail);
+                  var btn = document.createElement('button');
+                  btn.className = 'btnDanger';
+                  btn.textContent = '仍然儲存 / Override';
+                  btn.onclick = function(){
+                    callApi('api_admin_serving_event_save', App.token, ev, payload, true).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
                       showBox('servingEditMsg','ok','已儲存','Saved.');
+                      closeModal(modal);
+                      if (App.refreshServingPlan) App.refreshServingPlan();
                     }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
-                  }
+                  };
+                  var msg = $('servingEditMsg');
+                  if (msg) msg.appendChild(btn);
                   return;
                 }
                 showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
                 return;
               }
               showBox('servingEditMsg','ok','已儲存','Saved.');
+              closeModal(modal);
+              if (App.refreshServingPlan) App.refreshServingPlan();
             }).catch(function(){
               showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
             });
           };
+          attachScrollControls_(modal);
         }
 
         render();
+      }).catch(function(){
+        modal.querySelector('.modal').innerHTML =
+          '<div class="big err">系統錯誤 / Error</div>'+
+          '<div class="small">System error</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+        modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+      });
+    }
+
+    function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
+      var ev = String(eventKey||'').trim();
+      var pos = String(position||'').trim();
+      var idx = parseInt(String(entryIndex||'0'), 10);
+      var rawValue = String(entryRaw||'').trim();
+      var groupKeyNorm = String(groupKey||'').trim();
+      var modal = openModal('<div class="big">🧩 快速編輯 / Quick edit</div><div class="small">載入中… / Loading…</div>');
+
+      callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
+        if(!res || !res.ok){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          return;
+        }
+
+        var positions = Array.isArray(res.positions) ? res.positions : [];
+        var values = res.values || {};
+        var members = Array.isArray(res.members) ? res.members : [];
+        var memberMap = {};
+        members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
+
+        if (positions.indexOf(pos) < 0){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big err">崗位不存在 / Position missing</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          return;
+        }
+
+        var tokens = splitServingValues_(values[pos] || '');
+        var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
+        if (useIdx < 0) useIdx = 0;
+        var currentToken = tokens[useIdx] || rawValue || '—';
+        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''));
+
+        function buildPayload_(){
+          return positions.map(function(p){
+            return { position: p, value: String(values[p] || '').trim() };
+          });
+        }
+        function saveWithOverride_(override){
+          callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override).then(function(res2){
+            if (!res2 || !res2.ok){
+              if (res2 && res2.code === 'E409' && res2.canOverride){
+                var detail = '';
+                var titleZh = '事奉安排需要確認';
+                var titleEn = 'Serving assignment needs confirmation.';
+                if (res2.conflicts && res2.conflicts.length){
+                  titleZh = '事奉安排與離開期重疊';
+                  titleEn = 'Serving assignment overlaps away period.';
+                  detail = res2.conflicts.map(function(c){
+                    return escapeHtml(c.memberId) + ' (' + escapeHtml(c.from) + ' - ' + escapeHtml(c.to) + ')';
+                  }).join('<br/>');
+                }
+                if (res2.duplicates && res2.duplicates.length){
+                  titleZh = '同一會員重覆崗位';
+                  titleEn = 'Duplicate serving assignments.';
+                  detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
+                    var posLabels = (d.positions||[]).map(function(p){
+                      return servingPositionLabel_({ position: p });
+                    });
+                    return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
+                  }).join('<br/>');
+                }
+                showBox('quickMsg','warn', titleZh, titleEn, detail);
+                var btn = document.createElement('button');
+                btn.className = 'btnDanger';
+                btn.textContent = '仍然儲存 / Override';
+                btn.onclick = function(){
+                  saveWithOverride_(true);
+                };
+                var msg = $('quickMsg');
+                if (msg) msg.appendChild(btn);
+                return;
+              }
+              showErr('quickMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+              return;
+            }
+            showBox('quickMsg','ok','已儲存','Saved.');
+            closeModal(modal);
+            if (App.refreshServingPlan) App.refreshServingPlan();
+          }).catch(function(){
+            showErr('quickMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        }
+
+        function swapToken_(nextToken){
+          if (!nextToken) return;
+          tokens[useIdx] = nextToken;
+          values[pos] = tokens.filter(Boolean).join(', ');
+          saveWithOverride_(false);
+        }
+        function deleteToken_(){
+          if (useIdx >= 0 && useIdx < tokens.length){
+            tokens.splice(useIdx, 1);
+          }
+          values[pos] = tokens.filter(Boolean).join(', ');
+          saveWithOverride_(false);
+        }
+
+        modal.querySelector('.modal').innerHTML =
+          '<div class="big">🧩 快速編輯 / Quick edit</div>'+
+          '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(servingPositionLabel_({ position: pos }))+'</div>'+
+          '<div class="small" style="margin-top:6px;">目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span></div>'+
+          '<div class="label" style="margin-top:10px;">交換 / Swap</div>'+
+          '<select id="quickSwapSelect" class="inputMini">'+options+'</select>'+
+          (pos === 'Other'
+            ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
+            : '')+
+          '<div class="miniBtnRow" style="margin-top:10px;">'+
+            '<button id="btnQuickSwap" class="btnMain">✅ 交換 / Swap</button>'+
+            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
+            '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>'+
+            '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="quickMsg"></div>';
+
+        modal.querySelector('#btnQuickClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#btnQuickSwap').onclick = function(){
+          var sel = modal.querySelector('#quickSwapSelect');
+          var val = sel ? String(sel.value||'').trim() : '';
+          if (!val) return;
+          swapToken_(formatServingToken_(memberMap, val));
+        };
+        if (pos === 'Other'){
+          modal.querySelector('#btnQuickUseText').onclick = function(){
+            var input = modal.querySelector('#quickOtherText');
+            var val = input ? String(input.value||'').trim() : '';
+            if (!val) return;
+            swapToken_(val);
+          };
+        }
+        modal.querySelector('#btnQuickDelete').onclick = function(){
+          if (!confirm('確認刪除此安排？ / Confirm delete assignment?')) return;
+          deleteToken_();
+        };
+        attachScrollControls_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
           '<div class="big err">系統錯誤 / Error</div>'+
@@ -1060,11 +1763,6 @@
       return ''+
         '<div class="card" style="border-color:rgba(200,132,0,0.35);background:#fffaf0;">'+
           '<div class="big">🔎 個人查詢 / Member lookup</div>'+
-          '<div class="kv">'+
-            '<div>開始 / From</div><div><input id="from2" type="date" /></div>'+
-            '<div>結束 / To</div><div><input id="to2" type="date" /></div>'+
-          '</div>'+
-          '<div class="divider"></div>'+
           '<div class="label">輸入 / Input</div>'+
           '<input id="mq" placeholder="CCF ID / 中文 / English" />'+
           '<div id="mResults" style="margin-top:10px;"></div>'+
@@ -1076,8 +1774,6 @@
     }
 
     function bindMemberLookup(){
-      $('from2').value = App.from;
-      $('to2').value = App.to || getTodayYmdUk();
       $('backAttendance2').onclick = function(){ App.view='attendanceHome'; render(); };
 
       var input = $('mq');
@@ -1120,6 +1816,7 @@
             var flagLine = r.lowFlag
               ? ('<div class="small" style="margin-top:6px;">〽️ '+escapeHtml(r.lowFlagZh||'')+'<br/>'+escapeHtml(r.lowFlagEn||'')+'</div>')
               : '';
+            var groupsHtml = renderServingGroupBadges_((r.servingGroups||[]).concat(r.servingGLGroups||[]));
 
             return ''+
               '<div class="msgBox warn" style="margin-bottom:10px;">'+
@@ -1129,6 +1826,7 @@
                   '<div>English</div><div>'+escapeHtml(r.nameEn||'')+'</div>'+
                   '<div>狀態 / Status</div><div>'+statusChip+'</div>'+
                 '</div>'+
+                groupsHtml+
                 flagLine+
                 '<div class="miniBtnRow">'+
                   '<button class="btnLookup" data-mid="'+escapeHtml(r.id)+'">查看 / View</button>'+
@@ -1139,8 +1837,8 @@
           Array.prototype.slice.call($('mResults').querySelectorAll('button[data-mid]')).forEach(function(btn){
             btn.onclick = function(){
               var mid = btn.getAttribute('data-mid');
-              var from = $('from2').value;
-              var to = $('to2').value;
+              var from = App.from;
+              var to = App.to || getTodayYmdUk();
               var v = validateRangeClient(from, to);
               if(!v.ok){ showBox('memberMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
               openMemberDetail(mid, from, to);
@@ -1446,20 +2144,34 @@
             return '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
           }
 
+          function formatServingName_(r){
+            var pref = String(r.preferredName||'').trim();
+            var en = String(r.nameEn||'').trim();
+            var zh = String(r.nameZh||'').trim();
+            return [pref, en, zh].filter(Boolean).join(' / ');
+          }
+          function servingBadgeHtml_(groupKey){
+            var badge = SERVING_GROUP_BADGES[normalizeServingGroupKey_(groupKey)] || null;
+            if (!badge) return escapeHtml(getServingGroupLabel_(groupKey));
+            return '<span class="'+badge.cls+'">'+escapeHtml(badge.zh)+' / '+escapeHtml(badge.en)+'</span>';
+          }
+
           var html = '';
           var currentGroup = '';
           rows.forEach(function(r){
             if (r.group !== currentGroup){
               currentGroup = r.group;
-              html += '<div class="big" style="margin-top:10px;">'+escapeHtml(getServingGroupLabel_(currentGroup))+'</div>';
+              html += '<div class="big" style="margin-top:10px;">'+servingBadgeHtml_(currentGroup)+'</div>';
             }
-            var who = r.nameEn || r.nameZh || r.memberId || '—';
+            var who = formatServingName_(r);
             var slot = r.slot ? (' · ' + r.slot) : '';
             var status = r.checkedIn ? '✅' : '❌';
+            var posLabel = servingPositionLabel_({ position: r.position, group: r.group });
+            var idLine = r.memberId || '—';
             html += ''+
               '<div class="nameItem">'+
-                '<div class="zh">'+escapeHtml(status+' '+(r.position||'')+slot)+'</div>'+
-                '<div class="en">'+escapeHtml(who)+'</div>'+
+                '<div class="zh">'+escapeHtml(status+' '+posLabel+slot)+'</div>'+
+                '<div class="en">'+escapeHtml(idLine+(who ? (' · '+who) : ''))+'</div>'+
               '</div>';
           });
           return '<div class="listWrap" style="margin-top:10px;">'+html+'</div>';
@@ -1495,14 +2207,17 @@
         if (c.new > 0){
           m.querySelector('#btnNew').onclick = function(){
             m.querySelector('#listBox').innerHTML = renderList_(newList);
+            m.querySelector('#servingBox').innerHTML = '';
           };
         }
         if (c.existing > 0){
           m.querySelector('#btnEx').onclick = function(){
             m.querySelector('#listBox').innerHTML = renderList_(exList);
+            m.querySelector('#servingBox').innerHTML = '';
           };
         }
         m.querySelector('#btnServing').onclick = function(){
+          m.querySelector('#listBox').innerHTML = '';
           m.querySelector('#servingBox').innerHTML = renderServingList_(servingRows);
         };
 
@@ -1566,18 +2281,26 @@
             '</div>'
           : '';
 
+        var awaySummary = '';
+        if (!away.from1 && !away.to1 && !away.from2 && !away.to2){
+          awaySummary = '<div class="small">目前沒有未來請假 / Currently no future absence.</div>';
+        } else {
+          var lines = [];
+          if (away.from1 || away.to1){
+            lines.push('Holiday 1: ' + escapeHtml(ymdToDmy_(away.from1||'') || '') + ' - ' + escapeHtml(ymdToDmy_(away.to1||'') || ''));
+          }
+          if (away.from2 || away.to2){
+            lines.push('Holiday 2: ' + escapeHtml(ymdToDmy_(away.from2||'') || '') + ' - ' + escapeHtml(ymdToDmy_(away.to2||'') || ''));
+          }
+          awaySummary = '<div class="small">'+lines.join('<br/>')+'</div>';
+        }
         var awayCard =
           '<div class="msgBox warn" style="margin-top:10px;">'+
-            '<div class="big warn">🏖️ 離開期 / Away period</div>'+
-            '<div class="kv">'+
-              '<div>開始 / From</div><div><input id="awayFrom" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.from||''))+'" /></div>'+
-              '<div>結束 / To</div><div><input id="awayTo" type="text" placeholder="DD/MM/YYYY" value="'+escapeHtml(ymdToDmy_(away.to||''))+'" /></div>'+
-            '</div>'+
+            '<div class="big warn">🏖️ 請假 / Absence</div>'+
+            awaySummary+
             '<div class="miniBtnRow">'+
-              '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
-              '<button id="btnAwayClear" class="btnBack">🧹 清除 / Clear</button>'+
+              '<button id="btnAbsence" class="btnPeriod">請假 / Absence</button>'+
             '</div>'+
-            '<div id="awayMsg"></div>'+
           '</div>';
 
         var attendanceCard = canStats
@@ -1593,6 +2316,8 @@
             '</div>'
           : '';
 
+        var groupsHtml = renderServingGroupBadges_((m.servingGroups||[]).concat(m.servingGLGroups||[]));
+
         modal.querySelector('.modal').innerHTML =
           topBtns +
           '<div class="big">👤 會員 / Member</div>'+
@@ -1604,6 +2329,7 @@
             '<div>Member since</div><div>'+escapeHtml(m.memberSince||'')+'</div>'+
             '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
           '</div>'+
+          (groupsHtml || '')+
 
           statsCard+
           awayCard+
@@ -1641,35 +2367,73 @@
           openStatusFlow_(m.id, m.status||'');
         };
 
-        var awayFrom = modal.querySelector('#awayFrom');
-        var awayTo = modal.querySelector('#awayTo');
-        if (awayFrom && awayTo){
-          awayFrom.onfocus = function(){ toggleDateInput_(awayFrom, true); };
-          awayFrom.onblur = function(){ toggleDateInput_(awayFrom, false); };
-          awayTo.onfocus = function(){ toggleDateInput_(awayTo, true); };
-          awayTo.onblur = function(){ toggleDateInput_(awayTo, false); };
+        var btnAbsence = modal.querySelector('#btnAbsence');
+        if (btnAbsence){
+          btnAbsence.onclick = function(){
+            var absModal = openModal(
+              '<div class="big">🏖️ 請假 / Absence</div>'+
+              '<div class="small">Holiday 1 / 假期一</div>'+
+              '<div class="kv">'+
+                '<div>Holiday 1 From / 假期一開始</div><div><input id="awayFrom1" type="date" value="'+escapeHtml(away.from1||'')+'" /></div>'+
+                '<div>Holiday 1 To / 假期一結束</div><div><input id="awayTo1" type="date" value="'+escapeHtml(away.to1||'')+'" /></div>'+
+              '</div>'+
+              '<div class="small" style="margin-top:10px;">Holiday 2 / 假期二</div>'+
+              '<div class="kv">'+
+                '<div>Holiday 2 From / 假期二開始</div><div><input id="awayFrom2" type="date" value="'+escapeHtml(away.from2||'')+'" /></div>'+
+                '<div>Holiday 2 To / 假期二結束</div><div><input id="awayTo2" type="date" value="'+escapeHtml(away.to2||'')+'" /></div>'+
+              '</div>'+
+              '<div class="miniBtnRow">'+
+                '<button id="btnAwaySave" class="btnPeriod">💾 儲存 / Save</button>'+
+                '<button id="btnAwayClear" class="btnBack">🧹 清除 / Clear</button>'+
+                '<button id="btnAwayClose" class="btnBack">⬅️ 返回 / Back</button>'+
+              '</div>'+
+              '<div id="awayMsg"></div>'
+            );
 
-          modal.querySelector('#btnAwaySave').onclick = function(){
-            var fromDmy = String(awayFrom.value||'').trim();
-            var toDmy = String(awayTo.value||'').trim();
-            clear('awayMsg');
-            callApi('api_admin_set_away_period', App.token, m.id, fromDmy, toDmy).then(function(res){
-              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-              showBox('awayMsg','ok','已更新','Saved.');
-            }).catch(function(){
-              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-            });
-          };
-          modal.querySelector('#btnAwayClear').onclick = function(){
-            awayFrom.value = '';
-            awayTo.value = '';
-            clear('awayMsg');
-            callApi('api_admin_set_away_period', App.token, m.id, '', '').then(function(res){
-              if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-              showBox('awayMsg','ok','已清除','Cleared.');
-            }).catch(function(){
-              showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-            });
+            var awayFrom1 = absModal.querySelector('#awayFrom1');
+            var awayTo1 = absModal.querySelector('#awayTo1');
+            var awayFrom2 = absModal.querySelector('#awayFrom2');
+            var awayTo2 = absModal.querySelector('#awayTo2');
+            absModal.querySelector('#btnAwayClose').onclick = function(){ closeModal(absModal); };
+            absModal.querySelector('#btnAwaySave').onclick = function(){
+              var fromDmy1 = ymdToDmy_(String(awayFrom1.value||'').trim());
+              var toDmy1 = ymdToDmy_(String(awayTo1.value||'').trim());
+              var fromDmy2 = ymdToDmy_(String(awayFrom2.value||'').trim());
+              var toDmy2 = ymdToDmy_(String(awayTo2.value||'').trim());
+              if ((fromDmy1 && !toDmy1) || (!fromDmy1 && toDmy1) || (fromDmy2 && !toDmy2) || (!fromDmy2 && toDmy2)){
+                showBox('awayMsg','err','請填寫完整日期','Please complete both from/to dates.');
+                return;
+              }
+              clear('awayMsg');
+              callApi('api_admin_set_away_period', App.token, m.id, fromDmy1, toDmy1, fromDmy2, toDmy2).then(function(res){
+                if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                away.from1 = res.from1 || '';
+                away.to1 = res.to1 || '';
+                away.from2 = res.from2 || '';
+                away.to2 = res.to2 || '';
+                showBox('awayMsg','ok','已更新','Saved.');
+              }).catch(function(){
+                showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+              });
+            };
+            absModal.querySelector('#btnAwayClear').onclick = function(){
+              awayFrom1.value = '';
+              awayTo1.value = '';
+              awayFrom2.value = '';
+              awayTo2.value = '';
+              clear('awayMsg');
+              callApi('api_admin_set_away_period', App.token, m.id, '', '', '', '').then(function(res){
+                if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                away.from1 = '';
+                away.to1 = '';
+                away.from2 = '';
+                away.to2 = '';
+                showBox('awayMsg','ok','已清除','Cleared.');
+              }).catch(function(){
+                showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+              });
+            };
+            attachScrollControls_(absModal);
           };
         }
       }).catch(function(){
@@ -1825,14 +2589,14 @@
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
 
-      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); return; }
-      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); return; }
-      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); return; }
-      if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); return; }
-      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); return; }
-      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); return; }
-      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); return; }
-      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); return; }
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); attachScrollControls_(root); return; }
+      if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); attachScrollControls_(root); return; }
+      if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); attachScrollControls_(root); return; }
+      if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); attachScrollControls_(root); return; }
+      if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); attachScrollControls_(root); return; }
+      if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); attachScrollControls_(root); return; }
+      if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
+      if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
     }
 
     /* init */
