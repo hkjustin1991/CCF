@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui11-serving-edit-away
+  UI VERSION TAG: admin2-ui12-serving-quick-edit
   For Admin.gs: v2026-02-08.admin13
   ============================================================
   -->
@@ -382,7 +382,8 @@
       media: { zh:'影像大師', en:'Media Master', cls:'groupBadge media' },
       logistic: { zh:'後勤特工', en:'Logistic Specialist', cls:'groupBadge logistic' },
       support: { zh:'聖工支援隊', en:'Divine Supporter', cls:'groupBadge support' },
-      finance: { zh:'財務公司', en:'Finance Dept', cls:'groupBadge finance' }
+      finance: { zh:'財務公司', en:'Finance Dept', cls:'groupBadge finance' },
+      other: { zh:'其他', en:'Other', cls:'groupBadge' }
     };
     function servingPositionLabel_(pos){
       if (!pos) return '—';
@@ -589,6 +590,51 @@
         nameLine = names ? (' ' + names) : '';
       }
       return upper + nameLine;
+    }
+    function splitServingValues_(raw){
+      var s = String(raw||'').trim();
+      if (!s) return [];
+      return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+    }
+    function extractMemberId_(token){
+      var m = String(token||'').match(/CCF\\d{4}/i);
+      return m ? String(m[0]||'').toUpperCase() : '';
+    }
+    function preferredNameForSheet_(m){
+      if (!m) return '';
+      var pref = String(m.preferredName||'').trim();
+      if (pref) return pref;
+      var en = String(m.nameEn||'').trim();
+      if (en) return en;
+      return String(m.nameZh||'').trim();
+    }
+    function memberLabel_(m){
+      if (!m) return '';
+      var pref = String(m.preferredName||'').trim();
+      var zh = String(m.nameZh||'').trim();
+      var en = String(m.nameEn||'').trim();
+      return m.id + ' ' + [zh, en].filter(Boolean).join(' ') + (pref ? (' ('+pref+')') : '');
+    }
+    function formatServingToken_(memberMap, memberId){
+      var m = memberMap[String(memberId||'').toUpperCase()];
+      if (!m) return String(memberId||'');
+      var name = preferredNameForSheet_(m);
+      return m.id + (name ? (' ('+name+')') : '');
+    }
+    function memberMatchesGroup_(member, groupKey){
+      if (!groupKey || groupKey === 'other') return true;
+      if (!member) return false;
+      var groups = Array.isArray(member.groups) ? member.groups : [];
+      return groups.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
+    }
+    function buildMemberOptions_(members, groupKey){
+      var list = Array.isArray(members) ? members : [];
+      var opts = '<option value="">選擇 / Select</option>';
+      list.forEach(function(m){
+        if (!memberMatchesGroup_(m, groupKey)) return;
+        opts += '<option value="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</option>';
+      });
+      return opts;
     }
 
     /* ---------- Login (no camera here; QR login via server is handled elsewhere) ---------- */
@@ -920,7 +966,7 @@
             return;
           }
 
-          var groupOrder = ['worship','media','logistic','support','finance'];
+          var groupOrder = ['worship','media','logistic','support','finance','other'];
           var monthMap = {};
           var monthKeys = [];
           events.forEach(function(ev){
@@ -960,10 +1006,14 @@
                 if(!cell || !cell.length){
                   return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'"></td>';
                 }
-                var entries = cell.map(function(entry){
+                var entries = cell.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
                   if (!label) return '';
-                  return '<div class="servingPlanEntry">'+escapeHtml(label)+'</div>';
+                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
+                  return ''+
+                    '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
+                      escapeHtml(label)+
+                    '</button>';
                 }).filter(Boolean).join('');
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+entries+'</td>';
               }).join('');
@@ -971,7 +1021,7 @@
                 '<tr>'+
                   '<td class="servingPlanEvent">'+
                     '<div>'+escapeHtml(eventLabel_(ev))+'</div>'+
-                    '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'">✏️ 編輯 / Edit</button></div>'+
+                    '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(groupKey)+'">✏️ 編輯 / Edit</button></div>'+
                   '</td>'+
                   rowCells +
                 '</tr>';
@@ -998,7 +1048,12 @@
 
           Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
             btn.onclick = function(){
-              openServingEditModal(btn.getAttribute('data-event'));
+              openServingEditModal(btn.getAttribute('data-event'), btn.getAttribute('data-group'));
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingPlanEntry')).forEach(function(btn){
+            btn.onclick = function(){
+              openServingQuickEdit_(btn.getAttribute('data-event'), btn.getAttribute('data-position'), btn.getAttribute('data-idx'), btn.getAttribute('data-raw'), btn.getAttribute('data-group'));
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupToggle')).forEach(function(btn){
@@ -1025,8 +1080,9 @@
       loadServingPlan();
     }
 
-    function openServingEditModal(eventKey){
+    function openServingEditModal(eventKey, groupKey){
       var ev = String(eventKey||'').trim();
+      var filterGroupKey = String(groupKey||'').trim();
       var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
@@ -1042,75 +1098,26 @@
         }
 
         var positions = Array.isArray(res.positions) ? res.positions : [];
+        var displayPositions = filterGroupKey
+          ? positions.filter(function(pos){ return (POSITION_GROUP[pos] || '') === filterGroupKey; })
+          : positions.slice();
         var values = res.values || {};
         var members = Array.isArray(res.members) ? res.members : [];
         var memberMap = {};
         var assignedMap = {};
         members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
 
-        function splitServingValues_(raw){
-          var s = String(raw||'').trim();
-          if (!s) return [];
-          return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
-        }
-        function normalizeGroup_(g){
-          var key = String(g||'').trim().toUpperCase();
-          if (key === 'WORSHIP') return 'worship';
-          if (key === 'MEDIA') return 'media';
-          if (key === 'LOGISTIC') return 'logistic';
-          if (key === 'SUPPORT') return 'support';
-          if (key === 'FINANCE') return 'finance';
-          return '';
-        }
-        function memberMatchesGroup_(m, groupKey){
-          if (!groupKey || groupKey === 'other') return false;
-          var groups = Array.isArray(m.groups) ? m.groups : [];
-          return groups.some(function(g){ return normalizeGroup_(g) === groupKey; });
-        }
-        function buildMemberOptions_(groupKey){
-          var opts = '<option value="">選擇 / Select</option>';
-          members.forEach(function(m){
-            if (!memberMatchesGroup_(m, groupKey)) return;
-            opts += '<option value="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</option>';
-          });
-          return opts;
-        }
-        function extractMemberId_(token){
-          var m = String(token||'').match(/CCF\\d{4}/i);
-          return m ? String(m[0]||'').toUpperCase() : '';
-        }
-        function preferredNameForSheet_(m){
-          if (!m) return '';
-          var pref = String(m.preferredName||'').trim();
-          if (pref) return pref;
-          var en = String(m.nameEn||'').trim();
-          if (en) return en;
-          return String(m.nameZh||'').trim();
-        }
-        function formatServingToken_(memberId){
-          var m = memberMap[String(memberId||'').toUpperCase()];
-          if (!m) return String(memberId||'');
-          var name = preferredNameForSheet_(m);
-          return m.id + (name ? (' ('+name+')') : '');
-        }
-        function memberLabel_(m){
-          if (!m) return '';
-          var pref = String(m.preferredName||'').trim();
-          var zh = String(m.nameZh||'').trim();
-          var en = String(m.nameEn||'').trim();
-          return m.id + ' ' + [zh, en].filter(Boolean).join(' ') + (pref ? (' ('+pref+')') : '');
-        }
         function isNaToken_(token){
           var up = String(token||'').trim().toUpperCase();
           return (up === 'N/A' || up === 'NA');
         }
 
-        positions.forEach(function(pos){
+        displayPositions.forEach(function(pos){
           var initial = splitServingValues_(values[pos] || '');
           assignedMap[pos] = initial.map(function(token){
             if (isNaToken_(token)) return 'N/A';
             var id = extractMemberId_(token);
-            return id ? formatServingToken_(id) : token;
+            return id ? formatServingToken_(memberMap, id) : token;
           }).filter(Boolean);
         });
 
@@ -1128,27 +1135,33 @@
         }
 
         function renderRows_(){
-          if (!positions.length){
+          if (!displayPositions.length){
             return '<div class="small">暫無事奉資料 / No serving rows</div>';
           }
           var h = '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
             '<th>事奉崗位 / Position</th><th>安排 / Assignment</th>'+
             '</tr></thead><tbody>';
-          positions.forEach(function(pos){
+          displayPositions.forEach(function(pos){
             var groupKey = POSITION_GROUP[pos] || '';
             var isOther = String(pos||'') === 'Other';
             h += '<tr>'+
               '<td class="posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_({ position: pos }))+'</td>'+
               '<td>';
             if (isOther){
-              h += '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(String(values[pos] || ''))+'</textarea>';
+              h += '<textarea class="inputMini" data-pos="'+escapeHtml(pos)+'" placeholder="自訂內容 / Custom text">'+escapeHtml(String(values[pos] || ''))+'</textarea>'+
+                   '<div class="miniBtnRow" style="margin-top:8px;">'+
+                     '<input class="inputMini otherInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名 / 備註" />'+
+                     '<button type="button" class="btnBack otherAdd btnSmall" data-pos="'+escapeHtml(pos)+'">加入 / Add</button>'+
+                   '</div>'+
+                   '<select class="inputMini otherSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, 'other')+'</select>'+
+                   '<div class="suggestList otherSuggest" data-pos="'+escapeHtml(pos)+'"></div>';
             } else {
               h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
                      '<button type="button" class="btnBack assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
                    '</div>'+
-                   '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(groupKey)+'</select>'+
+                   '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
             }
             h += '</td></tr>';
@@ -1183,7 +1196,7 @@
           var current = assignedMap[pos] || [];
           if (current.some(function(t){ return extractMemberId_(t) === id; })) return;
           assignedMap[pos] = current.filter(function(t){ return !isNaToken_(t); });
-          assignedMap[pos].push(formatServingToken_(id));
+          assignedMap[pos].push(formatServingToken_(memberMap, id));
           refreshAssigned_(pos);
         }
         function removeAssigned_(pos, idx){
@@ -1223,6 +1236,35 @@
               var id = String(btn.getAttribute('data-id')||'');
               addAssigned_(pos, id);
               var input = modal.querySelector('.assignInput[data-pos="'+pos+'"]');
+              if (input) input.value = '';
+              wrap.innerHTML = '';
+            };
+          });
+        }
+        function appendOtherValue_(pos, token){
+          var ta = modal.querySelector('textarea[data-pos="'+pos+'"]');
+          if (!ta) return;
+          var current = splitServingValues_(String(ta.value||''));
+          if (token && current.indexOf(token) === -1) current.push(token);
+          ta.value = current.filter(Boolean).join(', ');
+          values[pos] = String(ta.value||'').trim();
+        }
+        function renderOtherSuggestions_(pos, query){
+          var wrap = modal.querySelector('.otherSuggest[data-pos="'+pos+'"]');
+          if (!wrap) return;
+          var list = getSuggestions_(pos, query);
+          if (!query || !list.length){
+            wrap.innerHTML = '';
+            return;
+          }
+          wrap.innerHTML = list.map(function(m){
+            return '<button type="button" class="suggestBtn" data-pos="'+escapeHtml(pos)+'" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
+          }).join('');
+          Array.prototype.slice.call(wrap.querySelectorAll('button[data-id]')).forEach(function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-id')||'');
+              appendOtherValue_(pos, formatServingToken_(memberMap, id));
+              var input = modal.querySelector('.otherInput[data-pos="'+pos+'"]');
               if (input) input.value = '';
               wrap.innerHTML = '';
             };
@@ -1283,6 +1325,53 @@
                 addAssigned_(pos, list[0].id);
                 input.value = '';
                 renderSuggestions_(pos, '');
+              }
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.otherAdd')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              var input = modal.querySelector('.otherInput[data-pos="'+pos+'"]');
+              if (!input) return;
+              var token = String(input.value||'').trim();
+              if (!token) return;
+              appendOtherValue_(pos, token);
+              input.value = '';
+              renderOtherSuggestions_(pos, '');
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.otherSelect')).forEach(function(sel){
+            sel.onchange = function(){
+              var pos = String(sel.getAttribute('data-pos')||'');
+              var val = String(sel.value||'').trim();
+              if (!val) return;
+              appendOtherValue_(pos, formatServingToken_(memberMap, val));
+              sel.value = '';
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.otherInput')).forEach(function(input){
+            input.oninput = function(){
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              renderOtherSuggestions_(pos, query);
+            };
+            input.onkeydown = function(ev){
+              if (!ev || ev.key !== 'Enter') return;
+              var pos = String(input.getAttribute('data-pos')||'');
+              var query = String(input.value||'').trim();
+              if (!query) return;
+              var matchedId = extractMemberId_(query);
+              if (matchedId){
+                appendOtherValue_(pos, formatServingToken_(memberMap, matchedId));
+                input.value = '';
+                renderOtherSuggestions_(pos, '');
+                return;
+              }
+              var list = getSuggestions_(pos, query);
+              if (list.length === 1){
+                appendOtherValue_(pos, formatServingToken_(memberMap, list[0].id));
+                input.value = '';
+                renderOtherSuggestions_(pos, '');
               }
             };
           });
@@ -1360,6 +1449,161 @@
         }
 
         render();
+      }).catch(function(){
+        modal.querySelector('.modal').innerHTML =
+          '<div class="big err">系統錯誤 / Error</div>'+
+          '<div class="small">System error</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+        modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+      });
+    }
+
+    function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
+      var ev = String(eventKey||'').trim();
+      var pos = String(position||'').trim();
+      var idx = parseInt(String(entryIndex||'0'), 10);
+      var rawValue = String(entryRaw||'').trim();
+      var groupKeyNorm = String(groupKey||'').trim();
+      var modal = openModal('<div class="big">🧩 快速編輯 / Quick edit</div><div class="small">載入中… / Loading…</div>');
+
+      callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
+        if(!res || !res.ok){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          return;
+        }
+
+        var positions = Array.isArray(res.positions) ? res.positions : [];
+        var values = res.values || {};
+        var members = Array.isArray(res.members) ? res.members : [];
+        var memberMap = {};
+        members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
+
+        if (positions.indexOf(pos) < 0){
+          modal.querySelector('.modal').innerHTML =
+            '<div class="big err">崗位不存在 / Position missing</div>'+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          return;
+        }
+
+        var tokens = splitServingValues_(values[pos] || '');
+        var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
+        if (useIdx < 0) useIdx = 0;
+        var currentToken = tokens[useIdx] || rawValue || '—';
+        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''));
+
+        function buildPayload_(){
+          return positions.map(function(p){
+            return { position: p, value: String(values[p] || '').trim() };
+          });
+        }
+        function saveWithOverride_(override){
+          callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override).then(function(res2){
+            if (!res2 || !res2.ok){
+              if (res2 && res2.code === 'E409' && res2.canOverride){
+                var detail = '';
+                var titleZh = '事奉安排需要確認';
+                var titleEn = 'Serving assignment needs confirmation.';
+                if (res2.conflicts && res2.conflicts.length){
+                  titleZh = '事奉安排與離開期重疊';
+                  titleEn = 'Serving assignment overlaps away period.';
+                  detail = res2.conflicts.map(function(c){
+                    return escapeHtml(c.memberId) + ' (' + escapeHtml(c.from) + ' - ' + escapeHtml(c.to) + ')';
+                  }).join('<br/>');
+                }
+                if (res2.duplicates && res2.duplicates.length){
+                  titleZh = '同一會員重覆崗位';
+                  titleEn = 'Duplicate serving assignments.';
+                  detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
+                    var posLabels = (d.positions||[]).map(function(p){
+                      return servingPositionLabel_({ position: p });
+                    });
+                    return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
+                  }).join('<br/>');
+                }
+                showBox('quickMsg','warn', titleZh, titleEn, detail);
+                var btn = document.createElement('button');
+                btn.className = 'btnDanger';
+                btn.textContent = '仍然儲存 / Override';
+                btn.onclick = function(){
+                  saveWithOverride_(true);
+                };
+                var msg = $('quickMsg');
+                if (msg) msg.appendChild(btn);
+                return;
+              }
+              showErr('quickMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+              return;
+            }
+            showBox('quickMsg','ok','已儲存','Saved.');
+            closeModal(modal);
+            if (App.refreshServingPlan) App.refreshServingPlan();
+          }).catch(function(){
+            showErr('quickMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        }
+
+        function swapToken_(nextToken){
+          if (!nextToken) return;
+          tokens[useIdx] = nextToken;
+          values[pos] = tokens.filter(Boolean).join(', ');
+          saveWithOverride_(false);
+        }
+        function deleteToken_(){
+          if (useIdx >= 0 && useIdx < tokens.length){
+            tokens.splice(useIdx, 1);
+          }
+          values[pos] = tokens.filter(Boolean).join(', ');
+          saveWithOverride_(false);
+        }
+
+        modal.querySelector('.modal').innerHTML =
+          '<div class="big">🧩 快速編輯 / Quick edit</div>'+
+          '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(servingPositionLabel_({ position: pos }))+'</div>'+
+          '<div class="small" style="margin-top:6px;">目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span></div>'+
+          '<div class="label" style="margin-top:10px;">交換 / Swap</div>'+
+          '<select id="quickSwapSelect" class="inputMini">'+options+'</select>'+
+          (pos === 'Other'
+            ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
+            : '')+
+          '<div class="miniBtnRow" style="margin-top:10px;">'+
+            '<button id="btnQuickSwap" class="btnMain">✅ 交換 / Swap</button>'+
+            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
+            '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>'+
+            '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="quickMsg"></div>';
+
+        modal.querySelector('#btnQuickClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#btnQuickSwap').onclick = function(){
+          var sel = modal.querySelector('#quickSwapSelect');
+          var val = sel ? String(sel.value||'').trim() : '';
+          if (!val) return;
+          swapToken_(formatServingToken_(memberMap, val));
+        };
+        if (pos === 'Other'){
+          modal.querySelector('#btnQuickUseText').onclick = function(){
+            var input = modal.querySelector('#quickOtherText');
+            var val = input ? String(input.value||'').trim() : '';
+            if (!val) return;
+            swapToken_(val);
+          };
+        }
+        modal.querySelector('#btnQuickDelete').onclick = function(){
+          if (!confirm('確認刪除此安排？ / Confirm delete assignment?')) return;
+          deleteToken_();
+        };
+        attachScrollControls_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
           '<div class="big err">系統錯誤 / Error</div>'+

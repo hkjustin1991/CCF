@@ -183,7 +183,7 @@
       token:null, staff:null,
       view:'login',
       stream:null, raf:null, scanning:false, detector:null,
-      debounceT:null, intervalId:null, clockTimer:null,
+      debounceT:null, vrmDebounceT:null, intervalId:null, clockTimer:null,
       liveNamesOpen:false,
       liveData:null,
       liveNamesFilter:'',
@@ -693,7 +693,10 @@
       if(App.intervalId){ clearInterval(App.intervalId); App.intervalId=null; }
       if(App.clockTimer){ clearInterval(App.clockTimer); App.clockTimer=null; }
       clearTimeout(App.debounceT);
-      if (App.view !== 'vrm') App.vrmActive = false;
+      if (App.view !== 'vrm'){
+        App.vrmActive = false;
+        clearTimeout(App.vrmDebounceT);
+      }
 
       if(App.view !== 'auth'){
         App.authApprover=null;
@@ -1759,7 +1762,7 @@
       $('backMenu3').onclick = function(){
         App.vrmActive = false;
         App.vrmToken = (App.vrmToken || 0) + 1;
-        clearTimeout(App.debounceT);
+        clearTimeout(App.vrmDebounceT);
         App.view='menu';
         render();
       };
@@ -1811,8 +1814,12 @@
       }
 
       qEl.oninput = function(){
-        clearTimeout(App.debounceT);
-        App.debounceT = setTimeout(doSearch, 250);
+        clearTimeout(App.vrmDebounceT);
+        App.vrmDebounceT = setTimeout(doSearch, 250);
+      };
+      qEl.onkeydown = function(ev){
+        if (!ev || ev.key !== 'Enter') return;
+        doSearch();
       };
       qEl.onkeydown = function(ev){
         if (!ev || ev.key !== 'Enter') return;
@@ -2066,7 +2073,6 @@
         if (btnUndo){
           btnUndo.onclick = function(){
             if (!today) return;
-            if(!confirm('確認要刪除此會員今日簽到？ / Confirm undo check-in?')) return;
             openUndoConfirm_(memberId, today.eventKey || null);
           };
         }
@@ -2082,6 +2088,7 @@
 
     function openUndoConfirm_(memberId, eventKey){
       var isSuper = App.staff && App.staff.id === 'SUPERUSER';
+      var pendingPayload = null;
       var modal = openModal(
         '<div class="big">🧹 刪除簽到 / Undo check-in</div>'+
         '<div class="small">此操作需要同工/管理員確認。<br/>Staff/Admin confirmation required.</div>'+
@@ -2096,7 +2103,7 @@
             '</div>'
         )+
         '<div class="miniBtnRow" style="margin-top:10px;">'+
-          (isSuper ? '<button id="btnUndoConfirm" class="danger">確認刪除 / Confirm</button>' : '')+
+          '<button id="btnUndoConfirm" class="danger" '+(isSuper ? '' : 'disabled')+'>確認刪除 / Confirm</button>'+
           '<button id="btnUndoClose" class="btnBack">⬅️ 返回 / Back</button>'+
         '</div>'+
         '<div id="undoMsg"></div>'
@@ -2105,31 +2112,28 @@
       function closeAll(){ try{ closeModal(modal); }catch(e){} }
 
       modal.querySelector('#btnUndoClose').onclick = function(){ stopScan(); closeAll(); };
-      if (isSuper){
-        modal.querySelector('#btnUndoConfirm').onclick = function(){
-          showBox('undoMsg','warn','更新中…','Processing…');
-          callApi('api_live_delete_today_checkin', App.token, memberId, null, null).then(function(res){
-            if(!res || !res.ok){ showErr('undoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-            if (App.refreshLive) App.refreshLive();
-            closeAll();
-          }).catch(function(){
-            showErr('undoMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-          });
-        };
-        return;
-      }
-
-      function handleScan(payload){
-        if (!payload) return;
-        stopScan();
+      modal.querySelector('#btnUndoConfirm').onclick = function(){
+        if (!isSuper && !pendingPayload) return;
         showBox('undoMsg','warn','更新中…','Processing…');
-        callApi('api_live_delete_today_checkin', App.token, memberId, payload, null).then(function(res){
+        callApi('api_live_delete_today_checkin', App.token, memberId, isSuper ? null : pendingPayload, null).then(function(res){
           if(!res || !res.ok){ showErr('undoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
           if (App.refreshLive) App.refreshLive();
           closeAll();
         }).catch(function(){
           showErr('undoMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
+      };
+      if (isSuper){
+        return;
+      }
+
+      function handleScan(payload){
+        if (!payload) return;
+        stopScan();
+        pendingPayload = payload;
+        var btn = modal.querySelector('#btnUndoConfirm');
+        if (btn) btn.disabled = false;
+        showBox('undoMsg','warn','已掃描，請確認刪除','Scanned. Please confirm.');
       }
 
       camBindSwitchButton_('btnSwitchCamUndo', function(){ startScan('videoUndo', handleScan, 'undoMsg'); });
