@@ -861,6 +861,9 @@
           '<div class="card" style="margin-top:10px;">'+
             '<div class="label">車牌 / Plate</div>'+
             '<input id="vrmQ" autocomplete="off" placeholder="例如：AB12CDE" />'+
+            '<div class="miniBtnRow" style="margin-top:8px;">'+
+              '<button id="btnVrmSearch" class="primary">🔎 搜尋 / Search</button>'+
+            '</div>'+
             '<div id="vrmResults" style="margin-top:10px;"></div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
@@ -1818,6 +1821,14 @@
         if (!ev || ev.key !== 'Enter') return;
         doSearch();
       };
+      qEl.onkeydown = function(ev){
+        if (!ev || ev.key !== 'Enter') return;
+        doSearch();
+      };
+      var btnSearch = $('btnVrmSearch');
+      if (btnSearch){
+        btnSearch.onclick = function(){ doSearch(); };
+      }
 
       outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>';
       qEl.focus();
