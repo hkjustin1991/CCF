@@ -23,7 +23,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-02-07.staff9';
+const APP_VERSION = '2026-02-08.staff10';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -33,6 +33,7 @@ const SESSION_TTL_SECONDS = 4 * 60 * 60;
 const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
 const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
 const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
+const NEW_FRIEND_HANDLED_SHEET_NAME = 'NewFriendHandled';
 
 // Healthcheck (self-test) sheet (NEW)
 const HEALTHCHECK_SHEET_NAME = 'Healthcheck';
@@ -72,11 +73,36 @@ const MEMBERS_OPTIONAL_HEADERS = [
   'PreferredName',
   'IsMinor',
   'ServingGroups',
-  'ServingGLGroups'
+  'ServingGLGroups',
+  'AwayFrom1',
+  'AwayTo1',
+  'AwayFrom2',
+  'AwayTo2'
 ];
 
 // Serving sheet (read-only in Live Service Portal)
 const SERVING_SHEET_NAME = 'Serving';
+const SERVING_POSITION_GROUPS = {
+  Worship_Lead: 'WORSHIP',
+  Worship_Singer_1: 'WORSHIP',
+  Worship_Singer_2: 'WORSHIP',
+  Worship_Pianist: 'WORSHIP',
+  Worship_Drum: 'WORSHIP',
+  Worship_Instrument_1: 'WORSHIP',
+  Worship_Instrument_2: 'WORSHIP',
+  Media_AV: 'MEDIA',
+  Media_PPT: 'MEDIA',
+  Media_PPTBuild: 'MEDIA',
+  Support_BibleReader: 'SUPPORT',
+  Support_Prayer: 'SUPPORT',
+  Support_Communion: 'SUPPORT',
+  Support_Care: 'SUPPORT',
+  Logistic_Welcome: 'LOGISTIC',
+  Logistic_Venue: 'LOGISTIC',
+  Logistic_Refreshment: 'LOGISTIC',
+  Finance_Offering: 'FINANCE',
+  Other: 'OTHER'
+};
 
 /******** Web App Router ********/
 function doGet(e) {
@@ -399,10 +425,23 @@ function parseServingHeader_(header){
     return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join(' - ')||'').trim() };
   }
   if (raw.includes('/')){
-    const parts = raw.split('/');
+    const parts = raw.split('/').map(p => String(p||'').trim()).filter(Boolean);
+    if (parts.length){
+      const key = parts[0];
+      const groupFromKey = SERVING_POSITION_GROUPS[key] || '';
+      if (groupFromKey){
+        return { group: groupFromKey, position: key };
+      }
+    }
     return { group: String(parts[0]||'').trim().toUpperCase(), position: String(parts.slice(1).join('/')||'').trim() };
   }
-  return { group:'', position: raw };
+  const groupFromKey = SERVING_POSITION_GROUPS[raw] || '';
+  return { group: groupFromKey, position: raw };
+}
+function parseServingMemberIds_(raw){
+  const s = String(raw||'').trim();
+  if (!s) return [];
+  return s.split(',').map(v => String(v||'').trim()).filter(Boolean);
 }
 function findServingEventRowIndex_(sh, eventKey){
   const lastRow = sh.getLastRow();
@@ -426,19 +465,28 @@ function getServingForEvent_(eventKey, membersById, checkedInSet){
   const out = [];
 
   matrix.positions.forEach(function(pos){
-    const raw = String(row[pos.colIndex-1] || '').trim().toUpperCase();
+    const raw = String(row[pos.colIndex-1] || '').trim();
     if (!raw) return;
     if (isServingNaValue_(raw)) return;
-    const m = membersById[raw] || {};
-    out.push({
-      eventKey: eventKey,
-      group: pos.group,
-      position: pos.position,
-      slot: '',
-      memberId: raw,
-      nameZh: String(m.nameZh || ''),
-      nameEn: String(m.nameEn || ''),
-      checkedIn: checkedInSet.has(raw)
+    const entries = parseServingMemberIds_(raw);
+    if (!entries.length) return;
+    entries.forEach(function(entry){
+      if (!entry) return;
+      if (isServingNaValue_(entry)) return;
+      const matched = String(entry || '').trim().match(/CCF\d{4}/i);
+      const memberId = matched ? matched[0].toUpperCase() : String(entry || '').trim().toUpperCase();
+      if (!memberId) return;
+      const m = membersById[memberId] || {};
+      out.push({
+        eventKey: eventKey,
+        group: pos.group,
+        position: pos.position,
+        slot: '',
+        memberId: memberId || entry,
+        nameZh: String(m.nameZh || ''),
+        nameEn: String(m.nameEn || ''),
+        checkedIn: checkedInSet.has(memberId)
+      });
     });
   });
 
@@ -464,18 +512,64 @@ function ensureHealthcheckSheet_(){
   return sh;
 }
 
-/******** New-friend suppression cache (event-only) ********/
-function newFriendSuppressKey_(eventKey, memberId){
-  return 'newSupp_' + String(eventKey||'').trim() + '_' + String(memberId||'').trim().toUpperCase();
+/******** New-friend handled (persistent) ********/
+function ensureNewFriendHandledSheet_(){
+  const ss = openSs_();
+  let sh = ss.getSheetByName(NEW_FRIEND_HANDLED_SHEET_NAME);
+  if (!sh){
+    sh = ss.insertSheet(NEW_FRIEND_HANDLED_SHEET_NAME);
+    sh.appendRow(['Timestamp','EventKey','MemberId','StaffId','StaffNameZh','StaffNameEn']);
+    sh.getRange(1,1,1,6).setFontWeight('bold');
+  }
+  return sh;
+}
+function newFriendHandledKey_(eventKey, memberId){
+  return 'newHandled_' + String(eventKey||'').trim() + '_' + String(memberId||'').trim().toUpperCase();
 }
 function isNewFriendSuppressed_(eventKey, memberId){
-  try{ return !!CacheService.getScriptCache().get(newFriendSuppressKey_(eventKey, memberId)); }catch(e){ return false; }
+  const key = newFriendHandledKey_(eventKey, memberId);
+  try{
+    if (CacheService.getScriptCache().get(key)) return true;
+  }catch(e){}
+  const sh = ensureNewFriendHandledSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return false;
+  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  const ev = String(eventKey||'').trim();
+  const mid = String(memberId||'').trim().toUpperCase();
+  for (let i=0;i<data.length;i++){
+    if (String(data[i][1]||'').trim() === ev && String(data[i][2]||'').trim().toUpperCase() === mid){
+      try{ CacheService.getScriptCache().put(key, '1', 12 * 60 * 60); }catch(e){}
+      return true;
+    }
+  }
+  return false;
 }
-function setNewFriendSuppressed_(eventKey, memberId){
-  try{ CacheService.getScriptCache().put(newFriendSuppressKey_(eventKey, memberId), '1', 12 * 60 * 60); }catch(e){}
+function setNewFriendSuppressed_(eventKey, memberId, staff){
+  const sh = ensureNewFriendHandledSheet_();
+  sh.appendRow([
+    nowUk_(),
+    String(eventKey||'').trim(),
+    String(memberId||'').trim().toUpperCase(),
+    staff && staff.id ? staff.id : '',
+    staff && staff.nameZh ? staff.nameZh : '',
+    staff && staff.nameEn ? staff.nameEn : ''
+  ]);
+  try{ CacheService.getScriptCache().put(newFriendHandledKey_(eventKey, memberId), '1', 12 * 60 * 60); }catch(e){}
 }
 function clearNewFriendSuppressed_(eventKey, memberId){
-  try{ CacheService.getScriptCache().remove(newFriendSuppressKey_(eventKey, memberId)); }catch(e){}
+  try{ CacheService.getScriptCache().remove(newFriendHandledKey_(eventKey, memberId)); }catch(e){}
+  const sh = ensureNewFriendHandledSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return;
+  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  const ev = String(eventKey||'').trim();
+  const mid = String(memberId||'').trim().toUpperCase();
+  for (let i=data.length-1;i>=0;i--){
+    if (String(data[i][1]||'').trim() === ev && String(data[i][2]||'').trim().toUpperCase() === mid){
+      sh.deleteRow(i+2);
+    }
+  }
 }
 
 /******** New friend history helper ********/
@@ -893,7 +987,7 @@ function api_search_members(token, query) {
     const m = byId[qUpper];
     if (!m) return { ok:true, results:[] };
     if (normalizeStatus_(m.status) === STATUS_DISABLED) return { ok:true, results:[] };
-    return { ok:true, results:[ { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' } ] };
+    return { ok:true, results:[ { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', preferredName:m.preferredName||'' } ] };
   }
 
   // Partial CCF digits => show up to 4 closest matches (ID-only)
@@ -906,9 +1000,9 @@ function api_search_members(token, query) {
     if (!isNaN(num)) {
       const padded = 'CCF' + String(num).padStart(4,'0');
       if (byId[padded] && normalizeStatus_(byId[padded].status) !== STATUS_DISABLED) {
-        const m0 = byId[padded];
-        out.push({ id:m0.id, nameZh:m0.nameZh||'', nameEn:m0.nameEn||'' });
-      }
+      const m0 = byId[padded];
+      out.push({ id:m0.id, nameZh:m0.nameZh||'', nameEn:m0.nameEn||'', preferredName:m0.preferredName||'' });
+    }
     }
 
     // 2) prefix matches (e.g. CCF00)
@@ -922,7 +1016,7 @@ function api_search_members(token, query) {
     }
     starts.sort((a,b)=> a.id.localeCompare(b.id));
     starts.slice(0, 4 - out.length).forEach(m=>{
-      out.push({ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' });
+      out.push({ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', preferredName:m.preferredName||'' });
     });
 
     return { ok:true, results: out.slice(0,4) };
@@ -940,7 +1034,7 @@ function api_search_members(token, query) {
       .map(x => String(x || '').toLowerCase())
       .join(' | ');
 
-    if (hay.includes(qLower)) out.push({ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'' });
+    if (hay.includes(qLower)) out.push({ id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', preferredName:m.preferredName||'' });
     if (out.length >= 12) break;
   }
 
@@ -1080,6 +1174,7 @@ function api_search_vrm(token, query, eventKeyOptional) {
         id: m.id,
         nameZh: m.nameZh || '',
         nameEn: m.nameEn || '',
+        preferredName: m.preferredName || '',
         vrm: v1,
         vrm2: v2,
         checkedInToday: checkedSet.has(m.id)
@@ -1413,7 +1508,7 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   const target = mi.byId[targetId];
   if (!target) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
 
-  setNewFriendSuppressed_(eventKey, targetId);
+  setNewFriendSuppressed_(eventKey, targetId, { id: byId, nameZh: byNameZh, nameEn: byNameEn });
   CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
   const logSh = ensureActivityLogSheet_();
@@ -1448,6 +1543,25 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
       byNameEn: byNameEn
     }
   };
+}
+
+function deleteCheckinsForEventMember_(eventKey, memberId){
+  const sh = getCheckinsSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return 0;
+  const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
+  const rowsToDelete = [];
+  for (let i=0;i<data.length;i++){
+    const ev = String(data[i][1]||'').trim();
+    const mid = String(data[i][2]||'').trim();
+    if (ev === eventKey && mid === memberId){
+      rowsToDelete.push(i + 2);
+    }
+  }
+  for (let i=rowsToDelete.length-1;i>=0;i--){
+    sh.deleteRow(rowsToDelete[i]);
+  }
+  return rowsToDelete.length;
 }
 
 /******** Delete today's attendance ********/
@@ -1527,20 +1641,8 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   lock.waitLock(10000);
 
   try{
-    const sh = getCheckinsSheet_();
-    const lastRow = sh.getLastRow();
-    if (lastRow < 2) return { ok:false, code:'E404', zh:'今日暫無簽到記錄', en:'No check-ins today.' };
-
-    const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
-    let hitIdx = -1;
-    for (let i=data.length-1; i>=0; i--){
-      const ev = String(data[i][1]||'').trim();
-      const mid = String(data[i][2]||'').trim();
-      if (ev === eventKey && mid === targetId){ hitIdx = i; break; }
-    }
-    if (hitIdx < 0) return { ok:false, code:'E404', zh:'找不到此會員今日簽到記錄', en:'Today check-in not found.' };
-
-    sh.deleteRow(hitIdx + 2);
+    const deletedCount = deleteCheckinsForEventMember_(eventKey, targetId);
+    if (!deletedCount) return { ok:false, code:'E404', zh:'找不到此會員今日簽到記錄', en:'Today check-in not found.' };
 
     clearNewFriendSuppressed_(eventKey, targetId);
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
@@ -1562,6 +1664,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
         byId: byId,
         byNameZh: byNameZh,
         byNameEn: byNameEn,
+        deletedCount: deletedCount,
         emailStatus: emailRes.status,
         emailToMasked: emailRes.toMasked
       }),
@@ -1582,6 +1685,102 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
       },
       email: emailRes
     };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/******** Live: mark new friend handled (no QR reauth) ********/
+function api_newfriend_mark_handled(token, memberId, eventKeyOptional){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const staff = auth.sess.staff;
+  const st = normalizeStatus_(staff.status);
+  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+
+  const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
+  const targetId = String(memberId||'').trim().toUpperCase();
+  if (!targetId) return { ok:false, code:'E416', zh:'找不到此會員', en:'Member not found.' };
+
+  const mi = getMembersIndex_();
+  const target = mi.byId[targetId];
+  if (!target) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
+
+  setNewFriendSuppressed_(eventKey, targetId, { id: staff.id, nameZh: staff.nameZh||'', nameEn: staff.nameEn||'' });
+  CacheService.getScriptCache().remove('liveNames_' + eventKey);
+
+  const logSh = ensureActivityLogSheet_();
+  logSh.appendRow([
+    nowUk_(),
+    staff.id,
+    staff.nameZh||'',
+    staff.nameEn||'',
+    'NEWFRIEND_HANDLED',
+    JSON.stringify({
+      eventKey: eventKey,
+      memberId: targetId,
+      memberNameZh: target.nameZh||'',
+      memberNameEn: target.nameEn||'',
+      byId: staff.id,
+      byNameZh: staff.nameZh||'',
+      byNameEn: staff.nameEn||''
+    }),
+    eventKey
+  ]);
+
+  return { ok:true, eventKey: eventKey, memberId: targetId };
+}
+
+/******** Live: delete checkin (no QR reauth) ********/
+function api_checkin_delete(token, memberId, eventKeyOptional){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+
+  const staff = auth.sess.staff;
+  const st = normalizeStatus_(staff.status);
+  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+
+  const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
+  const targetId = String(memberId||'').trim().toUpperCase();
+  if (!targetId) return { ok:false, code:'E416', zh:'找不到此會員', en:'Member not found.' };
+
+  const mi = getMembersIndex_();
+  const target = mi.byId[targetId];
+  if (!target) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try{
+    const deletedCount = deleteCheckinsForEventMember_(eventKey, targetId);
+    if (!deletedCount) return { ok:false, code:'E404', zh:'找不到此會員今日簽到記錄', en:'Today check-in not found.' };
+
+    clearNewFriendSuppressed_(eventKey, targetId);
+    CacheService.getScriptCache().remove('liveNames_' + eventKey);
+
+    const logSh = ensureActivityLogSheet_();
+    logSh.appendRow([
+      nowUk_(),
+      staff.id,
+      staff.nameZh||'',
+      staff.nameEn||'',
+      'DELETE_CHECKIN',
+      JSON.stringify({
+        eventKey: eventKey,
+        memberId: targetId,
+        memberNameZh: target.nameZh||'',
+        memberNameEn: target.nameEn||'',
+        byId: staff.id,
+        byNameZh: staff.nameZh||'',
+        byNameEn: staff.nameEn||'',
+        deletedCount: deletedCount
+      }),
+      eventKey
+    ]);
+
+    return { ok:true, eventKey: eventKey, memberId: targetId, deletedCount: deletedCount };
   } finally {
     lock.releaseLock();
   }
