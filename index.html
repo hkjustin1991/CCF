@@ -699,6 +699,7 @@
         }
         App.vrmActive = false;
         clearTimeout(App.vrmDebounceT);
+        App.vrmDebounceT = null;
       }
 
       if(App.view !== 'auth'){
@@ -1766,14 +1767,17 @@
         App.vrmActive = false;
         App.vrmToken = (App.vrmToken || 0) + 1;
         clearTimeout(App.vrmDebounceT);
+        App.vrmDebounceT = null;
         App.view='menu';
-        render();
+        setTimeout(function(){
+          if (typeof window.render === 'function') window.render();
+        }, 0);
       };
 
       var qEl = $('vrmQ');
       var outEl = $('vrmResults');
 
-      function render(res){
+      function renderVrmResults(res){
         if (!App.vrmActive || App.view !== 'vrm' || token !== App.vrmToken) return;
         if(!res || !res.ok){ outEl.innerHTML=''; showErr('vrmMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
         var list = res.results || [];
@@ -1809,7 +1813,7 @@
         var q = String(qEl.value||'').trim();
         if(!q){ outEl.innerHTML = '<div class="small">請輸入車牌 / Type a plate…</div>'; return; }
         outEl.innerHTML = '<div class="small">搜尋中… / Searching…</div>';
-        callApi('api_search_vrm', App.token, q, null).then(render).catch(function(){
+        callApi('api_search_vrm', App.token, q, null).then(renderVrmResults).catch(function(){
           if (!App.vrmActive || App.view !== 'vrm' || token !== App.vrmToken) return;
           showErr('vrmMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
           outEl.innerHTML='';
@@ -1819,6 +1823,10 @@
       qEl.oninput = function(){
         clearTimeout(App.vrmDebounceT);
         App.vrmDebounceT = setTimeout(doSearch, 250);
+      };
+      qEl.onkeydown = function(ev){
+        if (!ev || ev.key !== 'Enter') return;
+        doSearch();
       };
       qEl.onkeydown = function(ev){
         if (!ev || ev.key !== 'Enter') return;
