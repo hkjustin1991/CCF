@@ -36,8 +36,8 @@
     }
     *{box-sizing:border-box}
     html{-webkit-text-size-adjust:100%}
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
-    .wrap{max-width:760px;margin:0 auto;padding:var(--pad)}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text);overflow-x:hidden}
+    .wrap{max-width:900px;margin:0 auto;padding:var(--pad)}
     .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
     .title{font-size:var(--fs-title);font-weight:900}
     .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
@@ -95,8 +95,8 @@
     .kv div:nth-child(odd){color:var(--muted)}
     .msgEn{margin-top:4px;font-size:var(--fs-body);}
 
-    .videoWrap{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#f7f9ff}
-    video{width:100%;display:block}
+    .videoWrap{border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#f7f9ff;aspect-ratio:4/3;max-height:62dvh;display:flex;align-items:center;justify-content:center}
+    video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
 
     .footer{margin-top:14px;padding:6px 4px;font-size:var(--fs-small);color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
@@ -108,10 +108,10 @@
       width:min(720px, 100%);
       background:#fff;border-radius:18px;border:1px solid var(--border);
       box-shadow:0 24px 60px rgba(0,0,0,0.25);
-      padding:14px;max-height:85vh;overflow:auto;
+      padding:14px;max-height:85vh;overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
     }
 
-    .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
+    .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
     .nameItem{
       padding:10px;border:1px solid var(--border);border-radius:12px;margin-top:8px;
       white-space:normal;overflow-wrap:anywhere;word-break:break-word;
@@ -147,9 +147,15 @@
 
     @media (pointer: coarse){
       button{ min-height: 56px; }
+      .scrollBtn{ min-height:0; }
+    }
+    @media (max-width: 900px){
+      .wrap{max-width:760px}
     }
     @media (max-width: 420px){
       .kv{ grid-template-columns: 120px 1fr; }
+      .videoWrap{aspect-ratio:1/1}
+      .menuGrid{grid-template-columns:1fr}
     }
   </style>
 </head>
