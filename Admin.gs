@@ -1479,6 +1479,18 @@ function admin_findServingEventRowIndex_(sh, eventKey){
   }
   return null;
 }
+function admin_getServingEventRowLookup_(sh){
+  const lastRow = sh.getLastRow();
+  const byEvent = {};
+  if (lastRow < 2) return byEvent;
+  const values = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i=0;i<values.length;i++){
+    const eventKey = String(values[i][0]||'').trim();
+    if (!eventKey) continue;
+    byEvent[eventKey] = i + 2;
+  }
+  return byEvent;
+}
 function admin_isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();
   return (v === 'N/A' || v === 'NA');
@@ -1567,18 +1579,44 @@ function admin_getServingPlanMatrix_(events){
   }
 
   const matrix = admin_getServingMatrix_(sh);
+  const lastCol = sh.getLastColumn();
+  if (lastCol < 2){
+    return { events: eventList, positions: [], cells: cells };
+  }
   const positions = matrix.positions.map(function(pos){
     return { key: pos.key, group: pos.group, position: pos.position };
   });
 
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
+  const rowLookup = admin_getServingEventRowLookup_(sh);
 
+  const targetRows = [];
+  const targetEvents = [];
   eventKeys.forEach(function(ev){
-    const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+    const rowIndex = rowLookup[ev] || null;
     if (!rowIndex) return;
-    const lastCol = sh.getLastColumn();
-    const row = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+    targetRows.push(rowIndex);
+    targetEvents.push(ev);
+  });
+
+  if (!targetRows.length){
+    return { events: eventList, positions: positions, cells: cells };
+  }
+
+  const minRow = Math.min.apply(null, targetRows);
+  const maxRow = Math.max.apply(null, targetRows);
+  const block = sh.getRange(minRow, 1, maxRow - minRow + 1, lastCol).getValues();
+  const rowValuesByIndex = {};
+  for (let i=0;i<block.length;i++){
+    rowValuesByIndex[minRow + i] = block[i];
+  }
+
+  targetEvents.forEach(function(ev){
+    const rowIndex = rowLookup[ev] || null;
+    if (!rowIndex) return;
+    const row = rowValuesByIndex[rowIndex] || null;
+    if (!row) return;
     matrix.positions.forEach(function(pos){
       if (!pos.colIndex) return;
       const raw = String(row[pos.colIndex-1] || '').trim();
