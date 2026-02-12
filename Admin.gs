@@ -357,6 +357,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
 
   const duplicateMap = {};
   const duplicateDetails = [];
+  const duplicateWarn = [];
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
@@ -391,6 +392,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   Object.keys(duplicateMap).forEach(function(id){
     const positions = duplicateMap[id] || [];
     if (positions.length <= 1) return;
+    if (admin_memberHasAdminStatus_(id, membersById)){
+      duplicateWarn.push({ memberId: id, positions: positions.slice(0, 2), reason: 'admin_member_override' });
+      return;
+    }
     duplicateDetails.push({ memberId: id, positions: positions.slice(0, 2) });
   });
 
@@ -401,8 +406,21 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
       return { memberId: id };
     }));
   }
+  const conflictWarn = [];
+  conflicts = conflicts.filter(function(c){
+    if (admin_memberHasAdminStatus_(c.memberId, membersById)){
+      conflictWarn.push({ memberId: c.memberId, from: c.from, to: c.to, reason: 'admin_member_override' });
+      return false;
+    }
+    return true;
+  });
   const role = String(s.actor.role||'').trim().toUpperCase();
   const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
+  const adminWarnings = {
+    conflicts: conflictWarn,
+    duplicates: duplicateWarn
+  };
+  const hasAdminWarnings = (adminWarnings.conflicts.length || adminWarnings.duplicates.length);
   if (invalidGroupAssignments.length){
     return admin_err_('E409','成員不屬於該事奉組別','Member is not in the required serving group.');
   }
@@ -424,6 +442,21 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     }
     if (!overrideAway){
       return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, canOverride:true };
+    }
+  }
+  if (hasAdminWarnings){
+    if (!canOverride){
+      return admin_err_('E409','ADMIN 成員已安排重疊（需管理員確認）','ADMIN member scheduling overlap requires admin confirmation.');
+    }
+    if (!overrideAway){
+      return {
+        ok:false,
+        code:'E409',
+        zh:'ADMIN 成員可覆蓋規則，請確認是否繼續',
+        en:'ADMIN member can override rules. Please confirm to continue.',
+        adminWarnings: adminWarnings,
+        canOverride:true
+      };
     }
   }
 
@@ -455,7 +488,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     'serving'
   );
 
-  return { ok:true, eventKey: ev, rows: cleaned.length };
+  return {
+    ok:true,
+    eventKey: ev,
+    rows: cleaned.length,
+    warnings:{
+      conflicts: conflictWarn,
+      duplicates: duplicateWarn
+    }
+  };
 }
 
 /**
@@ -1329,6 +1370,15 @@ function admin_memberLabelCompact_(m){
     label: id ? (id + ' · ' + display) : display
   };
 }
+function admin_memberHasAdminStatus_(memberId, membersById){
+  const map = membersById || {};
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!id) return false;
+  const m = map[id] || null;
+  if (!m) return false;
+  const st = String(m.status || '').trim().toUpperCase();
+  return (st === 'ADMIN');
+}
 function admin_getAwayPeriodForMember_(memberId){
   const mi = admin_getMembersIndex_();
   const id = String(memberId||'').trim().toUpperCase();
@@ -1379,7 +1429,8 @@ function admin_getServingInsightsForMember_(memberId){
       group: groupKey,
       summary: [],
       historical: [],
-      upcoming: []
+      upcoming: [],
+      gaps: []
     };
   });
 
@@ -1396,6 +1447,8 @@ function admin_getServingInsightsForMember_(memberId){
   const summaryMap = {};
   const historicalByGroup = {};
   const upcomingByGroup = {};
+  const gapsByGroupEvent = {};
+  const soon12w = new Date(today.getTime() + (84 * 24 * 60 * 60 * 1000));
 
   rows.forEach(function(row){
     const eventKey = String(row[0] || '').trim();
@@ -1408,8 +1461,29 @@ function admin_getServingInsightsForMember_(memberId){
       const groupKey = admin_normalizeServingGroup_(pos.group);
       if (!groupKey || !out.byGroup[groupKey]) return;
       const raw = String(row[pos.colIndex - 1] || '').trim();
-      if (!raw) return;
-      const ids = admin_extractMemberIdsFromServingValue_(raw);
+      const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
+
+      const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
+      const missing = Math.max(0, minRequired - ids.length);
+      if (missing > 0 && evDate && evDate.getTime() >= today.getTime() && evDate.getTime() <= soon12w.getTime()){
+        const gk = groupKey + '::' + eventKey;
+        if (!gapsByGroupEvent[gk]){
+          gapsByGroupEvent[gk] = {
+            group: groupKey,
+            eventKey: eventKey,
+            dateYmd: dateYmd,
+            totalMissing: 0,
+            positions: []
+          };
+        }
+        gapsByGroupEvent[gk].totalMissing += missing;
+        gapsByGroupEvent[gk].positions.push({
+          position: String(pos.position||''),
+          label: admin_servingPositionLabel_(String(pos.position||'')),
+          missing: missing
+        });
+      }
+
       if (!ids || ids.indexOf(id) < 0) return;
 
       const position = String(pos.position||'').trim();
@@ -1460,6 +1534,10 @@ function admin_getServingInsightsForMember_(memberId){
     const future = upcomingByGroup[groupKey] || [];
     future.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
     bucket.upcoming = future;
+
+    bucket.gaps = Object.keys(gapsByGroupEvent).map(function(k){ return gapsByGroupEvent[k]; })
+      .filter(function(item){ return item.group === groupKey; })
+      .sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
   }
 
   return out;
