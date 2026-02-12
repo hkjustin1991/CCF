@@ -126,6 +126,7 @@
       border:1px solid var(--border);
       background:#fff;
     }
+    .groupBadge.clickableTag{cursor:pointer}
     .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
     .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
     .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
@@ -204,6 +205,26 @@
       background:#fff;
       color:var(--muted);
     }
+    .servingGapUrgent{
+      background:#fff0f0 !important;
+      box-shadow:inset 0 0 0 2px #d93c5e;
+    }
+    .servingGapUrgent .servingPlanEntry{
+      border-color:#d93c5e;
+      background:#fff;
+    }
+    .groupDialog{
+      margin-top:10px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      background:#fff;
+    }
+    .groupDialogHeader{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+    .groupDialogTitle{font-weight:900}
+    .groupDialogSection{margin-top:10px}
+    .groupDialogList{margin:6px 0 0 16px;padding:0}
+    .groupDialogList li{margin:4px 0}
 
     /* list items (same feel as staff live list) */
     .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
@@ -390,6 +411,15 @@
       Logistic_Refreshment: 2,
       Finance_Offering: 3
     };
+    var POSITION_MIN = {
+      Finance_Offering: 2,
+      Other: 0
+    };
+    function positionMinRequired_(position){
+      var key = String(position||'').trim();
+      if (Object.prototype.hasOwnProperty.call(POSITION_MIN, key)) return Number(POSITION_MIN[key] || 0);
+      return 1;
+    }
     var SERVING_GROUP_BADGES = {
       worship: { zh:'敬拜聯盟', en:'Worship Alliance', cls:'groupBadge worship' },
       media: { zh:'影像大師', en:'Media Master', cls:'groupBadge media' },
@@ -556,7 +586,7 @@
       if (key === 'FINANCE') return 'finance';
       return '';
     }
-    function renderServingGroupBadges_(groups){
+    function renderServingGroupBadges_(groups, clickable){
       var list = Array.isArray(groups) ? groups : [];
       var seen = {};
       var html = list.map(function(g){
@@ -565,9 +595,80 @@
         seen[key] = true;
         var label = SERVING_GROUP_BADGES[key];
         if (!label) return '';
-        return '<span class="'+label.cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+        var cls = label.cls + (clickable ? ' clickableTag' : '');
+        if (!clickable) return '<span class="'+cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+        return '<button type="button" class="'+cls+'" data-group-key="'+escapeHtml(key)+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</button>';
       }).filter(Boolean).join('');
       return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
+    }
+    function buildServingGroupDialogHtml_(groupKey, servingInsights){
+      var insights = servingInsights || {};
+      var byGroup = insights.byGroup || {};
+      var currentByGroup = insights.currentMembersByGroup || {};
+      var bucket = byGroup[groupKey] || {};
+      var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
+
+      var summary = Array.isArray(bucket.summary) ? bucket.summary : [];
+      var historical = Array.isArray(bucket.historical) ? bucket.historical : [];
+      var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
+      var currentMembers = Array.isArray(currentByGroup[groupKey]) ? currentByGroup[groupKey] : [];
+      var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
+
+      var summaryHtml = summary.length
+        ? '<ul class="groupDialogList">'+summary.map(function(it){
+            var count = Number(it.count||0);
+            return '<li><b>'+escapeHtml(String(count))+'x</b> · '+escapeHtml(it.label || it.position || '—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有記錄 / No records</div>';
+
+      var histHtml = historical.length
+        ? '<ul class="groupDialogList">'+historical.map(function(it){
+            return '<li>'+escapeHtml(it.eventKey||'')+' · '+escapeHtml(it.label||it.position||'—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有歷史事奉 / No historical services</div>';
+
+      var upHtml = upcoming.length
+        ? '<ul class="groupDialogList">'+upcoming.map(function(it){
+            return '<li>'+escapeHtml(it.eventKey||'')+' · '+escapeHtml(it.label||it.position||'—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有未來事奉 / No upcoming services</div>';
+
+      var membersHtml = currentMembers.length
+        ? '<ul class="groupDialogList">'+currentMembers.map(function(m){
+            return '<li>'+escapeHtml(m.label || m.id || m.name || '—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">暫無組員 / No members found</div>';
+
+      return ''+
+        '<div class="groupDialog">'+
+          '<div class="groupDialogHeader">'+
+            '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+            '<button type="button" class="btnMini btnBack" id="btnGroupDialogClose">✖ Close</button>'+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">次數統計（按崗位） / Summary by position</div>'+
+            summaryHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">歷史事奉 / Historical services</div>'+
+            histHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">未來事奉 / Upcoming services</div>'+
+            upHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">當前組員 / Current members</div>'+
+            membersHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="miniBtnRow">'+
+              '<button type="button" class="btnLookup btnMini" id="btnGap6">缺口（&lt;6 週） / Gaps (&lt;6 weeks)</button>'+
+              '<button type="button" class="btnLookup btnMini" id="btnGap12">缺口（&lt;12 週） / Gaps (&lt;12 weeks)</button>'+
+            '</div>'+
+            '<div id="gapResult" class="small" style="margin-top:8px;"></div>'+
+          '</div>'+
+        '</div>';
     }
 
     function eventDateYmdFromKey(ev){
@@ -608,6 +709,21 @@
       var s = String(raw||'').trim();
       if (!s) return [];
       return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+    }
+    function buildAdminOverrideWarningHtml_(warnings){
+      var w = warnings || {};
+      var lines = [];
+      var conflicts = Array.isArray(w.conflicts) ? w.conflicts : [];
+      var duplicates = Array.isArray(w.duplicates) ? w.duplicates : [];
+      conflicts.forEach(function(c){
+        lines.push(escapeHtml(c.memberId||'') + ' holiday overlap: ' + escapeHtml(String(c.from||'')) + ' - ' + escapeHtml(String(c.to||'')));
+      });
+      duplicates.forEach(function(d){
+        var posLabels = (d.positions||[]).map(function(p){ return servingPositionLabel_({ position: p }); });
+        lines.push(escapeHtml(d.memberId||'') + ' duplicate positions: ' + escapeHtml(posLabels.join(', ')));
+      });
+      if (!lines.length) return '';
+      return lines.join('<br/>');
     }
     function extractMemberId_(token){
       var m = String(token||'').match(/CCF\\d{4}/i);
@@ -1016,8 +1132,15 @@
             var bodyHtml = viewEvents.map(function(ev){
               var rowCells = groupPositions.map(function(pos){
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+                var minReq = positionMinRequired_(pos.position);
+                var currentCount = (cell && cell.length) ? cell.length : 0;
+                var ymd = eventDateYmdFromKey(ev.eventKey||'');
+                var evDate = parseYmd(ymd);
+                var today = parseYmd(getTodayYmdUk());
+                var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
+                var urgentGap = (diff >= 0 && diff < 28 && currentCount < minReq);
                 if(!cell || !cell.length){
-                  return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'"></td>';
+                  return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'"></td>';
                 }
                 var entries = cell.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
@@ -1028,7 +1151,7 @@
                       escapeHtml(label)+
                     '</button>';
                 }).filter(Boolean).join('');
-                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+entries+'</td>';
+                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries+'</td>';
               }).join('');
               return ''+
                 '<tr>'+
@@ -1415,6 +1538,11 @@
                   var detail = '';
                   var titleZh = '事奉安排需要確認';
                   var titleEn = 'Serving assignment needs confirmation.';
+                  if (res2.adminWarnings){
+                    titleZh = 'ADMIN 可覆蓋規則（請確認）';
+                    titleEn = 'ADMIN can override rules (please confirm).';
+                    detail = buildAdminOverrideWarningHtml_(res2.adminWarnings);
+                  }
                   if (res2.conflicts && res2.conflicts.length){
                     titleZh = '事奉安排與離開期重疊';
                     titleEn = 'Serving assignment overlaps away period.';
@@ -1439,7 +1567,8 @@
                   btn.onclick = function(){
                     callApi('api_admin_serving_event_save', App.token, ev, payload, true).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-                      showBox('servingEditMsg','ok','已儲存','Saved.');
+                      var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {});
+                      showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
                       closeModal(modal);
                       if (App.refreshServingPlan) App.refreshServingPlan();
                     }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
@@ -1451,7 +1580,8 @@
                 showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
                 return;
               }
-              showBox('servingEditMsg','ok','已儲存','Saved.');
+              var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {});
+              showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
               closeModal(modal);
               if (App.refreshServingPlan) App.refreshServingPlan();
             }).catch(function(){
@@ -1527,6 +1657,11 @@
                 var detail = '';
                 var titleZh = '事奉安排需要確認';
                 var titleEn = 'Serving assignment needs confirmation.';
+                if (res2.adminWarnings){
+                  titleZh = 'ADMIN 可覆蓋規則（請確認）';
+                  titleEn = 'ADMIN can override rules (please confirm).';
+                  detail = buildAdminOverrideWarningHtml_(res2.adminWarnings);
+                }
                 if (res2.conflicts && res2.conflicts.length){
                   titleZh = '事奉安排與離開期重疊';
                   titleEn = 'Serving assignment overlaps away period.';
@@ -1558,7 +1693,8 @@
               showErr('quickMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
               return;
             }
-            showBox('quickMsg','ok','已儲存','Saved.');
+            var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {});
+            showBox('quickMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
             closeModal(modal);
             if (App.refreshServingPlan) App.refreshServingPlan();
           }).catch(function(){
@@ -2262,6 +2398,7 @@
         var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
         var low = res.lowAttendance || {};
         var away = res.away || {};
+        var servingInsights = res.servingInsights || {};
 
         var statusDisplay = displayMemberStatusLabel(m.status||'');
 
@@ -2329,7 +2466,7 @@
             '</div>'
           : '';
 
-        var groupsHtml = renderServingGroupBadges_((m.servingGroups||[]).concat(m.servingGLGroups||[]));
+        var groupsHtml = renderServingGroupBadges_((m.servingGroups||[]).concat(m.servingGLGroups||[]), true);
 
         modal.querySelector('.modal').innerHTML =
           topBtns +
@@ -2343,6 +2480,7 @@
             '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
           '</div>'+
           (groupsHtml || '')+
+          '<div id="groupDialogHost"></div>'+
 
           statsCard+
           awayCard+
@@ -2449,6 +2587,63 @@
             attachScrollControls_(absModal);
           };
         }
+
+        var groupDialogHost = modal.querySelector('#groupDialogHost');
+        var activeGroupKey = '';
+        function renderGroupDialog_(groupKey){
+          if (!groupDialogHost) return;
+          if (!groupKey){
+            groupDialogHost.innerHTML = '';
+            activeGroupKey = '';
+            return;
+          }
+          groupDialogHost.innerHTML = buildServingGroupDialogHtml_(groupKey, servingInsights);
+          activeGroupKey = groupKey;
+          var closeBtn = groupDialogHost.querySelector('#btnGroupDialogClose');
+          if (closeBtn){
+            closeBtn.onclick = function(){ renderGroupDialog_(''); };
+          }
+          var gap6Btn = groupDialogHost.querySelector('#btnGap6');
+          var gap12Btn = groupDialogHost.querySelector('#btnGap12');
+          var gapResult = groupDialogHost.querySelector('#gapResult');
+          function renderGapByWeeks_(maxDays){
+            if (!gapResult) return;
+            var bucket = ((servingInsights.byGroup||{})[groupKey] || {});
+            var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
+            var today = parseYmd(getTodayYmdUk());
+            var filtered = gaps.filter(function(g){
+              var ymd = eventDateYmdFromKey(g.eventKey || '');
+              var d = parseYmd(ymd);
+              if (!today || !d) return false;
+              var diff = daysBetween(today, d);
+              return diff >= 0 && diff < maxDays && Number(g.totalMissing||0) > 0;
+            });
+            if (!filtered.length){
+              gapResult.innerHTML = '<div class="small">沒有缺口 / No gaps</div>';
+              return;
+            }
+            gapResult.innerHTML = '<ul class="groupDialogList">'+filtered.map(function(g){
+              var posText = (g.positions || []).map(function(p){
+                return (p.label || p.position || '—') + ' (+' + String(p.missing||0) + ')';
+              }).join(', ');
+              return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · +'+escapeHtml(String(g.totalMissing||0))+' · '+escapeHtml(posText)+'</li>';
+            }).join('')+'</ul>';
+          }
+          if (gap6Btn) gap6Btn.onclick = function(){ renderGapByWeeks_(42); };
+          if (gap12Btn) gap12Btn.onclick = function(){ renderGapByWeeks_(84); };
+        }
+
+        Array.prototype.forEach.call(modal.querySelectorAll('[data-group-key]'), function(btn){
+          btn.onclick = function(){
+            var key = String(btn.getAttribute('data-group-key')||'').trim();
+            if (!key) return;
+            if (activeGroupKey === key){
+              renderGroupDialog_('');
+              return;
+            }
+            renderGroupDialog_(key);
+          };
+        });
       }).catch(function(){
         closeModal(modal);
         showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
