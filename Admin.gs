@@ -172,6 +172,11 @@ function admin_servingPositionLabel_(pos){
   if (label) return label.en + ' / ' + label.zh;
   return String(pos || '');
 }
+function admin_servingPositionZh_(pos){
+  const label = ADMIN_SERVING_POSITION_LABELS[pos];
+  if (label) return label.zh;
+  return String(pos || '');
+}
 
 // Cache
 const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
@@ -303,6 +308,12 @@ function api_admin_serving_plan_matrix(token, fromDate){
     maxMonths: ADMIN_SERVING_MONTHS_AHEAD
   };
 }
+function api_admin_serving_group_overview(token, fromDate){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const fromYmd = String(fromDate || admin_todayUkYmd_()).trim();
+  return { ok:true, fromDate: fromYmd, overview: admin_buildServingGroupOverview_(fromYmd) };
+}
 
 /**
  * Serving event rows (for per-event edit UI).
@@ -357,10 +368,13 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
 
   const duplicateMap = {};
   const duplicateDetails = [];
+  const duplicateWarn = [];
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
   const membersById = mi.byId || {};
+  const existingValues = admin_getServingValuesForEvent_(ev);
+  const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
 
   for (const r of cleaned){
     const ids = admin_extractMemberIdsFromServingValue_(r.value);
@@ -391,7 +405,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   Object.keys(duplicateMap).forEach(function(id){
     const positions = duplicateMap[id] || [];
     if (positions.length <= 1) return;
-    duplicateDetails.push({ memberId: id, positions: positions.slice(0, 2) });
+    const normalized = positions.slice().sort();
+    const existing = existingDupMap[id] || [];
+    const isNewDup = (existing.join('|') !== normalized.join('|'));
+    if (!isNewDup) return;
+    if (admin_memberHasAdminStatus_(id, membersById)){
+      duplicateWarn.push({ memberId: id, positions: positions.slice(0, 2), reason: 'admin_member_override', newlyIntroduced:true });
+      return;
+    }
+    duplicateDetails.push({ memberId: id, positions: positions.slice(0, 2), newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -401,8 +423,21 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
       return { memberId: id };
     }));
   }
+  const conflictWarn = [];
+  conflicts = conflicts.filter(function(c){
+    if (admin_memberHasAdminStatus_(c.memberId, membersById)){
+      conflictWarn.push({ memberId: c.memberId, from: c.from, to: c.to, reason: 'admin_member_override' });
+      return false;
+    }
+    return true;
+  });
   const role = String(s.actor.role||'').trim().toUpperCase();
   const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
+  const adminWarnings = {
+    conflicts: conflictWarn,
+    duplicates: duplicateWarn
+  };
+  const hasAdminWarnings = (adminWarnings.conflicts.length || adminWarnings.duplicates.length);
   if (invalidGroupAssignments.length){
     return admin_err_('E409','成員不屬於該事奉組別','Member is not in the required serving group.');
   }
@@ -424,6 +459,21 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     }
     if (!overrideAway){
       return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, canOverride:true };
+    }
+  }
+  if (hasAdminWarnings){
+    if (!canOverride){
+      return admin_err_('E409','ADMIN 成員已安排重疊（需管理員確認）','ADMIN member scheduling overlap requires admin confirmation.');
+    }
+    if (!overrideAway){
+      return {
+        ok:false,
+        code:'E409',
+        zh:'ADMIN 成員可覆蓋規則，請確認是否繼續',
+        en:'ADMIN member can override rules. Please confirm to continue.',
+        adminWarnings: adminWarnings,
+        canOverride:true
+      };
     }
   }
 
@@ -455,7 +505,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
     'serving'
   );
 
-  return { ok:true, eventKey: ev, rows: cleaned.length };
+  return {
+    ok:true,
+    eventKey: ev,
+    rows: cleaned.length,
+    warnings:{
+      conflicts: conflictWarn,
+      duplicates: duplicateWarn
+    }
+  };
 }
 
 /**
@@ -1016,6 +1074,7 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
   const lowEnabled = !!low.enabled;
   const lowFlag = !!low.flagById[id];
   const away = admin_getAwayPeriodForMember_(id);
+  const servingInsights = admin_getServingInsightsForMember_(id);
 
   admin_audit_(s.actor, 'MEMBER_DETAIL', JSON.stringify({id:id, from:String(fromDate||''), to:String(toDate||'')}), 'member_detail');
 
@@ -1048,7 +1107,8 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       to1: away.toYmd || '',
       from2: away.from2Ymd || '',
       to2: away.to2Ymd || ''
-    }
+    },
+    servingInsights: servingInsights
   };
 }
 
@@ -1309,10 +1369,33 @@ function admin_ensureAwaySheet_(){
   return sh;
 }
 function admin_normalizeAwayPeriod_(fromYmd, toYmd){
-  const f = String(fromYmd||'').trim();
-  const t = String(toYmd||'').trim();
+  const f = admin_parseDmyToYmd_(fromYmd);
+  const t = admin_parseDmyToYmd_(toYmd);
   if (!f && !t) return { fromYmd:'', toYmd:'' };
   return { fromYmd: f || t, toYmd: t || f };
+}
+
+function admin_memberLabelCompact_(m){
+  const id = String((m && m.id) || '').trim().toUpperCase();
+  const pref = String((m && m.preferredName) || '').trim();
+  const zh = String((m && m.nameZh) || '').trim();
+  const en = String((m && m.nameEn) || '').trim();
+  const fallback = [en, zh].filter(Boolean).join(' / ');
+  const display = pref || fallback || zh || en || id;
+  return {
+    id: id,
+    name: display,
+    label: id ? (id + ' · ' + display) : display
+  };
+}
+function admin_memberHasAdminStatus_(memberId, membersById){
+  const map = membersById || {};
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!id) return false;
+  const m = map[id] || null;
+  if (!m) return false;
+  const st = String(m.status || '').trim().toUpperCase();
+  return (st === 'ADMIN');
 }
 function admin_getAwayPeriodForMember_(memberId){
   const mi = admin_getMembersIndex_();
@@ -1344,6 +1427,198 @@ function admin_getAwayPeriodsMap_(memberIds){
       periods: [p1, p2].filter(p => p.fromYmd || p.toYmd)
     };
   });
+  return out;
+}
+function admin_getServingInsightsForMember_(memberId){
+  const id = String(memberId||'').trim().toUpperCase();
+  const out = { byGroup:{}, currentMembersByGroup:{} };
+  if (!id) return out;
+
+  const mi = admin_getMembersIndex_();
+  const allMembers = (mi && mi.all) ? mi.all : [];
+  const groups = ['worship','media','logistic','support','finance'];
+
+  groups.forEach(function(groupKey){
+    const list = allMembers.filter(function(m){ return admin_memberHasServingGroup_(m, groupKey); })
+      .map(admin_memberLabelCompact_)
+      .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
+    out.currentMembersByGroup[groupKey] = list;
+    out.byGroup[groupKey] = {
+      group: groupKey,
+      summary: [],
+      historical: [],
+      upcoming: [],
+      gaps: []
+    };
+  });
+
+  const sh = admin_getServingSheet_();
+  if (!sh) return out;
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 2) return out;
+
+  const matrix = admin_getServingMatrix_(sh);
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const today = admin_parseYmd_(admin_todayUkYmd_()) || new Date();
+
+  const summaryMap = {};
+  const historicalByGroup = {};
+  const upcomingByGroup = {};
+  const gapsByGroupEvent = {};
+  const soon12w = new Date(today.getTime() + (84 * 24 * 60 * 60 * 1000));
+
+  rows.forEach(function(row){
+    const eventKey = String(row[0] || '').trim();
+    if (!eventKey) return;
+    const evDate = admin_eventDateFromKey_(eventKey);
+    const dateYmd = evDate ? admin_fmtYmd_(evDate) : '';
+
+    matrix.positions.forEach(function(pos){
+      if (!pos || !pos.colIndex) return;
+      const groupKey = admin_normalizeServingGroup_(pos.group);
+      if (!groupKey || !out.byGroup[groupKey]) return;
+      const raw = String(row[pos.colIndex - 1] || '').trim();
+      const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
+
+      const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
+      const missing = Math.max(0, minRequired - ids.length);
+      if (missing > 0 && evDate && evDate.getTime() >= today.getTime() && evDate.getTime() <= soon12w.getTime()){
+        const gk = groupKey + '::' + eventKey;
+        if (!gapsByGroupEvent[gk]){
+          gapsByGroupEvent[gk] = {
+            group: groupKey,
+            eventKey: eventKey,
+            dateYmd: dateYmd,
+            totalMissing: 0,
+            positions: []
+          };
+        }
+        gapsByGroupEvent[gk].totalMissing += missing;
+        gapsByGroupEvent[gk].positions.push({
+          position: String(pos.position||''),
+          label: admin_servingPositionZh_(String(pos.position||'')),
+          missing: missing
+        });
+      }
+
+      if (!ids || ids.indexOf(id) < 0) return;
+
+      const position = String(pos.position||'').trim();
+      const sKey = groupKey + '::' + position;
+      if (evDate && evDate.getTime() < today.getTime()){
+        if (!summaryMap[sKey]){
+          summaryMap[sKey] = {
+            group: groupKey,
+            position: position,
+            label: admin_servingPositionLabel_(position),
+            count: 0
+          };
+        }
+        summaryMap[sKey].count += 1;
+      }
+
+      const entry = {
+        eventKey: eventKey,
+        dateYmd: dateYmd,
+        position: position,
+        label: admin_servingPositionLabel_(position)
+      };
+      if (evDate && evDate.getTime() >= today.getTime()){
+        if (!upcomingByGroup[groupKey]) upcomingByGroup[groupKey] = [];
+        upcomingByGroup[groupKey].push(entry);
+      } else {
+        if (!historicalByGroup[groupKey]) historicalByGroup[groupKey] = [];
+        historicalByGroup[groupKey].push(entry);
+      }
+    });
+  });
+
+  for (const key in summaryMap){
+    const item = summaryMap[key];
+    if (!item || !out.byGroup[item.group]) continue;
+    out.byGroup[item.group].summary.push(item);
+  }
+
+  for (const groupKey in out.byGroup){
+    const bucket = out.byGroup[groupKey];
+    bucket.summary.sort(function(a,b){
+      if (a.count !== b.count) return b.count - a.count;
+      return String(a.position||'').localeCompare(String(b.position||''));
+    });
+
+    const past = historicalByGroup[groupKey] || [];
+    past.sort(function(a,b){ return String(b.dateYmd||'').localeCompare(String(a.dateYmd||'')); });
+    bucket.historical = past;
+
+    const future = upcomingByGroup[groupKey] || [];
+    future.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
+    bucket.upcoming = future;
+
+    bucket.gaps = Object.keys(gapsByGroupEvent).map(function(k){ return gapsByGroupEvent[k]; })
+      .filter(function(item){ return item.group === groupKey; })
+      .sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
+  }
+
+  return out;
+}
+function admin_buildServingGroupOverview_(fromYmd){
+  const out = { byGroup:{} };
+  const groups = ['worship','media','logistic','support','finance'];
+  const mi = admin_getMembersIndex_();
+  const allMembers = (mi && mi.all) ? mi.all : [];
+  groups.forEach(function(groupKey){
+    const current = allMembers
+      .filter(function(m){ return admin_memberHasServingGroup_(m, groupKey); })
+      .map(admin_memberLabelCompact_)
+      .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
+    out.byGroup[groupKey] = { group: groupKey, currentMembers: current, gaps: [] };
+  });
+
+  const sh = admin_getServingSheet_();
+  if (!sh) return out;
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 2) return out;
+
+  const matrix = admin_getServingMatrix_(sh);
+  const rows = sh.getRange(2,1,lastRow-1,lastCol).getValues();
+  const today = admin_parseYmd_(fromYmd) || admin_parseYmd_(admin_todayUkYmd_()) || new Date();
+  const soon12w = new Date(today.getTime() + (84 * 24 * 60 * 60 * 1000));
+  const gapMap = {};
+
+  rows.forEach(function(row){
+    const eventKey = String(row[0]||'').trim();
+    if (!eventKey) return;
+    const evDate = admin_eventDateFromKey_(eventKey);
+    if (!evDate || evDate.getTime() < today.getTime() || evDate.getTime() > soon12w.getTime()) return;
+    const dateYmd = admin_fmtYmd_(evDate);
+    matrix.positions.forEach(function(pos){
+      if (!pos || !pos.colIndex) return;
+      const groupKey = admin_normalizeServingGroup_(pos.group);
+      if (!groupKey || !out.byGroup[groupKey]) return;
+      const raw = String(row[pos.colIndex - 1] || '').trim();
+      const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
+      const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
+      const missing = Math.max(0, minRequired - ids.length);
+      if (missing <= 0) return;
+      const key = groupKey + '::' + eventKey;
+      if (!gapMap[key]){
+        gapMap[key] = { group: groupKey, eventKey:eventKey, dateYmd:dateYmd, totalMissing:0, positions:[] };
+      }
+      gapMap[key].totalMissing += missing;
+      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionZh_(String(pos.position||'')), missing:missing });
+    });
+  });
+
+  for (const k in gapMap){
+    const it = gapMap[k];
+    if (!it || !out.byGroup[it.group]) continue;
+    out.byGroup[it.group].gaps.push(it);
+  }
+  for (const g in out.byGroup){
+    out.byGroup[g].gaps.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
+  }
   return out;
 }
 function admin_servingHeaderLabel_(key){
@@ -1560,6 +1835,26 @@ function admin_getServingValuesForEvent_(eventKey){
     const key = admin_extractServingKey_(headers[i]);
     if (!key) continue;
     out[key] = String(row[i] || '').trim();
+  }
+  return out;
+}
+function admin_getDuplicatePositionMapFromValues_(valuesByPos){
+  const map = {};
+  const vals = valuesByPos || {};
+  ADMIN_SERVING_POSITIONS.forEach(function(pos){
+    const raw = String(vals[pos] || '').trim();
+    if (!raw) return;
+    const ids = admin_extractMemberIdsFromServingValue_(raw);
+    ids.forEach(function(id){
+      if (!map[id]) map[id] = [];
+      map[id].push(pos);
+    });
+  });
+  const out = {};
+  for (const id in map){
+    const arr = map[id] || [];
+    if (arr.length <= 1) continue;
+    out[id] = arr.slice().sort();
   }
   return out;
 }
