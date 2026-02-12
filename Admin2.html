@@ -126,6 +126,7 @@
       border:1px solid var(--border);
       background:#fff;
     }
+    .groupBadge.clickableTag{cursor:pointer}
     .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
     .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
     .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
@@ -204,6 +205,18 @@
       background:#fff;
       color:var(--muted);
     }
+    .groupDialog{
+      margin-top:10px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      background:#fff;
+    }
+    .groupDialogHeader{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+    .groupDialogTitle{font-weight:900}
+    .groupDialogSection{margin-top:10px}
+    .groupDialogList{margin:6px 0 0 16px;padding:0}
+    .groupDialogList li{margin:4px 0}
 
     /* list items (same feel as staff live list) */
     .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
@@ -556,7 +569,7 @@
       if (key === 'FINANCE') return 'finance';
       return '';
     }
-    function renderServingGroupBadges_(groups){
+    function renderServingGroupBadges_(groups, clickable){
       var list = Array.isArray(groups) ? groups : [];
       var seen = {};
       var html = list.map(function(g){
@@ -565,9 +578,72 @@
         seen[key] = true;
         var label = SERVING_GROUP_BADGES[key];
         if (!label) return '';
-        return '<span class="'+label.cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+        var cls = label.cls + (clickable ? ' clickableTag' : '');
+        if (!clickable) return '<span class="'+cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+        return '<button type="button" class="'+cls+'" data-group-key="'+escapeHtml(key)+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</button>';
       }).filter(Boolean).join('');
       return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
+    }
+    function buildServingGroupDialogHtml_(groupKey, servingInsights){
+      var insights = servingInsights || {};
+      var byGroup = insights.byGroup || {};
+      var currentByGroup = insights.currentMembersByGroup || {};
+      var bucket = byGroup[groupKey] || {};
+      var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
+
+      var summary = Array.isArray(bucket.summary) ? bucket.summary : [];
+      var historical = Array.isArray(bucket.historical) ? bucket.historical : [];
+      var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
+      var currentMembers = Array.isArray(currentByGroup[groupKey]) ? currentByGroup[groupKey] : [];
+
+      var summaryHtml = summary.length
+        ? '<ul class="groupDialogList">'+summary.map(function(it){
+            var count = Number(it.count||0);
+            return '<li><b>'+escapeHtml(String(count))+'x</b> · '+escapeHtml(it.label || it.position || '—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有記錄 / No records</div>';
+
+      var histHtml = historical.length
+        ? '<ul class="groupDialogList">'+historical.map(function(it){
+            return '<li>'+escapeHtml(it.eventKey||'')+' · '+escapeHtml(it.label||it.position||'—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有歷史事奉 / No historical services</div>';
+
+      var upHtml = upcoming.length
+        ? '<ul class="groupDialogList">'+upcoming.map(function(it){
+            return '<li>'+escapeHtml(it.eventKey||'')+' · '+escapeHtml(it.label||it.position||'—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有未來事奉 / No upcoming services</div>';
+
+      var membersHtml = currentMembers.length
+        ? '<ul class="groupDialogList">'+currentMembers.map(function(m){
+            return '<li>'+escapeHtml(m.label || m.id || m.name || '—')+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">暫無組員 / No members found</div>';
+
+      return ''+
+        '<div class="groupDialog">'+
+          '<div class="groupDialogHeader">'+
+            '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+            '<button type="button" class="btnMini btnBack" id="btnGroupDialogClose">✖ Close</button>'+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">次數統計（按崗位） / Summary by position</div>'+
+            summaryHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">歷史事奉 / Historical services</div>'+
+            histHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">未來事奉 / Upcoming services</div>'+
+            upHtml+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">當前組員 / Current members</div>'+
+            membersHtml+
+          '</div>'+
+        '</div>';
     }
 
     function eventDateYmdFromKey(ev){
@@ -2262,6 +2338,7 @@
         var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
         var low = res.lowAttendance || {};
         var away = res.away || {};
+        var servingInsights = res.servingInsights || {};
 
         var statusDisplay = displayMemberStatusLabel(m.status||'');
 
@@ -2329,7 +2406,7 @@
             '</div>'
           : '';
 
-        var groupsHtml = renderServingGroupBadges_((m.servingGroups||[]).concat(m.servingGLGroups||[]));
+        var groupsHtml = renderServingGroupBadges_((m.servingGroups||[]).concat(m.servingGLGroups||[]), true);
 
         modal.querySelector('.modal').innerHTML =
           topBtns +
@@ -2343,6 +2420,7 @@
             '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
           '</div>'+
           (groupsHtml || '')+
+          '<div id="groupDialogHost"></div>'+
 
           statsCard+
           awayCard+
@@ -2449,6 +2527,35 @@
             attachScrollControls_(absModal);
           };
         }
+
+        var groupDialogHost = modal.querySelector('#groupDialogHost');
+        var activeGroupKey = '';
+        function renderGroupDialog_(groupKey){
+          if (!groupDialogHost) return;
+          if (!groupKey){
+            groupDialogHost.innerHTML = '';
+            activeGroupKey = '';
+            return;
+          }
+          groupDialogHost.innerHTML = buildServingGroupDialogHtml_(groupKey, servingInsights);
+          activeGroupKey = groupKey;
+          var closeBtn = groupDialogHost.querySelector('#btnGroupDialogClose');
+          if (closeBtn){
+            closeBtn.onclick = function(){ renderGroupDialog_(''); };
+          }
+        }
+
+        Array.prototype.forEach.call(modal.querySelectorAll('[data-group-key]'), function(btn){
+          btn.onclick = function(){
+            var key = String(btn.getAttribute('data-group-key')||'').trim();
+            if (!key) return;
+            if (activeGroupKey === key){
+              renderGroupDialog_('');
+              return;
+            }
+            renderGroupDialog_(key);
+          };
+        });
       }).catch(function(){
         closeModal(modal);
         showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
