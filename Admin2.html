@@ -225,6 +225,12 @@
     .groupDialogSection{margin-top:10px}
     .groupDialogList{margin:6px 0 0 16px;padding:0}
     .groupDialogList li{margin:4px 0}
+    .sectionToggle{width:auto;padding:8px 12px;border-radius:10px;font-size:13px}
+    .groupTheme-worship{border-color:rgba(217,60,94,0.45)!important;background:#fff3f6!important}
+    .groupTheme-media{border-color:rgba(40,90,200,0.45)!important;background:#f2f7ff!important}
+    .groupTheme-logistic{border-color:rgba(139,94,60,0.45)!important;background:#f9f1e7!important}
+    .groupTheme-support{border-color:rgba(26,168,108,0.45)!important;background:#effff7!important}
+    .groupTheme-finance{border-color:rgba(202,155,0,0.45)!important;background:#fff9e4!important}
 
     /* list items (same feel as staff live list) */
     .listWrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
@@ -322,7 +328,9 @@
 
       chart:null,
       matrixState:null,
-      servingPlanOpenGroups:{}
+      servingPlanOpenGroups:{},
+      servingPlanInfoOpenGroups:{},
+      servingGroupOverview:null
     };
 
     function $(id){ return document.getElementById(id); }
@@ -607,6 +615,7 @@
       var currentByGroup = insights.currentMembersByGroup || {};
       var bucket = byGroup[groupKey] || {};
       var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
+      var themeCls = 'groupTheme-' + groupKey;
 
       var summary = Array.isArray(bucket.summary) ? bucket.summary : [];
       var historical = Array.isArray(bucket.historical) ? bucket.historical : [];
@@ -625,7 +634,7 @@
         ? '<ul class="groupDialogList">'+historical.map(function(it){
             return '<li>'+escapeHtml(it.eventKey||'')+' · '+escapeHtml(it.label||it.position||'—')+'</li>';
           }).join('')+'</ul>'
-        : '<div class="small">沒有歷史事奉 / No historical services</div>';
+        : '<div class="small">沒有以往事奉 / No previous services</div>';
 
       var upHtml = upcoming.length
         ? '<ul class="groupDialogList">'+upcoming.map(function(it){
@@ -640,34 +649,58 @@
         : '<div class="small">暫無組員 / No members found</div>';
 
       return ''+
-        '<div class="groupDialog">'+
+        '<div class="groupDialog '+themeCls+'">'+
           '<div class="groupDialogHeader">'+
             '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
             '<button type="button" class="btnMini btnBack" id="btnGroupDialogClose">✖ Close</button>'+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">次數統計（按崗位） / Summary by position</div>'+
+            '<div class="label">次數統計（按崗位） / Summary by position（只計以往事奉 / previous only）</div>'+
             summaryHtml+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">歷史事奉 / Historical services</div>'+
-            histHtml+
+            '<button type="button" class="btnBack sectionToggle" id="btnPrevToggle">以往事奉（Previous）</button>'+
+            '<div id="prevSection" class="hide" style="margin-top:6px;">'+histHtml+'</div>'+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">未來事奉 / Upcoming services</div>'+
-            upHtml+
+            '<button type="button" class="btnBack sectionToggle" id="btnUpcomingToggle">將來事奉（Upcoming）</button>'+
+            '<div id="upcomingSection" class="hide" style="margin-top:6px;">'+upHtml+'</div>'+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">當前組員 / Current members</div>'+
-            membersHtml+
+            '<button type="button" class="btnBack sectionToggle" id="btnMembersToggle">當前組員（Current members）</button>'+
+            '<div id="membersSection" class="hide" style="margin-top:6px;">'+membersHtml+'</div>'+
           '</div>'+
           '<div class="groupDialogSection">'+
             '<div class="miniBtnRow">'+
-              '<button type="button" class="btnLookup btnMini" id="btnGap6">缺口（&lt;6 週） / Gaps (&lt;6 weeks)</button>'+
-              '<button type="button" class="btnLookup btnMini" id="btnGap12">缺口（&lt;12 週） / Gaps (&lt;12 weeks)</button>'+
+              '<button type="button" class="btnLookup btnMini" id="btnGap6">空缺（&lt;6 週）</button>'+
+              '<button type="button" class="btnLookup btnMini" id="btnGap12">空缺（&lt;12 週）</button>'+
             '</div>'+
             '<div id="gapResult" class="small" style="margin-top:8px;"></div>'+
           '</div>'+
+        '</div>';
+    }
+    function buildServingGroupOverviewPopupHtml_(groupKey, overview){
+      var ov = overview || {};
+      var byGroup = ov.byGroup || {};
+      var bucket = byGroup[groupKey] || {};
+      var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
+      var themeCls = 'groupTheme-' + groupKey;
+      var members = Array.isArray(bucket.currentMembers) ? bucket.currentMembers : [];
+      var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
+      var membersHtml = members.length
+        ? '<ul class="groupDialogList">'+members.map(function(m){ return '<li>'+escapeHtml(m.label || '—')+'</li>'; }).join('')+'</ul>'
+        : '<div class="small">暫無組員 / No members found</div>';
+      var gapsHtml = gaps.length
+        ? '<ul class="groupDialogList">'+gaps.map(function(g){
+            var posText = (g.positions || []).map(function(p){ return (p.label || p.position || '—') + ' (+' + String(p.missing||0) + ')'; }).join(', ');
+            return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · +'+escapeHtml(String(g.totalMissing||0))+' · '+escapeHtml(posText)+'</li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有空缺 / No gaps</div>';
+      return ''+
+        '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
+          '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+          '<div class="groupDialogSection"><div class="label">空缺（未來 12 週）</div>'+gapsHtml+'</div>'+
+          '<div class="groupDialogSection"><div class="label">當前組員 / Current members</div>'+membersHtml+'</div>'+
         '</div>';
     }
 
@@ -1072,12 +1105,18 @@
       function loadServingPlan(){
         listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
 
-        callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()).then(function(res){
+        Promise.all([
+          callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()),
+          callApi('api_admin_serving_group_overview', App.token, getTodayYmdUk())
+        ]).then(function(allRes){
+          var res = allRes[0];
+          var overviewRes = allRes[1];
           if(!res || !res.ok){
             listEl.innerHTML = '';
             showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
             return;
           }
+          App.servingGroupOverview = (overviewRes && overviewRes.ok) ? (overviewRes.overview || {}) : {};
           var events = res.events || [];
           var positions = res.positions || [];
           if(!events.length){
@@ -1163,12 +1202,16 @@
                 '</tr>';
             }).join('');
             var isOpen = !!App.servingPlanOpenGroups[groupKey];
+            var infoOpen = !!App.servingPlanInfoOpenGroups[groupKey];
+            var infoHtml = infoOpen ? buildServingGroupOverviewPopupHtml_(groupKey, App.servingGroupOverview || {}) : '';
             return ''+
               '<div class="monthSection" data-group="'+groupKey+'">'+
                 '<button class="btnPeriod servingGroupToggle '+badge.cls+'" data-group="'+groupKey+'">'+
                   badge.zh + ' / ' + badge.en + (isOpen ? ' ▲' : ' ▼')+
                 '</button>'+
                 '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
+                  '<div style="margin:8px 0;"><button class="btnBack btnMini servingGroupInfoToggle '+badge.cls+'" data-group="'+groupKey+'">📌 快速摘要 / Quick summary '+(infoOpen ? '▲' : '▼')+'</button></div>'+
+                  infoHtml+
                   '<div class="tableWrap">'+
                     '<table class="servingPlanTable">'+
                       '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
@@ -1196,6 +1239,13 @@
             btn.onclick = function(){
               var key = String(btn.getAttribute('data-group')||'');
               App.servingPlanOpenGroups[key] = !App.servingPlanOpenGroups[key];
+              loadServingPlan();
+            };
+          });
+          Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupInfoToggle')).forEach(function(btn){
+            btn.onclick = function(){
+              var key = String(btn.getAttribute('data-group')||'');
+              App.servingPlanInfoOpenGroups[key] = !App.servingPlanInfoOpenGroups[key];
               loadServingPlan();
             };
           });
@@ -1560,7 +1610,9 @@
                       return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
                     }).join('<br/>');
                   }
-                  showBox('servingEditMsg','warn', titleZh, titleEn, detail);
+                showBox('servingEditMsg','warn', titleZh, titleEn, detail);
+                  var btnRow = document.createElement('div');
+                  btnRow.className = 'miniBtnRow';
                   var btn = document.createElement('button');
                   btn.className = 'btnDanger';
                   btn.textContent = '仍然儲存 / Override';
@@ -1573,8 +1625,14 @@
                       if (App.refreshServingPlan) App.refreshServingPlan();
                     }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
                   };
+                  var btnCancel = document.createElement('button');
+                  btnCancel.className = 'btnBack';
+                  btnCancel.textContent = '返回 / Cancel';
+                  btnCancel.onclick = function(){ clear('servingEditMsg'); };
+                  btnRow.appendChild(btn);
+                  btnRow.appendChild(btnCancel);
                   var msg = $('servingEditMsg');
-                  if (msg) msg.appendChild(btn);
+                  if (msg) msg.appendChild(btnRow);
                   return;
                 }
                 showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
@@ -1680,14 +1738,22 @@
                   }).join('<br/>');
                 }
                 showBox('quickMsg','warn', titleZh, titleEn, detail);
+                var btnRow = document.createElement('div');
+                btnRow.className = 'miniBtnRow';
                 var btn = document.createElement('button');
                 btn.className = 'btnDanger';
                 btn.textContent = '仍然儲存 / Override';
                 btn.onclick = function(){
                   saveWithOverride_(true);
                 };
+                var btnCancel = document.createElement('button');
+                btnCancel.className = 'btnBack';
+                btnCancel.textContent = '返回 / Cancel';
+                btnCancel.onclick = function(){ clear('quickMsg'); };
+                btnRow.appendChild(btn);
+                btnRow.appendChild(btnCancel);
                 var msg = $('quickMsg');
-                if (msg) msg.appendChild(btn);
+                if (msg) msg.appendChild(btnRow);
                 return;
               }
               showErr('quickMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
@@ -2606,6 +2672,27 @@
           var gap6Btn = groupDialogHost.querySelector('#btnGap6');
           var gap12Btn = groupDialogHost.querySelector('#btnGap12');
           var gapResult = groupDialogHost.querySelector('#gapResult');
+          var prevToggle = groupDialogHost.querySelector('#btnPrevToggle');
+          var upcomingToggle = groupDialogHost.querySelector('#btnUpcomingToggle');
+          var membersToggle = groupDialogHost.querySelector('#btnMembersToggle');
+          var prevSection = groupDialogHost.querySelector('#prevSection');
+          var upcomingSection = groupDialogHost.querySelector('#upcomingSection');
+          var membersSection = groupDialogHost.querySelector('#membersSection');
+          function toggleExclusive_(target){
+            if (prevSection){
+              if (target === 'prev') prevSection.classList.toggle('hide');
+              else prevSection.classList.add('hide');
+            }
+            if (upcomingSection){
+              if (target === 'upcoming') upcomingSection.classList.toggle('hide');
+              else upcomingSection.classList.add('hide');
+            }
+          }
+          if (prevToggle) prevToggle.onclick = function(){ toggleExclusive_('prev'); };
+          if (upcomingToggle) upcomingToggle.onclick = function(){ toggleExclusive_('upcoming'); };
+          if (membersToggle && membersSection){
+            membersToggle.onclick = function(){ membersSection.classList.toggle('hide'); };
+          }
           function renderGapByWeeks_(maxDays){
             if (!gapResult) return;
             var bucket = ((servingInsights.byGroup||{})[groupKey] || {});
