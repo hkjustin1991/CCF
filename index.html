@@ -168,7 +168,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff12-ui1-bluefix</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · ui staff12-ui1-bluefix2</span></div>
     </header>
 
     <main id="app"></main>
@@ -999,7 +999,8 @@
         '<div class="small">Back-end checks only. Feedback to Media team appreciated.</div>'+
         '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
         '<div class="miniBtnRow">'+
-          '<button id="btnScConfirm" class="orange">✅ 同工確認 / Staff confirm</button>'+
+          '<button id="btnScConfirm" class="orange">💾 同工自我記錄 / Staff self record</button>'+
+          '<button id="btnScBack" class="alt">⬅️ 返回 / Back</button>'+
           '<button id="btnScClose" class="danger">關閉 / Close</button>'+
         '</div>'
       );
@@ -1046,6 +1047,7 @@
           '</div>';
       }
 
+      o.querySelector('#btnScBack').onclick = function(){ closeModal(o); };
       o.querySelector('#btnScClose').onclick = function(){ closeModal(o); };
 
       o.querySelector('#btnScConfirm').onclick = function(){
