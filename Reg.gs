@@ -488,6 +488,16 @@ function api_reg_self_lookup_public(qrPayload){
   }
 }
 
+
+function regGetCheckinsDataMinimal_(){
+  const check = (typeof admin_getCheckinsData_ === 'function') ? admin_getCheckinsData_() : null;
+  if (!check || !check.ok) return check || { ok:false, code:'E500', zh:'讀取簽到資料失敗', en:'Failed to read checkins.' };
+  const rows = (check.rows || []).map(function(r){
+    return { eventKey:String(r.eventKey||''), memberId:String(r.memberId||'') };
+  });
+  return { ok:true, rows: rows };
+}
+
 /* ============================================================
  * PATCH_BOUNDARY: REG2_SELF_ATTENDANCE_BEGIN
  * Self attendance endpoint (self-only).
@@ -706,7 +716,8 @@ function api_reg_self_portal_snapshot_public(qrPayload){
         preferredName: member.preferredName || '',
         displayName: regDisplayNameForPortal_(member),
         servingGroups: groups,
-        away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' }
+        away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
+        memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, member.memberSinceRaw)
       },
       attendance: att.stats,
       attendanceEvents: att.attendance,
@@ -906,16 +917,16 @@ function api_reg_self_live_service_public(qrPayload){
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
 
-    const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), 1);
+    const todayYmd = admin_todayUkYmd_();
+    const today = admin_parseYmd_(todayYmd) || new Date();
+    const todayDow = today.getUTCDay();
+    const offsetToPrevSunday = (todayDow === 0) ? 7 : todayDow;
+    const prevSunday = new Date(today.getTime() - offsetToPrevSunday*24*60*60*1000);
+    const prevYmd = admin_fmtYmd_(prevSunday);
+
+    const events = admin_getUpcomingSundayEventKeys_(todayYmd, 1);
     const next = (events && events.length) ? events[0].eventKey : '';
-    const today = admin_parseYmd_(admin_todayUkYmd_()) || new Date();
-    let last = '';
-    for (let i=1;i<=14;i++){
-      const d = new Date(today.getTime() - i*24*60*60*1000);
-      const ymd = Utilities.formatDate(d, 'Europe/London', 'yyyy-MM-dd');
-      const ev = 'SundayService_' + ymd;
-      if (admin_eventDateFromKey_(ev)) { last = ev; break; }
-    }
+    const last = prevYmd ? ('SundayService_' + prevYmd) : '';
 
     const check = admin_getCheckinsData_();
     const countByEvent = {};
@@ -927,7 +938,27 @@ function api_reg_self_live_service_public(qrPayload){
       });
     }
 
-    const serving = next ? admin_getServingForEvent_(next, (admin_getMembersIndex_()||{}).byId || {}, null, false) : [];
+    const mi = admin_getMembersIndex_() || {};
+    const byId = mi.byId || {};
+    const servingRaw = next ? admin_getServingForEvent_(next, byId, null, false) : [];
+    const serving = servingRaw.map(function(r){
+      const m = byId[String(r.memberId||'').trim().toUpperCase()] || {};
+      const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
+      const suffix = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄 / Brother'
+        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹 / Sister' : '');
+      const zhEnName = [String(r.nameZh||'').trim(), String(r.nameEn||'').trim()].filter(Boolean).join(' / ');
+      return {
+        eventKey: r.eventKey,
+        group: admin_normalizeServingGroup_(r.group || ''),
+        groupZh: getServingGroupLabelZh_(r.group || ''),
+        groupEn: getServingGroupLabelEn_(r.group || ''),
+        position: r.position,
+        positionZh: admin_servingPositionZh_(r.position || ''),
+        positionEn: admin_servingPositionLabel_(r.position || ''),
+        displayName: zhEnName + (suffix ? (' · ' + suffix) : '')
+      };
+    });
+
     return {
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
@@ -938,6 +969,26 @@ function api_reg_self_live_service_public(qrPayload){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
 }
+
+function getServingGroupLabelZh_(raw){
+  const k = admin_normalizeServingGroup_(raw);
+  if (k === 'worship') return '敬拜聯盟';
+  if (k === 'media') return '影像大師';
+  if (k === 'logistic') return '後勤特工';
+  if (k === 'support') return '聖工支援隊';
+  if (k === 'finance') return '財務公司';
+  return raw || '';
+}
+function getServingGroupLabelEn_(raw){
+  const k = admin_normalizeServingGroup_(raw);
+  if (k === 'worship') return 'Worship Alliance';
+  if (k === 'media') return 'Media Master';
+  if (k === 'logistic') return 'Logistic Specialist';
+  if (k === 'support') return 'Divine Supporter';
+  if (k === 'finance') return 'Finance Dept';
+  return raw || '';
+}
+
 
 function api_reg_self_set_holiday_public(qrPayload, fromDmy1, toDmy1, fromDmy2, toDmy2){
   try{

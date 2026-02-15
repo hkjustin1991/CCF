@@ -401,7 +401,7 @@
           '<div class="big">📌 選擇 / Choose</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
-            '<button id="btnScan" class="alt">📷 掃描 QR（自助功能）</button>'+
+            '<button id="btnScan" class="alt">📷 掃描 QR - 更改、查閱資料</button>'+
           '</div>'+
           '<div class="small" style="margin-top:10px;">'+
             '掃描 QR 可查看/更改資料、查閱自己出席記錄。<br/>'+
@@ -422,10 +422,27 @@
       var serviceAttended = (snap.attendance && typeof snap.attendance.attended !== 'undefined') ? snap.attendance.attended : 0;
       var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
+      function mapGroupKey_(g){
+        var up = String(g||'').trim().toUpperCase();
+        if (up === 'WORSHIP') return 'worship';
+        if (up === 'MEDIA') return 'media';
+        if (up === 'LOGISTIC') return 'logistic';
+        if (up === 'SUPPORT') return 'support';
+        if (up === 'FINANCE') return 'finance';
+        return String(g||'').toLowerCase();
+      }
+      function groupLabel_(k){
+        if (k==='worship') return '敬拜聯盟 / Worship Alliance';
+        if (k==='media') return '影像大師 / Media Master';
+        if (k==='logistic') return '後勤特工 / Logistic Specialist';
+        if (k==='support') return '聖工支援隊 / Divine Supporter';
+        if (k==='finance') return '財務公司 / Finance Dept';
+        return k || '—';
+      }
       var groupHtml = groups.map(function(g){
-        var cls = String(g||'').toLowerCase();
-        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<button type="button" class="groupBadge '+cls+'" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(g)+'</button>';
-        return '<button type="button" class="groupBadge" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(g)+'</button>';
+        var cls = mapGroupKey_(g);
+        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<button type="button" class="groupBadge '+cls+'" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(groupLabel_(cls))+'</button>';
+        return '<button type="button" class="groupBadge" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(groupLabel_(cls))+'</button>';
       }).join('');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
@@ -440,7 +457,7 @@
       return ''+
         '<div class="card">'+
           '<div class="big ok">✅ 已登入 / Logged in</div>'+
-          '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b></div>'+
+          '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b>'+(memberSince ? ('<br/>Member since / 入會日期：'+escapeHtml(memberSince)) : '')+'</div>'+
           '<div class="big" style="margin-top:8px;">'+greetZh+' / '+greetEn+' '+escapeHtml(displayName)+'</div>'+
           '<div class="small">歡迎來到 CCF 自助服務平台。若有問題，請聯絡影音同工。<br/>Welcome to CCF self service portal. Please ask the media team should there be any issues.</div>'+
           '<div class="msgBox warn" style="margin-top:10px;cursor:pointer;" id="btnOpenAttStats">'+
@@ -465,8 +482,7 @@
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
             '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
             '<button id="btnSelfLive" class="alt">📡 即時聚會 / Live service</button>'+
-            '<button id="btnSelfHoliday" class="alt">🌴 假期設定 / Holiday</button>'+
-            '<button id="btnSelfAtt" class="alt">📊 出席查詢 / Attendance check</button>'+
+            '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfBack" class="danger">⬅️ 返回 / Back</button>'+
@@ -552,18 +568,32 @@
       res = res || {};
       var cur = res.currentAttendance || {};
       var last = res.lastAttendance || {};
-      var list = (res.servingThisWeek||[]).map(function(r){ return '<li>'+escapeHtml((r.groupZh||r.group||'')+' · '+(r.positionZh||r.position||'')+' · '+(r.memberId||''))+'</li>'; }).join('');
+      var groups = {};
+      (res.servingThisWeek||[]).forEach(function(r){
+        var g = String(r.group||'other');
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(r);
+      });
+      function badgeCls(g){ return (g==='worship'||g==='media'||g==='logistic'||g==='support'||g==='finance') ? g : ''; }
+      var blocks = Object.keys(groups).map(function(g){
+        var rows = groups[g].map(function(r){
+          return '<li>'+escapeHtml((r.positionZh||'')+' / '+(r.positionEn||''))+' · '+escapeHtml(r.displayName||'')+'</li>';
+        }).join('');
+        var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
+        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul></div>';
+      }).join('');
       return '<div class="card"><div class="big">📡 即時聚會 / Live service</div>'+
-        '<div class="msgBox"><b>Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
-        '<div class="msgBox" style="margin-top:8px;"><b>Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
-        '<div class="msgBox" style="margin-top:8px;"><b>Serving this week</b><ul style="margin:6px 0 0 18px;">'+(list||'<li>—</li>')+'</ul></div>'+
+        '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
+        '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
+        '<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>'+
+        (blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>')+
         '<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>';
     }
 
+
     function viewSelfHoliday(m){
       m = m || {}; var a = m.away || {};
-      function dmy(v){ if(!v) return ''; var p=v.split('-'); return (p[2]+'/'+p[1]+'/'+p[0]); }
-      return '<div class="card"><div class="big">🌴 假期設定 / Holiday</div>'+
+      return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
         '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from1||''))+'" />'+
         '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to1||''))+'" />'+
         '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from2||''))+'" />'+
@@ -932,7 +962,13 @@
       };
 
       if ($('btnOpenAttStats')) $('btnOpenAttStats').onclick = function(){
-        $('btnSelfAtt').click();
+        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+        callApi('api_reg_self_attendance_public', State.authQrPayload, null, null).then(function(res){
+          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
+          State.lastResult = res;
+          State.view = 'selfAttendance';
+          render();
+        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
 
       Array.prototype.slice.call(document.querySelectorAll('[data-self-group]')).forEach(function(btn){
@@ -967,20 +1003,67 @@
         render();
       };
 
-      $('btnSelfAtt').onclick = function(){
+      if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
-        callApi('api_reg_self_attendance_public', State.authQrPayload, null, null).then(function(res){
-          if(!res || !res.ok){
-            $('selfMsg').innerHTML = showServerErr(res);
-            return;
-          }
+        callApi('api_reg_self_live_service_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
           State.lastResult = res;
-          State.view = 'selfAttendance';
+          State.view = 'selfLive';
           render();
-        }).catch(function(err){
-          var msg = (err && err.message) ? err.message : String(err||'');
-          $('selfMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
-        });
+        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+      };
+
+      if ($('btnSelfHoliday')) $('btnSelfHoliday').onclick = function(){
+        State.view = 'selfHoliday';
+        render();
+      };
+    }
+
+    function bindServing(){
+      $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
+      var open = null;
+      Array.prototype.slice.call(document.querySelectorAll('button[data-acc]')).forEach(function(b){
+        b.onclick = function(){
+          var i = b.getAttribute('data-acc');
+          if (open !== null && $('acc_'+open)) $('acc_'+open).classList.add('hide');
+          if (open === i){ open = null; return; }
+          $('acc_'+i).classList.remove('hide'); open = i;
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-add]')).forEach(function(b){
+        b.onclick = function(){
+          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos'), slot=b.getAttribute('data-slot');
+          if(!confirm('確認報名？\nSure to sign up?\n'+ev+' '+pos)) return;
+          callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
+            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          });
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-del]')).forEach(function(b){
+        b.onclick = function(){
+          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos');
+          if(!confirm('確認刪除？\nSure to delete?')) return;
+          callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
+            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          });
+        };
+      });
+    }
+
+    function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
+
+    function bindHoliday(){
+      $('btnHolidayBack').onclick = function(){ State.view='selfHome'; render(); };
+      $('btnHolidaySave').onclick = function(){
+        $('holidayMsg').innerHTML = showBox('warn','儲存中…','Saving…');
+        callApi('api_reg_self_set_holiday_public', State.authQrPayload, $('hFrom1').value.trim(), $('hTo1').value.trim(), $('hFrom2').value.trim(), $('hTo2').value.trim())
+          .then(function(r){
+            if(!r||!r.ok){ $('holidayMsg').innerHTML = showServerErr(r); return; }
+            $('holidayMsg').innerHTML = showBox('ok','已儲存','Saved');
+            return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
+          }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
 
       if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){

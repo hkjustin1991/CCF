@@ -2287,6 +2287,7 @@ function admin_getMembersIndex_(){
         key: String(row[col.Key]||'').trim(),
         nameZh: String(row[col.NameZh]||'').trim(),
         nameEn: String(row[col.NameEn]||'').trim(),
+        gender: (col.Gender!==undefined) ? String(row[col.Gender]||'').trim() : '',
         status: String(row[col.Status]||'').trim(),
         email: (col.Email!==undefined) ? String(row[col.Email]||'').trim() : '',
         mobile:(col.Mobile!==undefined)? String(row[col.Mobile]||'').trim() : '',
