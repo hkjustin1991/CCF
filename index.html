@@ -393,7 +393,7 @@
       if(!App.staff) return false;
       if(App.staff.id === 'SUPERUSER') return true;
       var st = String(App.staff.status||'').toUpperCase();
-      return (st === 'STAFF' || st === 'ADMIN');
+      return (st === 'STAFF' || st === 'ADMIN' || st === 'HELPER' || st === 'TEMP');
     }
 
     function canUseAuth(){
@@ -1155,6 +1155,8 @@
         if(!res || !res.ok){ box.innerHTML=''; showErr('scanMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
 
         var m = res.member || {};
+        var stNow = App.staff ? String(App.staff.status||'').toUpperCase() : '';
+        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'ADMIN'));
         var nameLine = formatMemberName_(m) || m.id || '';
         var chips = '<div class="chipRow">'+
           '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
@@ -2023,6 +2025,8 @@
         }
 
         var m = res.member || {};
+        var stNow = App.staff ? String(App.staff.status||'').toUpperCase() : '';
+        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'ADMIN'));
         var nameLine = formatMemberName_(m) || m.id || '';
         var pref = (m.preferredName||'').trim();
         var lastEvents = Array.isArray(res.last4EventKeys) ? res.last4EventKeys : [];
@@ -2070,8 +2074,8 @@
         var actionBox = document.createElement('div');
         actionBox.className = 'miniBtnRow';
         actionBox.innerHTML =
-          (m.isNewFriend ? '<button id="btnMdRemoveNew" class="orange">🧹 移除新朋友 / Remove new friend</button>' : '')+
-          '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>';
+          (canDestructive && m.isNewFriend ? '<button id="btnMdRemoveNew" class="orange">🧹 移除新朋友 / Remove new friend</button>' : '')+
+          (canDestructive ? '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>' : '');
         o.querySelector('#mdBox').appendChild(actionBox);
         attachScrollControls_(o);
 
