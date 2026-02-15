@@ -690,6 +690,28 @@ function api_reg_self_portal_snapshot_public(qrPayload){
   }
 }
 
+function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+
+    const key = admin_normalizeServingGroup_(groupKey);
+    if (!key) return { ok:false, code:'E416', zh:'組別格式錯誤', en:'Invalid group key.' };
+
+    const mi = admin_getMembersIndex_();
+    const all = (mi && mi.all) ? mi.all : [];
+    const members = all
+      .filter(function(m){ return admin_memberHasServingGroup_(m, key); })
+      .map(admin_memberLabelCompact_)
+      .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
+
+    return { ok:true, group:key, count:members.length, members:members };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+
 function api_reg_self_delete_membership_public(qrPayload, confirmQrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
@@ -768,27 +790,51 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
     const member = mi.byId[id];
     if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return { ok:false, code:'E409', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
 
-    const sh = admin_ensureServingSheet_();
-    admin_ensureServingEventKeys_(sh);
-    const rowIndex = admin_findServingEventRowIndex_(sh, ev);
-    if (!rowIndex) return { ok:false, code:'E412', zh:'找不到活動', en:'Event not found.' };
+    const lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try{
+      const sh = admin_ensureServingSheet_();
+      admin_ensureServingEventKeys_(sh);
+      const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+      if (!rowIndex) return { ok:false, code:'E412', zh:'找不到活動', en:'Event not found.' };
 
-    const headerMap = admin_getServingMatrixHeaderMap_(sh);
-    const colIndex = headerMap[pos];
-    if (!colIndex) return { ok:false, code:'E500', zh:'崗位欄位不存在', en:'Position column not found.' };
+      const headerMap = admin_getServingMatrixHeaderMap_(sh);
+      const colIndex = headerMap[pos];
+      if (!colIndex) return { ok:false, code:'E500', zh:'崗位欄位不存在', en:'Position column not found.' };
 
-    const raw = String(sh.getRange(rowIndex, colIndex).getValue() || '').trim();
-    const ids = admin_extractMemberIdsFromServingValue_(raw);
-    const max = ADMIN_SERVING_POSITION_MAX[pos] || 1;
-    const idx = Math.max(0, Number(slotIndex||0));
-    if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
-    if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
-    if (ids.length >= max) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+      // duplicate guard: same member cannot hold >1 position for same event
+      let existingPosition = '';
+      ADMIN_SERVING_POSITIONS.forEach(function(p){
+        const ci = headerMap[p];
+        if (!ci || existingPosition) return;
+        const idsAtPos = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, ci).getValue() || ''));
+        if (idsAtPos.indexOf(id) >= 0) existingPosition = p;
+      });
+      if (existingPosition && existingPosition !== pos){
+        return {
+          ok:false,
+          code:'E409',
+          zh:'同一活動不可同時擔任多個崗位',
+          en:'Duplicate serving assignments for the same event are not allowed.',
+          detail: existingPosition + ' -> ' + pos
+        };
+      }
 
-    ids.push(id);
-    sh.getRange(rowIndex, colIndex).setValue(ids.join(', '));
-    regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos });
-    return { ok:true, eventKey:ev, position:pos };
+      const raw = String(sh.getRange(rowIndex, colIndex).getValue() || '').trim();
+      const ids = admin_extractMemberIdsFromServingValue_(raw);
+      const max = ADMIN_SERVING_POSITION_MAX[pos] || 1;
+      const idx = Math.max(0, Number(slotIndex||0));
+      if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
+      if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
+      if (ids.length >= max) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+
+      ids.push(id);
+      sh.getRange(rowIndex, colIndex).setValue(ids.join(', '));
+      regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos });
+      return { ok:true, eventKey:ev, position:pos };
+    } finally {
+      lock.releaseLock();
+    }
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
@@ -805,17 +851,23 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
     if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
     if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return { ok:false, code:'E409', zh:'六週內不可更改，請聯絡組長', en:'Changes within 6 weeks are blocked. Please contact GL.' };
 
-    const sh = admin_ensureServingSheet_();
-    const rowIndex = admin_findServingEventRowIndex_(sh, ev);
-    const headerMap = admin_getServingMatrixHeaderMap_(sh);
-    const colIndex = headerMap[pos];
-    if (!rowIndex || !colIndex) return { ok:false, code:'E412', zh:'找不到崗位', en:'Position not found.' };
+    const lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try{
+      const sh = admin_ensureServingSheet_();
+      const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+      const headerMap = admin_getServingMatrixHeaderMap_(sh);
+      const colIndex = headerMap[pos];
+      if (!rowIndex || !colIndex) return { ok:false, code:'E412', zh:'找不到崗位', en:'Position not found.' };
 
-    const ids = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, colIndex).getValue()||''));
-    const next = ids.filter(function(x){ return x !== id; });
-    sh.getRange(rowIndex, colIndex).setValue(next.join(', '));
-    regLogActivity_('REG_SELF_SERVING_REMOVE', id, 'OK', { eventKey:ev, position:pos });
-    return { ok:true, eventKey:ev, position:pos };
+      const ids = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, colIndex).getValue()||''));
+      const next = ids.filter(function(x){ return x !== id; });
+      sh.getRange(rowIndex, colIndex).setValue(next.join(', '));
+      regLogActivity_('REG_SELF_SERVING_REMOVE', id, 'OK', { eventKey:ev, position:pos });
+      return { ok:true, eventKey:ev, position:pos };
+    } finally {
+      lock.releaseLock();
+    }
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }

@@ -426,8 +426,8 @@
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
       var groupHtml = groups.map(function(g){
         var cls = String(g||'').toLowerCase();
-        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<span class="groupBadge '+cls+'">'+escapeHtml(g)+'</span>';
-        return '<span class="groupBadge">'+escapeHtml(g)+'</span>';
+        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<button type="button" class="groupBadge '+cls+'" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(g)+'</button>';
+        return '<button type="button" class="groupBadge" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(g)+'</button>';
       }).join('');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
@@ -935,6 +935,31 @@
       if ($('btnOpenAttStats')) $('btnOpenAttStats').onclick = function(){
         $('btnSelfAtt').click();
       };
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-self-group]')).forEach(function(btn){
+        btn.onclick = function(){
+          var key = String(btn.getAttribute('data-self-group')||'').trim();
+          if (!key) return;
+          $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+          callApi('api_reg_self_serving_group_stats_public', State.authQrPayload, key).then(function(res){
+            if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
+            var members = (res.members||[]).map(function(m){ return '<li>'+escapeHtml(m.label||m.id||'—')+'</li>'; }).join('');
+            var modal = openModal(
+              '<div class="big">組別統計 / Group stats</div>'+
+              '<div class="small">'+escapeHtml(key)+' · 人數 / Count: '+escapeHtml(String(res.count||0))+'</div>'+
+              '<div class="miniBtnRow"><button id="btnToggleGroupMembers" class="alt">▶ 展開名單 / Expand members</button><button id="btnCloseGroupStats" class="danger">關閉 / Close</button></div>'+
+              '<div id="groupMemberList" class="hide"><ul style="margin:8px 0 0 18px;">'+members+'</ul></div>'
+            );
+            modal.querySelector('#btnCloseGroupStats').onclick = function(){ closeModal(modal); };
+            modal.querySelector('#btnToggleGroupMembers').onclick = function(){
+              var box = modal.querySelector('#groupMemberList');
+              var b = modal.querySelector('#btnToggleGroupMembers');
+              if (box.classList.contains('hide')){ box.classList.remove('hide'); b.textContent='▼ 收起名單 / Collapse members'; }
+              else { box.classList.add('hide'); b.textContent='▶ 展開名單 / Expand members'; }
+            };
+          }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+        };
+      });
 
       $('btnSelfDetails').onclick = function(){
         // Go to form with current info
