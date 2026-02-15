@@ -39,15 +39,15 @@
  *    • SUPERUSER must scan an ADMIN QR (and must match ADMIN member)
  * - Status change (STAFF also allowed):
  *    • dropdown STAFF/ACTIVE/DISABLED/PROVISIONAL/TEMP/HELPER
- *    • TEMP via admin portal = 2 days (RoleExpiresISO)
- *    • HELPER via admin portal = 31 days (RoleExpiresISO)
+ *    • TEMP via admin portal = 2 days (RoleExpires)
+ *    • HELPER via admin portal = 31 days (RoleExpires)
  *    • QR re-scan confirmation (same rules as contact reveal)
  *    • Hard-stop: cannot change another ADMIN’s status (including ADMIN->ADMIN)
  * - Separate audit sheet: Admin_Activity logs actions
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-08.admin13';
+const ADMIN_VERSION = '2026-02-15.admin95';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -231,8 +231,25 @@ function api_admin_login(input){
   const m = mi.byId[parsed.id];
   if (!m) return admin_err_('E412','找不到此 ID','Member not found.');
 
-  const st = admin_normStatus_(m.status);
+  let st = admin_normStatus_(m.status);
   if (st === 'DISABLED') return admin_err_('E414','此帳號已停用','Account disabled.');
+
+  // enforce RoleExpires for all statuses; auto-downgrade expired to ACTIVE
+  if (m.roleExpires){
+    const exp = admin_safeToDate_(m.roleExpires);
+    if (exp && exp.getTime() < Date.now()){
+      const ms = admin_findMembersSheet_();
+      const col = admin_getMembersColMap_(ms);
+      const rowNumber = m.rowNumber || admin_findMemberRowById_(ms, col, parsed.id);
+      if (rowNumber){
+        ms.getRange(rowNumber, col.Status+1).setValue('ACTIVE');
+        const roleCol = admin_ensureRoleExpiresColumn_(ms, col);
+        if (roleCol !== null) ms.getRange(rowNumber, roleCol+1).setValue('');
+      }
+      admin_clearMembersCache_();
+      st = 'ACTIVE';
+    }
+  }
 
   const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
   if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
@@ -1047,6 +1064,25 @@ function api_admin_matrix(token, fromDate, toDate, q){
 
   members.sort((a,b)=> a.id.localeCompare(b.id));
 
+  const away = {};
+  events.forEach(function(ev){
+    const d = admin_eventDateFromKey_(ev);
+    if (!d) return;
+    members.forEach(function(m){
+      const ap = admin_getAwayPeriodForMember_(m.id);
+      const periods = (ap && ap.periods) ? ap.periods : [];
+      const hit = periods.some(function(p){
+        const from = admin_parseYmd_(p.fromYmd || '');
+        const to = admin_parseYmd_(p.toYmd || '');
+        if (!from || !to) return false;
+        return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
+      });
+      if (!hit) return;
+      if (!away[m.id]) away[m.id] = {};
+      away[m.id][ev] = 1;
+    });
+  });
+
   admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length}), 'matrix');
 
   return {
@@ -1054,7 +1090,8 @@ function api_admin_matrix(token, fromDate, toDate, q){
     range:{ from: admin_fmtYmd_(range.from), to: admin_fmtYmd_(range.to) },
     events: events,
     members: members,
-    attended: attended
+    attended: attended,
+    away: away
   };
 }
 
@@ -1320,8 +1357,8 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
     return admin_err_('E409', zh, en);
   }
 
-  // Ensure RoleExpiresISO column exists (for TEMP expiry)
-  const roleCol = admin_ensureRoleExpiresIsoColumn_(ms, col);
+  // Ensure RoleExpires column exists (for TEMP/HELPER expiry)
+  const roleCol = admin_ensureRoleExpiresColumn_(ms, col);
 
   // Apply Status
   ms.getRange(rowNumber, col.Status+1).setValue(ns);
@@ -2082,6 +2119,13 @@ function admin_audit_(actor, action, details, context){
 }
 
 // Date helpers (UTC midnight strings)
+function admin_safeToDate_(v){
+  if (!v && v !== 0) return null;
+  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? null : v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function admin_parseYmd_(s){
   const v = String(s||'').trim();
   const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -2189,14 +2233,14 @@ function admin_findMemberRowById_(sh, col, id){
   }
   return null;
 }
-function admin_ensureRoleExpiresIsoColumn_(sh, col){
-  if (col.RoleExpiresISO !== undefined) return col.RoleExpiresISO;
+function admin_ensureRoleExpiresColumn_(sh, col){
+  if (col.RoleExpires !== undefined) return col.RoleExpires;
   const lastCol = sh.getLastColumn();
   sh.insertColumnAfter(lastCol);
   const newCol = lastCol + 1;
-  sh.getRange(1, newCol).setValue('RoleExpiresISO').setFontWeight('bold');
-  col.RoleExpiresISO = newCol - 1;
-  return col.RoleExpiresISO;
+  sh.getRange(1, newCol).setValue('RoleExpires').setFontWeight('bold');
+  col.RoleExpires = newCol - 1;
+  return col.RoleExpires;
 }
 function admin_ensureAwayColumns_(sh, col){
   const fields = ['AwayFrom1','AwayTo1','AwayFrom2','AwayTo2'];
@@ -2255,7 +2299,8 @@ function admin_getMembersIndex_(){
         awayFrom1: (col.AwayFrom1!==undefined) ? String(row[col.AwayFrom1]||'').trim() : '',
         awayTo1: (col.AwayTo1!==undefined) ? String(row[col.AwayTo1]||'').trim() : '',
         awayFrom2: (col.AwayFrom2!==undefined) ? String(row[col.AwayFrom2]||'').trim() : '',
-        awayTo2: (col.AwayTo2!==undefined) ? String(row[col.AwayTo2]||'').trim() : ''
+        awayTo2: (col.AwayTo2!==undefined) ? String(row[col.AwayTo2]||'').trim() : '',
+        roleExpires: (col.RoleExpires!==undefined) ? String(row[col.RoleExpires]||'').trim() : ''
       };
     }
   }

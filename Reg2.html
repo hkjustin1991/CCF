@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CCF Registration</title>
+  <title>CCF會員登記及自助服務平台 / CCF registration and self service portal</title>
 
   <!--
   ============================================================
@@ -142,14 +142,12 @@
   <div class="wrap">
     <header class="topbar">
       <div>
-        <div class="title">CCF Registration / 會員登記</div>
-        <div class="sub">只作登記，不會自動簽到 / Registration only (no auto check-in)</div>
-        <div class="hint">
-          完成後請交給接待同工掃描 QR。<br/>
-          After completion, ask Welcome team to scan the QR.
-        </div>
+        <div class="title">CCF會員登記及自助服務平台 / CCF registration and self service portal</div>
+        <div class="sub">會員登記及自助服務 / Member registration and self service</div>
+        <div id="globalClock" class="sub"></div>
+        
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui2-selfhome-keepqr</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-02-15.reg95</span></div>
     </header>
 
     <main id="app"></main>
@@ -436,11 +434,12 @@
       if (away.from1 && away.to1) awayHtml += '<div>假期 1 / Holiday 1: '+escapeHtml(away.from1)+' ~ '+escapeHtml(away.to1)+'</div>';
       if (away.from2 && away.to2) awayHtml += '<div>假期 2 / Holiday 2: '+escapeHtml(away.from2)+' ~ '+escapeHtml(away.to2)+'</div>';
       if (!awayHtml) awayHtml = '<div>未設定 / Not set</div>';
+      var memberSince = (snap.memberSinceEarliest || (snap.member && snap.member.memberSinceEarliest) || '');
       var servingDisabled = groups.length ? '' : 'disabled';
 
       return ''+
         '<div class="card">'+
-          '<div class="big ok">✅ 已驗證 / Verified</div>'+
+          '<div class="big ok">✅ 已登入 / Logged in</div>'+
           '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b></div>'+
           '<div class="big" style="margin-top:8px;">'+greetZh+' / '+greetEn+' '+escapeHtml(displayName)+'</div>'+
           '<div class="small">歡迎來到 CCF 自助服務平台。若有問題，請聯絡影音同工。<br/>Welcome to CCF self service portal. Please ask the media team should there be any issues.</div>'+
@@ -590,7 +589,7 @@
 
       var isSelf = (State.flow === 'self_update');
       return ''+
-        '<div class="card"><div class="big">📝 填寫資料 / Details</div></div>'+
+        '<div class="card"><div class="big">📝 填寫資料 / Details</div><div class="small">只作登記，不會自動簽到 / Registration only (no auto check-in)<br/>完成後請交給接待同工掃描 QR。After completion, ask Welcome team to scan the QR.</div></div>'+
 
         '<div class="card">'+
           '<div class="label">中文名 / Chinese name</div>'+
@@ -1295,15 +1294,15 @@
           '</div>'+
         '</div>'+
 
-        '<div style="margin-top:10px;display:flex;gap:10px;align-items:center;">'+
-          '<input id="chkKeepQr" type="checkbox" style="width:auto;transform:scale(1.1);" />'+
-          '<div style="font-weight:950;">保留現有 QR（不更換） / Keep existing QR (do not change)</div>'+
+        '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">'+
+          '<label style="display:flex;gap:10px;align-items:center;"><input id="optKeepQr" name="qrMode" type="radio" checked style="width:auto;transform:scale(1.1);" /><span style="font-weight:950;">保留現有 QR（不更換） / Keep existing QR (do not change)</span></label>'+
+          '<label style="display:flex;gap:10px;align-items:center;"><input id="optNewQr" name="qrMode" type="radio" style="width:auto;transform:scale(1.1);" /><span style="font-weight:950;">發出新 QR（舊 QR 失效） / Generate NEW QR (old QR invalid)</span></label>'+
         '</div>'+
 
         '<div class="msgBox warn" style="margin-top:10px;">'+
           '<div class="small">'+
-            '如你懷疑 QR 已外洩／遺失／被轉發，請不要勾選（系統會重新發出新 QR，舊 QR 會失效）。<br/>'+
-            'If you suspect leakage/loss/sharing, do NOT tick (a NEW QR will be issued and old QR becomes invalid).'+
+            '如你懷疑 QR 已外洩／遺失／被轉發，請選擇「發出新 QR」。<br/>'+
+            'If you suspect leakage/loss/sharing, select "Generate NEW QR".'+
           '</div>'+
         '</div>'+
 
@@ -1319,7 +1318,7 @@
         try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
       };
       modal.querySelector('#btnGo').onclick = function(){
-        var keep = !!modal.querySelector('#chkKeepQr').checked;
+        var keep = !!modal.querySelector('#optKeepQr').checked;
         closeModal(modal);
         State.keepExistingQr = keep;
         onConfirm(keep);
@@ -1417,7 +1416,29 @@
       render();
     }
 
-    // init
+    
+    function updateGlobalClock_(){
+      var el = $('globalClock');
+      if(!el) return;
+      try{
+        var now = new Date();
+        var localTz = (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local');
+        var localText = now.toLocaleString();
+        var ukText = now.toLocaleString('en-GB', { timeZone:'Europe/London', hour12:false });
+        var mismatch = (localTz !== 'Europe/London');
+        el.innerHTML = '本地時間 / Local: '+escapeHtml(localText)+' ('+escapeHtml(localTz)+')'+(mismatch ? ('<br/><span class="timeFallback">英國時間 / UK: '+escapeHtml(ukText)+' (Europe/London)</span>') : '');
+      }catch(e){
+        el.innerHTML = '<span class="timeFallback">英國時間 / UK: '+escapeHtml(new Date().toLocaleString('en-GB', { timeZone:'Europe/London', hour12:false }))+'</span>';
+      }
+    }
+    function startGlobalClock_(){
+      updateGlobalClock_();
+      if(window._clockTimer) clearInterval(window._clockTimer);
+      window._clockTimer = setInterval(updateGlobalClock_, 1000);
+    }
+
+// init
+    startGlobalClock_();
     render();
   </script>
 </body>

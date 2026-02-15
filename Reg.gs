@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-02-09.reg3';
+const REG_VERSION = '2026-02-15.reg95';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -58,7 +58,7 @@ function doGetReg_(e){
   t.APP_VERSION = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : REG_VERSION;
   t.REG_VERSION = REG_VERSION;
   return t.evaluate()
-    .setTitle('CCF Registration / 會員登記')
+    .setTitle('CCF會員登記及自助服務平台 / CCF registration and self service portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -531,6 +531,9 @@ function api_reg_self_attendance_public(qrPayload, fromYmdOptional, toYmdOptiona
     let denomFrom = from;
     const joinRaw = r.Member_Since || '';
     const joinDt = regSafeToDate_(joinRaw);
+    if (joinRaw && !joinDt){
+      return { ok:false, code:'E422', zh:'會員入會日期格式錯誤，請聯絡影音同工', en:'Invalid member since date format. Please contact Media team.' };
+    }
     if (joinDt){
       const joinUtc = new Date(Date.UTC(joinDt.getFullYear(), joinDt.getMonth(), joinDt.getDate()));
       if (joinUtc.getTime() > denomFrom.getTime()) denomFrom = joinUtc;
@@ -625,6 +628,30 @@ function regDisplayNameForPortal_(m){
   return '(' + String((m && m.id) || '').trim().toUpperCase() + ')';
 }
 
+function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
+  const id = String(memberId||'').trim().toUpperCase();
+  let earliest = null;
+  const msDt = regSafeToDate_(memberSinceRaw);
+  if (msDt){
+    earliest = Utilities.formatDate(msDt, 'Europe/London', 'yyyy-MM-dd');
+  }
+
+  try{
+    const check = admin_getCheckinsData_();
+    if (check && check.ok){
+      check.rows.forEach(function(r){
+        if (r.memberId !== id) return;
+        if (!admin_isSundayServiceKey_(r.eventKey)) return;
+        const ymd = (String(r.eventKey||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/) || [])[1] || '';
+        if (!ymd) return;
+        if (!earliest || ymd < earliest) earliest = ymd;
+      });
+    }
+  }catch(e){}
+
+  return earliest || '';
+}
+
 function regFutureDateYmd_(offsetDays){
   const d = new Date();
   d.setDate(d.getDate() + Number(offsetDays || 0));
@@ -683,6 +710,7 @@ function api_reg_self_portal_snapshot_public(qrPayload){
       },
       attendance: att.stats,
       attendanceEvents: att.attendance,
+      memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, member.memberSinceRaw),
       upcoming4: upcoming4
     };
   }catch(e){
@@ -1255,6 +1283,14 @@ function regSanitizeMobile_(s){
   if (!raw) return '';
   if (raw === '+' || raw === '+44' || raw === '44') return '';
   return raw;
+}
+
+
+function regSafeToDate_(v){
+  if (!v && v !== 0) return null;
+  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? null : v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 /******** Hard-stops ********/

@@ -213,6 +213,17 @@
       border-color:#d93c5e;
       background:#fff;
     }
+    .emptySlotOutline{
+      display:block;
+      margin-top:4px;
+      padding:4px 6px;
+      border:1px dashed rgba(10,30,80,0.35);
+      border-radius:10px;
+      color:var(--muted);
+      background:#f8fbff;
+      text-align:center;
+      font-size:12px;
+    }
     .groupDialog{
       margin-top:10px;
       border:1px solid var(--border);
@@ -1225,10 +1236,9 @@
                 var today = parseYmd(getTodayYmdUk());
                 var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
                 var urgentGap = (diff >= 0 && diff < 28 && currentCount < minReq);
-                if(!cell || !cell.length){
-                  return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'"></td>';
-                }
-                var entries = cell.map(function(entry, idx){
+                var maxSlots = Number(pos.max || 1);
+                var existingEntries = (cell && cell.length) ? cell : [];
+                var entries = existingEntries.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
                   if (!label) return '';
                   var rawValue = String(entry.rawValue || entry.memberId || '').trim();
@@ -1236,8 +1246,14 @@
                     '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
                       escapeHtml(label)+
                     '</button>';
-                }).filter(Boolean).join('');
-                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries+'</td>';
+                }).filter(Boolean);
+                for (var slotIdx = entries.length; slotIdx < maxSlots; slotIdx++){
+                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                }
+                if(!entries.length){
+                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                }
+                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
               return ''+
                 '<tr>'+
@@ -1975,7 +1991,9 @@
             var mid = members[c].id;
             var cid2 = safeClassId(mid);
             var tick = (attended[mid] && attended[mid][ev]) ? '✅' : '';
-            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+tick+'</span></td>';
+            var isAway = !!(res.away && res.away[mid] && res.away[mid][ev]);
+            var mark = tick || (isAway ? '🏖️ Holiday' : '');
+            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+mark+'</span></td>'; 
           }
           html += '</tr>';
         }
