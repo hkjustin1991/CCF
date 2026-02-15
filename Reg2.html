@@ -1065,6 +1065,69 @@
             return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
           }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
+
+      if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){
+        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+        callApi('api_reg_self_live_service_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
+          State.lastResult = res;
+          State.view = 'selfLive';
+          render();
+        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+      };
+
+      if ($('btnSelfHoliday')) $('btnSelfHoliday').onclick = function(){
+        State.view = 'selfHoliday';
+        render();
+      };
+    }
+
+    function bindServing(){
+      $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
+      var open = null;
+      Array.prototype.slice.call(document.querySelectorAll('button[data-acc]')).forEach(function(b){
+        b.onclick = function(){
+          var i = b.getAttribute('data-acc');
+          if (open !== null && $('acc_'+open)) $('acc_'+open).classList.add('hide');
+          if (open === i){ open = null; return; }
+          $('acc_'+i).classList.remove('hide'); open = i;
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-add]')).forEach(function(b){
+        b.onclick = function(){
+          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos'), slot=b.getAttribute('data-slot');
+          if(!confirm('確認報名？\nSure to sign up?\n'+ev+' '+pos)) return;
+          callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
+            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          });
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-del]')).forEach(function(b){
+        b.onclick = function(){
+          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos');
+          if(!confirm('確認刪除？\nSure to delete?')) return;
+          callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
+            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          });
+        };
+      });
+    }
+
+    function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
+
+    function bindHoliday(){
+      $('btnHolidayBack').onclick = function(){ State.view='selfHome'; render(); };
+      $('btnHolidaySave').onclick = function(){
+        $('holidayMsg').innerHTML = showBox('warn','儲存中…','Saving…');
+        callApi('api_reg_self_set_holiday_public', State.authQrPayload, $('hFrom1').value.trim(), $('hTo1').value.trim(), $('hFrom2').value.trim(), $('hTo2').value.trim())
+          .then(function(r){
+            if(!r||!r.ok){ $('holidayMsg').innerHTML = showServerErr(r); return; }
+            $('holidayMsg').innerHTML = showBox('ok','已儲存','Saved');
+            return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
+          }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+      };
     }
 
     function bindAttendance(){
