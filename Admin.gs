@@ -315,6 +315,77 @@ function api_admin_serving_group_overview(token, fromDate){
   return { ok:true, fromDate: fromYmd, overview: admin_buildServingGroupOverview_(fromYmd) };
 }
 
+function api_admin_serving_group_members(token, groupKey){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+
+  const mi = admin_getMembersIndex_();
+  const all = (mi && mi.all) ? mi.all : [];
+  const members = all
+    .filter(function(m){ return admin_memberHasServingGroup_(m, key); })
+    .map(admin_memberLabelCompact_)
+    .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
+
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const canManage = (role === 'ADMIN' || role === 'SUPERUSER' || (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; })));
+
+  return { ok:true, group:key, count:members.length, members:members, canManage:canManage };
+}
+
+function api_admin_serving_group_member_update(token, groupKey, memberId, action){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
+  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
+  if (!isAdminLike && !isGlAllowed){
+    return admin_err_('E403','沒有權限修改此組別','No permission to modify this group.');
+  }
+
+  const mi = admin_getMembersIndex_();
+  const target = (mi && mi.byId) ? mi.byId[id] : null;
+  if (!target) return admin_err_('E412','找不到此會員','Member not found.');
+
+  const targetStatus = admin_normStatus_(target.status || '');
+  if (!isAdminLike && (targetStatus === 'STAFF' || targetStatus === 'ADMIN')){
+    return admin_err_('E403','GL 不可修改 STAFF/ADMIN 的組別','GL cannot modify STAFF/ADMIN serving groups.');
+  }
+
+  const sh = admin_findMembersSheet_();
+  if (!sh) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+  const col = admin_getMembersColMap_(sh);
+  if (col.ServingGroups === undefined) return admin_err_('E500','缺少 ServingGroups 欄位','ServingGroups column missing.');
+  const rowNumber = target.rowNumber || admin_findMemberRowById_(sh, col, id);
+  if (!rowNumber) return admin_err_('E500','找不到會員列','Member row not found.');
+
+  const nowGroups = admin_parseGroupsCsv_(sh.getRange(rowNumber, col.ServingGroups+1).getValue());
+  const up = String(action||'').trim().toUpperCase();
+  let next = nowGroups.slice();
+  const keyUpper = key.toUpperCase();
+  if (up === 'ADD'){
+    if (next.indexOf(keyUpper) < 0) next.push(keyUpper);
+  } else if (up === 'REMOVE'){
+    next = next.filter(function(g){ return g !== keyUpper; });
+  } else {
+    return admin_err_('E416','操作格式錯誤','Invalid action.');
+  }
+
+  sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
+  admin_clearMembersCache_();
+  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_UPDATE', JSON.stringify({ group:key, action:up, memberId:id }), 'serving_group');
+  return { ok:true, group:key, action:up, memberId:id, servingGroups:next };
+}
+
 /**
  * Serving event rows (for per-event edit UI).
  */
@@ -344,7 +415,7 @@ function api_admin_serving_event_rows(token, eventKey){
  * Serving event save (replace rows for one event).
  * rows: [{position, value}]
  */
-function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
+function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scopeGroupKey){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
@@ -354,6 +425,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   if (!admin_isSundayServiceKey_(ev)){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
+  const scopeGroup = admin_normalizeServingGroup_(scopeGroupKey || '');
 
   const list = Array.isArray(rows) ? rows : [];
   const cleaned = [];
@@ -376,7 +448,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const existingValues = admin_getServingValuesForEvent_(ev);
   const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
 
+  const changedPositions = new Set();
+  const changedMembers = new Set();
+
   for (const r of cleaned){
+    const oldValue = String(existingValues[r.position] || '').trim();
+    const newValue = String(r.value || '').trim();
+    const isChanged = (oldValue !== newValue);
+    if (isChanged) changedPositions.add(r.position);
+
     const ids = admin_extractMemberIdsFromServingValue_(r.value);
     const maxAllowed = ADMIN_SERVING_POSITION_MAX[r.position] || 1;
     if (ids.length > maxAllowed){
@@ -396,15 +476,23 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
       if (!admin_memberHasServingGroup_(membersById[id], groupKey)){
         invalidGroupAssignments.push({ memberId: id, position: r.position, group: groupKey });
       }
-      memberIdsForAway.push(id);
+      if (isChanged){
+        memberIdsForAway.push(id);
+        changedMembers.add(id);
+      }
       if (!duplicateMap[id]) duplicateMap[id] = [];
       duplicateMap[id].push(r.position);
     });
   }
 
   Object.keys(duplicateMap).forEach(function(id){
+    if (!changedMembers.has(id)) return;
     const positions = duplicateMap[id] || [];
     if (positions.length <= 1) return;
+    if (scopeGroup){
+      const touchesScopedGroup = positions.some(function(p){ return (ADMIN_SERVING_POSITION_GROUP[p] || '') === scopeGroup; });
+      if (!touchesScopedGroup) return;
+    }
     const normalized = positions.slice().sort();
     const existing = existingDupMap[id] || [];
     const isNewDup = (existing.join('|') !== normalized.join('|'));
@@ -501,7 +589,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   admin_audit_(
     s.actor,
     'SERVING_EVENT_SAVE',
-    JSON.stringify({ eventKey: ev, rows: cleaned.length, overrideAway: !!overrideAway }),
+    JSON.stringify({ eventKey: ev, rows: cleaned.length, overrideAway: !!overrideAway, scopeGroup: scopeGroup||'' }),
     'serving'
   );
 
