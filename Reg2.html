@@ -547,10 +547,13 @@
           var slots = cell.slots || [];
           var html = slots.map(function(id, idx){
             if (id){
-              if (id === m.id) return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(id)+'</button>';
+              if (id === m.id){
+                if (cell.canChange === false) return '<span class="pill">'+escapeHtml(id)+'（4w鎖定）</span>';
+                return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(id)+'</button>';
+              }
               return '<span class="pill">'+escapeHtml(id)+'</span>';
             }
-            return cell.editable ? '<button class="primary" data-add="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">＋</button>' : '<span class="pill">—</span>';
+            return (cell.canSignup !== false) ? '<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">＋</button>' : '<span class="pill">—</span>';
           }).join(' ');
           table += '<td>'+html+'</td>';
         });
@@ -1033,72 +1036,16 @@
       Array.prototype.slice.call(document.querySelectorAll('button[data-add]')).forEach(function(b){
         b.onclick = function(){
           var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos'), slot=b.getAttribute('data-slot');
-          if(!confirm('確認報名？\nSure to sign up?\n'+ev+' '+pos)) return;
+          var canChange = b.getAttribute('data-chg') !== '0';
+          var prompt = canChange
+            ? ('確認報名？\nSure to sign up?\n'+ev+' '+pos)
+            : ('已超過四週更改期限，仍要報名？\nAfter the 4-week cutoff, still sign up?\n\n如需更改或取消，請聯絡組長。\nFor changes/cancellations, please contact your GL.\n\n'+ev+' '+pos);
+          if(!confirm(prompt)) return;
           callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
-            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
-          });
-        };
-      });
-      Array.prototype.slice.call(document.querySelectorAll('button[data-del]')).forEach(function(b){
-        b.onclick = function(){
-          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos');
-          if(!confirm('確認刪除？\nSure to delete?')) return;
-          callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
-            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
-            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
-          });
-        };
-      });
-    }
-
-    function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
-
-    function bindHoliday(){
-      $('btnHolidayBack').onclick = function(){ State.view='selfHome'; render(); };
-      $('btnHolidaySave').onclick = function(){
-        $('holidayMsg').innerHTML = showBox('warn','儲存中…','Saving…');
-        callApi('api_reg_self_set_holiday_public', State.authQrPayload, $('hFrom1').value.trim(), $('hTo1').value.trim(), $('hFrom2').value.trim(), $('hTo2').value.trim())
-          .then(function(r){
-            if(!r||!r.ok){ $('holidayMsg').innerHTML = showServerErr(r); return; }
-            $('holidayMsg').innerHTML = showBox('ok','已儲存','Saved');
-            return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
-          }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
-      };
-
-      if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){
-        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
-        callApi('api_reg_self_live_service_public', State.authQrPayload).then(function(res){
-          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
-          State.lastResult = res;
-          State.view = 'selfLive';
-          render();
-        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
-      };
-
-      if ($('btnSelfHoliday')) $('btnSelfHoliday').onclick = function(){
-        State.view = 'selfHoliday';
-        render();
-      };
-    }
-
-    function bindServing(){
-      $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
-      var open = null;
-      Array.prototype.slice.call(document.querySelectorAll('button[data-acc]')).forEach(function(b){
-        b.onclick = function(){
-          var i = b.getAttribute('data-acc');
-          if (open !== null && $('acc_'+open)) $('acc_'+open).classList.add('hide');
-          if (open === i){ open = null; return; }
-          $('acc_'+i).classList.remove('hide'); open = i;
-        };
-      });
-      Array.prototype.slice.call(document.querySelectorAll('button[data-add]')).forEach(function(b){
-        b.onclick = function(){
-          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos'), slot=b.getAttribute('data-slot');
-          if(!confirm('確認報名？\nSure to sign up?\n'+ev+' '+pos)) return;
-          callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
-            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            if (r.warning && (r.warning.zh || r.warning.en)){
+              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 已超過更改期限', r.warning.en || '⚠️ Change/cancel cutoff passed');
+            }
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
           });
         };

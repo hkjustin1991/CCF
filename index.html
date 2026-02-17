@@ -996,7 +996,7 @@
       var o = openModal(
         '<div class="big">🩺 自我檢查 / Self-check</div>'+
         staffBannerHtml_()+
-        '<div class="small">Back-end checks only. Feedback to Media team appreciated.</div>'+
+        '<div class="small">Back-end checks only. Some forward functions may still be problematic. Feedback to Media team appreciated.</div>'+
         '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
         '<div class="miniBtnRow">'+
           '<button id="btnScConfirm" class="orange">💾 同工自我記錄 / Staff self record</button>'+
@@ -1547,7 +1547,7 @@
 
           var last = res.lastSignIn
             ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div class="msgEn">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
-            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">請歡迎並為會眾簽到！ / Please welcome and sign in members!</div></div>';
+            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">OK sign, please welcome and check in the first person</div></div>';
 
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });

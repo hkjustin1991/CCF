@@ -673,7 +673,7 @@ function regSelfServingEditable_(eventDate){
   const now = new Date();
   const diffMs = eventDate.getTime() - now.getTime();
   const weeks = diffMs / (7 * 24 * 60 * 60 * 1000);
-  return weeks >= 6;
+  return weeks >= 4;
 }
 
 function api_reg_self_portal_snapshot_public(qrPayload){
@@ -802,7 +802,8 @@ function api_reg_self_serving_data_public(qrPayload){
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
         const slots = [];
         for (let i=0;i<max;i++) slots.push(ids[i] || '');
-        cells[ev.eventKey][p.position] = { slots: slots, editable: regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey)) };
+        const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
+        cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
       });
     });
 
@@ -823,7 +824,7 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
     if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
 
     const evDate = admin_eventDateFromKey_(ev);
-    if (!regSelfServingEditable_(evDate)) return { ok:false, code:'E409', zh:'六週內不可更改，請聯絡組長', en:'Changes within 6 weeks are blocked. Please contact GL.' };
+    const afterChangeCutoff = !regSelfServingEditable_(evDate);
 
     const mi = admin_getMembersIndex_();
     const member = mi.byId[id];
@@ -869,8 +870,19 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
 
       ids.push(id);
       sh.getRange(rowIndex, colIndex).setValue(ids.join(', '));
-      regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos });
-      return { ok:true, eventKey:ev, position:pos };
+      regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
+      return {
+        ok:true,
+        eventKey:ev,
+        position:pos,
+        warning: afterChangeCutoff
+          ? {
+              code:'W_CUTOFF',
+              zh:'已超過四週更改期限。如需更改或取消，請聯絡組長。',
+              en:'The 4-week change/cancel cutoff has passed. Please contact your GL for changes or cancellations.'
+            }
+          : null
+      };
     } finally {
       lock.releaseLock();
     }
@@ -888,7 +900,7 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
     const pos = String(position||'').trim();
     if (!admin_isSundayServiceKey_(ev)) return { ok:false, code:'E416', zh:'活動格式錯誤', en:'Invalid eventKey.' };
     if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
-    if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return { ok:false, code:'E409', zh:'六週內不可更改，請聯絡組長', en:'Changes within 6 weeks are blocked. Please contact GL.' };
+    if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return { ok:false, code:'E409', zh:'四週內不可更改，請聯絡組長', en:'Changes within 4 weeks are blocked. Please contact GL.' };
 
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
