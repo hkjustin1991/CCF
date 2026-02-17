@@ -617,7 +617,7 @@
               if (id){
                 var display = memberText_(id);
                 if (id === m.id){
-                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(display)+'（4w鎖定）</span>';
+                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(display)+'（6w鎖定）</span>';
                   return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(display)+'</button>';
                 }
                 return '<span class="pill">'+escapeHtml(display)+'</span>';
@@ -1116,10 +1116,14 @@
         }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
 
-      $('btnSelfHoliday').onclick = function(){
-        State.view = 'selfHoliday';
-        render();
-      };
+      var holidayBtn = $('btnSelfHoliday');
+      if (holidayBtn){
+        holidayBtn.onclick = null;
+        holidayBtn.addEventListener('click', function(){
+          State.view = 'selfHoliday';
+          render();
+        });
+      }
     }
 
     function bindServing(){
@@ -1153,12 +1157,12 @@
           var canChange = b.getAttribute('data-chg') !== '0';
           var prompt = canChange
             ? ('確認報名？\nSure to sign up?\n'+ev+' '+pos)
-            : ('已超過四週更改期限，仍要報名？\nAfter the 4-week cutoff, still sign up?\n\n如需更改或取消，請聯絡組長。\nFor changes/cancellations, please contact your GL.\n\n'+ev+' '+pos);
+            : ('已超過六週更改期限，仍要報名？\nAfter the 6-week cutoff, still sign up?\n\n如需更改或取消，請聯絡組長。\nFor changes/cancellations, please contact your GL.\n\n'+ev+' '+pos);
           if(!confirm(prompt)) return;
           callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
             if (r.warning && (r.warning.zh || r.warning.en)){
-              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 已超過更改期限', r.warning.en || '⚠️ Change/cancel cutoff passed');
+              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 已超過六週更改期限', r.warning.en || '⚠️ Change/cancel cutoff passed');
             }
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
           });
