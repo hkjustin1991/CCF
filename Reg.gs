@@ -749,9 +749,19 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
     if (!key) return { ok:false, code:'E416', zh:'組別格式錯誤', en:'Invalid group key.' };
 
     const mi = admin_getMembersIndex_();
-    const all = (mi && mi.all) ? mi.all : [];
+    const byId = (mi && mi.byId) ? mi.byId : {};
+    const selfMember = byId[auth.parsed.id] || null;
+    const selfGroups = selfMember ? (selfMember.servingGroups || []).map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean) : [];
+    if (selfGroups.indexOf(key) < 0){
+      return { ok:false, code:'E403', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
+    }
+
+    const all = Object.keys(byId).map(function(id){ return byId[id]; });
     const members = all
-      .filter(function(m){ return admin_memberHasServingGroup_(m, key); })
+      .filter(function(m){
+        const groups = Array.isArray(m.servingGroups) ? m.servingGroups : [];
+        return groups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
+      })
       .map(admin_memberLabelCompact_)
       .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
 

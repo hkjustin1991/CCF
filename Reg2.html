@@ -223,6 +223,8 @@
       lastResult: null,
       lastSubmit: null,
       snapshot: null,
+      servingMonth: '',
+      servingGroup: '',
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -539,7 +541,6 @@
     function viewSelfServing(res){
       res = res || {};
       var m = res.member || {};
-      var groupOrder = ['WORSHIP','MEDIA','LOGISTIC','SUPPORT','FINANCE'];
       function groupLabel(k){
         var up = String(k||'').toUpperCase();
         if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
@@ -554,31 +555,49 @@
         return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
       }
 
-      var groups = (m.servingGroups||[]).map(function(g){
-        var up = String(g||'').trim().toUpperCase();
-        return '<span class="groupBadge '+groupCss(up)+'">'+escapeHtml(groupLabel(up))+'</span>';
+      var memberGroups = (m.servingGroups || []).map(function(g){ return String(g||'').trim().toUpperCase(); }).filter(Boolean);
+      var groupButtons = memberGroups.map(function(g){
+        var active = (String(State.servingGroup||'').toUpperCase() === g) ? ' primary' : ' alt';
+        return '<button class="'+active+' btnSmall" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(groupLabel(g))+'</button>';
       }).join('');
 
-      var sum = res.summary || [];
-      var rows = sum.map(function(s, i){
-        var ev = (s.events||[]).map(function(e){ return '<li>'+escapeHtml(e)+'</li>'; }).join('');
-        return '<div class="msgBox" style="margin-top:8px;"><div><button class="alt" data-acc="'+i+'">'+escapeHtml((s.labelZh||s.position||'')+'：'+s.count)+'</button></div><div id="acc_'+i+'" class="hide"><ul style="margin:6px 0 0 18px;">'+ev+'</ul></div></div>';
-      }).join('');
-
-      var events = res.events || [];
-      var positions = res.positions || [];
-      var byGroup = {};
-      positions.forEach(function(p){
-        var g = String(p.group||'').trim().toUpperCase() || 'OTHER';
-        if (!byGroup[g]) byGroup[g] = [];
-        byGroup[g].push(p);
+      var events = Array.isArray(res.events) ? res.events : [];
+      var monthMap = {};
+      events.forEach(function(ev){
+        var mKey = String(ev.eventKey||'').replace(/^SundayService_(\d{4}-\d{2})-\d{2}$/, '$1');
+        if (!/^\d{4}-\d{2}$/.test(mKey)) return;
+        monthMap[mKey] = monthMap[mKey] || { key:mKey, events:[] };
+        monthMap[mKey].events.push(ev);
       });
+      var months = Object.keys(monthMap).sort();
+      var selectedMonth = (months.indexOf(State.servingMonth) >= 0) ? State.servingMonth : (months[0] || '');
+      var selectedGroup = (memberGroups.indexOf(String(State.servingGroup||'').toUpperCase()) >= 0)
+        ? String(State.servingGroup||'').toUpperCase()
+        : (memberGroups[0] || '');
 
-      var groupTables = groupOrder.concat(Object.keys(byGroup).filter(function(g){ return groupOrder.indexOf(g) < 0; })).filter(function(g, idx, arr){ return arr.indexOf(g)===idx && byGroup[g] && byGroup[g].length; }).map(function(g){
-        var header = '<tr><th style="text-align:left;min-width:180px;">Position</th>'+events.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
-        var body = byGroup[g].map(function(p){
+      var monthButtons = months.map(function(k){
+        var active = (k === selectedMonth) ? ' primary' : ' alt';
+        return '<button class="'+active+' btnSmall" data-serving-month="'+escapeHtml(k)+'">'+escapeHtml(k)+'</button>';
+      }).join('');
+
+      var positions = (res.positions || []).filter(function(p){
+        var g = String(p.group||'').trim().toUpperCase();
+        return (!selectedGroup || g === selectedGroup);
+      });
+      var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth].events : [];
+
+      var tableHtml = '';
+      if (!selectedGroup){
+        tableHtml = '<div class="msgBox warn">你暫未被編入任何事奉組別 / You are not in any serving group yet.</div>';
+      } else if (!monthEvents.length){
+        tableHtml = '<div class="msgBox warn">此月份沒有可顯示的主日 / No Sunday events in selected month.</div>';
+      } else if (!positions.length){
+        tableHtml = '<div class="msgBox warn">此組別沒有可用崗位 / No positions configured for this group.</div>';
+      } else {
+        var header = '<tr><th style="text-align:left;min-width:180px;">Position</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var body = positions.map(function(p){
           var row = '<tr><td><b>'+escapeHtml(p.labelZh||p.position||'')+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
-          events.forEach(function(ev){
+          monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
             var slots = cell.slots || [];
             var content = slots.map(function(id, idx){
@@ -596,13 +615,22 @@
           row += '</tr>';
           return row;
         }).join('');
-        return '<div class="card" style="margin-top:10px;"><div><span class="groupBadge '+groupCss(g)+'">'+escapeHtml(groupLabel(g))+'</span></div><div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div></div>';
-      }).join('');
+        tableHtml = '<div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div>';
+      }
 
       return ''+
-        '<div class="card"><div class="big">🧩 事奉 / Serving</div><div class="small">Member of: '+(groups||'—')+'</div></div>'+
-        '<div class="card"><div class="big">事奉次數（中文）</div>'+rows+'</div>'+
-        (groupTables || '<div class="card"><div class="msgBox warn">No serving positions available.</div></div>')+
+        '<div class="card"><div class="big">🧩 事奉 / Serving</div><div class="small">Step 1：Select month。Step 2：Select your group。Step 3：Pick slot.</div></div>'+
+        '<div class="card">'+
+          '<div class="small"><b>月份 / Month</b></div>'+
+          '<div class="miniBtnRow">'+(monthButtons || '<span class="pill">—</span>')+'</div>'+
+          '<div class="small" style="margin-top:8px;"><b>組別 / Serving group</b>（只顯示你所屬組別）</div>'+
+          '<div class="miniBtnRow">'+(groupButtons || '<span class="pill">—</span>')+'</div>'+
+          '<div class="small" style="margin-top:8px;">點擊組別查看組員 / Click group to view members</div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div><span class="groupBadge '+groupCss(selectedGroup)+'">'+escapeHtml(groupLabel(selectedGroup))+'</span></div>'+
+          tableHtml+
+        '</div>'+
         '<div class="card"><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
     }
 
@@ -1008,6 +1036,8 @@
         callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
           State.lastResult = res;
+          if (!State.servingMonth) State.servingMonth = '';
+          if (!State.servingGroup) State.servingGroup = '';
           State.view = 'selfServing';
           render();
         }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
@@ -1073,13 +1103,27 @@
 
     function bindServing(){
       $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
-      var open = null;
-      Array.prototype.slice.call(document.querySelectorAll('button[data-acc]')).forEach(function(b){
+      Array.prototype.slice.call(document.querySelectorAll('button[data-serving-month]')).forEach(function(b){
         b.onclick = function(){
-          var i = b.getAttribute('data-acc');
-          if (open !== null && $('acc_'+open)) $('acc_'+open).classList.add('hide');
-          if (open === i){ open = null; return; }
-          $('acc_'+i).classList.remove('hide'); open = i;
+          State.servingMonth = String(b.getAttribute('data-serving-month')||'').trim();
+          render();
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-serving-group]')).forEach(function(b){
+        b.onclick = function(){
+          var key = String(b.getAttribute('data-serving-group')||'').trim();
+          State.servingGroup = key;
+          callApi('api_reg_self_serving_group_stats_public', State.authQrPayload, key).then(function(res){
+            if(!res || !res.ok){ $('servingMsg').innerHTML = showServerErr(res); return; }
+            var members = (res.members||[]).map(function(m){ return '<li>'+escapeHtml(m.label||m.id||'—')+'</li>'; }).join('');
+            var modal = openModal(
+              '<div class="big">組員名單 / Group members</div>'+
+              '<div class="small">'+escapeHtml(key)+' · 人數 / Count: '+escapeHtml(String(res.count||0))+'</div>'+
+              '<ul style="margin:8px 0 0 18px;">'+(members||'<li>—</li>')+'</ul>'+
+              '<div class="miniBtnRow"><button id="btnCloseGroupMembers" class="danger">關閉 / Close</button></div>'
+            );
+            modal.querySelector('#btnCloseGroupMembers').onclick = function(){ closeModal(modal); };
+          }).catch(function(){ $('servingMsg').innerHTML = showBox('err','系統錯誤','System error'); });
         };
       });
       Array.prototype.slice.call(document.querySelectorAll('button[data-add]')).forEach(function(b){
