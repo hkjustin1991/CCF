@@ -23,7 +23,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-02-08.staff12';
+const APP_VERSION = '2026-02-15.staff95';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -132,11 +132,25 @@ function getDefaultEventKey_(){ return 'SundayService_' + fmtUk_(nowUk_(), 'yyyy
 
 function normalizeStatus_(s){ return String(s || '').trim().toUpperCase(); }
 function normalizeVrm_(s){ return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function normalizeServingGroupToken_(token){
+  const t = String(token || '').trim().toUpperCase();
+  if (!t) return '';
+  const alias = {
+    'MEDIA':'MEDIA','MEDIA MASTER':'MEDIA','MEDIA-MASTER':'MEDIA','影像大師':'MEDIA',
+    'WORSHIP':'WORSHIP','WORSHIP ALLIANCE':'WORSHIP','敬拜聯盟':'WORSHIP',
+    'LOGISTIC':'LOGISTIC','LOGISTICS':'LOGISTIC','LOGISTIC SPECIALIST':'LOGISTIC','後勤特工':'LOGISTIC',
+    'SUPPORT':'SUPPORT','DIVINE SUPPORTER':'SUPPORT','聖工支援隊':'SUPPORT',
+    'FINANCE':'FINANCE','FINANCE DEPT':'FINANCE','財務公司':'FINANCE'
+  };
+  return alias[t] || t;
+}
 function parseGroupsCsv_(value){
-  return String(value || '')
-    .split(',')
-    .map(v => String(v || '').trim().toUpperCase())
-    .filter(Boolean);
+  return Array.from(new Set(
+    String(value || '')
+      .split(/[;,\n|]+/)
+      .map(v => normalizeServingGroupToken_(v))
+      .filter(Boolean)
+  ));
 }
 function isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();
@@ -667,10 +681,31 @@ function api_login(input) {
   if (!m.key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
   if (m.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符，可能是舊 QR 卡，請聯絡影音同工', en:'Key mismatch (possibly old QR badge). Please contact Media team.' };
 
-  if (isHelperOrTemp_(st)) {
-    const exp = m.roleExpires ? safeToDate_(m.roleExpires) : null;
-    if (!exp) return { ok:false, code:'E419', zh:'此臨時權限缺少到期日，請聯絡影音同工', en:'Expiry missing. Please contact Media team.' };
-    if (isExpired_(exp)) return { ok:false, code:'E420', zh:'此臨時權限已到期，請聯絡影音同工', en:'Temporary privilege expired. Please contact Media team.' };
+  // enforce RoleExpires for any status with expiry; auto-downgrade to ACTIVE on expiry
+  if (m.roleExpires){
+    const exp = safeToDate_(m.roleExpires);
+    if (!exp){
+      return { ok:false, code:'E419', zh:'權限到期日格式錯誤，請聯絡影音同工', en:'Invalid expiry format. Please contact Media team.' };
+    }
+    if (isExpired_(exp)){
+      try{
+        const sh = getMembersSheet_();
+        const cols = getMembersColMap_(sh);
+        const rowNumber = m.rowNumber || findMemberRowById_(sh, cols, parsed.id);
+        if (rowNumber){
+          setMemberCell_(sh, cols, rowNumber, 'Status', STATUS_ACTIVE);
+          setMemberCell_(sh, cols, rowNumber, 'RoleExpires', '');
+          clearMembersIndexCache_();
+        }
+      }catch(e){}
+      const stNow = STATUS_ACTIVE;
+      if (!isPortalUserAllowed_(stNow)) {
+        return { ok:false, code:'E415', zh:'此帳號沒有權限登入同工專頁，請聯絡影音同工', en:'No permission for staff portal. Please contact Media team.' };
+      }
+      const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:stNow, isSuper:false };
+      const token = createSession_(staff);
+      return { ok:true, token, staff };
+    }
   }
 
   const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:st, isSuper:false };

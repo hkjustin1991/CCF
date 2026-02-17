@@ -213,6 +213,17 @@
       border-color:#d93c5e;
       background:#fff;
     }
+    .emptySlotOutline{
+      display:block;
+      margin-top:4px;
+      padding:4px 6px;
+      border:1px dashed rgba(10,30,80,0.35);
+      border-radius:10px;
+      color:var(--muted);
+      background:#f8fbff;
+      text-align:center;
+      font-size:12px;
+    }
     .groupDialog{
       margin-top:10px;
       border:1px solid var(--border);
@@ -587,11 +598,12 @@
     }
     function normalizeServingGroupKey_(g){
       var key = String(g||'').trim().toUpperCase();
-      if (key === 'WORSHIP') return 'worship';
-      if (key === 'MEDIA') return 'media';
-      if (key === 'LOGISTIC') return 'logistic';
-      if (key === 'SUPPORT') return 'support';
-      if (key === 'FINANCE') return 'finance';
+      if (!key) return '';
+      if (key === 'WORSHIP' || key === 'WORSHIP ALLIANCE' || key === '敬拜聯盟') return 'worship';
+      if (key === 'MEDIA' || key === 'MEDIA MASTER' || key === '影像大師') return 'media';
+      if (key === 'LOGISTIC' || key === 'LOGISTICS' || key === 'LOGISTIC SPECIALIST' || key === '後勤特工') return 'logistic';
+      if (key === 'SUPPORT' || key === 'DIVINE SUPPORTER' || key === '聖工支援隊') return 'support';
+      if (key === 'FINANCE' || key === 'FINANCE DEPT' || key === '財務公司') return 'finance';
       return '';
     }
     function renderServingGroupBadges_(groups, clickable){
@@ -608,6 +620,52 @@
         return '<button type="button" class="'+cls+'" data-group-key="'+escapeHtml(key)+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</button>';
       }).filter(Boolean).join('');
       return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
+    }
+
+    function canManageServingGroup_(groupKey){
+      var role = String((App.actor && App.actor.role) || '').toUpperCase();
+      if (role === 'ADMIN' || role === 'SUPERUSER') return true;
+      if (role !== 'GL') return false;
+      var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
+      return gl.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
+    }
+    function renderGroupMemberManage_(host, groupKey){
+      if (!host || !groupKey) return;
+      callApi('api_admin_serving_group_members', App.token, groupKey).then(function(res){
+        if (!res || !res.ok) return;
+        var members = Array.isArray(res.members) ? res.members : [];
+        var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
+        html += '<ul class="groupDialogList">'+members.map(function(m){
+          var canRm = !!res.canManage;
+          return '<li>'+escapeHtml(m.label||m.id||'—') + (canRm ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(m.id||'')+'">移除 / Remove</button>') : '') + '</li>';
+        }).join('')+'</ul>';
+        if (res.canManage){
+          html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">新增組員 / Add member</button></div>';
+        }
+        host.innerHTML = html;
+        Array.prototype.forEach.call(host.querySelectorAll('[data-rm-member]'), function(btn){
+          btn.onclick = function(){
+            var id = String(btn.getAttribute('data-rm-member')||'').trim();
+            if (!id) return;
+            if (!confirm('確認移除 ' + id + '?\nConfirm remove ' + id + '?')) return;
+            callApi('api_admin_serving_group_member_update', App.token, groupKey, id, 'REMOVE').then(function(r){
+              if (!r || !r.ok) return;
+              renderGroupMemberManage_(host, groupKey);
+            });
+          };
+        });
+        var addBtn = host.querySelector('#btnGroupAddMember');
+        if (addBtn){
+          addBtn.onclick = function(){
+            var id = prompt('輸入 CCF ID\nEnter CCF ID');
+            if (!id) return;
+            callApi('api_admin_serving_group_member_update', App.token, groupKey, String(id).trim().toUpperCase(), 'ADD').then(function(r){
+              if (!r || !r.ok) return;
+              renderGroupMemberManage_(host, groupKey);
+            });
+          };
+        }
+      });
     }
     function buildServingGroupDialogHtml_(groupKey, servingInsights){
       var insights = servingInsights || {};
@@ -668,7 +726,8 @@
           '</div>'+
           '<div class="groupDialogSection">'+
             '<button type="button" class="btnBack sectionToggle" id="btnMembersToggle">當前組員（Current members）</button>'+
-            '<div id="membersSection" class="hide" style="margin-top:6px;">'+membersHtml+'</div>'+
+            '<div class="small">人數 / Count: '+escapeHtml(String(currentMembers.length))+'</div>'+
+            '<div id="membersSection" class="hide" style="margin-top:6px;">'+membersHtml+'<div id="groupManageHost"></div></div>'+
           '</div>'+
           '<div class="groupDialogSection">'+
             '<div class="miniBtnRow">'+
@@ -1178,10 +1237,9 @@
                 var today = parseYmd(getTodayYmdUk());
                 var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
                 var urgentGap = (diff >= 0 && diff < 28 && currentCount < minReq);
-                if(!cell || !cell.length){
-                  return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'"></td>';
-                }
-                var entries = cell.map(function(entry, idx){
+                var maxSlots = Number(pos.max || 1);
+                var existingEntries = (cell && cell.length) ? cell : [];
+                var entries = existingEntries.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
                   if (!label) return '';
                   var rawValue = String(entry.rawValue || entry.memberId || '').trim();
@@ -1189,8 +1247,14 @@
                     '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
                       escapeHtml(label)+
                     '</button>';
-                }).filter(Boolean).join('');
-                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries+'</td>';
+                }).filter(Boolean);
+                for (var slotIdx = entries.length; slotIdx < maxSlots; slotIdx++){
+                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                }
+                if(!entries.length){
+                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                }
+                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
               return ''+
                 '<tr>'+
@@ -1582,7 +1646,7 @@
             var payload = positions.map(function(pos){
               return { position: pos, value: String(values[pos] || '').trim() };
             });
-            callApi('api_admin_serving_event_save', App.token, ev, payload, false).then(function(res2){
+            callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.canOverride){
                   var detail = '';
@@ -1617,7 +1681,7 @@
                   btn.className = 'btnDanger';
                   btn.textContent = '仍然儲存 / Override';
                   btn.onclick = function(){
-                    callApi('api_admin_serving_event_save', App.token, ev, payload, true).then(function(res3){
+                    callApi('api_admin_serving_event_save', App.token, ev, payload, true, filterGroupKey).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
                       var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {});
                       showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
@@ -1709,7 +1773,7 @@
           });
         }
         function saveWithOverride_(override){
-          callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override).then(function(res2){
+          callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override, groupKeyNorm).then(function(res2){
             if (!res2 || !res2.ok){
               if (res2 && res2.code === 'E409' && res2.canOverride){
                 var detail = '';
@@ -1928,7 +1992,9 @@
             var mid = members[c].id;
             var cid2 = safeClassId(mid);
             var tick = (attended[mid] && attended[mid][ev]) ? '✅' : '';
-            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+tick+'</span></td>';
+            var isAway = !!(res.away && res.away[mid] && res.away[mid][ev]);
+            var mark = tick || (isAway ? '🏖️ Holiday' : '');
+            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+mark+'</span></td>'; 
           }
           html += '</tr>';
         }
@@ -2692,6 +2758,11 @@
           if (upcomingToggle) upcomingToggle.onclick = function(){ toggleExclusive_('upcoming'); };
           if (membersToggle && membersSection){
             membersToggle.onclick = function(){ membersSection.classList.toggle('hide'); };
+          }
+
+          if (membersSection){
+            var manageHost = groupDialogHost.querySelector('#groupManageHost');
+            if (manageHost) renderGroupMemberManage_(manageHost, groupKey);
           }
           function renderGapByWeeks_(maxDays){
             if (!gapResult) return;
