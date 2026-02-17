@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CCF Registration</title>
+  <title>CCF會員登記及自助服務平台 / CCF registration and self service portal</title>
 
   <!--
   ============================================================
@@ -67,6 +67,7 @@
     button:disabled{opacity:.55;cursor:not-allowed}
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
+    .btnSmall{width:auto;min-height:auto;padding:8px 12px;font-size:13px;border-radius:999px;flex:0 0 auto}
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
@@ -117,6 +118,13 @@
     }
     .nameItem .zh{font-weight:950;}
     .nameItem .en{color:var(--muted);font-size:14px;margin-top:4px;font-weight:700;}
+    .groupBadge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:900;margin:2px;border:1px solid var(--border)}
+    .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
+    .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
+    .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
+    .groupBadge.support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
+    .groupBadge.finance{background:#fff2cc;border-color:rgba(202,155,0,0.45);color:#7a5b00}
+    .timeFallback{color:#d93c5e;font-weight:900}
 
     @media (pointer: coarse){
       button{ min-height: 52px; }
@@ -135,14 +143,12 @@
   <div class="wrap">
     <header class="topbar">
       <div>
-        <div class="title">CCF Registration / 會員登記</div>
-        <div class="sub">只作登記，不會自動簽到 / Registration only (no auto check-in)</div>
-        <div class="hint">
-          完成後請交給接待同工掃描 QR。<br/>
-          After completion, ask Welcome team to scan the QR.
-        </div>
+        <div class="title">CCF會員登記及自助服務平台 / CCF registration and self service portal</div>
+        <div class="sub">會員登記及自助服務 / Member registration and self service</div>
+        <div id="globalClock" class="sub"></div>
+        
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui2-selfhome-keepqr</span></div>
+      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-02-15.reg95</span></div>
     </header>
 
     <main id="app"></main>
@@ -210,12 +216,13 @@
     }
 
     var State = {
-      view: 'home',          // home | form | scan | success | selfHome | selfAttendance
+      view: 'home',          // home | form | scan | success | selfHome | selfAttendance | selfServing | selfLive | selfHoliday
       flow: 'create',        // create | self_update
       authQrPayload: null,
       prefill: null,
       lastResult: null,
       lastSubmit: null,
+      snapshot: null,
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -392,10 +399,13 @@
     function viewHome(){
       return ''+
         '<div class="card">'+
-          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">📌 選擇 / Choose</div>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+          '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
-            '<button id="btnScan" class="alt">📷 掃描 QR（自助功能）</button>'+
+            '<button id="btnScan" class="alt">📷 掃描 QR - 更改、查閱資料</button>'+
           '</div>'+
           '<div class="small" style="margin-top:10px;">'+
             '掃描 QR 可查看/更改資料、查閱自己出席記錄。<br/>'+
@@ -407,18 +417,79 @@
 
     function viewSelfHome(m){
       m = m || {};
-      var nameLine = ((m.nameZh||'') + ' ' + (m.nameEn||'')).trim();
+      var snap = State.snapshot || {};
+      var displayName = (snap.member && snap.member.displayName) ? snap.member.displayName : (((m.nameZh||'') + ' ' + (m.nameEn||'')).trim() || (m.id||''));
+      var now = new Date();
+      var hh = now.getHours();
+      var greetEn = (hh < 12) ? 'Good morning' : ((hh < 18) ? 'Good afternoon' : 'Good evening');
+      var greetZh = (hh < 12) ? '早晨' : ((hh < 18) ? '午安' : '晚上好');
+      var serviceAttended = (snap.attendance && typeof snap.attendance.attended !== 'undefined') ? snap.attendance.attended : 0;
+      var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
+      var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
+      function mapGroupKey_(g){
+        var up = String(g||'').trim().toUpperCase();
+        if (up === 'WORSHIP' || up === 'WORSHIP ALLIANCE' || up === '敬拜聯盟') return 'worship';
+        if (up === 'MEDIA' || up === 'MEDIA MASTER' || up === '影像大師') return 'media';
+        if (up === 'LOGISTIC' || up === 'LOGISTICS' || up === 'LOGISTIC SPECIALIST' || up === '後勤特工') return 'logistic';
+        if (up === 'SUPPORT' || up === 'DIVINE SUPPORTER' || up === '聖工支援隊') return 'support';
+        if (up === 'FINANCE' || up === 'FINANCE DEPT' || up === '財務公司') return 'finance';
+        return String(g||'').toLowerCase();
+      }
+      function groupLabel_(k){
+        if (k==='worship') return '敬拜聯盟 / Worship Alliance';
+        if (k==='media') return '影像大師 / Media Master';
+        if (k==='logistic') return '後勤特工 / Logistic Specialist';
+        if (k==='support') return '聖工支援隊 / Divine Supporter';
+        if (k==='finance') return '財務公司 / Finance Dept';
+        return k || '—';
+      }
+      var groupHtml = groups.map(function(g){
+        var cls = mapGroupKey_(g);
+        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<button type="button" class="groupBadge '+cls+'" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(groupLabel_(cls))+'</button>';
+        return '<button type="button" class="groupBadge" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(groupLabel_(cls))+'</button>';
+      }).join('');
+      var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
+      var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
+      var away = (snap.member && snap.member.away) ? snap.member.away : {};
+      var awayHtml = '';
+      if (away.from1 && away.to1) awayHtml += '<div>假期 1 / Holiday 1: '+escapeHtml(away.from1)+' ~ '+escapeHtml(away.to1)+'</div>';
+      if (away.from2 && away.to2) awayHtml += '<div>假期 2 / Holiday 2: '+escapeHtml(away.from2)+' ~ '+escapeHtml(away.to2)+'</div>';
+      if (!awayHtml) awayHtml = '<div>未設定 / Not set</div>';
+      var memberSince = (snap.memberSinceEarliest || (snap.member && snap.member.memberSinceEarliest) || '');
+      var servingDisabled = groups.length ? '' : 'disabled';
+
       return ''+
         '<div class="card">'+
-          '<div class="big ok">✅ 已驗證 / Verified</div>'+
-          '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b>'+(nameLine?('<br/>'+escapeHtml(nameLine)):'')+'</div>'+
+          '<div class="big ok">✅ 已登入 / Logged in</div>'+
+          '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b>'+(memberSince ? ('<br/>Member since / 入會日期：'+escapeHtml(memberSince)) : '')+'</div>'+
+          '<div class="big" style="margin-top:8px;">'+greetZh+' / '+greetEn+' '+escapeHtml(displayName)+'</div>'+
+          '<div class="small">歡迎來到 CCF 自助服務平台。若有問題，請聯絡影音同工。<br/>Welcome to CCF self service portal. Please ask the media team should there be any issues.</div>'+
+          '<div class="msgBox warn" style="margin-top:10px;cursor:pointer;" id="btnOpenAttStats">'+
+            '<div><b>出席服務次數 / Service attended:</b> '+escapeHtml(String(serviceAttended))+'</div>'+
+            '<div><b>出席率 / Attendance:</b> '+escapeHtml(String(attPercent))+'%</div>'+
+          '</div>'+
+          '<div class="msgBox" style="margin-top:10px;">'+
+            '<div><b>所屬事奉組別 / Member of:</b></div>'+
+            '<div style="margin-top:6px;">'+(groupHtml || '—')+'</div>'+
+          '</div>'+
+          '<div class="msgBox" style="margin-top:10px;">'+
+            '<div><b>未來 4 週事奉 / Next 4 weeks serving</b></div>'+
+            '<ul style="margin:6px 0 0 18px;padding:0;">'+up4Html+'</ul>'+
+          '</div>'+
+          '<div class="msgBox" style="margin-top:10px;">'+
+            '<div><b>假期 / Holiday</b></div>'+awayHtml+
+          '</div>'+
         '</div>'+
         '<div class="card">'+
-          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">📌 選擇 / Choose</div>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+          '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnSelfDetails" class="primary">🪪 資料查看/更改 / Details check/change</button>'+
-            '<button id="btnSelfServing" class="alt">🧩 事奉確認 / Serving（coming soon）</button>'+
-            '<button id="btnSelfAtt" class="alt">📊 出席查詢 / Attendance check</button>'+
+            '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
+            '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
+            '<button id="btnSelfLive" class="alt">📡 即時聚會 / Live service</button>'+
+            '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfBack" class="danger">⬅️ 返回 / Back</button>'+
@@ -465,6 +536,113 @@
         '</div>';
     }
 
+    function viewSelfServing(res){
+      res = res || {};
+      var m = res.member || {};
+      var groupOrder = ['WORSHIP','MEDIA','LOGISTIC','SUPPORT','FINANCE'];
+      function groupLabel(k){
+        var up = String(k||'').toUpperCase();
+        if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
+        if (up==='MEDIA') return '影像大師 / Media Master';
+        if (up==='LOGISTIC') return '後勤特工 / Logistic Specialist';
+        if (up==='SUPPORT') return '聖工支援隊 / Divine Supporter';
+        if (up==='FINANCE') return '財務公司 / Finance Dept';
+        return up || 'OTHER';
+      }
+      function groupCss(k){
+        var x = String(k||'').toLowerCase();
+        return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
+      }
+
+      var groups = (m.servingGroups||[]).map(function(g){
+        var up = String(g||'').trim().toUpperCase();
+        return '<span class="groupBadge '+groupCss(up)+'">'+escapeHtml(groupLabel(up))+'</span>';
+      }).join('');
+
+      var sum = res.summary || [];
+      var rows = sum.map(function(s, i){
+        var ev = (s.events||[]).map(function(e){ return '<li>'+escapeHtml(e)+'</li>'; }).join('');
+        return '<div class="msgBox" style="margin-top:8px;"><div><button class="alt" data-acc="'+i+'">'+escapeHtml((s.labelZh||s.position||'')+'：'+s.count)+'</button></div><div id="acc_'+i+'" class="hide"><ul style="margin:6px 0 0 18px;">'+ev+'</ul></div></div>';
+      }).join('');
+
+      var events = res.events || [];
+      var positions = res.positions || [];
+      var byGroup = {};
+      positions.forEach(function(p){
+        var g = String(p.group||'').trim().toUpperCase() || 'OTHER';
+        if (!byGroup[g]) byGroup[g] = [];
+        byGroup[g].push(p);
+      });
+
+      var groupTables = groupOrder.concat(Object.keys(byGroup).filter(function(g){ return groupOrder.indexOf(g) < 0; })).filter(function(g, idx, arr){ return arr.indexOf(g)===idx && byGroup[g] && byGroup[g].length; }).map(function(g){
+        var header = '<tr><th style="text-align:left;min-width:180px;">Position</th>'+events.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var body = byGroup[g].map(function(p){
+          var row = '<tr><td><b>'+escapeHtml(p.labelZh||p.position||'')+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
+          events.forEach(function(ev){
+            var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
+            var slots = cell.slots || [];
+            var content = slots.map(function(id, idx){
+              if (id){
+                if (id === m.id){
+                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(id)+'（4w鎖定）</span>';
+                  return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(id)+'</button>';
+                }
+                return '<span class="pill">'+escapeHtml(id)+'</span>';
+              }
+              return '<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">空缺 / Empty</button>';
+            }).join(' ');
+            row += '<td>'+content+'</td>';
+          });
+          row += '</tr>';
+          return row;
+        }).join('');
+        return '<div class="card" style="margin-top:10px;"><div><span class="groupBadge '+groupCss(g)+'">'+escapeHtml(groupLabel(g))+'</span></div><div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div></div>';
+      }).join('');
+
+      return ''+
+        '<div class="card"><div class="big">🧩 事奉 / Serving</div><div class="small">Member of: '+(groups||'—')+'</div></div>'+
+        '<div class="card"><div class="big">事奉次數（中文）</div>'+rows+'</div>'+
+        (groupTables || '<div class="card"><div class="msgBox warn">No serving positions available.</div></div>')+
+        '<div class="card"><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
+    }
+
+    function viewSelfLive(res){
+      res = res || {};
+      var cur = res.currentAttendance || {};
+      var last = res.lastAttendance || {};
+      var groups = {};
+      (res.servingThisWeek||[]).forEach(function(r){
+        var g = String(r.group||'other');
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(r);
+      });
+      function badgeCls(g){ return (g==='worship'||g==='media'||g==='logistic'||g==='support'||g==='finance') ? g : ''; }
+      var blocks = Object.keys(groups).map(function(g){
+        var rows = groups[g].map(function(r){
+          return '<li>'+escapeHtml((r.positionZh||'')+' / '+(r.positionEn||''))+' · '+escapeHtml(r.displayName||'')+'</li>';
+        }).join('');
+        var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
+        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul></div>';
+      }).join('');
+      return '<div class="card"><div class="big">📡 即時聚會 / Live service</div>'+
+        '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
+        '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
+        '<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>'+
+        (blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>')+
+        '<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>';
+    }
+
+
+    function viewSelfHoliday(m){
+      m = m || {}; var a = m.away || {};
+      return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
+        '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from1||''))+'" />'+
+        '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to1||''))+'" />'+
+        '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from2||''))+'" />'+
+        '<div class="label">假期 2 To</div><input id="hTo2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to2||''))+'" />'+
+        '<div class="miniBtnRow"><button id="btnHolidaySave" class="primary">✅ 儲存 / Save</button><button id="btnHolidayBack" class="danger">⬅️ 返回 / Back</button></div><div id="holidayMsg"></div></div>';
+    }
+
     function viewForm(prefill){
       prefill = prefill || {};
       var hasCar = (prefill.hasCar === true);
@@ -481,8 +659,9 @@
         else { cc = d.slice(0,3); nat = d.slice(3); }
       }
 
+      var isSelf = (State.flow === 'self_update');
       return ''+
-        '<div class="card"><div class="big">📝 填寫資料 / Details</div></div>'+
+        '<div class="card"><div class="big">📝 填寫資料 / Details</div><div class="small">只作登記，不會自動簽到 / Registration only (no auto check-in)<br/>完成後請交給接待同工掃描 QR。After completion, ask Welcome team to scan the QR.</div></div>'+
 
         '<div class="card">'+
           '<div class="label">中文名 / Chinese name</div>'+
@@ -553,9 +732,18 @@
           '<textarea id="notes">'+escapeHtml(prefill.notes||'')+'</textarea>'+
           '<div id="notesHelp" class="small hide">提示：家人關係／短住探訪／特殊需要<br/>Tip: family relationship / visiting / special needs</div>'+
 
+          (isSelf ?
+            '<div class="msgBox warn" style="margin-bottom:10px;">'+
+              '<div style="display:flex;gap:10px;align-items:center;">'+
+                '<input id="qrConcern" type="checkbox" style="width:auto;transform:scale(1.1);" />'+
+                '<div>QR 有遺失/被盜/被複製/誤用疑慮？ / QR concern (lost/stolen/copied/misused)?</div>'+
+              '</div>'+
+            '</div>' : '')+
+
           '<div class="miniBtnRow">'+
             '<button id="btnSubmit" class="primary" type="button">✅ 提交 / Submit</button>'+
             '<button id="btnBackHome" class="danger" type="button">⬅️ 返回 / Back</button>'+
+            (isSelf ? '<button id="btnDeleteMembership" class="danger" type="button">🗑️ 刪除會籍 / Delete membership</button>' : '')+
           '</div>'+
 
           '<div id="formMsg"></div>'+
@@ -670,6 +858,11 @@
 
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
+        if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
+          var u = new URL(window.location.href);
+          u.searchParams.delete('mode');
+          window.location.href = u.toString();
+        };
         $('btnNew').onclick = function(){
           State.view = 'form';
           State.flow = 'create';
@@ -700,6 +893,24 @@
       if(State.view === 'selfAttendance'){
         $('app').innerHTML = viewAttendance(State.lastResult || {});
         bindAttendance();
+        return;
+      }
+
+      if(State.view === 'selfServing'){
+        $('app').innerHTML = viewSelfServing(State.lastResult || {});
+        bindServing();
+        return;
+      }
+
+      if(State.view === 'selfLive'){
+        $('app').innerHTML = viewSelfLive(State.lastResult || {});
+        bindLive();
+        return;
+      }
+
+      if(State.view === 'selfHoliday'){
+        $('app').innerHTML = viewSelfHoliday((State.snapshot && State.snapshot.member) ? State.snapshot.member : {});
+        bindHoliday();
         return;
       }
 
@@ -762,7 +973,13 @@
           State.authQrPayload = text;
           State.prefill = res.member;
           State.lastResult = null;
-          render();
+          callApi('api_reg_self_portal_snapshot_public', text).then(function(snap){
+            State.snapshot = (snap && snap.ok) ? snap : null;
+            render();
+          }).catch(function(){
+            State.snapshot = null;
+            render();
+          });
 
         }).catch(function(err){
           var msg = (err && err.message) ? err.message : String(err||'');
@@ -774,6 +991,11 @@
     }
 
     function bindSelfHome(){
+      if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
+        var u = new URL(window.location.href);
+        u.searchParams.delete('mode');
+        window.location.href = u.toString();
+      };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;
@@ -782,8 +1004,49 @@
       };
 
       $('btnSelfServing').onclick = function(){
-        $('selfMsg').innerHTML = showBox('warn','🧩 功能準備中','🧩 Coming soon','<div class="small">稍後會加入事奉報名/確認功能。</div>');
+        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+        callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
+          State.lastResult = res;
+          State.view = 'selfServing';
+          render();
+        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
+
+      if ($('btnOpenAttStats')) $('btnOpenAttStats').onclick = function(){
+        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+        callApi('api_reg_self_attendance_public', State.authQrPayload, null, null).then(function(res){
+          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
+          State.lastResult = res;
+          State.view = 'selfAttendance';
+          render();
+        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+      };
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-self-group]')).forEach(function(btn){
+        btn.onclick = function(){
+          var key = String(btn.getAttribute('data-self-group')||'').trim();
+          if (!key) return;
+          $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
+          callApi('api_reg_self_serving_group_stats_public', State.authQrPayload, key).then(function(res){
+            if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
+            var members = (res.members||[]).map(function(m){ return '<li>'+escapeHtml(m.label||m.id||'—')+'</li>'; }).join('');
+            var modal = openModal(
+              '<div class="big">組別統計 / Group stats</div>'+
+              '<div class="small">'+escapeHtml(key)+' · 人數 / Count: '+escapeHtml(String(res.count||0))+'</div>'+
+              '<div class="miniBtnRow"><button id="btnToggleGroupMembers" class="alt">▶ 展開名單 / Expand members</button><button id="btnCloseGroupStats" class="danger">關閉 / Close</button></div>'+
+              '<div id="groupMemberList" class="hide"><ul style="margin:8px 0 0 18px;">'+members+'</ul></div>'
+            );
+            modal.querySelector('#btnCloseGroupStats').onclick = function(){ closeModal(modal); };
+            modal.querySelector('#btnToggleGroupMembers').onclick = function(){
+              var box = modal.querySelector('#groupMemberList');
+              var b = modal.querySelector('#btnToggleGroupMembers');
+              if (box.classList.contains('hide')){ box.classList.remove('hide'); b.textContent='▼ 收起名單 / Collapse members'; }
+              else { box.classList.add('hide'); b.textContent='▶ 展開名單 / Expand members'; }
+            };
+          }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+        };
+      });
 
       $('btnSelfDetails').onclick = function(){
         // Go to form with current info
@@ -792,20 +1055,74 @@
         render();
       };
 
-      $('btnSelfAtt').onclick = function(){
+      if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
-        callApi('api_reg_self_attendance_public', State.authQrPayload, null, null).then(function(res){
-          if(!res || !res.ok){
-            $('selfMsg').innerHTML = showServerErr(res);
-            return;
-          }
+        callApi('api_reg_self_live_service_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
           State.lastResult = res;
-          State.view = 'selfAttendance';
+          State.view = 'selfLive';
           render();
-        }).catch(function(err){
-          var msg = (err && err.message) ? err.message : String(err||'');
-          $('selfMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
-        });
+        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+      };
+
+      if ($('btnSelfHoliday')) $('btnSelfHoliday').onclick = function(){
+        State.view = 'selfHoliday';
+        render();
+      };
+    }
+
+    function bindServing(){
+      $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
+      var open = null;
+      Array.prototype.slice.call(document.querySelectorAll('button[data-acc]')).forEach(function(b){
+        b.onclick = function(){
+          var i = b.getAttribute('data-acc');
+          if (open !== null && $('acc_'+open)) $('acc_'+open).classList.add('hide');
+          if (open === i){ open = null; return; }
+          $('acc_'+i).classList.remove('hide'); open = i;
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-add]')).forEach(function(b){
+        b.onclick = function(){
+          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos'), slot=b.getAttribute('data-slot');
+          var canChange = b.getAttribute('data-chg') !== '0';
+          var prompt = canChange
+            ? ('確認報名？\nSure to sign up?\n'+ev+' '+pos)
+            : ('已超過四週更改期限，仍要報名？\nAfter the 4-week cutoff, still sign up?\n\n如需更改或取消，請聯絡組長。\nFor changes/cancellations, please contact your GL.\n\n'+ev+' '+pos);
+          if(!confirm(prompt)) return;
+          callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
+            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            if (r.warning && (r.warning.zh || r.warning.en)){
+              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 已超過更改期限', r.warning.en || '⚠️ Change/cancel cutoff passed');
+            }
+            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          });
+        };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('button[data-del]')).forEach(function(b){
+        b.onclick = function(){
+          var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos');
+          if(!confirm('確認刪除？\nSure to delete?')) return;
+          callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
+            if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          });
+        };
+      });
+    }
+
+    function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
+
+    function bindHoliday(){
+      $('btnHolidayBack').onclick = function(){ State.view='selfHome'; render(); };
+      $('btnHolidaySave').onclick = function(){
+        $('holidayMsg').innerHTML = showBox('warn','儲存中…','Saving…');
+        callApi('api_reg_self_set_holiday_public', State.authQrPayload, $('hFrom1').value.trim(), $('hTo1').value.trim(), $('hFrom2').value.trim(), $('hTo2').value.trim())
+          .then(function(r){
+            if(!r||!r.ok){ $('holidayMsg').innerHTML = showServerErr(r); return; }
+            $('holidayMsg').innerHTML = showBox('ok','已儲存','Saved');
+            return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
+          }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
     }
 
@@ -905,7 +1222,17 @@
         }
 
         if(State.flow === 'self_update'){
+          var qrConcern = !!($('qrConcern') && $('qrConcern').checked);
+          if (qrConcern){
+            if(!confirm('確認更換 QR？舊 QR 會即時失效。\nConfirm replace QR? Old QR will be invalid immediately.')){
+              State.submitting = false;
+              if(btn) btn.disabled = false;
+              return;
+            }
+          }
+
           confirmUpdateThen(function(keep){
+            keep = qrConcern ? false : keep;
             data.keepExistingQr = !!keep;
             State.keepExistingQr = !!keep;
 
@@ -946,6 +1273,18 @@
           State.submitting = false;
           if(btn) btn.disabled = false;
         });
+      };
+
+      if ($('btnDeleteMembership')) $('btnDeleteMembership').onclick = function(){
+        if(!confirm('刪除會籍後不可還原，是否繼續？\nThis is irreversible. Continue?')) return;
+        var q = prompt('請輸入目前登入 QR payload 以確認\nPaste current signed-in QR payload to confirm');
+        if(!q) return;
+        $('formMsg').innerHTML = showBox('warn','處理中…','Processing…');
+        callApi('api_reg_self_delete_membership_public', State.authQrPayload, q).then(function(r){
+          if(!r||!r.ok){ $('formMsg').innerHTML = showServerErr(r); return; }
+          $('formMsg').innerHTML = showBox('ok','已停用會籍，請重新登入','Membership disabled. Please log in again.');
+          setTimeout(function(){ State.view='home'; State.authQrPayload=null; State.prefill=null; State.snapshot=null; render(); }, 900);
+        }).catch(function(){ $('formMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
     }
 
@@ -1034,15 +1373,15 @@
           '</div>'+
         '</div>'+
 
-        '<div style="margin-top:10px;display:flex;gap:10px;align-items:center;">'+
-          '<input id="chkKeepQr" type="checkbox" style="width:auto;transform:scale(1.1);" />'+
-          '<div style="font-weight:950;">保留現有 QR（不更換） / Keep existing QR (do not change)</div>'+
+        '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">'+
+          '<label style="display:flex;gap:10px;align-items:center;"><input id="optKeepQr" name="qrMode" type="radio" checked style="width:auto;transform:scale(1.1);" /><span style="font-weight:950;">保留現有 QR（不更換） / Keep existing QR (do not change)</span></label>'+
+          '<label style="display:flex;gap:10px;align-items:center;"><input id="optNewQr" name="qrMode" type="radio" style="width:auto;transform:scale(1.1);" /><span style="font-weight:950;">發出新 QR（舊 QR 失效） / Generate NEW QR (old QR invalid)</span></label>'+
         '</div>'+
 
         '<div class="msgBox warn" style="margin-top:10px;">'+
           '<div class="small">'+
-            '如你懷疑 QR 已外洩／遺失／被轉發，請不要勾選（系統會重新發出新 QR，舊 QR 會失效）。<br/>'+
-            'If you suspect leakage/loss/sharing, do NOT tick (a NEW QR will be issued and old QR becomes invalid).'+
+            '如你懷疑 QR 已外洩／遺失／被轉發，請選擇「發出新 QR」。<br/>'+
+            'If you suspect leakage/loss/sharing, select "Generate NEW QR".'+
           '</div>'+
         '</div>'+
 
@@ -1058,7 +1397,7 @@
         try{ var b=$('btnSubmit'); if(b) b.disabled=false; }catch(e){}
       };
       modal.querySelector('#btnGo').onclick = function(){
-        var keep = !!modal.querySelector('#chkKeepQr').checked;
+        var keep = !!modal.querySelector('#optKeepQr').checked;
         closeModal(modal);
         State.keepExistingQr = keep;
         onConfirm(keep);
@@ -1156,7 +1495,29 @@
       render();
     }
 
-    // init
+    
+    function updateGlobalClock_(){
+      var el = $('globalClock');
+      if(!el) return;
+      try{
+        var now = new Date();
+        var localTz = (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local');
+        var localText = now.toLocaleString();
+        var ukText = now.toLocaleString('en-GB', { timeZone:'Europe/London', hour12:false });
+        var mismatch = (localTz !== 'Europe/London');
+        el.innerHTML = '本地時間 / Local: '+escapeHtml(localText)+' ('+escapeHtml(localTz)+')'+(mismatch ? ('<br/><span class="timeFallback">英國時間 / UK: '+escapeHtml(ukText)+' (Europe/London)</span>') : '');
+      }catch(e){
+        el.innerHTML = '<span class="timeFallback">英國時間 / UK: '+escapeHtml(new Date().toLocaleString('en-GB', { timeZone:'Europe/London', hour12:false }))+'</span>';
+      }
+    }
+    function startGlobalClock_(){
+      updateGlobalClock_();
+      if(window._clockTimer) clearInterval(window._clockTimer);
+      window._clockTimer = setInterval(updateGlobalClock_, 1000);
+    }
+
+// init
+    startGlobalClock_();
     render();
   </script>
 </body>

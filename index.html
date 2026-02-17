@@ -393,7 +393,7 @@
       if(!App.staff) return false;
       if(App.staff.id === 'SUPERUSER') return true;
       var st = String(App.staff.status||'').toUpperCase();
-      return (st === 'STAFF' || st === 'ADMIN');
+      return (st === 'STAFF' || st === 'ADMIN' || st === 'HELPER' || st === 'TEMP');
     }
 
     function canUseAuth(){
@@ -727,7 +727,10 @@
     function viewLogin(){
       return ''+
         '<div class="card">'+
-          '<div class="big">🔐 LOG IN / 登入</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">🔐 LOG IN / 登入</div>'+
+            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 Self portal</button>'+
+          '</div>'+
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartLoginScan" class="primary">📷 掃描 QR 登入 / Scan QR to log in</button>'+
@@ -996,7 +999,7 @@
       var o = openModal(
         '<div class="big">🩺 自我檢查 / Self-check</div>'+
         staffBannerHtml_()+
-        '<div class="small">Back-end checks only. Feedback to Media team appreciated.</div>'+
+        '<div class="small">Back-end checks only. Some forward functions may still be problematic. Feedback to Media team appreciated.</div>'+
         '<div id="scBox" class="card" style="margin-top:10px;"></div>'+
         '<div class="miniBtnRow">'+
           '<button id="btnScConfirm" class="orange">💾 同工自我記錄 / Staff self record</button>'+
@@ -1080,6 +1083,12 @@
 
     // ===== Bindings =====
     function bindLogin(){
+      if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
+        var u = new URL(window.location.href);
+        u.searchParams.set('mode','reg');
+        window.location.href = u.toString();
+      };
+
       $('btnStartLoginScan').onclick = function(){
         clear('msg');
         $('loginCam').classList.remove('hide');
@@ -1155,6 +1164,8 @@
         if(!res || !res.ok){ box.innerHTML=''; showErr('scanMsg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
 
         var m = res.member || {};
+        var stNow = App.staff ? String(App.staff.status||'').toUpperCase() : '';
+        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'ADMIN'));
         var nameLine = formatMemberName_(m) || m.id || '';
         var chips = '<div class="chipRow">'+
           '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
@@ -1545,7 +1556,7 @@
 
           var last = res.lastSignIn
             ? '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">最後簽到 / Last sign-in</div><div class="msgEn">'+escapeHtml(res.lastSignIn.timeUk)+' — '+escapeHtml(((res.lastSignIn.nameZh||'')+' '+(res.lastSignIn.nameEn||'')).trim())+'</div></div>'
-            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">請歡迎並為會眾簽到！ / Please welcome and sign in members!</div></div>';
+            : '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">OK sign, please welcome and check in the first person</div></div>';
 
           var names = res.names || [];
           var newFriends = names.filter(function(n){ return n && n.isNew; });
@@ -2023,6 +2034,8 @@
         }
 
         var m = res.member || {};
+        var stNow = App.staff ? String(App.staff.status||'').toUpperCase() : '';
+        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'ADMIN'));
         var nameLine = formatMemberName_(m) || m.id || '';
         var pref = (m.preferredName||'').trim();
         var lastEvents = Array.isArray(res.last4EventKeys) ? res.last4EventKeys : [];
@@ -2070,8 +2083,8 @@
         var actionBox = document.createElement('div');
         actionBox.className = 'miniBtnRow';
         actionBox.innerHTML =
-          (m.isNewFriend ? '<button id="btnMdRemoveNew" class="orange">🧹 移除新朋友 / Remove new friend</button>' : '')+
-          '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>';
+          (canDestructive && m.isNewFriend ? '<button id="btnMdRemoveNew" class="orange">🧹 移除新朋友 / Remove new friend</button>' : '')+
+          (canDestructive ? '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>' : '');
         o.querySelector('#mdBox').appendChild(actionBox);
         attachScrollControls_(o);
 
