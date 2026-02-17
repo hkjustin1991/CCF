@@ -1391,11 +1391,37 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
 function admin_openSs_(){ return SpreadsheetApp.openById(ADMIN_SPREADSHEET_ID); }
 function admin_nowIso_(){ return new Date().toISOString(); }
 function admin_normStatus_(s){ return String(s||'').trim().toUpperCase(); }
+function admin_normalizeServingGroupToken_(token){
+  const t = String(token || '').trim().toUpperCase();
+  if (!t) return '';
+  const alias = {
+    'MEDIA':'MEDIA','MEDIA MASTER':'MEDIA','MEDIA-MASTER':'MEDIA','影像大師':'MEDIA',
+    'WORSHIP':'WORSHIP','WORSHIP ALLIANCE':'WORSHIP','敬拜聯盟':'WORSHIP',
+    'LOGISTIC':'LOGISTIC','LOGISTICS':'LOGISTIC','LOGISTIC SPECIALIST':'LOGISTIC','後勤特工':'LOGISTIC',
+    'SUPPORT':'SUPPORT','DIVINE SUPPORTER':'SUPPORT','聖工支援隊':'SUPPORT',
+    'FINANCE':'FINANCE','FINANCE DEPT':'FINANCE','財務公司':'FINANCE'
+  };
+  return alias[t] || t;
+}
 function admin_parseGroupsCsv_(value){
-  return String(value || '')
-    .split(',')
-    .map(v => String(v || '').trim().toUpperCase())
-    .filter(Boolean);
+  return Array.from(new Set(
+    String(value || '')
+      .split(/[;,\n|]+/)
+      .map(v => admin_normalizeServingGroupToken_(v))
+      .filter(Boolean)
+  ));
+}
+function admin_cellToYmd_(value){
+  if (!value) return '';
+  if (value instanceof Date){
+    return Utilities.formatDate(value, ADMIN_TZ, 'yyyy-MM-dd');
+  }
+  const s = String(value||'').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) return Utilities.formatDate(parsed, ADMIN_TZ, 'yyyy-MM-dd');
+  return admin_parseDmyToYmd_(s) || '';
 }
 function admin_hasGroupOverlap_(a, b){
   const set = new Set(a || []);
@@ -2297,10 +2323,10 @@ function admin_getMembersIndex_(){
         memberSinceRaw: (col.Member_Since!==undefined) ? row[col.Member_Since] : '',
         servingGroups: (col.ServingGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGroups]) : [],
         servingGLGroups: (col.ServingGLGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGLGroups]) : [],
-        awayFrom1: (col.AwayFrom1!==undefined) ? String(row[col.AwayFrom1]||'').trim() : '',
-        awayTo1: (col.AwayTo1!==undefined) ? String(row[col.AwayTo1]||'').trim() : '',
-        awayFrom2: (col.AwayFrom2!==undefined) ? String(row[col.AwayFrom2]||'').trim() : '',
-        awayTo2: (col.AwayTo2!==undefined) ? String(row[col.AwayTo2]||'').trim() : '',
+        awayFrom1: (col.AwayFrom1!==undefined) ? admin_cellToYmd_(row[col.AwayFrom1]) : '',
+        awayTo1: (col.AwayTo1!==undefined) ? admin_cellToYmd_(row[col.AwayTo1]) : '',
+        awayFrom2: (col.AwayFrom2!==undefined) ? admin_cellToYmd_(row[col.AwayFrom2]) : '',
+        awayTo2: (col.AwayTo2!==undefined) ? admin_cellToYmd_(row[col.AwayTo2]) : '',
         roleExpires: (col.RoleExpires!==undefined) ? String(row[col.RoleExpires]||'').trim() : ''
       };
     }

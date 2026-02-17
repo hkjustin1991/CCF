@@ -132,11 +132,25 @@ function getDefaultEventKey_(){ return 'SundayService_' + fmtUk_(nowUk_(), 'yyyy
 
 function normalizeStatus_(s){ return String(s || '').trim().toUpperCase(); }
 function normalizeVrm_(s){ return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function normalizeServingGroupToken_(token){
+  const t = String(token || '').trim().toUpperCase();
+  if (!t) return '';
+  const alias = {
+    'MEDIA':'MEDIA','MEDIA MASTER':'MEDIA','MEDIA-MASTER':'MEDIA','影像大師':'MEDIA',
+    'WORSHIP':'WORSHIP','WORSHIP ALLIANCE':'WORSHIP','敬拜聯盟':'WORSHIP',
+    'LOGISTIC':'LOGISTIC','LOGISTICS':'LOGISTIC','LOGISTIC SPECIALIST':'LOGISTIC','後勤特工':'LOGISTIC',
+    'SUPPORT':'SUPPORT','DIVINE SUPPORTER':'SUPPORT','聖工支援隊':'SUPPORT',
+    'FINANCE':'FINANCE','FINANCE DEPT':'FINANCE','財務公司':'FINANCE'
+  };
+  return alias[t] || t;
+}
 function parseGroupsCsv_(value){
-  return String(value || '')
-    .split(',')
-    .map(v => String(v || '').trim().toUpperCase())
-    .filter(Boolean);
+  return Array.from(new Set(
+    String(value || '')
+      .split(/[;,\n|]+/)
+      .map(v => normalizeServingGroupToken_(v))
+      .filter(Boolean)
+  ));
 }
 function isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();

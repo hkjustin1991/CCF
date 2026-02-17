@@ -598,11 +598,12 @@
     }
     function normalizeServingGroupKey_(g){
       var key = String(g||'').trim().toUpperCase();
-      if (key === 'WORSHIP') return 'worship';
-      if (key === 'MEDIA') return 'media';
-      if (key === 'LOGISTIC') return 'logistic';
-      if (key === 'SUPPORT') return 'support';
-      if (key === 'FINANCE') return 'finance';
+      if (!key) return '';
+      if (key === 'WORSHIP' || key === 'WORSHIP ALLIANCE' || key === '敬拜聯盟') return 'worship';
+      if (key === 'MEDIA' || key === 'MEDIA MASTER' || key === '影像大師') return 'media';
+      if (key === 'LOGISTIC' || key === 'LOGISTICS' || key === 'LOGISTIC SPECIALIST' || key === '後勤特工') return 'logistic';
+      if (key === 'SUPPORT' || key === 'DIVINE SUPPORTER' || key === '聖工支援隊') return 'support';
+      if (key === 'FINANCE' || key === 'FINANCE DEPT' || key === '財務公司') return 'finance';
       return '';
     }
     function renderServingGroupBadges_(groups, clickable){

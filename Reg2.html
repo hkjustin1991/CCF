@@ -67,6 +67,7 @@
     button:disabled{opacity:.55;cursor:not-allowed}
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
+    .btnSmall{width:auto;min-height:auto;padding:8px 12px;font-size:13px;border-radius:999px;flex:0 0 auto}
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
@@ -398,7 +399,10 @@
     function viewHome(){
       return ''+
         '<div class="card">'+
-          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">📌 選擇 / Choose</div>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+          '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
             '<button id="btnScan" class="alt">📷 掃描 QR - 更改、查閱資料</button>'+
@@ -424,11 +428,11 @@
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
       function mapGroupKey_(g){
         var up = String(g||'').trim().toUpperCase();
-        if (up === 'WORSHIP') return 'worship';
-        if (up === 'MEDIA') return 'media';
-        if (up === 'LOGISTIC') return 'logistic';
-        if (up === 'SUPPORT') return 'support';
-        if (up === 'FINANCE') return 'finance';
+        if (up === 'WORSHIP' || up === 'WORSHIP ALLIANCE' || up === '敬拜聯盟') return 'worship';
+        if (up === 'MEDIA' || up === 'MEDIA MASTER' || up === '影像大師') return 'media';
+        if (up === 'LOGISTIC' || up === 'LOGISTICS' || up === 'LOGISTIC SPECIALIST' || up === '後勤特工') return 'logistic';
+        if (up === 'SUPPORT' || up === 'DIVINE SUPPORTER' || up === '聖工支援隊') return 'support';
+        if (up === 'FINANCE' || up === 'FINANCE DEPT' || up === '財務公司') return 'finance';
         return String(g||'').toLowerCase();
       }
       function groupLabel_(k){
@@ -477,7 +481,10 @@
           '</div>'+
         '</div>'+
         '<div class="card">'+
-          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">📌 選擇 / Choose</div>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+          '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
             '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
@@ -532,39 +539,71 @@
     function viewSelfServing(res){
       res = res || {};
       var m = res.member || {};
-      var groups = (m.servingGroups||[]).map(function(g){ return '<span class="groupBadge '+String(g||'').toLowerCase()+'">'+escapeHtml(g)+'</span>'; }).join('');
+      var groupOrder = ['WORSHIP','MEDIA','LOGISTIC','SUPPORT','FINANCE'];
+      function groupLabel(k){
+        var up = String(k||'').toUpperCase();
+        if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
+        if (up==='MEDIA') return '影像大師 / Media Master';
+        if (up==='LOGISTIC') return '後勤特工 / Logistic Specialist';
+        if (up==='SUPPORT') return '聖工支援隊 / Divine Supporter';
+        if (up==='FINANCE') return '財務公司 / Finance Dept';
+        return up || 'OTHER';
+      }
+      function groupCss(k){
+        var x = String(k||'').toLowerCase();
+        return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
+      }
+
+      var groups = (m.servingGroups||[]).map(function(g){
+        var up = String(g||'').trim().toUpperCase();
+        return '<span class="groupBadge '+groupCss(up)+'">'+escapeHtml(groupLabel(up))+'</span>';
+      }).join('');
+
       var sum = res.summary || [];
       var rows = sum.map(function(s, i){
         var ev = (s.events||[]).map(function(e){ return '<li>'+escapeHtml(e)+'</li>'; }).join('');
         return '<div class="msgBox" style="margin-top:8px;"><div><button class="alt" data-acc="'+i+'">'+escapeHtml((s.labelZh||s.position||'')+'：'+s.count)+'</button></div><div id="acc_'+i+'" class="hide"><ul style="margin:6px 0 0 18px;">'+ev+'</ul></div></div>';
       }).join('');
 
-      var table = '<div style="overflow:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="text-align:left;">Event</th>'+ (res.positions||[]).map(function(p){ return '<th>'+escapeHtml(p.labelZh||p.position)+'</th>'; }).join('') +'</tr></thead><tbody>';
-      (res.events||[]).forEach(function(ev){
-        table += '<tr><td><span class="pill">'+escapeHtml(ev.eventKey)+'</span></td>';
-        (res.positions||[]).forEach(function(p){
-          var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
-          var slots = cell.slots || [];
-          var html = slots.map(function(id, idx){
-            if (id){
-              if (id === m.id){
-                if (cell.canChange === false) return '<span class="pill">'+escapeHtml(id)+'（4w鎖定）</span>';
-                return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(id)+'</button>';
-              }
-              return '<span class="pill">'+escapeHtml(id)+'</span>';
-            }
-            return (cell.canSignup !== false) ? '<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">＋</button>' : '<span class="pill">—</span>';
-          }).join(' ');
-          table += '<td>'+html+'</td>';
-        });
-        table += '</tr>';
+      var events = res.events || [];
+      var positions = res.positions || [];
+      var byGroup = {};
+      positions.forEach(function(p){
+        var g = String(p.group||'').trim().toUpperCase() || 'OTHER';
+        if (!byGroup[g]) byGroup[g] = [];
+        byGroup[g].push(p);
       });
-      table += '</tbody></table></div>';
+
+      var groupTables = groupOrder.concat(Object.keys(byGroup).filter(function(g){ return groupOrder.indexOf(g) < 0; })).filter(function(g, idx, arr){ return arr.indexOf(g)===idx && byGroup[g] && byGroup[g].length; }).map(function(g){
+        var header = '<tr><th style="text-align:left;min-width:180px;">Position</th>'+events.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var body = byGroup[g].map(function(p){
+          var row = '<tr><td><b>'+escapeHtml(p.labelZh||p.position||'')+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
+          events.forEach(function(ev){
+            var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
+            var slots = cell.slots || [];
+            var content = slots.map(function(id, idx){
+              if (id){
+                if (id === m.id){
+                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(id)+'（4w鎖定）</span>';
+                  return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(id)+'</button>';
+                }
+                return '<span class="pill">'+escapeHtml(id)+'</span>';
+              }
+              return '<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">空缺 / Empty</button>';
+            }).join(' ');
+            row += '<td>'+content+'</td>';
+          });
+          row += '</tr>';
+          return row;
+        }).join('');
+        return '<div class="card" style="margin-top:10px;"><div><span class="groupBadge '+groupCss(g)+'">'+escapeHtml(groupLabel(g))+'</span></div><div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div></div>';
+      }).join('');
 
       return ''+
         '<div class="card"><div class="big">🧩 事奉 / Serving</div><div class="small">Member of: '+(groups||'—')+'</div></div>'+
         '<div class="card"><div class="big">事奉次數（中文）</div>'+rows+'</div>'+
-        '<div class="card"><div class="big">報名 / Signup</div>'+table+'<div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
+        (groupTables || '<div class="card"><div class="msgBox warn">No serving positions available.</div></div>')+
+        '<div class="card"><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
     }
 
     function viewSelfLive(res){
@@ -819,6 +858,11 @@
 
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
+        if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
+          var u = new URL(window.location.href);
+          u.searchParams.delete('mode');
+          window.location.href = u.toString();
+        };
         $('btnNew').onclick = function(){
           State.view = 'form';
           State.flow = 'create';
@@ -947,6 +991,11 @@
     }
 
     function bindSelfHome(){
+      if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
+        var u = new URL(window.location.href);
+        u.searchParams.delete('mode');
+        window.location.href = u.toString();
+      };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;

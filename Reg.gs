@@ -676,6 +676,17 @@ function regSelfServingEditable_(eventDate){
   return weeks >= 4;
 }
 
+function reg_buildServingTokensForWrite_(raw, maxSlots){
+  const list = (typeof admin_splitServingValues_ === 'function')
+    ? admin_splitServingValues_(raw)
+    : String(raw||'').split(',').map(v => String(v||'').trim()).filter(Boolean);
+  const out = [];
+  for (let i=0;i<Number(maxSlots||0);i++){
+    out.push(String(list[i]||'').trim() || 'N/A');
+  }
+  return out;
+}
+
 function api_reg_self_portal_snapshot_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
@@ -798,10 +809,9 @@ function api_reg_self_serving_data_public(qrPayload){
       cells[ev.eventKey] = {};
       filteredPositions.forEach(function(p){
         const raw = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||{}).value || '';
-        const ids = admin_extractMemberIdsFromServingValue_(raw);
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
-        const slots = [];
-        for (let i=0;i<max;i++) slots.push(ids[i] || '');
+        const tokens = reg_buildServingTokensForWrite_(raw, max);
+        const slots = tokens.map(function(t){ return admin_isServingNaValue_(t) ? '' : String(t||'').trim().toUpperCase(); });
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
         cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
       });
@@ -866,10 +876,16 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       const idx = Math.max(0, Number(slotIndex||0));
       if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
       if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
-      if (ids.length >= max) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+      const tokens = reg_buildServingTokensForWrite_(raw, max);
+      const currentAtSlot = String(tokens[idx]||'').trim();
+      if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
+        return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+      }
+      const hasFree = tokens.some(function(t){ return admin_isServingNaValue_(t); });
+      if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
 
-      ids.push(id);
-      sh.getRange(rowIndex, colIndex).setValue(ids.join(', '));
+      tokens[idx] = id;
+      sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
       regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
       return {
         ok:true,
@@ -911,8 +927,10 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
       const colIndex = headerMap[pos];
       if (!rowIndex || !colIndex) return { ok:false, code:'E412', zh:'找不到崗位', en:'Position not found.' };
 
-      const ids = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, colIndex).getValue()||''));
-      const next = ids.filter(function(x){ return x !== id; });
+      const raw = String(sh.getRange(rowIndex, colIndex).getValue()||'');
+      const max = ADMIN_SERVING_POSITION_MAX[pos] || 1;
+      const tokens = reg_buildServingTokensForWrite_(raw, max);
+      const next = tokens.map(function(t){ return String(t||'').trim().toUpperCase() === id ? 'N/A' : t; });
       sh.getRange(rowIndex, colIndex).setValue(next.join(', '));
       regLogActivity_('REG_SELF_SERVING_REMOVE', id, 'OK', { eventKey:ev, position:pos });
       return { ok:true, eventKey:ev, position:pos };
