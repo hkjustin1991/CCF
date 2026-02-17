@@ -483,7 +483,10 @@
           '</div>'+
         '</div>'+
         '<div class="card">'+
-          '<div class="big">📌 選擇 / Choose</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">📌 選擇 / Choose</div>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+          '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
             '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
@@ -1016,6 +1019,11 @@
     }
 
     function bindSelfHome(){
+      if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
+        var u = new URL(window.location.href);
+        u.searchParams.delete('mode');
+        window.location.href = u.toString();
+      };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;
