@@ -39,15 +39,15 @@
  *    • SUPERUSER must scan an ADMIN QR (and must match ADMIN member)
  * - Status change (STAFF also allowed):
  *    • dropdown STAFF/ACTIVE/DISABLED/PROVISIONAL/TEMP/HELPER
- *    • TEMP via admin portal = 2 days (RoleExpiresISO)
- *    • HELPER via admin portal = 31 days (RoleExpiresISO)
+ *    • TEMP via admin portal = 2 days (RoleExpires)
+ *    • HELPER via admin portal = 31 days (RoleExpires)
  *    • QR re-scan confirmation (same rules as contact reveal)
  *    • Hard-stop: cannot change another ADMIN’s status (including ADMIN->ADMIN)
  * - Separate audit sheet: Admin_Activity logs actions
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-08.admin13';
+const ADMIN_VERSION = '2026-02-15.admin95';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -231,8 +231,25 @@ function api_admin_login(input){
   const m = mi.byId[parsed.id];
   if (!m) return admin_err_('E412','找不到此 ID','Member not found.');
 
-  const st = admin_normStatus_(m.status);
+  let st = admin_normStatus_(m.status);
   if (st === 'DISABLED') return admin_err_('E414','此帳號已停用','Account disabled.');
+
+  // enforce RoleExpires for all statuses; auto-downgrade expired to ACTIVE
+  if (m.roleExpires){
+    const exp = admin_safeToDate_(m.roleExpires);
+    if (exp && exp.getTime() < Date.now()){
+      const ms = admin_findMembersSheet_();
+      const col = admin_getMembersColMap_(ms);
+      const rowNumber = m.rowNumber || admin_findMemberRowById_(ms, col, parsed.id);
+      if (rowNumber){
+        ms.getRange(rowNumber, col.Status+1).setValue('ACTIVE');
+        const roleCol = admin_ensureRoleExpiresColumn_(ms, col);
+        if (roleCol !== null) ms.getRange(rowNumber, roleCol+1).setValue('');
+      }
+      admin_clearMembersCache_();
+      st = 'ACTIVE';
+    }
+  }
 
   const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
   if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
@@ -315,6 +332,77 @@ function api_admin_serving_group_overview(token, fromDate){
   return { ok:true, fromDate: fromYmd, overview: admin_buildServingGroupOverview_(fromYmd) };
 }
 
+function api_admin_serving_group_members(token, groupKey){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+
+  const mi = admin_getMembersIndex_();
+  const all = (mi && mi.all) ? mi.all : [];
+  const members = all
+    .filter(function(m){ return admin_memberHasServingGroup_(m, key); })
+    .map(admin_memberLabelCompact_)
+    .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
+
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const canManage = (role === 'ADMIN' || role === 'SUPERUSER' || (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; })));
+
+  return { ok:true, group:key, count:members.length, members:members, canManage:canManage };
+}
+
+function api_admin_serving_group_member_update(token, groupKey, memberId, action){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
+  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
+  if (!isAdminLike && !isGlAllowed){
+    return admin_err_('E403','沒有權限修改此組別','No permission to modify this group.');
+  }
+
+  const mi = admin_getMembersIndex_();
+  const target = (mi && mi.byId) ? mi.byId[id] : null;
+  if (!target) return admin_err_('E412','找不到此會員','Member not found.');
+
+  const targetStatus = admin_normStatus_(target.status || '');
+  if (!isAdminLike && (targetStatus === 'STAFF' || targetStatus === 'ADMIN')){
+    return admin_err_('E403','GL 不可修改 STAFF/ADMIN 的組別','GL cannot modify STAFF/ADMIN serving groups.');
+  }
+
+  const sh = admin_findMembersSheet_();
+  if (!sh) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+  const col = admin_getMembersColMap_(sh);
+  if (col.ServingGroups === undefined) return admin_err_('E500','缺少 ServingGroups 欄位','ServingGroups column missing.');
+  const rowNumber = target.rowNumber || admin_findMemberRowById_(sh, col, id);
+  if (!rowNumber) return admin_err_('E500','找不到會員列','Member row not found.');
+
+  const nowGroups = admin_parseGroupsCsv_(sh.getRange(rowNumber, col.ServingGroups+1).getValue());
+  const up = String(action||'').trim().toUpperCase();
+  let next = nowGroups.slice();
+  const keyUpper = key.toUpperCase();
+  if (up === 'ADD'){
+    if (next.indexOf(keyUpper) < 0) next.push(keyUpper);
+  } else if (up === 'REMOVE'){
+    next = next.filter(function(g){ return g !== keyUpper; });
+  } else {
+    return admin_err_('E416','操作格式錯誤','Invalid action.');
+  }
+
+  sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
+  admin_clearMembersCache_();
+  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_UPDATE', JSON.stringify({ group:key, action:up, memberId:id }), 'serving_group');
+  return { ok:true, group:key, action:up, memberId:id, servingGroups:next };
+}
+
 /**
  * Serving event rows (for per-event edit UI).
  */
@@ -344,7 +432,7 @@ function api_admin_serving_event_rows(token, eventKey){
  * Serving event save (replace rows for one event).
  * rows: [{position, value}]
  */
-function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
+function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scopeGroupKey){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
@@ -354,6 +442,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   if (!admin_isSundayServiceKey_(ev)){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
+  const scopeGroup = admin_normalizeServingGroup_(scopeGroupKey || '');
 
   const list = Array.isArray(rows) ? rows : [];
   const cleaned = [];
@@ -376,7 +465,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   const existingValues = admin_getServingValuesForEvent_(ev);
   const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
 
+  const changedPositions = new Set();
+  const changedMembers = new Set();
+
   for (const r of cleaned){
+    const oldValue = String(existingValues[r.position] || '').trim();
+    const newValue = String(r.value || '').trim();
+    const isChanged = (oldValue !== newValue);
+    if (isChanged) changedPositions.add(r.position);
+
     const ids = admin_extractMemberIdsFromServingValue_(r.value);
     const maxAllowed = ADMIN_SERVING_POSITION_MAX[r.position] || 1;
     if (ids.length > maxAllowed){
@@ -396,15 +493,23 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
       if (!admin_memberHasServingGroup_(membersById[id], groupKey)){
         invalidGroupAssignments.push({ memberId: id, position: r.position, group: groupKey });
       }
-      memberIdsForAway.push(id);
+      if (isChanged){
+        memberIdsForAway.push(id);
+        changedMembers.add(id);
+      }
       if (!duplicateMap[id]) duplicateMap[id] = [];
       duplicateMap[id].push(r.position);
     });
   }
 
   Object.keys(duplicateMap).forEach(function(id){
+    if (!changedMembers.has(id)) return;
     const positions = duplicateMap[id] || [];
     if (positions.length <= 1) return;
+    if (scopeGroup){
+      const touchesScopedGroup = positions.some(function(p){ return (ADMIN_SERVING_POSITION_GROUP[p] || '') === scopeGroup; });
+      if (!touchesScopedGroup) return;
+    }
     const normalized = positions.slice().sort();
     const existing = existingDupMap[id] || [];
     const isNewDup = (existing.join('|') !== normalized.join('|'));
@@ -501,7 +606,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway){
   admin_audit_(
     s.actor,
     'SERVING_EVENT_SAVE',
-    JSON.stringify({ eventKey: ev, rows: cleaned.length, overrideAway: !!overrideAway }),
+    JSON.stringify({ eventKey: ev, rows: cleaned.length, overrideAway: !!overrideAway, scopeGroup: scopeGroup||'' }),
     'serving'
   );
 
@@ -959,6 +1064,25 @@ function api_admin_matrix(token, fromDate, toDate, q){
 
   members.sort((a,b)=> a.id.localeCompare(b.id));
 
+  const away = {};
+  events.forEach(function(ev){
+    const d = admin_eventDateFromKey_(ev);
+    if (!d) return;
+    members.forEach(function(m){
+      const ap = admin_getAwayPeriodForMember_(m.id);
+      const periods = (ap && ap.periods) ? ap.periods : [];
+      const hit = periods.some(function(p){
+        const from = admin_parseYmd_(p.fromYmd || '');
+        const to = admin_parseYmd_(p.toYmd || '');
+        if (!from || !to) return false;
+        return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
+      });
+      if (!hit) return;
+      if (!away[m.id]) away[m.id] = {};
+      away[m.id][ev] = 1;
+    });
+  });
+
   admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length}), 'matrix');
 
   return {
@@ -966,7 +1090,8 @@ function api_admin_matrix(token, fromDate, toDate, q){
     range:{ from: admin_fmtYmd_(range.from), to: admin_fmtYmd_(range.to) },
     events: events,
     members: members,
-    attended: attended
+    attended: attended,
+    away: away
   };
 }
 
@@ -1232,8 +1357,8 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
     return admin_err_('E409', zh, en);
   }
 
-  // Ensure RoleExpiresISO column exists (for TEMP expiry)
-  const roleCol = admin_ensureRoleExpiresIsoColumn_(ms, col);
+  // Ensure RoleExpires column exists (for TEMP/HELPER expiry)
+  const roleCol = admin_ensureRoleExpiresColumn_(ms, col);
 
   // Apply Status
   ms.getRange(rowNumber, col.Status+1).setValue(ns);
@@ -1266,11 +1391,37 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
 function admin_openSs_(){ return SpreadsheetApp.openById(ADMIN_SPREADSHEET_ID); }
 function admin_nowIso_(){ return new Date().toISOString(); }
 function admin_normStatus_(s){ return String(s||'').trim().toUpperCase(); }
+function admin_normalizeServingGroupToken_(token){
+  const t = String(token || '').trim().toUpperCase();
+  if (!t) return '';
+  const alias = {
+    'MEDIA':'MEDIA','MEDIA MASTER':'MEDIA','MEDIA-MASTER':'MEDIA','影像大師':'MEDIA',
+    'WORSHIP':'WORSHIP','WORSHIP ALLIANCE':'WORSHIP','敬拜聯盟':'WORSHIP',
+    'LOGISTIC':'LOGISTIC','LOGISTICS':'LOGISTIC','LOGISTIC SPECIALIST':'LOGISTIC','後勤特工':'LOGISTIC',
+    'SUPPORT':'SUPPORT','DIVINE SUPPORTER':'SUPPORT','聖工支援隊':'SUPPORT',
+    'FINANCE':'FINANCE','FINANCE DEPT':'FINANCE','財務公司':'FINANCE'
+  };
+  return alias[t] || t;
+}
 function admin_parseGroupsCsv_(value){
-  return String(value || '')
-    .split(',')
-    .map(v => String(v || '').trim().toUpperCase())
-    .filter(Boolean);
+  return Array.from(new Set(
+    String(value || '')
+      .split(/[;,\n|]+/)
+      .map(v => admin_normalizeServingGroupToken_(v))
+      .filter(Boolean)
+  ));
+}
+function admin_cellToYmd_(value){
+  if (!value) return '';
+  if (value instanceof Date){
+    return Utilities.formatDate(value, ADMIN_TZ, 'yyyy-MM-dd');
+  }
+  const s = String(value||'').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) return Utilities.formatDate(parsed, ADMIN_TZ, 'yyyy-MM-dd');
+  return admin_parseDmyToYmd_(s) || '';
 }
 function admin_hasGroupOverlap_(a, b){
   const set = new Set(a || []);
@@ -1994,6 +2145,13 @@ function admin_audit_(actor, action, details, context){
 }
 
 // Date helpers (UTC midnight strings)
+function admin_safeToDate_(v){
+  if (!v && v !== 0) return null;
+  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? null : v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function admin_parseYmd_(s){
   const v = String(s||'').trim();
   const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -2101,14 +2259,14 @@ function admin_findMemberRowById_(sh, col, id){
   }
   return null;
 }
-function admin_ensureRoleExpiresIsoColumn_(sh, col){
-  if (col.RoleExpiresISO !== undefined) return col.RoleExpiresISO;
+function admin_ensureRoleExpiresColumn_(sh, col){
+  if (col.RoleExpires !== undefined) return col.RoleExpires;
   const lastCol = sh.getLastColumn();
   sh.insertColumnAfter(lastCol);
   const newCol = lastCol + 1;
-  sh.getRange(1, newCol).setValue('RoleExpiresISO').setFontWeight('bold');
-  col.RoleExpiresISO = newCol - 1;
-  return col.RoleExpiresISO;
+  sh.getRange(1, newCol).setValue('RoleExpires').setFontWeight('bold');
+  col.RoleExpires = newCol - 1;
+  return col.RoleExpires;
 }
 function admin_ensureAwayColumns_(sh, col){
   const fields = ['AwayFrom1','AwayTo1','AwayFrom2','AwayTo2'];
@@ -2155,6 +2313,7 @@ function admin_getMembersIndex_(){
         key: String(row[col.Key]||'').trim(),
         nameZh: String(row[col.NameZh]||'').trim(),
         nameEn: String(row[col.NameEn]||'').trim(),
+        gender: (col.Gender!==undefined) ? String(row[col.Gender]||'').trim() : '',
         status: String(row[col.Status]||'').trim(),
         email: (col.Email!==undefined) ? String(row[col.Email]||'').trim() : '',
         mobile:(col.Mobile!==undefined)? String(row[col.Mobile]||'').trim() : '',
@@ -2164,10 +2323,11 @@ function admin_getMembersIndex_(){
         memberSinceRaw: (col.Member_Since!==undefined) ? row[col.Member_Since] : '',
         servingGroups: (col.ServingGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGroups]) : [],
         servingGLGroups: (col.ServingGLGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGLGroups]) : [],
-        awayFrom1: (col.AwayFrom1!==undefined) ? String(row[col.AwayFrom1]||'').trim() : '',
-        awayTo1: (col.AwayTo1!==undefined) ? String(row[col.AwayTo1]||'').trim() : '',
-        awayFrom2: (col.AwayFrom2!==undefined) ? String(row[col.AwayFrom2]||'').trim() : '',
-        awayTo2: (col.AwayTo2!==undefined) ? String(row[col.AwayTo2]||'').trim() : ''
+        awayFrom1: (col.AwayFrom1!==undefined) ? admin_cellToYmd_(row[col.AwayFrom1]) : '',
+        awayTo1: (col.AwayTo1!==undefined) ? admin_cellToYmd_(row[col.AwayTo1]) : '',
+        awayFrom2: (col.AwayFrom2!==undefined) ? admin_cellToYmd_(row[col.AwayFrom2]) : '',
+        awayTo2: (col.AwayTo2!==undefined) ? admin_cellToYmd_(row[col.AwayTo2]) : '',
+        roleExpires: (col.RoleExpires!==undefined) ? String(row[col.RoleExpires]||'').trim() : ''
       };
     }
   }

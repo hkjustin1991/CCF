@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-02-09.reg3';
+const REG_VERSION = '2026-02-15.reg95';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -58,7 +58,7 @@ function doGetReg_(e){
   t.APP_VERSION = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : REG_VERSION;
   t.REG_VERSION = REG_VERSION;
   return t.evaluate()
-    .setTitle('CCF Registration / 會員登記')
+    .setTitle('CCF會員登記及自助服務平台 / CCF registration and self service portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -488,6 +488,16 @@ function api_reg_self_lookup_public(qrPayload){
   }
 }
 
+
+function regGetCheckinsDataMinimal_(){
+  const check = (typeof admin_getCheckinsData_ === 'function') ? admin_getCheckinsData_() : null;
+  if (!check || !check.ok) return check || { ok:false, code:'E500', zh:'讀取簽到資料失敗', en:'Failed to read checkins.' };
+  const rows = (check.rows || []).map(function(r){
+    return { eventKey:String(r.eventKey||''), memberId:String(r.memberId||'') };
+  });
+  return { ok:true, rows: rows };
+}
+
 /* ============================================================
  * PATCH_BOUNDARY: REG2_SELF_ATTENDANCE_BEGIN
  * Self attendance endpoint (self-only).
@@ -531,6 +541,9 @@ function api_reg_self_attendance_public(qrPayload, fromYmdOptional, toYmdOptiona
     let denomFrom = from;
     const joinRaw = r.Member_Since || '';
     const joinDt = regSafeToDate_(joinRaw);
+    if (joinRaw && !joinDt){
+      return { ok:false, code:'E422', zh:'會員入會日期格式錯誤，請聯絡影音同工', en:'Invalid member since date format. Please contact Media team.' };
+    }
     if (joinDt){
       const joinUtc = new Date(Date.UTC(joinDt.getFullYear(), joinDt.getMonth(), joinDt.getDate()));
       if (joinUtc.getTime() > denomFrom.getTime()) denomFrom = joinUtc;
@@ -593,6 +606,486 @@ function api_reg_self_attendance_public(qrPayload, fromYmdOptional, toYmdOptiona
 }
 /* ============================================================
  * PATCH_BOUNDARY: REG2_SELF_ATTENDANCE_END
+ * ============================================================ */
+
+/* ============================================================
+ * PATCH_BOUNDARY: REG4_SELF_SERVICE_PORTAL_BEGIN
+ * Self-service portal APIs.
+ * ============================================================ */
+function regGetSelfMemberByQr_(qrPayload){
+  const parsed = regParseQr_(qrPayload);
+  if (!parsed.ok) return parsed;
+
+  const ms = regGetMembersScan_({ ensureExtras:true });
+  const rowNumber = regFindRowByIdFromScan_(ms, parsed.id);
+  if (!rowNumber) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+  const row = regReadRow_(ms, rowNumber);
+  const st = regStatus_(row.Status);
+  if (st === 'DISABLED') return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
+  if (String(row.Key||'').trim() !== parsed.key) return { ok:false, code:'E418', zh:'QR 已失效或不相符', en:'QR invalid/mismatch.' };
+
+  return { ok:true, parsed: parsed, ms: ms, rowNumber: rowNumber, row: row };
+}
+
+function regDisplayNameForPortal_(m){
+  const pref = String((m && m.preferredName) || '').trim();
+  const en = String((m && m.nameEn) || '').trim();
+  const zh = String((m && m.nameZh) || '').trim();
+  if (pref) return pref;
+  if (en) return en;
+  if (zh) return zh;
+  return '(' + String((m && m.id) || '').trim().toUpperCase() + ')';
+}
+
+function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
+  const id = String(memberId||'').trim().toUpperCase();
+  let earliest = null;
+  const msDt = regSafeToDate_(memberSinceRaw);
+  if (msDt){
+    earliest = Utilities.formatDate(msDt, 'Europe/London', 'yyyy-MM-dd');
+  }
+
+  try{
+    const check = admin_getCheckinsData_();
+    if (check && check.ok){
+      check.rows.forEach(function(r){
+        if (r.memberId !== id) return;
+        if (!admin_isSundayServiceKey_(r.eventKey)) return;
+        const ymd = (String(r.eventKey||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/) || [])[1] || '';
+        if (!ymd) return;
+        if (!earliest || ymd < earliest) earliest = ymd;
+      });
+    }
+  }catch(e){}
+
+  return earliest || '';
+}
+
+function regFutureDateYmd_(offsetDays){
+  const d = new Date();
+  d.setDate(d.getDate() + Number(offsetDays || 0));
+  return Utilities.formatDate(d, 'Europe/London', 'yyyy-MM-dd');
+}
+
+function regSelfServingEditable_(eventDate){
+  if (!eventDate) return false;
+  const now = new Date();
+  const diffMs = eventDate.getTime() - now.getTime();
+  const weeks = diffMs / (7 * 24 * 60 * 60 * 1000);
+  return weeks >= 4;
+}
+
+function reg_buildServingTokensForWrite_(raw, maxSlots){
+  const list = (typeof admin_splitServingValues_ === 'function')
+    ? admin_splitServingValues_(raw)
+    : String(raw||'').split(',').map(v => String(v||'').trim()).filter(Boolean);
+  const out = [];
+  for (let i=0;i<Number(maxSlots||0);i++){
+    out.push(String(list[i]||'').trim() || 'N/A');
+  }
+  return out;
+}
+
+function api_reg_self_portal_snapshot_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+
+    const id = auth.parsed.id;
+    const mIndex = admin_getMembersIndex_();
+    const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
+    if (!member) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+    const att = api_reg_self_attendance_public(qrPayload, null, null);
+    if (!att || !att.ok) return att;
+
+    const servingInsights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
+    const groups = Array.from(new Set(((member.servingGroups||[]).concat(member.servingGLGroups||[])).filter(Boolean)));
+
+    const upcoming4 = [];
+    const today = admin_parseYmd_(admin_todayUkYmd_()) || new Date();
+    const max4 = new Date(today.getTime() + (28 * 24 * 60 * 60 * 1000));
+    Object.keys(servingInsights.byGroup || {}).forEach(function(gk){
+      const b = servingInsights.byGroup[gk];
+      (b.upcoming || []).forEach(function(it){
+        const d = admin_parseYmd_(it.dateYmd || '');
+        if (!d || d.getTime() < today.getTime() || d.getTime() > max4.getTime()) return;
+        upcoming4.push({ group: gk, eventKey: it.eventKey, dateYmd: it.dateYmd, position: it.position, labelZh: admin_servingPositionZh_(it.position || '') });
+      });
+    });
+    upcoming4.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
+
+    const away = admin_getAwayPeriodForMember_(id) || {};
+
+    return {
+      ok:true,
+      member:{
+        id: id,
+        nameZh: member.nameZh || '',
+        nameEn: member.nameEn || '',
+        preferredName: member.preferredName || '',
+        displayName: regDisplayNameForPortal_(member),
+        servingGroups: groups,
+        away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
+        memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, member.memberSinceRaw)
+      },
+      attendance: att.stats,
+      attendanceEvents: att.attendance,
+      memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, member.memberSinceRaw),
+      upcoming4: upcoming4
+    };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+
+    const key = admin_normalizeServingGroup_(groupKey);
+    if (!key) return { ok:false, code:'E416', zh:'組別格式錯誤', en:'Invalid group key.' };
+
+    const mi = admin_getMembersIndex_();
+    const byId = (mi && mi.byId) ? mi.byId : {};
+    const selfMember = byId[auth.parsed.id] || null;
+    const selfGroups = selfMember ? (selfMember.servingGroups || []).map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean) : [];
+    if (selfGroups.indexOf(key) < 0){
+      return { ok:false, code:'E403', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
+    }
+
+    const all = Object.keys(byId).map(function(id){ return byId[id]; });
+    const members = all
+      .filter(function(m){
+        const groups = Array.isArray(m.servingGroups) ? m.servingGroups : [];
+        return groups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
+      })
+      .map(admin_memberLabelCompact_)
+      .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
+
+    return { ok:true, group:key, count:members.length, members:members };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+
+function api_reg_self_delete_membership_public(qrPayload, confirmQrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    if (String(qrPayload||'').trim() !== String(confirmQrPayload||'').trim()) {
+      return { ok:false, code:'E418', zh:'確認 QR 不相符', en:'Confirmation QR mismatch.' };
+    }
+
+    regWriteCell_(auth.ms, auth.rowNumber, 'Status', 'DISABLED');
+    regLogActivity_('REG_SELF_DISABLE', auth.parsed.id, 'OK', { reason:'self_delete' });
+    regClearMembersIndexCache_();
+    if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
+    return { ok:true, memberId: auth.parsed.id, status:'DISABLED' };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_serving_data_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const id = auth.parsed.id;
+    const mIndex = admin_getMembersIndex_();
+    const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
+    if (!member) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
+
+    const groups = Array.from(new Set(((member.servingGroups||[]).concat(member.servingGLGroups||[])).filter(Boolean)));
+    const groupNorm = groups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
+    const insights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
+
+    const summary = [];
+    const memberLabelsById = {};
+    Object.keys((mIndex && mIndex.byId) ? mIndex.byId : {}).forEach(function(mid){
+      memberLabelsById[mid] = admin_memberLabelCompact_(mIndex.byId[mid]).label || mid;
+    });
+    Object.keys(insights.byGroup || {}).forEach(function(gk){
+      const b = insights.byGroup[gk] || {};
+      (b.summary || []).forEach(function(s){ summary.push({ position: s.position, labelZh: admin_servingPositionZh_(s.position||''), count: s.count || 0, events: (b.historical||[]).filter(function(h){ return h.position===s.position; }).map(function(h){ return h.eventKey; }) }); });
+    });
+    summary.sort(function(a,b){ return (b.count||0)-(a.count||0); });
+
+    const from = admin_todayUkYmd_();
+    const events = admin_getUpcomingSundayEventKeys_(from, ADMIN_SERVING_MONTHS_AHEAD);
+    const matrix = admin_getServingPlanMatrix_(events);
+    const filteredPositions = (matrix.positions||[]).filter(function(p){ return groupNorm.indexOf(admin_normalizeServingGroup_(p.group||'')) >= 0; });
+    const cells = {};
+    (matrix.events||[]).forEach(function(ev){
+      cells[ev.eventKey] = {};
+      filteredPositions.forEach(function(p){
+        const raw = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||{}).value || '';
+        const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
+        const tokens = reg_buildServingTokensForWrite_(raw, max);
+        const slots = tokens.map(function(t){ return admin_isServingNaValue_(t) ? '' : String(t||'').trim().toUpperCase(); });
+        const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
+        cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
+      });
+    });
+
+    return { ok:true, member:{ id:id, servingGroups:groups }, summary:summary, events:matrix.events||[], positions:filteredPositions, cells:cells, memberLabelsById:memberLabelsById, maxMonths:ADMIN_SERVING_MONTHS_AHEAD };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotIndex){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const id = auth.parsed.id;
+    const ev = String(eventKey||'').trim();
+    const pos = String(position||'').trim();
+    if (!admin_isSundayServiceKey_(ev)) return { ok:false, code:'E416', zh:'活動格式錯誤', en:'Invalid eventKey.' };
+    if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
+
+    const evDate = admin_eventDateFromKey_(ev);
+    const afterChangeCutoff = !regSelfServingEditable_(evDate);
+
+    const mi = admin_getMembersIndex_();
+    const member = mi.byId[id];
+    if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return { ok:false, code:'E409', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
+
+    const lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try{
+      const sh = admin_ensureServingSheet_();
+      admin_ensureServingEventKeys_(sh);
+      const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+      if (!rowIndex) return { ok:false, code:'E412', zh:'找不到活動', en:'Event not found.' };
+
+      const headerMap = admin_getServingMatrixHeaderMap_(sh);
+      const colIndex = headerMap[pos];
+      if (!colIndex) return { ok:false, code:'E500', zh:'崗位欄位不存在', en:'Position column not found.' };
+
+      // duplicate guard: same member cannot hold >1 position for same event
+      let existingPosition = '';
+      ADMIN_SERVING_POSITIONS.forEach(function(p){
+        const ci = headerMap[p];
+        if (!ci || existingPosition) return;
+        const idsAtPos = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, ci).getValue() || ''));
+        if (idsAtPos.indexOf(id) >= 0) existingPosition = p;
+      });
+      if (existingPosition && existingPosition !== pos){
+        return {
+          ok:false,
+          code:'E409',
+          zh:'同一活動不可同時擔任多個崗位',
+          en:'Duplicate serving assignments for the same event are not allowed.',
+          detail: existingPosition + ' -> ' + pos
+        };
+      }
+
+      const raw = String(sh.getRange(rowIndex, colIndex).getValue() || '').trim();
+      const ids = admin_extractMemberIdsFromServingValue_(raw);
+      const max = ADMIN_SERVING_POSITION_MAX[pos] || 1;
+      const idx = Math.max(0, Number(slotIndex||0));
+      if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
+      if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
+      const tokens = reg_buildServingTokensForWrite_(raw, max);
+      const currentAtSlot = String(tokens[idx]||'').trim();
+      if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
+        return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+      }
+      const hasFree = tokens.some(function(t){ return admin_isServingNaValue_(t); });
+      if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+
+      tokens[idx] = id;
+      sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
+      regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
+      return {
+        ok:true,
+        eventKey:ev,
+        position:pos,
+        warning: afterChangeCutoff
+          ? {
+              code:'W_CUTOFF',
+              zh:'已超過四週更改期限。如需更改或取消，請聯絡組長。',
+              en:'The 4-week change/cancel cutoff has passed. Please contact your GL for changes or cancellations.'
+            }
+          : null
+      };
+    } finally {
+      lock.releaseLock();
+    }
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const id = auth.parsed.id;
+    const ev = String(eventKey||'').trim();
+    const pos = String(position||'').trim();
+    if (!admin_isSundayServiceKey_(ev)) return { ok:false, code:'E416', zh:'活動格式錯誤', en:'Invalid eventKey.' };
+    if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
+    if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return { ok:false, code:'E409', zh:'四週內不可更改，請聯絡組長', en:'Changes within 4 weeks are blocked. Please contact GL.' };
+
+    const lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    try{
+      const sh = admin_ensureServingSheet_();
+      const rowIndex = admin_findServingEventRowIndex_(sh, ev);
+      const headerMap = admin_getServingMatrixHeaderMap_(sh);
+      const colIndex = headerMap[pos];
+      if (!rowIndex || !colIndex) return { ok:false, code:'E412', zh:'找不到崗位', en:'Position not found.' };
+
+      const raw = String(sh.getRange(rowIndex, colIndex).getValue()||'');
+      const max = ADMIN_SERVING_POSITION_MAX[pos] || 1;
+      const tokens = reg_buildServingTokensForWrite_(raw, max);
+      const next = tokens.map(function(t){ return String(t||'').trim().toUpperCase() === id ? 'N/A' : t; });
+      sh.getRange(rowIndex, colIndex).setValue(next.join(', '));
+      regLogActivity_('REG_SELF_SERVING_REMOVE', id, 'OK', { eventKey:ev, position:pos });
+      return { ok:true, eventKey:ev, position:pos };
+    } finally {
+      lock.releaseLock();
+    }
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_live_service_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+
+    const todayYmd = admin_todayUkYmd_();
+    const today = admin_parseYmd_(todayYmd) || new Date();
+    const todayDow = today.getUTCDay();
+    const offsetToPrevSunday = (todayDow === 0) ? 7 : todayDow;
+    const prevSunday = new Date(today.getTime() - offsetToPrevSunday*24*60*60*1000);
+    const prevYmd = admin_fmtYmd_(prevSunday);
+
+    const events = admin_getUpcomingSundayEventKeys_(todayYmd, 1);
+    const next = (events && events.length) ? events[0].eventKey : '';
+    const last = prevYmd ? ('SundayService_' + prevYmd) : '';
+
+    const check = admin_getCheckinsData_();
+    const countByEvent = {};
+    if (check && check.ok){
+      check.rows.forEach(function(r){
+        if (!admin_isSundayServiceKey_(r.eventKey)) return;
+        if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
+        countByEvent[r.eventKey].add(r.memberId);
+      });
+    }
+
+    const mi = admin_getMembersIndex_() || {};
+    const byId = mi.byId || {};
+    const servingRaw = next ? admin_getServingForEvent_(next, byId, null, false) : [];
+    const serving = servingRaw.map(function(r){
+      const m = byId[String(r.memberId||'').trim().toUpperCase()] || {};
+      const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
+      const suffix = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄 / Brother'
+        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹 / Sister' : '');
+      const zhEnName = [String(r.nameZh||'').trim(), String(r.nameEn||'').trim()].filter(Boolean).join(' / ');
+      return {
+        eventKey: r.eventKey,
+        group: admin_normalizeServingGroup_(r.group || ''),
+        groupZh: getServingGroupLabelZh_(r.group || ''),
+        groupEn: getServingGroupLabelEn_(r.group || ''),
+        position: r.position,
+        positionZh: admin_servingPositionZh_(r.position || ''),
+        positionEn: admin_servingPositionLabel_(r.position || ''),
+        displayName: zhEnName + (suffix ? (' · ' + suffix) : '')
+      };
+    });
+
+    return {
+      ok:true,
+      currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
+      lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
+      servingThisWeek: serving
+    };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function getServingGroupLabelZh_(raw){
+  const k = admin_normalizeServingGroup_(raw);
+  if (k === 'worship') return '敬拜聯盟';
+  if (k === 'media') return '影像大師';
+  if (k === 'logistic') return '後勤特工';
+  if (k === 'support') return '聖工支援隊';
+  if (k === 'finance') return '財務公司';
+  return raw || '';
+}
+function getServingGroupLabelEn_(raw){
+  const k = admin_normalizeServingGroup_(raw);
+  if (k === 'worship') return 'Worship Alliance';
+  if (k === 'media') return 'Media Master';
+  if (k === 'logistic') return 'Logistic Specialist';
+  if (k === 'support') return 'Divine Supporter';
+  if (k === 'finance') return 'Finance Dept';
+  return raw || '';
+}
+
+
+function api_reg_self_set_holiday_public(qrPayload, fromDmy1, toDmy1, fromDmy2, toDmy2){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const id = auth.parsed.id;
+
+    const fromYmd1 = admin_parseDmyToYmd_(fromDmy1);
+    const toYmd1 = admin_parseDmyToYmd_(toDmy1);
+    const fromYmd2 = admin_parseDmyToYmd_(fromDmy2);
+    const toYmd2 = admin_parseDmyToYmd_(toDmy2);
+
+    function bothOrNone(fromYmd, toYmd){
+      return (!fromYmd && !toYmd) || (fromYmd && toYmd);
+    }
+    if (!bothOrNone(fromYmd1, toYmd1) || !bothOrNone(fromYmd2, toYmd2)) {
+      return { ok:false, code:'E422', zh:'假期日期格式錯誤', en:'Holiday date format invalid.' };
+    }
+
+    const periods = [];
+    if (fromYmd1 && toYmd1) periods.push({ from: fromYmd1, to: toYmd1 });
+    if (fromYmd2 && toYmd2) periods.push({ from: fromYmd2, to: toYmd2 });
+    for (let i=0;i<periods.length;i++){
+      const aFrom = admin_parseYmd_(periods[i].from), aTo = admin_parseYmd_(periods[i].to);
+      if (!aFrom || !aTo || aTo.getTime() < aFrom.getTime()) return { ok:false, code:'E423', zh:'結束日期不可早於開始日期', en:'End date cannot be before start date.' };
+      for (let j=i+1;j<periods.length;j++){
+        const bFrom = admin_parseYmd_(periods[j].from), bTo = admin_parseYmd_(periods[j].to);
+        if (aFrom.getTime() <= bTo.getTime() && bFrom.getTime() <= aTo.getTime()) return { ok:false, code:'E409', zh:'兩段假期不可重疊', en:'Holiday periods cannot overlap.' };
+      }
+    }
+
+    const sh = getMembersSheet_();
+    const col = admin_getMembersColMap_(sh);
+    admin_ensureAwayColumns_(sh, col);
+    const row = admin_findMemberRowById_(sh, col, id);
+    if (!row) return { ok:false, code:'E412', zh:'找不到會員列', en:'Member row not found.' };
+
+    const p1 = periods[0] || { from:'', to:'' };
+    const p2 = periods[1] || { from:'', to:'' };
+    sh.getRange(row, col.AwayFrom1+1).setValue(p1.from || '');
+    sh.getRange(row, col.AwayTo1+1).setValue(p1.to || '');
+    sh.getRange(row, col.AwayFrom2+1).setValue(p2.from || '');
+    sh.getRange(row, col.AwayTo2+1).setValue(p2.to || '');
+
+    regLogActivity_('REG_SELF_HOLIDAY_SET', id, 'OK', { from1:p1.from||'', to1:p1.to||'', from2:p2.from||'', to2:p2.to||'' });
+    if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
+    return { ok:true, from1:p1.from||'', to1:p1.to||'', from2:p2.from||'', to2:p2.to||'' };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+/* ============================================================
+ * PATCH_BOUNDARY: REG4_SELF_SERVICE_PORTAL_END
  * ============================================================ */
 
 /******** Update apply ********/
@@ -885,6 +1378,14 @@ function regSanitizeMobile_(s){
   if (!raw) return '';
   if (raw === '+' || raw === '+44' || raw === '44') return '';
   return raw;
+}
+
+
+function regSafeToDate_(v){
+  if (!v && v !== 0) return null;
+  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? null : v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 /******** Hard-stops ********/
