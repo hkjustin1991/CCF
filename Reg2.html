@@ -124,6 +124,7 @@
     .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
     .groupBadge.support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
     .groupBadge.finance{background:#fff2cc;border-color:rgba(202,155,0,0.45);color:#7a5b00}
+    .groupBadge.activeGroup{outline:3px solid rgba(30,60,120,0.25);transform:translateY(-1px)}
     .timeFallback{color:#d93c5e;font-weight:900}
 
     @media (pointer: coarse){
@@ -447,8 +448,8 @@
       }
       var groupHtml = groups.map(function(g){
         var cls = mapGroupKey_(g);
-        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<button type="button" class="groupBadge '+cls+'" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(groupLabel_(cls))+'</button>';
-        return '<button type="button" class="groupBadge" data-self-group="'+escapeHtml(cls)+'">'+escapeHtml(groupLabel_(cls))+'</button>';
+        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<span class="groupBadge '+cls+'">'+escapeHtml(groupLabel_(cls))+'</span>';
+        return '<span class="groupBadge">'+escapeHtml(groupLabel_(cls))+'</span>';
       }).join('');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
@@ -541,6 +542,7 @@
     function viewSelfServing(res){
       res = res || {};
       var m = res.member || {};
+      var labelsById = res.memberLabelsById || {};
       function groupLabel(k){
         var up = String(k||'').toUpperCase();
         if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
@@ -554,11 +556,22 @@
         var x = String(k||'').toLowerCase();
         return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
       }
+      function positionEnFromKey_(k){
+        var parts = String(k||'').split('_');
+        if (parts.length <= 1) return String(k||'');
+        return parts.slice(1).join(' ');
+      }
+      function memberText_(id){
+        var mid = String(id||'').trim().toUpperCase();
+        if (!mid) return '';
+        return labelsById[mid] || mid;
+      }
 
       var memberGroups = (m.servingGroups || []).map(function(g){ return String(g||'').trim().toUpperCase(); }).filter(Boolean);
       var groupButtons = memberGroups.map(function(g){
-        var active = (String(State.servingGroup||'').toUpperCase() === g) ? ' primary' : ' alt';
-        return '<button class="'+active+' btnSmall" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(groupLabel(g))+'</button>';
+        var isActive = (String(State.servingGroup||'').toUpperCase() === g);
+        var cls = 'groupBadge '+groupCss(g)+(isActive ? ' activeGroup' : '');
+        return '<button class="'+cls+'" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(groupLabel(g))+'</button>';
       }).join('');
 
       var events = Array.isArray(res.events) ? res.events : [];
@@ -594,19 +607,20 @@
       } else if (!positions.length){
         tableHtml = '<div class="msgBox warn">此組別沒有可用崗位 / No positions configured for this group.</div>';
       } else {
-        var header = '<tr><th style="text-align:left;min-width:180px;">Position</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var header = '<tr><th style="text-align:left;min-width:220px;">Position</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
         var body = positions.map(function(p){
-          var row = '<tr><td><b>'+escapeHtml(p.labelZh||p.position||'')+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
+          var row = '<tr><td><b>'+escapeHtml((p.labelZh||p.position||'')+' / '+positionEnFromKey_(p.position||''))+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
           monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
             var slots = cell.slots || [];
             var content = slots.map(function(id, idx){
               if (id){
+                var display = memberText_(id);
                 if (id === m.id){
-                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(id)+'（4w鎖定）</span>';
-                  return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(id)+'</button>';
+                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(display)+'（4w鎖定）</span>';
+                  return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(display)+'</button>';
                 }
-                return '<span class="pill">'+escapeHtml(id)+'</span>';
+                return '<span class="pill">'+escapeHtml(display)+'</span>';
               }
               return '<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">空缺 / Empty</button>';
             }).join(' ');
@@ -619,13 +633,12 @@
       }
 
       return ''+
-        '<div class="card"><div class="big">🧩 事奉 / Serving</div><div class="small">Step 1：Select month。Step 2：Select your group。Step 3：Pick slot.</div></div>'+
+        '<div class="card"><div class="big">🧩 事奉 / Serving</div></div>'+
         '<div class="card">'+
           '<div class="small"><b>月份 / Month</b></div>'+
           '<div class="miniBtnRow">'+(monthButtons || '<span class="pill">—</span>')+'</div>'+
-          '<div class="small" style="margin-top:8px;"><b>組別 / Serving group</b>（只顯示你所屬組別）</div>'+
+          '<div class="small" style="margin-top:8px;"><b>組別 / Serving group</b></div>'+
           '<div class="miniBtnRow">'+(groupButtons || '<span class="pill">—</span>')+'</div>'+
-          '<div class="small" style="margin-top:8px;">點擊組別查看組員 / Click group to view members</div>'+
         '</div>'+
         '<div class="card">'+
           '<div><span class="groupBadge '+groupCss(selectedGroup)+'">'+escapeHtml(groupLabel(selectedGroup))+'</span></div>'+
@@ -645,9 +658,17 @@
         groups[g].push(r);
       });
       function badgeCls(g){ return (g==='worship'||g==='media'||g==='logistic'||g==='support'||g==='finance') ? g : ''; }
+      function livePosLabel_(r){
+        var zh = String(r.positionZh||'').trim();
+        var en = String(r.positionEn||'').trim();
+        if (!en) return zh;
+        if (!zh) return en;
+        if (en.toUpperCase().indexOf(zh.toUpperCase()) >= 0) return en;
+        return zh + ' / ' + en;
+      }
       var blocks = Object.keys(groups).map(function(g){
         var rows = groups[g].map(function(r){
-          return '<li>'+escapeHtml((r.positionZh||'')+' / '+(r.positionEn||''))+' · '+escapeHtml(r.displayName||'')+'</li>';
+          return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>';
         }).join('');
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
         return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul></div>';
@@ -1095,7 +1116,7 @@
         }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
 
-      if ($('btnSelfHoliday')) $('btnSelfHoliday').onclick = function(){
+      $('btnSelfHoliday').onclick = function(){
         State.view = 'selfHoliday';
         render();
       };

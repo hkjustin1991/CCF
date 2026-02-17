@@ -804,6 +804,10 @@ function api_reg_self_serving_data_public(qrPayload){
     const insights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
 
     const summary = [];
+    const memberLabelsById = {};
+    Object.keys((mIndex && mIndex.byId) ? mIndex.byId : {}).forEach(function(mid){
+      memberLabelsById[mid] = admin_memberLabelCompact_(mIndex.byId[mid]).label || mid;
+    });
     Object.keys(insights.byGroup || {}).forEach(function(gk){
       const b = insights.byGroup[gk] || {};
       (b.summary || []).forEach(function(s){ summary.push({ position: s.position, labelZh: admin_servingPositionZh_(s.position||''), count: s.count || 0, events: (b.historical||[]).filter(function(h){ return h.position===s.position; }).map(function(h){ return h.eventKey; }) }); });
@@ -827,7 +831,7 @@ function api_reg_self_serving_data_public(qrPayload){
       });
     });
 
-    return { ok:true, member:{ id:id, servingGroups:groups }, summary:summary, events:matrix.events||[], positions:filteredPositions, cells:cells, maxMonths:ADMIN_SERVING_MONTHS_AHEAD };
+    return { ok:true, member:{ id:id, servingGroups:groups }, summary:summary, events:matrix.events||[], positions:filteredPositions, cells:cells, memberLabelsById:memberLabelsById, maxMonths:ADMIN_SERVING_MONTHS_AHEAD };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
