@@ -1131,6 +1131,28 @@
     }
 
     function bindServing(){
+      function needsServingDataRefresh(){
+        var res = State.lastResult || {};
+        var selectedGroup = String(State.servingGroup||'').trim().toUpperCase();
+        var selectedMonth = String(State.servingMonth||'').trim();
+        if (!res.ok) return true;
+        if (!selectedGroup) return false;
+
+        var positions = Array.isArray(res.positions) ? res.positions : [];
+        var hasGroupPositions = positions.some(function(p){
+          return String((p && p.group) || '').trim().toUpperCase() === selectedGroup;
+        });
+        if (!hasGroupPositions) return true;
+
+        if (!selectedMonth) return false;
+        var events = Array.isArray(res.events) ? res.events : [];
+        var hasMonthEvents = events.some(function(ev){
+          var mKey = String((ev && ev.eventKey) || '').replace(/^SundayService_(\d{4}-\d{2})-\d{2}$/, '$1');
+          return mKey === selectedMonth;
+        });
+        return !hasMonthEvents;
+      }
+
       $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-month]')).forEach(function(b){
         b.onclick = function(){
@@ -1140,18 +1162,13 @@
       });
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-group]')).forEach(function(b){
         b.onclick = function(){
-          var key = String(b.getAttribute('data-serving-group')||'').trim();
-          State.servingGroup = key;
-          callApi('api_reg_self_serving_group_stats_public', State.authQrPayload, key).then(function(res){
+          State.servingGroup = String(b.getAttribute('data-serving-group')||'').trim();
+          render();
+          if (!needsServingDataRefresh()) return;
+          callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
             if(!res || !res.ok){ $('servingMsg').innerHTML = showServerErr(res); return; }
-            var members = (res.members||[]).map(function(m){ return '<li>'+escapeHtml(m.label||m.id||'—')+'</li>'; }).join('');
-            var modal = openModal(
-              '<div class="big">組員名單 / Group members</div>'+
-              '<div class="small">'+escapeHtml(key)+' · 人數 / Count: '+escapeHtml(String(res.count||0))+'</div>'+
-              '<ul style="margin:8px 0 0 18px;">'+(members||'<li>—</li>')+'</ul>'+
-              '<div class="miniBtnRow"><button id="btnCloseGroupMembers" class="danger">關閉 / Close</button></div>'
-            );
-            modal.querySelector('#btnCloseGroupMembers').onclick = function(){ closeModal(modal); };
+            State.lastResult = res;
+            render();
           }).catch(function(){ $('servingMsg').innerHTML = showBox('err','系統錯誤','System error'); });
         };
       });
