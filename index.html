@@ -584,10 +584,13 @@
           v.setAttribute('muted','');
           v.muted = true;
           v.autoplay = true;
-          return v.play().then(function(){
-            App.scanning=true;
-            scanLoop(v, onCaptured, msgTarget);
-          });
+          var playPromise = v.play();
+          if (playPromise && typeof playPromise.then === 'function'){
+            playPromise.catch(function(){});
+          }
+          App.scanning=true;
+          scanLoop(v, onCaptured, msgTarget);
+          return;
         }).catch(function(err){
           var sel = camGetSelectedId_();
           var usingExact = !!(sel && constraints && constraints.video && constraints.video.deviceId && constraints.video.deviceId.exact);
@@ -798,7 +801,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">🔐 LOG IN / 登入</div>'+
-            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 Self portal</button>'+
+            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'+
           '</div>'+
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
@@ -1155,9 +1158,7 @@
     // ===== Bindings =====
     function bindLogin(){
       if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        var u = new URL(window.location.href);
-        u.searchParams.set('mode','reg');
-        window.location.href = u.toString();
+        window.location.href = '?mode=reg';
       };
 
       $('btnStartLoginScan').onclick = function(){
