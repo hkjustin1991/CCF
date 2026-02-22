@@ -917,6 +917,10 @@
         navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
           Scan.stream = stream;
           videoEl.srcObject = stream;
+          videoEl.setAttribute('playsinline','');
+          videoEl.setAttribute('muted','');
+          videoEl.muted = true;
+          videoEl.autoplay = true;
           return videoEl.play().then(function(){
             Scan.scanning=true;
             loop();
