@@ -580,6 +580,10 @@
           App.stream = stream;
           var v = $(videoId);
           v.srcObject = stream;
+          v.setAttribute('playsinline','');
+          v.setAttribute('muted','');
+          v.muted = true;
+          v.autoplay = true;
           return v.play().then(function(){
             App.scanning=true;
             scanLoop(v, onCaptured, msgTarget);
