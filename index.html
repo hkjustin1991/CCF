@@ -1155,9 +1155,7 @@
     // ===== Bindings =====
     function bindLogin(){
       if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        var u = new URL(window.location.href);
-        u.searchParams.set('mode','reg');
-        window.location.assign(u.toString());
+        window.location.href = '?mode=reg';
       };
 
       $('btnStartLoginScan').onclick = function(){

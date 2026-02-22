@@ -918,9 +918,7 @@
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
         if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-          var u = new URL(window.location.href);
-          u.searchParams.delete('mode');
-          window.location.assign(u.toString());
+          window.location.href = '?';
         };
         $('btnNew').onclick = function(){
           State.view = 'form';
@@ -1052,9 +1050,7 @@
     function bindSelfHome(){
       var selfMsgEl = $('selfMsg');
       if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-        var u = new URL(window.location.href);
-        u.searchParams.delete('mode');
-        window.location.assign(u.toString());
+        window.location.href = '?';
       };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
