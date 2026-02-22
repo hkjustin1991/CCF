@@ -1638,32 +1638,41 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   let byNameEn = staff.nameEn||'';
 
   if (staff.isSuper){
-    const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-    if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+    if (adminQrPayloadOptional){
+      const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
 
-    const admin = mi.byId[parsed.id];
-    if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
+      const admin = mi.byId[parsed.id];
+      if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
-    const admSt = normalizeStatus_(admin.status);
-    if (admSt !== STATUS_ADMIN){
-      return {
-        ok:false,
-        code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
-      };
+      const admSt = normalizeStatus_(admin.status);
+      if (admSt !== STATUS_ADMIN){
+        return {
+          ok:false,
+          code:'E491',
+          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
+          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        };
+      }
+      if (!admin.key || admin.key !== parsed.key){
+        return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
+      }
+
+      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
+      auditNameZh = admin.nameZh || 'ADMIN';
+      auditNameEn = admin.nameEn || 'ADMIN';
+
+      byId = admin.id;
+      byNameZh = admin.nameZh || '';
+      byNameEn = admin.nameEn || '';
+    } else {
+      auditLabel = 'SUPERUSER';
+      auditNameZh = staff.nameZh || 'SUPERUSER';
+      auditNameEn = staff.nameEn || 'SUPERUSER';
+      byId = staff.id;
+      byNameZh = staff.nameZh || '';
+      byNameEn = staff.nameEn || '';
     }
-    if (!admin.key || admin.key !== parsed.key){
-      return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
-    }
-
-    auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-    auditNameZh = admin.nameZh || 'ADMIN';
-    auditNameEn = admin.nameEn || 'ADMIN';
-
-    byId = admin.id;
-    byNameZh = admin.nameZh || '';
-    byNameEn = admin.nameEn || '';
 
   } else {
     const parsed = parseQrPayloadStrict_(reauthQrPayload);
