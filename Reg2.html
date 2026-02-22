@@ -656,12 +656,18 @@
       var cur = res.currentAttendance || {};
       var last = res.lastAttendance || {};
       var groups = {};
+      function normalizedGroupKey(g){
+        return String(g||'').trim().toLowerCase();
+      }
       (res.servingThisWeek||[]).forEach(function(r){
-        var g = String(r.group||'other');
+        var g = normalizedGroupKey(r.group) || 'other';
         if (!groups[g]) groups[g] = [];
         groups[g].push(r);
       });
-      function badgeCls(g){ return (g==='worship'||g==='media'||g==='logistic'||g==='support'||g==='finance') ? g : ''; }
+      function badgeCls(g){
+        var k = normalizedGroupKey(g);
+        return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : '';
+      }
       function livePosLabel_(r){
         var zh = String(r.positionZh||'').trim();
         var en = String(r.positionEn||'').trim();
