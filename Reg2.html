@@ -339,10 +339,13 @@
           videoEl.setAttribute('muted','');
           videoEl.muted = true;
           videoEl.autoplay = true;
-          return videoEl.play().then(function(){
-            scan.scanning = true;
-            loop(videoEl, onCaptured);
-          });
+          var playPromise = videoEl.play();
+          if (playPromise && typeof playPromise.then === 'function'){
+            playPromise.catch(function(){});
+          }
+          scan.scanning = true;
+          loop(videoEl, onCaptured);
+          return;
         }).catch(function(err){
           var sel = camGetSelectedId_();
           var usingExact = !!(sel && constraints && constraints.video && constraints.video.deviceId && constraints.video.deviceId.exact);

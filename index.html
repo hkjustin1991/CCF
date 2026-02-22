@@ -584,10 +584,13 @@
           v.setAttribute('muted','');
           v.muted = true;
           v.autoplay = true;
-          return v.play().then(function(){
-            App.scanning=true;
-            scanLoop(v, onCaptured, msgTarget);
-          });
+          var playPromise = v.play();
+          if (playPromise && typeof playPromise.then === 'function'){
+            playPromise.catch(function(){});
+          }
+          App.scanning=true;
+          scanLoop(v, onCaptured, msgTarget);
+          return;
         }).catch(function(err){
           var sel = camGetSelectedId_();
           var usingExact = !!(sel && constraints && constraints.video && constraints.video.deviceId && constraints.video.deviceId.exact);
