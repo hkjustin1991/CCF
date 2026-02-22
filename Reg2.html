@@ -1044,6 +1044,7 @@
     }
 
     function bindSelfHome(){
+      var selfMsgEl = $('selfMsg');
       if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
         var u = new URL(window.location.href);
         u.searchParams.delete('mode');
@@ -1121,12 +1122,23 @@
       };
 
       var holidayBtn = $('btnSelfHoliday');
-      if (holidayBtn){
-        holidayBtn.onclick = null;
-        holidayBtn.addEventListener('click', function(){
-          State.view = 'selfHoliday';
-          render();
-        });
+      if (!holidayBtn){
+        console.error('[bindSelfHome] Missing #btnSelfHoliday at bind time.');
+        if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','請假按鈕未載入，請重新整理頁面。','Absence button failed to load. Please refresh the page.');
+      } else {
+        holidayBtn.onclick = function(){
+          try{
+            State.view = 'selfHoliday';
+            render();
+          }catch(err){
+            console.error('[bindSelfHome] Failed to navigate to holiday view.', err);
+            if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','未能開啟請假頁面，請稍後再試。','Unable to open the absence page. Please try again.', '<div class="small">請重新整理後重試 / Refresh and retry</div>');
+          }
+        };
+      }
+
+      if (!$('holidayMsg')){
+        console.warn('[bindSelfHome] #holidayMsg not present during selfHome bind (expected unless holiday view is rendered).');
       }
     }
 
@@ -1187,15 +1199,46 @@
     function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
 
     function bindHoliday(){
-      $('btnHolidayBack').onclick = function(){ State.view='selfHome'; render(); };
-      $('btnHolidaySave').onclick = function(){
-        $('holidayMsg').innerHTML = showBox('warn','儲存中…','Saving…');
-        callApi('api_reg_self_set_holiday_public', State.authQrPayload, $('hFrom1').value.trim(), $('hTo1').value.trim(), $('hFrom2').value.trim(), $('hTo2').value.trim())
+      var holidayMsgEl = $('holidayMsg');
+      var backBtn = $('btnHolidayBack');
+      var saveBtn = $('btnHolidaySave');
+      var required = {
+        hFrom1: $('hFrom1'),
+        hTo1: $('hTo1'),
+        hFrom2: $('hFrom2'),
+        hTo2: $('hTo2')
+      };
+      var missing = Object.keys(required).filter(function(k){ return !required[k]; });
+      if (!holidayMsgEl){
+        console.error('[bindHoliday] Missing #holidayMsg container.');
+      } else {
+        holidayMsgEl.innerHTML = showBox('warn','請假頁面已載入','Absence page loaded');
+      }
+      if (missing.length){
+        var missingList = missing.map(function(id){ return '#'+id; }).join(', ');
+        console.error('[bindHoliday] Missing required holiday inputs:', missingList);
+        if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('err','請假欄位載入不完整，請重新整理頁面。','Holiday form is incomplete. Please refresh.', '<div class="small">Missing: '+escapeHtml(missingList)+'</div>');
+        return;
+      }
+
+      if (backBtn) backBtn.onclick = function(){ State.view='selfHome'; render(); };
+      if (!saveBtn){
+        console.error('[bindHoliday] Missing #btnHolidaySave button.');
+        if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('err','儲存按鈕未載入，請重新整理頁面。','Save button failed to load. Please refresh the page.');
+        return;
+      }
+      saveBtn.onclick = function(){
+        if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('warn','儲存中…','Saving…');
+        callApi('api_reg_self_set_holiday_public', State.authQrPayload, required.hFrom1.value.trim(), required.hTo1.value.trim(), required.hFrom2.value.trim(), required.hTo2.value.trim())
           .then(function(r){
-            if(!r||!r.ok){ $('holidayMsg').innerHTML = showServerErr(r); return; }
-            $('holidayMsg').innerHTML = showBox('ok','已儲存','Saved');
+            if(!r||!r.ok){ if (holidayMsgEl) holidayMsgEl.innerHTML = showServerErr(r); return; }
+            if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('ok','已儲存','Saved');
             return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
-          }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+          }).catch(function(err){
+            console.error('[bindHoliday] Save failed.', err);
+            var detail = '<div class="small">請檢查網絡連線後重試，或聯絡影音同工。<br/>Check connection and retry, or contact Media team.</div>';
+            if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('err','儲存失敗，請稍後再試。','Failed to save. Please try again.', detail);
+          });
       };
     }
 
