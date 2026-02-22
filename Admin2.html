@@ -921,13 +921,10 @@
           videoEl.setAttribute('muted','');
           videoEl.muted = true;
           videoEl.autoplay = true;
-          var playPromise = videoEl.play();
-          if (playPromise && typeof playPromise.then === 'function'){
-            playPromise.catch(function(){});
-          }
-          Scan.scanning=true;
-          loop();
-          return;
+          return videoEl.play().then(function(){
+            Scan.scanning=true;
+            loop();
+          });
         }).catch(function(err){
           if(allowFallback){ tryStart(constraintsFallback, false); return; }
           stopScan();
