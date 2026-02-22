@@ -563,6 +563,17 @@
       else wrap.classList.add('hide');
     }
 
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+
     function startScan(videoId, onCaptured, msgTarget){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -601,7 +612,7 @@
             return;
           }
           stopScan();
-          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : '' });
+          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: buildCameraStartDetail_(err) });
         });
       }
       tryStart(constraintsPreferred, true);

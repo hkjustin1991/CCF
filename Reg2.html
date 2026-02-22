@@ -320,6 +320,18 @@
      * PATCH_BOUNDARY: REG2_CAMERA_SWITCH_END
      * ============================================================ */
 
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+
+
     function startScan(videoEl, onCaptured, onError){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -351,7 +363,7 @@
             return tryStart(constraintsFacingFallback, true);
           }
           if(allowFallback) return tryStart(constraintsFallback, false);
-          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: err });
+          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: { name: buildCameraStartDetail_(err) } });
         });
       }
 
@@ -999,8 +1011,10 @@
 
       function restartScan(){
         $('scanMsg').innerHTML = '';
-        startScan(v, onCaptured, function(){
-          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start');
+        startScan(v, onCaptured, function(e){
+          var detail = '';
+          if(e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
+          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
         });
       }
 
