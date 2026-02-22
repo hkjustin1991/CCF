@@ -408,7 +408,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
@@ -490,7 +490,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
@@ -914,7 +914,7 @@
         if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
           var u = new URL(window.location.href);
           u.searchParams.delete('mode');
-          window.location.href = u.toString();
+          window.location.assign(u.toString());
         };
         $('btnNew').onclick = function(){
           State.view = 'form';
@@ -1047,7 +1047,7 @@
       if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
         var u = new URL(window.location.href);
         u.searchParams.delete('mode');
-        window.location.href = u.toString();
+        window.location.assign(u.toString());
       };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
