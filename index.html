@@ -682,6 +682,71 @@
       App.raf = requestAnimationFrame(function(){ scanLoop(video,onCaptured,msgTarget); });
     }
 
+    function decodeQrFromCanvas_(canvas){
+      if(!canvas) return Promise.resolve(null);
+
+      try{
+        if('BarcodeDetector' in window){
+          App.detector = App.detector || new BarcodeDetector({ formats:['qr_code'] });
+          return App.detector.detect(canvas).then(function(codes){
+            return (codes && codes.length && codes[0].rawValue) ? String(codes[0].rawValue) : null;
+          }).catch(function(){ return null; });
+        }
+      }catch(e){}
+
+      try{
+        if(window.jsQR){
+          var ctx = canvas.getContext('2d', { willReadFrequently:true });
+          var img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          var qr = window.jsQR(img.data, canvas.width, canvas.height);
+          return Promise.resolve((qr && qr.data) ? String(qr.data) : null);
+        }
+      }catch(e){}
+
+      return Promise.resolve(null);
+    }
+
+    function decodeQrFromImageFile_(file){
+      if(!file) return Promise.reject({ code:'E416', zh:'請先選擇圖片', en:'Please choose an image first.' });
+
+      return new Promise(function(resolve, reject){
+        var img = new Image();
+        var objectUrl = '';
+        function cleanup(){ if(objectUrl){ try{ URL.revokeObjectURL(objectUrl); }catch(e){} } }
+
+        img.onload = function(){
+          try{
+            var canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width || 0;
+            canvas.height = img.naturalHeight || img.height || 0;
+            if(!canvas.width || !canvas.height){ cleanup(); reject({ code:'E416', zh:'圖片讀取失敗', en:'Unable to read image.' }); return; }
+            var ctx = canvas.getContext('2d', { willReadFrequently:true });
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            decodeQrFromCanvas_(canvas).then(function(payload){
+              cleanup();
+              if(payload){ resolve(payload); return; }
+              reject({ code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.' });
+            }).catch(function(){
+              cleanup();
+              reject({ code:'E500', zh:'圖片解碼失敗', en:'Failed to decode image.' });
+            });
+          }catch(e){
+            cleanup();
+            reject({ code:'E500', zh:'圖片處理失敗', en:'Image processing failed.' });
+          }
+        };
+        img.onerror = function(){ cleanup(); reject({ code:'E416', zh:'圖片讀取失敗', en:'Unable to read image.' }); };
+
+        try{
+          objectUrl = URL.createObjectURL(file);
+          img.src = objectUrl;
+        }catch(e){
+          cleanup();
+          reject({ code:'E500', zh:'無法開啟圖片', en:'Cannot open the image.' });
+        }
+      });
+    }
+
     function restoreSession(){
       var token = null;
       try { token = sessionStorage.getItem('ccf_token'); } catch(e){}
@@ -766,11 +831,13 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">🔐 LOG IN / 登入</div>'+
-            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 Self portal</button>'+
+            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'+
           '</div>'+
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartLoginScan" class="primary">📷 掃描 QR 登入 / Scan QR to log in</button>'+
+            '<button id="btnLoginUploadQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<input id="loginQrImageInput" type="file" accept="image/*" class="hide" />'+
           '</div>'+
           '<div id="loginCam" class="card hide" style="margin-top:10px;">'+
             '<div class="big">📷 掃描中… / Scanning…</div>'+
@@ -1121,9 +1188,7 @@
     // ===== Bindings =====
     function bindLogin(){
       if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        var u = new URL(window.location.href);
-        u.searchParams.set('mode','reg');
-        window.location.href = u.toString();
+        window.location.href = '?mode=reg';
       };
 
       $('btnStartLoginScan').onclick = function(){
@@ -1157,6 +1222,35 @@
 
         startScan('videoLogin', onCapturedLogin, 'msg');
       };
+
+      if ($('btnLoginUploadQr') && $('loginQrImageInput')){
+        $('btnLoginUploadQr').onclick = function(){
+          clear('msg');
+          var input = $('loginQrImageInput');
+          input.value = '';
+          input.click();
+        };
+        $('loginQrImageInput').onchange = function(ev){
+          clear('msg');
+          var f = (ev && ev.target && ev.target.files && ev.target.files[0]) ? ev.target.files[0] : null;
+          if(!f) return;
+          showBox('msg', 'warn', '讀取圖片中…', 'Reading image…');
+          decodeQrFromImageFile_(f).then(function(payload){
+            showBox('msg', 'warn', '處理中…', 'Working…');
+            return callApi('api_login', payload);
+          }).then(function(res){
+            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+            App.token = res.token;
+            App.staff = res.staff;
+            try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
+            App.view='menu';
+            render();
+          }).catch(function(err){
+            if(err && err.code){ showErr('msg', err); return; }
+            showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
+          });
+        };
+      }
 
       $('btnInternalOk').onclick = function(){
         clear('msg');

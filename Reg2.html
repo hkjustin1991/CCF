@@ -443,7 +443,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
@@ -525,7 +525,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 Live portal</button>'+
+            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
@@ -691,12 +691,18 @@
       var cur = res.currentAttendance || {};
       var last = res.lastAttendance || {};
       var groups = {};
+      function normalizedGroupKey(g){
+        return String(g||'').trim().toLowerCase();
+      }
       (res.servingThisWeek||[]).forEach(function(r){
-        var g = String(r.group||'other');
+        var g = normalizedGroupKey(r.group) || 'other';
         if (!groups[g]) groups[g] = [];
         groups[g].push(r);
       });
-      function badgeCls(g){ return (g==='worship'||g==='media'||g==='logistic'||g==='support'||g==='finance') ? g : ''; }
+      function badgeCls(g){
+        var k = normalizedGroupKey(g);
+        return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : '';
+      }
       function livePosLabel_(r){
         var zh = String(r.positionZh||'').trim();
         var en = String(r.positionEn||'').trim();
@@ -947,9 +953,7 @@
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
         if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-          var u = new URL(window.location.href);
-          u.searchParams.delete('mode');
-          window.location.href = u.toString();
+          window.location.href = '?';
         };
         $('btnNew').onclick = function(){
           State.view = 'form';
@@ -1081,10 +1085,9 @@
     }
 
     function bindSelfHome(){
+      var selfMsgEl = $('selfMsg');
       if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-        var u = new URL(window.location.href);
-        u.searchParams.delete('mode');
-        window.location.href = u.toString();
+        window.location.href = '?';
       };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
@@ -1158,16 +1161,49 @@
       };
 
       var holidayBtn = $('btnSelfHoliday');
-      if (holidayBtn){
-        holidayBtn.onclick = null;
-        holidayBtn.addEventListener('click', function(){
-          State.view = 'selfHoliday';
-          render();
-        });
+      if (!holidayBtn){
+        console.error('[bindSelfHome] Missing #btnSelfHoliday at bind time.');
+        if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','請假按鈕未載入，請重新整理頁面。','Absence button failed to load. Please refresh the page.');
+      } else {
+        holidayBtn.onclick = function(){
+          try{
+            State.view = 'selfHoliday';
+            render();
+          }catch(err){
+            console.error('[bindSelfHome] Failed to navigate to holiday view.', err);
+            if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','未能開啟請假頁面，請稍後再試。','Unable to open the absence page. Please try again.', '<div class="small">請重新整理後重試 / Refresh and retry</div>');
+          }
+        };
+      }
+
+      if (!$('holidayMsg')){
+        console.warn('[bindSelfHome] #holidayMsg not present during selfHome bind (expected unless holiday view is rendered).');
       }
     }
 
     function bindServing(){
+      function needsServingDataRefresh(){
+        var res = State.lastResult || {};
+        var selectedGroup = String(State.servingGroup||'').trim().toUpperCase();
+        var selectedMonth = String(State.servingMonth||'').trim();
+        if (!res.ok) return true;
+        if (!selectedGroup) return false;
+
+        var positions = Array.isArray(res.positions) ? res.positions : [];
+        var hasGroupPositions = positions.some(function(p){
+          return String((p && p.group) || '').trim().toUpperCase() === selectedGroup;
+        });
+        if (!hasGroupPositions) return true;
+
+        if (!selectedMonth) return false;
+        var events = Array.isArray(res.events) ? res.events : [];
+        var hasMonthEvents = events.some(function(ev){
+          var mKey = String((ev && ev.eventKey) || '').replace(/^SundayService_(\d{4}-\d{2})-\d{2}$/, '$1');
+          return mKey === selectedMonth;
+        });
+        return !hasMonthEvents;
+      }
+
       $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-month]')).forEach(function(b){
         b.onclick = function(){
@@ -1177,18 +1213,13 @@
       });
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-group]')).forEach(function(b){
         b.onclick = function(){
-          var key = String(b.getAttribute('data-serving-group')||'').trim();
-          State.servingGroup = key;
-          callApi('api_reg_self_serving_group_stats_public', State.authQrPayload, key).then(function(res){
+          State.servingGroup = String(b.getAttribute('data-serving-group')||'').trim();
+          render();
+          if (!needsServingDataRefresh()) return;
+          callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
             if(!res || !res.ok){ $('servingMsg').innerHTML = showServerErr(res); return; }
-            var members = (res.members||[]).map(function(m){ return '<li>'+escapeHtml(m.label||m.id||'—')+'</li>'; }).join('');
-            var modal = openModal(
-              '<div class="big">組員名單 / Group members</div>'+
-              '<div class="small">'+escapeHtml(key)+' · 人數 / Count: '+escapeHtml(String(res.count||0))+'</div>'+
-              '<ul style="margin:8px 0 0 18px;">'+(members||'<li>—</li>')+'</ul>'+
-              '<div class="miniBtnRow"><button id="btnCloseGroupMembers" class="danger">關閉 / Close</button></div>'
-            );
-            modal.querySelector('#btnCloseGroupMembers').onclick = function(){ closeModal(modal); };
+            State.lastResult = res;
+            render();
           }).catch(function(){ $('servingMsg').innerHTML = showBox('err','系統錯誤','System error'); });
         };
       });
@@ -1224,15 +1255,46 @@
     function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
 
     function bindHoliday(){
-      $('btnHolidayBack').onclick = function(){ State.view='selfHome'; render(); };
-      $('btnHolidaySave').onclick = function(){
-        $('holidayMsg').innerHTML = showBox('warn','儲存中…','Saving…');
-        callApi('api_reg_self_set_holiday_public', State.authQrPayload, $('hFrom1').value.trim(), $('hTo1').value.trim(), $('hFrom2').value.trim(), $('hTo2').value.trim())
+      var holidayMsgEl = $('holidayMsg');
+      var backBtn = $('btnHolidayBack');
+      var saveBtn = $('btnHolidaySave');
+      var required = {
+        hFrom1: $('hFrom1'),
+        hTo1: $('hTo1'),
+        hFrom2: $('hFrom2'),
+        hTo2: $('hTo2')
+      };
+      var missing = Object.keys(required).filter(function(k){ return !required[k]; });
+      if (!holidayMsgEl){
+        console.error('[bindHoliday] Missing #holidayMsg container.');
+      } else {
+        holidayMsgEl.innerHTML = showBox('warn','請假頁面已載入','Absence page loaded');
+      }
+      if (missing.length){
+        var missingList = missing.map(function(id){ return '#'+id; }).join(', ');
+        console.error('[bindHoliday] Missing required holiday inputs:', missingList);
+        if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('err','請假欄位載入不完整，請重新整理頁面。','Holiday form is incomplete. Please refresh.', '<div class="small">Missing: '+escapeHtml(missingList)+'</div>');
+        return;
+      }
+
+      if (backBtn) backBtn.onclick = function(){ State.view='selfHome'; render(); };
+      if (!saveBtn){
+        console.error('[bindHoliday] Missing #btnHolidaySave button.');
+        if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('err','儲存按鈕未載入，請重新整理頁面。','Save button failed to load. Please refresh the page.');
+        return;
+      }
+      saveBtn.onclick = function(){
+        if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('warn','儲存中…','Saving…');
+        callApi('api_reg_self_set_holiday_public', State.authQrPayload, required.hFrom1.value.trim(), required.hTo1.value.trim(), required.hFrom2.value.trim(), required.hTo2.value.trim())
           .then(function(r){
-            if(!r||!r.ok){ $('holidayMsg').innerHTML = showServerErr(r); return; }
-            $('holidayMsg').innerHTML = showBox('ok','已儲存','Saved');
+            if(!r||!r.ok){ if (holidayMsgEl) holidayMsgEl.innerHTML = showServerErr(r); return; }
+            if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('ok','已儲存','Saved');
             return callApi('api_reg_self_portal_snapshot_public', State.authQrPayload).then(function(s){ if(s&&s.ok) State.snapshot=s; });
-          }).catch(function(){ $('holidayMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+          }).catch(function(err){
+            console.error('[bindHoliday] Save failed.', err);
+            var detail = '<div class="small">請檢查網絡連線後重試，或聯絡影音同工。<br/>Check connection and retry, or contact Media team.</div>';
+            if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('err','儲存失敗，請稍後再試。','Failed to save. Please try again.', detail);
+          });
       };
     }
 
