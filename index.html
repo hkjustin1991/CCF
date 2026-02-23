@@ -331,7 +331,7 @@
 
     function showErr(targetId, res){
       var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
-      var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+      var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
       showBox(
         targetId,
         'err',
@@ -563,6 +563,78 @@
       else wrap.classList.add('hide');
     }
 
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+    function bindCameraRetryButton_(msgTarget, retryFn){
+      var btnId = msgTarget + '_retryCam';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(!btn) return;
+        btn.onclick = function(){
+          if(typeof retryFn === 'function') retryFn();
+        };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
+    function bindImageQrFallback_(msgTarget, onDecoded){
+      var inputId = msgTarget + '_qrFile';
+      var btnId = msgTarget + '_qrFileBtn';
+      var statusId = msgTarget + '_qrFileStatus';
+      setTimeout(function(){
+        var input = $(inputId);
+        var btn = $(btnId);
+        var status = $(statusId);
+        if(!input || !btn) return;
+        btn.onclick = function(){
+          var f = input.files && input.files[0];
+          if(!f){ if(status) status.innerHTML = '請先選擇圖片 / Please choose an image first.'; return; }
+          var fr = new FileReader();
+          fr.onload = function(){
+            var img = new Image();
+            img.onload = function(){
+              try{
+                var c = document.createElement('canvas');
+                c.width = img.naturalWidth || img.width;
+                c.height = img.naturalHeight || img.height;
+                var x = c.getContext('2d', { willReadFrequently:true });
+                x.drawImage(img,0,0,c.width,c.height);
+                var d = x.getImageData(0,0,c.width,c.height);
+                var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
+                if(qr && qr.data){
+                  if(status) status.innerHTML = '已讀取 QR，處理中… / QR decoded, processing…';
+                  if(typeof onDecoded === 'function') onDecoded(String(qr.data||''));
+                }else{
+                  if(status) status.innerHTML = '無法從此圖片辨識 QR。請嘗試更清晰圖片。 / Cannot decode QR from this image. Try a clearer image.';
+                }
+              }catch(e){
+                if(status) status.innerHTML = '讀取圖片失敗 / Failed to read image';
+              }
+            };
+            img.onerror = function(){ if(status) status.innerHTML = '圖片格式不支援 / Unsupported image format'; };
+            img.src = fr.result;
+          };
+          fr.onerror = function(){ if(status) status.innerHTML = '檔案讀取失敗 / Failed to read file'; };
+          fr.readAsDataURL(f);
+        };
+      }, 0);
+      return ''+
+        '<div style="margin-top:10px;border-top:1px dashed #d6dcef;padding-top:10px;">'+
+          '<div class="small">相機被封鎖時可改用圖片解碼 / If camera is blocked, decode from image</div>'+
+          '<input id="'+inputId+'" type="file" accept="image/*" style="margin-top:6px;" />'+
+          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Decode QR image</button></div>'+
+          '<div id="'+statusId+'" class="small" style="margin-top:6px;"></div>'+
+        '</div>';
+    }
+
     function startScan(videoId, onCaptured, msgTarget){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -580,6 +652,10 @@
           App.stream = stream;
           var v = $(videoId);
           v.srcObject = stream;
+          v.setAttribute('playsinline','');
+          v.setAttribute('muted','');
+          v.muted = true;
+          v.autoplay = true;
           return v.play().then(function(){
             App.scanning=true;
             scanLoop(v, onCaptured, msgTarget);
@@ -597,7 +673,18 @@
             return;
           }
           stopScan();
-          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : '' });
+          var detail = buildCameraStartDetail_(err);
+          if(err && err.name === 'NotAllowedError'){
+            showErr(msgTarget, {
+              code:'E420',
+              zh:'相機無法啟動',
+              en:'Camera cannot start',
+              detail: detail,
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_(msgTarget, function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded); })
+            });
+            return;
+          }
+          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail });
         });
       }
       tryStart(constraintsPreferred, true);
@@ -1041,7 +1128,7 @@
 
       function showErrInto(containerEl, res){
         var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
-        var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+        var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
         containerEl.innerHTML =
           '<div class="msgBox err">'+
             '<div class="big err">'+escapeHtml((res && res.zh) || '發生錯誤')+code+'</div>'+
@@ -1273,7 +1360,7 @@
         App.view='checkinMenu'; render();
       };
 
-      start();
+      showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
     }
 
     function bindManualCheckin(){
@@ -2011,7 +2098,7 @@
       function setHtml(html){ o.querySelector('#mdBox').innerHTML = html; }
       function showErrInto(containerEl, res){
         var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
-        var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+        var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
         containerEl.innerHTML =
           '<div class="msgBox err">'+
             '<div class="big err">'+escapeHtml((res && res.zh) || '發生錯誤')+code+'</div>'+

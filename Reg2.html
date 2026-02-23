@@ -320,6 +320,81 @@
      * PATCH_BOUNDARY: REG2_CAMERA_SWITCH_END
      * ============================================================ */
 
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+
+
+
+    function bindCameraRetryButton_(msgTarget, retryFn){
+      var btnId = msgTarget + '_retryCam';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(!btn) return;
+        btn.onclick = function(){
+          if(typeof retryFn === 'function') retryFn();
+        };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
+    function bindImageQrFallback_(msgTarget, onDecoded){
+      var inputId = msgTarget + '_qrFile';
+      var btnId = msgTarget + '_qrFileBtn';
+      var statusId = msgTarget + '_qrFileStatus';
+      setTimeout(function(){
+        var input = $(inputId);
+        var btn = $(btnId);
+        var status = $(statusId);
+        if(!input || !btn) return;
+        btn.onclick = function(){
+          var f = input.files && input.files[0];
+          if(!f){ if(status) status.innerHTML = '請先選擇圖片 / Please choose an image first.'; return; }
+          var fr = new FileReader();
+          fr.onload = function(){
+            var img = new Image();
+            img.onload = function(){
+              try{
+                var c = document.createElement('canvas');
+                c.width = img.naturalWidth || img.width;
+                c.height = img.naturalHeight || img.height;
+                var x = c.getContext('2d', { willReadFrequently:true });
+                x.drawImage(img,0,0,c.width,c.height);
+                var d = x.getImageData(0,0,c.width,c.height);
+                var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
+                if(qr && qr.data){
+                  if(status) status.innerHTML = '已讀取 QR，處理中… / QR decoded, processing…';
+                  if(typeof onDecoded === 'function') onDecoded(String(qr.data||''));
+                }else{
+                  if(status) status.innerHTML = '無法從此圖片辨識 QR。請嘗試更清晰圖片。 / Cannot decode QR from this image. Try a clearer image.';
+                }
+              }catch(e){
+                if(status) status.innerHTML = '讀取圖片失敗 / Failed to read image';
+              }
+            };
+            img.onerror = function(){ if(status) status.innerHTML = '圖片格式不支援 / Unsupported image format'; };
+            img.src = fr.result;
+          };
+          fr.onerror = function(){ if(status) status.innerHTML = '檔案讀取失敗 / Failed to read file'; };
+          fr.readAsDataURL(f);
+        };
+      }, 0);
+      return ''+
+        '<div style="margin-top:10px;border-top:1px dashed #d6dcef;padding-top:10px;">'+
+          '<div class="small">相機被封鎖時可改用圖片解碼 / If camera is blocked, decode from image</div>'+
+          '<input id="'+inputId+'" type="file" accept="image/*" style="margin-top:6px;" />'+
+          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Decode QR image</button></div>'+
+          '<div id="'+statusId+'" class="small" style="margin-top:6px;"></div>'+
+        '</div>';
+    }
+
     function startScan(videoEl, onCaptured, onError){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -335,6 +410,10 @@
         navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
           scan.stream = stream;
           videoEl.srcObject = stream;
+          videoEl.setAttribute('playsinline','');
+          videoEl.setAttribute('muted','');
+          videoEl.muted = true;
+          videoEl.autoplay = true;
           return videoEl.play().then(function(){
             scan.scanning = true;
             loop(videoEl, onCaptured);
@@ -347,7 +426,17 @@
             return tryStart(constraintsFacingFallback, true);
           }
           if(allowFallback) return tryStart(constraintsFallback, false);
-          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: err });
+          var detail = buildCameraStartDetail_(err);
+          if(err && err.name === 'NotAllowedError'){
+            onError({
+              zh:'相機無法啟動',
+              en:'Camera cannot start',
+              err: { name: detail },
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+            });
+            return;
+          }
+          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: { name: detail } });
         });
       }
 
@@ -806,6 +895,7 @@
           '<div class="small">掃描你的 QR 以使用自助功能（只作登記，不會自動簽到）。</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
           '</div>'+
@@ -991,8 +1081,10 @@
 
       function restartScan(){
         $('scanMsg').innerHTML = '';
-        startScan(v, onCaptured, function(){
-          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start');
+        startScan(v, onCaptured, function(e){
+          var detail = (e && e.detailHtml) ? e.detailHtml : '';
+          if(!detail && e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
+          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
         });
       }
 
@@ -1000,6 +1092,10 @@
         stopScan();
         State.view='home';
         render();
+      };
+
+      if($('btnStartScanCam')) $('btnStartScanCam').onclick = function(){
+        restartScan();
       };
 
       camBindSwitchButton_($('btnSwitchCam'), function(){
@@ -1036,7 +1132,7 @@
         });
       }
 
-      restartScan();
+      $('scanMsg').innerHTML = showBox('warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
     }
 
     function bindSelfHome(){
