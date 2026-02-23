@@ -320,6 +320,31 @@
      * PATCH_BOUNDARY: REG2_CAMERA_SWITCH_END
      * ============================================================ */
 
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+
+
+
+    function bindCameraRetryButton_(msgTarget, retryFn){
+      var btnId = msgTarget + '_retryCam';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(!btn) return;
+        btn.onclick = function(){
+          if(typeof retryFn === 'function') retryFn();
+        };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
     function startScan(videoEl, onCaptured, onError){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -335,6 +360,10 @@
         navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
           scan.stream = stream;
           videoEl.srcObject = stream;
+          videoEl.setAttribute('playsinline','');
+          videoEl.setAttribute('muted','');
+          videoEl.muted = true;
+          videoEl.autoplay = true;
           return videoEl.play().then(function(){
             scan.scanning = true;
             loop(videoEl, onCaptured);
@@ -347,7 +376,17 @@
             return tryStart(constraintsFacingFallback, true);
           }
           if(allowFallback) return tryStart(constraintsFallback, false);
-          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: err });
+          var detail = buildCameraStartDetail_(err);
+          if(err && err.name === 'NotAllowedError'){
+            onError({
+              zh:'相機無法啟動',
+              en:'Camera cannot start',
+              err: { name: detail },
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); })
+            });
+            return;
+          }
+          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: { name: detail } });
         });
       }
 
@@ -806,6 +845,7 @@
           '<div class="small">掃描你的 QR 以使用自助功能（只作登記，不會自動簽到）。</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
           '</div>'+
@@ -991,8 +1031,10 @@
 
       function restartScan(){
         $('scanMsg').innerHTML = '';
-        startScan(v, onCaptured, function(){
-          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start');
+        startScan(v, onCaptured, function(e){
+          var detail = (e && e.detailHtml) ? e.detailHtml : '';
+          if(!detail && e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
+          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
         });
       }
 
@@ -1000,6 +1042,10 @@
         stopScan();
         State.view='home';
         render();
+      };
+
+      if($('btnStartScanCam')) $('btnStartScanCam').onclick = function(){
+        restartScan();
       };
 
       camBindSwitchButton_($('btnSwitchCam'), function(){
@@ -1036,7 +1082,7 @@
         });
       }
 
-      restartScan();
+      $('scanMsg').innerHTML = showBox('warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
     }
 
     function bindSelfHome(){

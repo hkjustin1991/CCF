@@ -331,7 +331,7 @@
 
     function showErr(targetId, res){
       var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
-      var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+      var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
       showBox(
         targetId,
         'err',
@@ -563,6 +563,28 @@
       else wrap.classList.add('hide');
     }
 
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+    function bindCameraRetryButton_(msgTarget, retryFn){
+      var btnId = msgTarget + '_retryCam';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(!btn) return;
+        btn.onclick = function(){
+          if(typeof retryFn === 'function') retryFn();
+        };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
     function startScan(videoId, onCaptured, msgTarget){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -580,6 +602,10 @@
           App.stream = stream;
           var v = $(videoId);
           v.srcObject = stream;
+          v.setAttribute('playsinline','');
+          v.setAttribute('muted','');
+          v.muted = true;
+          v.autoplay = true;
           return v.play().then(function(){
             App.scanning=true;
             scanLoop(v, onCaptured, msgTarget);
@@ -597,7 +623,18 @@
             return;
           }
           stopScan();
-          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : '' });
+          var detail = buildCameraStartDetail_(err);
+          if(err && err.name === 'NotAllowedError'){
+            showErr(msgTarget, {
+              code:'E420',
+              zh:'相機無法啟動',
+              en:'Camera cannot start',
+              detail: detail,
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_(msgTarget, function(){ tryStart(constraintsPreferred, true); })
+            });
+            return;
+          }
+          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail });
         });
       }
       tryStart(constraintsPreferred, true);
@@ -1041,7 +1078,7 @@
 
       function showErrInto(containerEl, res){
         var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
-        var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+        var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
         containerEl.innerHTML =
           '<div class="msgBox err">'+
             '<div class="big err">'+escapeHtml((res && res.zh) || '發生錯誤')+code+'</div>'+
@@ -1273,7 +1310,7 @@
         App.view='checkinMenu'; render();
       };
 
-      start();
+      showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
     }
 
     function bindManualCheckin(){
@@ -2011,7 +2048,7 @@
       function setHtml(html){ o.querySelector('#mdBox').innerHTML = html; }
       function showErrInto(containerEl, res){
         var code = res && res.code ? (' <span class="pill">'+escapeHtml(res.code)+'</span>') : '';
-        var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+        var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
         containerEl.innerHTML =
           '<div class="msgBox err">'+
             '<div class="big err">'+escapeHtml((res && res.zh) || '發生錯誤')+code+'</div>'+

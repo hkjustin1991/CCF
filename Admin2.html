@@ -495,7 +495,7 @@
 
     function showErr(targetId, res){
       var code = res && res.code ? (' <span class="chip">'+escapeHtml(res.code)+'</span>') : '';
-      var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+      var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
       showBox(
         targetId,
         'err',
@@ -904,6 +904,30 @@
       }
       resetStability();
     }
+    function buildCameraStartDetail_(err){
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
+    }
+
+
+    function bindCameraRetryButton_(msgTarget, retryFn){
+      var btnId = msgTarget + '_retryCam';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(!btn) return;
+        btn.onclick = function(){
+          if(typeof retryFn === 'function') retryFn();
+        };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
     function startScan(videoEl, onCaptured){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -917,6 +941,10 @@
         navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
           Scan.stream = stream;
           videoEl.srcObject = stream;
+          videoEl.setAttribute('playsinline','');
+          videoEl.setAttribute('muted','');
+          videoEl.muted = true;
+          videoEl.autoplay = true;
           return videoEl.play().then(function(){
             Scan.scanning=true;
             loop();
@@ -924,7 +952,18 @@
         }).catch(function(err){
           if(allowFallback){ tryStart(constraintsFallback, false); return; }
           stopScan();
-          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: err && err.name ? err.name : ''});
+          var detail = buildCameraStartDetail_(err);
+          if(err && err.name === 'NotAllowedError'){
+            onCaptured(null, {
+              code:'E420',
+              zh:'相機無法啟動',
+              en:'Camera cannot start',
+              detail: detail,
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); })
+            });
+            return;
+          }
+          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail});
         });
       }
 
@@ -996,6 +1035,7 @@
           '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'
@@ -1003,17 +1043,21 @@
         modal.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(modal); };
 
         var vEl = modal.querySelector('#vLogin');
-        startScan(vEl, function(payload, err){
-          if(err){ showErr('scanMsg', err); return; }
-          showBox('scanMsg','warn','處理中…','Working…');
-          callApi('api_admin_login', payload).then(function(res){
-            if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-            closeModal(modal);
-            onLoginRes(res);
-          }).catch(function(){
-            showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        function beginScan(){
+          startScan(vEl, function(payload, err){
+            if(err){ showErr('scanMsg', err); return; }
+            showBox('scanMsg','warn','處理中…','Working…');
+            callApi('api_admin_login', payload).then(function(res){
+              if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              closeModal(modal);
+              onLoginRes(res);
+            }).catch(function(){
+              showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
           });
-        });
+        }
+        modal.querySelector('#btnStartCam').onclick = beginScan;
+        showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
       };
 
       function onLoginRes(res){
