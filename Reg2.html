@@ -851,6 +851,7 @@
           '<div class="small">掃描你的 QR 以使用自助功能（只作登記，不會自動簽到）。</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
           '</div>'+
@@ -1047,6 +1048,10 @@
         render();
       };
 
+      if($('btnStartScanCam')) $('btnStartScanCam').onclick = function(){
+        restartScan();
+      };
+
       camBindSwitchButton_($('btnSwitchCam'), function(){
         stopScan();
         restartScan();
@@ -1081,7 +1086,7 @@
         });
       }
 
-      restartScan();
+      $('scanMsg').innerHTML = showBox('warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
     }
 
     function bindSelfHome(){

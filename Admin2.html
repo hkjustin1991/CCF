@@ -1035,6 +1035,7 @@
           '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'
@@ -1042,17 +1043,21 @@
         modal.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(modal); };
 
         var vEl = modal.querySelector('#vLogin');
-        startScan(vEl, function(payload, err){
-          if(err){ showErr('scanMsg', err); return; }
-          showBox('scanMsg','warn','處理中…','Working…');
-          callApi('api_admin_login', payload).then(function(res){
-            if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-            closeModal(modal);
-            onLoginRes(res);
-          }).catch(function(){
-            showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        function beginScan(){
+          startScan(vEl, function(payload, err){
+            if(err){ showErr('scanMsg', err); return; }
+            showBox('scanMsg','warn','處理中…','Working…');
+            callApi('api_admin_login', payload).then(function(res){
+              if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+              closeModal(modal);
+              onLoginRes(res);
+            }).catch(function(){
+              showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
           });
-        });
+        }
+        modal.querySelector('#btnStartCam').onclick = beginScan;
+        showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
       };
 
       function onLoginRes(res){
