@@ -495,7 +495,7 @@
 
     function showErr(targetId, res){
       var code = res && res.code ? (' <span class="chip">'+escapeHtml(res.code)+'</span>') : '';
-      var detail = res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
+      var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
       showBox(
         targetId,
         'err',
@@ -915,6 +915,19 @@
       return tips.join(' ');
     }
 
+
+    function bindCameraRetryButton_(msgTarget, retryFn){
+      var btnId = msgTarget + '_retryCam';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(!btn) return;
+        btn.onclick = function(){
+          if(typeof retryFn === 'function') retryFn();
+        };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
     function startScan(videoEl, onCaptured){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
@@ -939,7 +952,18 @@
         }).catch(function(err){
           if(allowFallback){ tryStart(constraintsFallback, false); return; }
           stopScan();
-          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: buildCameraStartDetail_(err)});
+          var detail = buildCameraStartDetail_(err);
+          if(err && err.name === 'NotAllowedError'){
+            onCaptured(null, {
+              code:'E420',
+              zh:'相機無法啟動',
+              en:'Camera cannot start',
+              detail: detail,
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); })
+            });
+            return;
+          }
+          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail});
         });
       }
 
