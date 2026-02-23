@@ -738,6 +738,26 @@ function api_log_activity(token, action, details) {
   return { ok:true };
 }
 
+
+function api_log_scanner_e420(payload){
+  try{
+    const sh = ensureActivityLogSheet_();
+    const ts = nowUk_();
+    const eventKey = getDefaultEventKey_();
+    const p = payload || {};
+    const details = {
+      stage: String(p.stage || ''),
+      diagnostics: p.diagnostics || {},
+      deviceId: String(p.deviceId || ''),
+      ua: String(p.ua || '')
+    };
+    sh.appendRow([ts, 'PUBLIC', 'PUBLIC', 'PUBLIC', 'SCANNER_E420', JSON.stringify(details), eventKey]);
+    return { ok:true };
+  }catch(e){
+    return { ok:false, code:'E500', zh:'系統錯誤', en:'System error', detail:String(e&&e.message||e) };
+  }
+}
+
 /******** Check-in dedupe lookup ********/
 function findExistingCheckin_(sh, eventKey, memberId) {
   const lastRow = sh.getLastRow();

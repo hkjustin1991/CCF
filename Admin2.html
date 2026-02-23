@@ -354,6 +354,20 @@
       });
     }
 
+    function getDeviceId(){
+      try{
+        var id = localStorage.getItem('ccf_admin_deviceId');
+        if(!id){
+          id = 'A' + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+          localStorage.setItem('ccf_admin_deviceId', id);
+        }
+        return id;
+      }catch(e){
+        return 'A' + Date.now().toString(36);
+      }
+    }
+    function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
+
     function logAction(action, details, context){
       try{
         if(!App.token) return;
@@ -904,15 +918,58 @@
       }
       resetStability();
     }
+    function collectCameraDiagnostics_(err){
+      var errName = (err && err.name) ? String(err.name) : 'UnknownError';
+      var errMessage = (err && err.message) ? String(err.message) : '';
+      var href = '';
+      try{ href = String((window.location && window.location.href) || ''); }catch(e){}
+      var isTop = false;
+      try{ isTop = (window.top === window.self); }catch(e){}
+      var secure = !!window.isSecureContext;
+      var policyCheck = 'unsupported';
+      try{
+        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function'){
+          policyCheck = !!document.featurePolicy.allowsFeature('camera');
+        }else if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function'){
+          policyCheck = !!document.permissionsPolicy.allowsFeature('camera');
+        }
+      }catch(e){
+        policyCheck = 'error:' + String((e && e.message) || e);
+      }
+      return {
+        href: href,
+        topSelf: isTop,
+        secureContext: secure,
+        featurePolicyCamera: policyCheck,
+        errorName: errName,
+        errorMessage: errMessage
+      };
+    }
     function buildCameraStartDetail_(err){
-      var name = (err && err.name) ? String(err.name) : '';
-      if(name !== 'NotAllowedError') return name;
-      var tips = [];
-      tips.push('NotAllowedError');
-      tips.push('請允許相機權限 / Please allow camera permission.');
-      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
-      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
-      return tips.join(' ');
+      var d = collectCameraDiagnostics_(err);
+      var detail = [
+        'location.href=' + d.href,
+        'window.top===window.self=' + d.topSelf,
+        'isSecureContext=' + d.secureContext,
+        'cameraPolicy=' + d.featurePolicyCamera,
+        'error=' + d.errorName + (d.errorMessage ? (': ' + d.errorMessage) : '')
+      ].join(' | ');
+      if(d.errorName === 'NotAllowedError'){
+        detail += ' | 請允許相機權限 / Please allow camera permission.';
+        if(!d.topSelf) detail += ' | 如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.';
+        if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') detail += ' | 需使用 HTTPS。 / HTTPS is required.';
+      }
+      return { detail: detail, diagnostics: d };
+    }
+    function reportScannerE420_(stage, diagnostics){
+      try{
+        callApi('api_admin_log_scanner_e420_public', {
+          stage: String(stage || ''),
+          diagnostics: diagnostics || {},
+          deviceId: getDeviceId(),
+          ua: getUA()
+        });
+      }catch(e){}
     }
 
 
@@ -931,7 +988,11 @@
     function startScan(videoEl, onCaptured){
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-        onCaptured(null, {code:'E420', zh:'此裝置不支援相機', en:'Camera not supported'});
+        var d0 = collectCameraDiagnostics_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
+        var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
+        console.error('E420 camera unsupported', detail0.diagnostics);
+        reportScannerE420_('unsupported', d0);
+        onCaptured(null, {code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail});
         return;
       }
       var constraintsPreferred = { video: { facingMode: { ideal:'environment' } }, audio:false };
@@ -952,18 +1013,20 @@
         }).catch(function(err){
           if(allowFallback){ tryStart(constraintsFallback, false); return; }
           stopScan();
-          var detail = buildCameraStartDetail_(err);
+          var detailObj = buildCameraStartDetail_(err);
+          console.error('E420 camera start failed', detailObj.diagnostics);
+          reportScannerE420_('start_failed', detailObj.diagnostics);
           if(err && err.name === 'NotAllowedError'){
             onCaptured(null, {
               code:'E420',
               zh:'相機無法啟動',
               en:'Camera cannot start',
-              detail: detail,
-              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); })
+              detail: detailObj.detail,
+              detailHtml: '<div class="small">'+escapeHtml(detailObj.detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); })
             });
             return;
           }
-          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail});
+          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detailObj.detail});
         });
       }
 
