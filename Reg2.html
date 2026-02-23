@@ -165,8 +165,40 @@
   <script>
     function $(id){ return document.getElementById(id); }
 
+    function getApiEndpoint(){
+      try{
+        if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
+        var qp = new URLSearchParams(window.location.search || '');
+        if (qp.get('api')) return String(qp.get('api'));
+      }catch(e){}
+      return '';
+    }
+
+    function callApiViaRpc(endpoint, fn, args){
+      return fetch(endpoint, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ fn: fn, args: args || [] }),
+        credentials:'omit'
+      }).then(function(resp){
+        return resp.text().then(function(txt){
+          var data;
+          try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
+          if(!resp.ok || !data || !data.ok){
+            var err = (data && data.error) ? data.error : { message:'API call failed' };
+            throw err;
+          }
+          return data.result;
+        });
+      });
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
+      var endpoint = getApiEndpoint();
+      if(endpoint){
+        return callApiViaRpc(endpoint, fn, args);
+      }
       return new Promise(function(resolve, reject){
         var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
         runner[fn].apply(runner, args);

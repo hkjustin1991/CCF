@@ -124,6 +124,46 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+
+function doPost(e) {
+  try {
+    const raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
+    const body = JSON.parse(raw);
+    const fn = String(body.fn || '').trim();
+    const args = Array.isArray(body.args) ? body.args : [];
+    const result = invokeRpcFunction_(fn, args);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, result: result }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: false,
+      error: {
+        message: String(err && err.message ? err.message : err),
+        name: String(err && err.name ? err.name : 'Error')
+      }
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function invokeRpcFunction_(fn, args){
+  if (!/^[a-zA-Z0-9_]+$/.test(fn)) {
+    throw new Error('Invalid function name.');
+  }
+
+  const allowedPrefixes = ['api_', 'admin_', 'reg_'];
+  const isAllowed = allowedPrefixes.some(prefix => fn.indexOf(prefix) === 0);
+  if (!isAllowed) {
+    throw new Error('Function not exposed over RPC.');
+  }
+
+  const target = this[fn];
+  if (typeof target !== 'function') {
+    throw new Error('Function not found: ' + fn);
+  }
+
+  return target.apply(null, args || []);
+}
+
 /******** Helpers ********/
 function openSs_(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
 function nowUk_(){ return new Date(); }
