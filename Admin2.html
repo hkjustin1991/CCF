@@ -374,15 +374,39 @@
       });
     }
 
+    function callApiViaGas(fn, args){
+      return new Promise(function(resolve, reject){
+        try{
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          runner[fn].apply(runner, args || []);
+        }catch(err){
+          reject(err);
+        }
+      });
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
-      if(endpoint){
-        return callApiViaRpc(endpoint, fn, args);
+      var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+
+      if(forceRpcOnce){
+        window.CCF_FORCE_RPC_ONCE = false;
+        if(endpoint) return callApiViaRpc(endpoint, fn, args);
       }
-      return new Promise(function(resolve, reject){
-        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-        runner[fn].apply(runner, args);
+
+      return callApiViaGas(fn, args).catch(function(err){
+        if(endpoint){
+          var msg = String((err && err.message) || err || 'GAS call failed');
+          throw {
+            code:'E530',
+            zh:'GAS 連線失敗，請改用 Git 再試',
+            en:'GAS failed. Please retry with Git API.',
+            detail: msg,
+            gasFailed:true
+          };
+        }
+        throw err;
       });
     }
 
@@ -549,6 +573,17 @@
         escapeHtml((res && res.en) || 'System error'),
         detail
       );
+    }
+
+
+
+    function bindGasRetryButton_(targetId, retryFn){
+      var btnId = targetId + '_retryGit';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(btn) btn.onclick = function(){ window.CCF_FORCE_RPC_ONCE = true; retryFn(); };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="btnBack" type="button">改用 Git 再試 / Retry with Git API</button></div>';
     }
 
     function attachScrollControls_(root){
@@ -1223,7 +1258,16 @@
               if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
               closeModal(modal);
               onLoginRes(res);
-            }).catch(function(){
+            }).catch(function(err){
+              if(err && err.gasFailed){
+                showErr('scanMsg', {
+                  code: err.code || 'E530',
+                  zh: err.zh || 'GAS 連線失敗，請改用 Git 再試',
+                  en: err.en || 'GAS failed. Please retry with Git API.',
+                  detailHtml: bindGasRetryButton_('scanMsg', beginScan)
+                });
+                return;
+              }
               showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
             });
           });
