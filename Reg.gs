@@ -57,6 +57,10 @@ function doGetReg_(e){
   const t = HtmlService.createTemplateFromFile(REG_TEMPLATE);
   t.APP_VERSION = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : REG_VERSION;
   t.REG_VERSION = REG_VERSION;
+  const scannerCfg = getExternalScannerConfig_();
+  t.EXTERNAL_SCANNER_URL = scannerCfg.url;
+  t.EXTERNAL_SCANNER_ORIGIN = scannerCfg.origin;
+  t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
   return t.evaluate()
     .setTitle('CCF會員登記及自助服務平台 / CCF registration and self service portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

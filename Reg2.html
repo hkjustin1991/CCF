@@ -260,9 +260,7 @@
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
 
-    const EXTERNAL_SCANNER_URL = 'https://<org>.github.io/<repo>/scanner/';
-    const EXTERNAL_SCANNER_ORIGIN = 'https://<org>.github.io';
-    const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+    const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>) || 120000;
 
     function makeExternalScannerState_(){
       try{
@@ -303,6 +301,7 @@
       }
 
       window.addEventListener('message', onMessage);
+      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return; }
       var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
       popup = window.open(url, 'ccf_ext_scanner', 'popup,width=460,height=760');
       if(!popup){ clear('blocked'); return; }
@@ -339,12 +338,51 @@
 
 
 
-    var EXTERNAL_SCANNER_URL = String(window.EXTERNAL_SCANNER_URL || '');
-    var EXTERNAL_SCANNER_ORIGIN = String(window.EXTERNAL_SCANNER_ORIGIN || '');
+    var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify(EXTERNAL_SCANNER_URL || '') ?> || '').trim();
+    var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify(EXTERNAL_SCANNER_ORIGIN || '') ?> || '').trim();
     var pendingExternalScanner_ = null;
+    var EXTERNAL_SCANNER_CONFIG_ERROR = '';
 
-    if(!EXTERNAL_SCANNER_ORIGIN && EXTERNAL_SCANNER_URL){
-      try{ EXTERNAL_SCANNER_ORIGIN = String(new URL(EXTERNAL_SCANNER_URL, window.location.href).origin || ''); }catch(e){}
+    function validateExternalScannerConfig_(){
+      var issues = [];
+      var parsedUrl = null;
+      var parsedOrigin = null;
+      if(!EXTERNAL_SCANNER_URL){
+        issues.push('Missing EXTERNAL_SCANNER_URL');
+      }else{
+        try{ parsedUrl = new URL(EXTERNAL_SCANNER_URL); }catch(e){ issues.push('Invalid EXTERNAL_SCANNER_URL'); }
+      }
+      if(!EXTERNAL_SCANNER_ORIGIN){
+        issues.push('Missing EXTERNAL_SCANNER_ORIGIN');
+      }else{
+        try{ parsedOrigin = new URL(EXTERNAL_SCANNER_ORIGIN); }catch(e){ issues.push('Invalid EXTERNAL_SCANNER_ORIGIN'); }
+      }
+      if(parsedOrigin && parsedOrigin.pathname !== '/') issues.push('EXTERNAL_SCANNER_ORIGIN must be origin only');
+      if(parsedUrl && parsedOrigin && parsedUrl.origin !== parsedOrigin.origin) issues.push('URL origin and scanner origin mismatch');
+      EXTERNAL_SCANNER_CONFIG_ERROR = issues.join('; ');
+      return { ok: !issues.length, message: EXTERNAL_SCANNER_CONFIG_ERROR };
+    }
+
+    function scannerConfigWarningHtml_(){
+      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
+      return showBox('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
+    }
+
+    var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
+
+
+    function applyExternalScannerGuard_(msgId, buttonIds){
+      if(EXTERNAL_SCANNER_CONFIG.ok) return true;
+      (buttonIds || []).forEach(function(id){
+        var btn = $(id);
+        if(btn){
+          btn.disabled = true;
+          btn.title = 'External scanner disabled: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+        }
+      });
+      var msgEl = $(msgId || 'msg');
+      if(msgEl && !String(msgEl.innerHTML || '').trim()) msgEl.innerHTML = scannerConfigWarningHtml_();
+      return false;
     }
 
     function cameraPolicyAllowed_(){
@@ -369,8 +407,8 @@
     }
     function openExternalScanner_(opts){
       opts = opts || {};
-      if(!EXTERNAL_SCANNER_URL){
-        if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
+      if(!EXTERNAL_SCANNER_CONFIG.ok){
+        if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'External scanner configuration is invalid.');
         return null;
       }
       var state = randomStateToken_();
@@ -382,7 +420,7 @@
         onError: opts.onError
       };
 
-      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      var target = new URL(EXTERNAL_SCANNER_URL);
       var origin = '';
       try{ origin = String(window.location.origin || ''); }catch(e){}
       if(!origin && window.location){ origin = window.location.protocol + '//' + window.location.host; }
@@ -1216,6 +1254,7 @@
 
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
+        applyExternalScannerGuard_('msg', []);
         if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
           navigateToLivePortal();
         };
@@ -1399,7 +1438,10 @@
         });
       }
 
+      applyExternalScannerGuard_('scanMsg', ['btnExternalScan']);
+
       $('btnExternalScan').onclick = function(){
+        if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnExternalScan']); return; }
         stopScan();
         openExternalScanner_(onCaptured, function(status){
           if(status === 'success') return;
@@ -1413,6 +1455,10 @@
           }
           if(status === 'blocked'){
             $('scanMsg').innerHTML = showBox('err','彈出視窗被封鎖','Popup was blocked.');
+            return;
+          }
+          if(status === 'config_invalid'){
+            applyExternalScannerGuard_('scanMsg', ['btnExternalScan']);
           }
         });
       };

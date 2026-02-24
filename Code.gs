@@ -28,6 +28,7 @@ const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
 const SESSION_TTL_SECONDS = 4 * 60 * 60;
+const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
 
 // Sheets
 const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
@@ -119,9 +120,26 @@ function doGet(e) {
 
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
+  const scannerCfg = getExternalScannerConfig_();
+  t.EXTERNAL_SCANNER_URL = scannerCfg.url;
+  t.EXTERNAL_SCANNER_ORIGIN = scannerCfg.origin;
+  t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
   return t.evaluate()
     .setTitle('CCF Live Service Portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function getExternalScannerConfig_(){
+  try{
+    const p = PropertiesService.getScriptProperties();
+    return {
+      url: String(p.getProperty('EXTERNAL_SCANNER_URL') || '').trim(),
+      origin: String(p.getProperty('EXTERNAL_SCANNER_ORIGIN') || '').trim(),
+      timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS
+    };
+  }catch(e){
+    return { url:'', origin:'', timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS };
+  }
 }
 
 
