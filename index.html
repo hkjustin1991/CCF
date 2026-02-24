@@ -215,6 +215,10 @@
 
     function $(id){ return document.getElementById(id); }
 
+    function shouldShowCrossPortalSwitch(){
+      return !(App && App.token);
+    }
+
     function getApiEndpoint(){
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
@@ -1044,11 +1048,14 @@
 
     // ===== Views =====
     function viewLogin(){
+      var switchBtn = shouldShowCrossPortalSwitch()
+        ? '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'
+        : '';
       return ''+
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">🔐 LOG IN / 登入</div>'+
-            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'+
+            switchBtn+
           '</div>'+
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
