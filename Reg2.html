@@ -244,6 +244,70 @@
       return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
     }
 
+
+
+    var EXTERNAL_SCANNER_URL = String(window.EXTERNAL_SCANNER_URL || '');
+    var EXTERNAL_SCANNER_ORIGIN = String(window.EXTERNAL_SCANNER_ORIGIN || '');
+    var pendingExternalScanner_ = null;
+
+    if(!EXTERNAL_SCANNER_ORIGIN && EXTERNAL_SCANNER_URL){
+      try{ EXTERNAL_SCANNER_ORIGIN = String(new URL(EXTERNAL_SCANNER_URL, window.location.href).origin || ''); }catch(e){}
+    }
+
+    function cameraPolicyAllowed_(){
+      try{
+        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function') return !!document.featurePolicy.allowsFeature('camera');
+        if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function') return !!document.permissionsPolicy.allowsFeature('camera');
+      }catch(e){}
+      return true;
+    }
+    function shouldPreferExternalScanner_(){
+      var topSelf = true;
+      try{ topSelf = (window.top === window.self); }catch(e){ topSelf = false; }
+      return !cameraPolicyAllowed_() || !topSelf;
+    }
+    function randomStateToken_(){
+      var arr = new Uint8Array(16);
+      if(window.crypto && window.crypto.getRandomValues){ window.crypto.getRandomValues(arr); }
+      else { for(var i=0;i<arr.length;i++) arr[i]=Math.floor(Math.random()*256); }
+      var out='';
+      for(var j=0;j<arr.length;j++) out += arr[j].toString(16).padStart(2,'0');
+      return out;
+    }
+    function openExternalScanner_(opts){
+      opts = opts || {};
+      if(!EXTERNAL_SCANNER_URL){
+        if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
+        return null;
+      }
+      var state = randomStateToken_();
+      pendingExternalScanner_ = { state: state, flow: String(opts.flow || ''), onPayload: opts.onPayload };
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      var origin = '';
+      try{ origin = String(window.location.origin || ''); }catch(e){}
+      if(!origin && window.location){ origin = window.location.protocol + '//' + window.location.host; }
+      target.searchParams.set('origin', origin);
+      target.searchParams.set('state', state);
+      target.searchParams.set('flow', pendingExternalScanner_.flow);
+
+      var w = null;
+      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
+      if(!w){ try{ window.location.href = target.toString(); }catch(e2){} }
+      return state;
+    }
+
+    window.addEventListener('message', function(event){
+      if(!pendingExternalScanner_) return;
+      if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
+      var data = event.data || {};
+      if(!data || data.type !== 'CCF_QR_RESULT') return;
+      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var cb = pendingExternalScanner_.onPayload;
+      pendingExternalScanner_ = null;
+      if(typeof cb === 'function') cb(data.payload);
+    });
+
     function normalizeVrm(s){
       return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
     }
@@ -930,6 +994,7 @@
           '<div class="small">掃描你的 QR 以使用自助功能（只作登記，不會自動簽到）。</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnOpenExternalScan" class="alt" type="button">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
