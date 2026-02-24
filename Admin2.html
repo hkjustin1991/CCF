@@ -374,15 +374,39 @@
       });
     }
 
+    function callApiViaGas(fn, args){
+      return new Promise(function(resolve, reject){
+        try{
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          runner[fn].apply(runner, args || []);
+        }catch(err){
+          reject(err);
+        }
+      });
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
-      if(endpoint){
-        return callApiViaRpc(endpoint, fn, args);
+      var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+
+      if(forceRpcOnce){
+        window.CCF_FORCE_RPC_ONCE = false;
+        if(endpoint) return callApiViaRpc(endpoint, fn, args);
       }
-      return new Promise(function(resolve, reject){
-        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-        runner[fn].apply(runner, args);
+
+      return callApiViaGas(fn, args).catch(function(err){
+        if(endpoint){
+          var msg = String((err && err.message) || err || 'GAS call failed');
+          throw {
+            code:'E530',
+            zh:'GAS 連線失敗，請改用 Git 再試',
+            en:'GAS failed. Please retry with Git API.',
+            detail: msg,
+            gasFailed:true
+          };
+        }
+        throw err;
       });
     }
 
@@ -549,6 +573,17 @@
         escapeHtml((res && res.en) || 'System error'),
         detail
       );
+    }
+
+
+
+    function bindGasRetryButton_(targetId, retryFn){
+      var btnId = targetId + '_retryGit';
+      setTimeout(function(){
+        var btn = $(btnId);
+        if(btn) btn.onclick = function(){ window.CCF_FORCE_RPC_ONCE = true; retryFn(); };
+      }, 0);
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="btnBack" type="button">改用 Git 再試 / Retry with Git API</button></div>';
     }
 
     function attachScrollControls_(root){
@@ -937,13 +972,19 @@
     }
     function openExternalScanner_(opts){
       opts = opts || {};
-      var flow = String(opts.flow || '');
+      var flow = String(opts.flow || 'admin');
       if(!EXTERNAL_SCANNER_URL){
         if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
         return null;
       }
       var state = randomStateToken_();
-      pendingExternalScanner_ = { state: state, flow: flow, onPayload: opts.onPayload };
+      pendingExternalScanner_ = {
+        state: state,
+        flow: flow,
+        onPayload: opts.onPayload,
+        onCancel: opts.onCancel,
+        onError: opts.onError
+      };
 
       var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
       var origin = '';
@@ -954,8 +995,12 @@
       target.searchParams.set('flow', flow);
 
       var w = null;
-      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
-      if(!w){ try{ window.location.href = target.toString(); }catch(e2){} }
+      try{ w = window.open(target.toString(), '_blank', 'width=460,height=760'); }catch(e){}
+      if(!w){
+        pendingExternalScanner_ = null;
+        if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        return null;
+      }
       return state;
     }
 
@@ -963,11 +1008,16 @@
       if(!pendingExternalScanner_) return;
       if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
       var data = event.data || {};
-      if(!data || data.type !== 'CCF_QR_RESULT') return;
-      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
-      var cb = pendingExternalScanner_.onPayload;
+      if(!data || String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var type = String(data.type || '');
+      if(type !== 'CCF_QR_RESULT' && type !== 'CCF_QR_CANCEL' && type !== 'CCF_QR_ERROR') return;
+      var cbPayload = pendingExternalScanner_.onPayload;
+      var cbCancel = pendingExternalScanner_.onCancel;
+      var cbError = pendingExternalScanner_.onError;
       pendingExternalScanner_ = null;
-      if(typeof cb === 'function') cb(data.payload);
+      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
+      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
+      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
     });
 
     function viewLogin(){
@@ -1223,7 +1273,16 @@
               if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
               closeModal(modal);
               onLoginRes(res);
-            }).catch(function(){
+            }).catch(function(err){
+              if(err && err.gasFailed){
+                showErr('scanMsg', {
+                  code: err.code || 'E530',
+                  zh: err.zh || 'GAS 連線失敗，請改用 Git 再試',
+                  en: err.en || 'GAS failed. Please retry with Git API.',
+                  detailHtml: bindGasRetryButton_('scanMsg', beginScan)
+                });
+                return;
+              }
               showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
             });
           });
@@ -3148,10 +3207,16 @@
         btnOpenExternal.onclick = function(){
           clear('msg');
           openExternalScanner_({
-            flow:'admin_reauth',
+            flow:'admin',
             onPayload:handleReauthPayload_,
+            onCancel:function(){
+              showBox('msg','warn','已取消掃描','Scan cancelled.');
+            },
+            onPopupBlocked:function(){
+              showBox('msg','warn','未能打開彈出視窗，請使用下方內置掃描器','Popup blocked; please use built-in scanner below.');
+            },
             onError:function(msg){
-              showErr('msg', {code:'E500', zh:'外部掃描器未設定', en:'External scanner is not configured', detail: String(msg||'')});
+              showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
             }
           });
         };
