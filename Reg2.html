@@ -193,15 +193,39 @@
       });
     }
 
+    function callApiViaGas(fn, args){
+      return new Promise(function(resolve, reject){
+        try{
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          runner[fn].apply(runner, args || []);
+        }catch(err){
+          reject(err);
+        }
+      });
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
-      if(endpoint){
-        return callApiViaRpc(endpoint, fn, args);
+      var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+
+      if(forceRpcOnce){
+        window.CCF_FORCE_RPC_ONCE = false;
+        if(endpoint) return callApiViaRpc(endpoint, fn, args);
       }
-      return new Promise(function(resolve, reject){
-        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-        runner[fn].apply(runner, args);
+
+      return callApiViaGas(fn, args).catch(function(err){
+        if(endpoint){
+          var msg = String((err && err.message) || err || 'GAS call failed');
+          throw {
+            code:'E530',
+            zh:'GAS 連線失敗，請改用 Git 再試',
+            en:'GAS failed. Please retry with Git API.',
+            detail: msg,
+            gasFailed:true
+          };
+        }
+        throw err;
       });
     }
 
@@ -209,6 +233,17 @@
       s = String(s || '');
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
               .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    function toDmy(ymd){
+      var s = String(ymd || '').trim();
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m) return '';
+      var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+      if(y < 1000 || y > 9999 || mo < 1 || mo > 12) return '';
+      var dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() !== y || dt.getMonth() !== (mo - 1) || dt.getDate() !== d) return '';
+      return m[3] + '/' + m[2] + '/' + m[1];
     }
 
     function getDeviceId(){
@@ -297,6 +332,11 @@
       return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
     }
 
+    function navigateToLivePortal(){
+      var target = window.location.origin + window.location.pathname;
+      window.location.href = target;
+    }
+
 
 
     var EXTERNAL_SCANNER_URL = String(window.EXTERNAL_SCANNER_URL || '');
@@ -334,7 +374,13 @@
         return null;
       }
       var state = randomStateToken_();
-      pendingExternalScanner_ = { state: state, flow: String(opts.flow || ''), onPayload: opts.onPayload };
+      pendingExternalScanner_ = {
+        state: state,
+        flow: String(opts.flow || 'reg'),
+        onPayload: opts.onPayload,
+        onCancel: opts.onCancel,
+        onError: opts.onError
+      };
 
       var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
       var origin = '';
@@ -345,8 +391,12 @@
       target.searchParams.set('flow', pendingExternalScanner_.flow);
 
       var w = null;
-      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
-      if(!w){ try{ window.location.href = target.toString(); }catch(e2){} }
+      try{ w = window.open(target.toString(), '_blank', 'width=460,height=760'); }catch(e){}
+      if(!w){
+        pendingExternalScanner_ = null;
+        if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        return null;
+      }
       return state;
     }
 
@@ -354,15 +404,46 @@
       if(!pendingExternalScanner_) return;
       if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
       var data = event.data || {};
-      if(!data || data.type !== 'CCF_QR_RESULT') return;
-      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
-      var cb = pendingExternalScanner_.onPayload;
+      if(!data || String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var type = String(data.type || '');
+      if(type !== 'CCF_QR_RESULT' && type !== 'CCF_QR_CANCEL' && type !== 'CCF_QR_ERROR') return;
+      var cbPayload = pendingExternalScanner_.onPayload;
+      var cbCancel = pendingExternalScanner_.onCancel;
+      var cbError = pendingExternalScanner_.onError;
       pendingExternalScanner_ = null;
-      if(typeof cb === 'function') cb(data.payload);
+      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
+      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
+      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
     });
 
     function normalizeVrm(s){
       return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+    }
+
+    function normalizeServingGroupKey(g){
+      var up = String(g||'').trim().toUpperCase();
+      if (!up) return '';
+      if (up === 'WORSHIP' || up === 'WORSHIP ALLIANCE' || up === '敬拜聯盟') return 'WORSHIP';
+      if (up === 'MEDIA' || up === 'MEDIA MASTER' || up === '影像大師') return 'MEDIA';
+      if (up === 'LOGISTIC' || up === 'LOGISTICS' || up === 'LOGISTIC SPECIALIST' || up === '後勤特工') return 'LOGISTIC';
+      if (up === 'SUPPORT' || up === 'DIVINE SUPPORTER' || up === '聖工支援隊') return 'SUPPORT';
+      if (up === 'FINANCE' || up === 'FINANCE DEPT' || up === '財務公司') return 'FINANCE';
+      return up;
+    }
+
+    function servingGroupCss(k){
+      var x = normalizeServingGroupKey(k).toLowerCase();
+      return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
+    }
+
+    function servingGroupLabel(k){
+      var up = normalizeServingGroupKey(k);
+      if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
+      if (up==='MEDIA') return '影像大師 / Media Master';
+      if (up==='LOGISTIC') return '後勤特工 / Logistic Specialist';
+      if (up==='SUPPORT') return '聖工支援隊 / Divine Supporter';
+      if (up==='FINANCE') return '財務公司 / Finance Dept';
+      return up || 'OTHER';
     }
 
     var State = {
@@ -642,71 +723,10 @@
 
     /******** Views ********/
     function openExternalScannerPopup_(onCaptured){
-      var popup = window.open('', 'ccfReg2QrScanner', 'width=460,height=720,noopener=no,noreferrer=no');
-      if(!popup){
-        return false;
-      }
-
-      var popupHtml = ''+
-        '<!doctype html><html><head><meta charset="utf-8" />'+
-        '<meta name="viewport" content="width=device-width,initial-scale=1" />'+
-        '<title>Scan QR</title>'+
-        '<style>'+
-          'body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;padding:14px;background:#eefbe9;color:#0d1b3d;}'+
-          '.card{background:#fff;border:1px solid rgba(10,30,80,0.12);border-radius:14px;padding:14px;}'+
-          '.video{width:100%;aspect-ratio:4/3;background:#000;border-radius:12px;object-fit:contain;}'+
-          '.msg{font-size:14px;color:#5a6b90;margin-top:10px;line-height:1.45;}'+
-          'button{width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid rgba(10,30,80,0.12);font-weight:800;background:#eef4ff;color:#0d1b3d;}'+
-          'details{margin-top:10px;border:1px dashed rgba(10,30,80,0.2);border-radius:12px;padding:10px;background:#fffaf0;}'+
-          'summary{font-weight:800;cursor:pointer;}'+
-          'input[type=file]{margin-top:10px;width:100%;}'+
-        '</style></head><body>'+
-        '<div class="card">'+
-          '<div style="font-weight:900;font-size:20px;">📷 掃描 QR / Scan QR</div>'+
-          '<video id="video" class="video" playsinline muted autoplay></video>'+
-          '<div id="msg" class="msg">Opening camera...</div>'+
-          '<button id="btnRetry" type="button">Tap again / 再按一次</button>'+
-          '<details><summary>Emergency only: upload QR image</summary>'+
-            '<div class="msg">Use only when camera is unavailable.</div>'+
-            '<input id="file" type="file" accept="image/*" />'+
-          '</details>'+
-        '</div>'+
-        '<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"><\/script>'+
-        '<script>'+
-          '(function(){'+
-            'var stream=null, raf=null, detector=null;'+
-            'var video=document.getElementById("video");'+
-            'var msg=document.getElementById("msg");'+
-            'function stop(){ if(raf) cancelAnimationFrame(raf); raf=null; if(stream){ try{ stream.getTracks().forEach(function(t){t.stop();}); }catch(e){} } stream=null; }'+
-            'function send(payload){ try{ if(window.opener && !window.opener.closed){ window.opener.postMessage({ type:"ccf-reg2-qr", payload:String(payload||"") }, "*"); } }catch(e){} stop(); window.close(); }'+
-            'function loop(){ if(!video || video.readyState<2){ raf=requestAnimationFrame(loop); return; }'+
-              'try{ if("BarcodeDetector" in window){ detector = detector || new BarcodeDetector({ formats:["qr_code"] }); detector.detect(video).then(function(codes){ var v=(codes&&codes.length&&codes[0].rawValue)?codes[0].rawValue:null; if(v){ send(v); return; } raf=requestAnimationFrame(loop); }).catch(function(){ raf=requestAnimationFrame(loop); }); return; } }catch(e){}'+
-              'try{ var c=document.createElement("canvas"); var x=c.getContext("2d",{ willReadFrequently:true }); c.width=video.videoWidth; c.height=video.videoHeight; x.drawImage(video,0,0,c.width,c.height); var img=x.getImageData(0,0,c.width,c.height); var qr=window.jsQR?window.jsQR(img.data,c.width,c.height):null; if(qr&&qr.data){ send(qr.data); return; } }catch(e){}'+
-              'raf=requestAnimationFrame(loop);'+
-            '}'+
-            'function start(){ stop(); msg.textContent="Opening camera...";'+
-              'if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ msg.textContent="Camera not supported on this device."; return; }'+
-              'navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:"environment" } }, audio:false }).then(function(s){ stream=s; video.srcObject=s; return video.play(); }).then(function(){ msg.textContent="Scanning..."; loop(); }).catch(function(){ msg.textContent="Camera did not open. Tap again."; });'+
-            '}'+
-            'document.getElementById("btnRetry").onclick=start;'+
-            'document.getElementById("file").addEventListener("change", function(evt){ var f=evt.target&&evt.target.files&&evt.target.files[0]; if(!f) return; var fr=new FileReader(); fr.onload=function(){ var img=new Image(); img.onload=function(){ try{ var c=document.createElement("canvas"); var x=c.getContext("2d",{ willReadFrequently:true }); c.width=img.width; c.height=img.height; x.drawImage(img,0,0); var data=x.getImageData(0,0,c.width,c.height); var qr=window.jsQR?window.jsQR(data.data,c.width,c.height):null; if(qr&&qr.data){ send(qr.data); return; } msg.textContent="No QR code found in image."; }catch(e){ msg.textContent="Image decode failed."; } }; img.src=String(fr.result||""); }; fr.readAsDataURL(f); });'+
-            'window.addEventListener("beforeunload", stop); start();'+
-          '})();'+
-        '<\/script>'+
-        '</body></html>';
-
-      popup.document.open();
-      popup.document.write(popupHtml);
-      popup.document.close();
-
-      function onMessage(evt){
-        var data = evt && evt.data;
-        if(!data || data.type !== 'ccf-reg2-qr') return;
-        window.removeEventListener('message', onMessage);
-        if(typeof onCaptured === 'function') onCaptured(String(data.payload || ''));
-      }
-      window.addEventListener('message', onMessage);
-      return true;
+      return !!openExternalScanner_({
+        flow:'reg',
+        onPayload:onCaptured
+      });
     }
 
     function viewHome(){
@@ -740,27 +760,11 @@
       var serviceAttended = (snap.attendance && typeof snap.attendance.attended !== 'undefined') ? snap.attendance.attended : 0;
       var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
-      function mapGroupKey_(g){
-        var up = String(g||'').trim().toUpperCase();
-        if (up === 'WORSHIP' || up === 'WORSHIP ALLIANCE' || up === '敬拜聯盟') return 'worship';
-        if (up === 'MEDIA' || up === 'MEDIA MASTER' || up === '影像大師') return 'media';
-        if (up === 'LOGISTIC' || up === 'LOGISTICS' || up === 'LOGISTIC SPECIALIST' || up === '後勤特工') return 'logistic';
-        if (up === 'SUPPORT' || up === 'DIVINE SUPPORTER' || up === '聖工支援隊') return 'support';
-        if (up === 'FINANCE' || up === 'FINANCE DEPT' || up === '財務公司') return 'finance';
-        return String(g||'').toLowerCase();
-      }
-      function groupLabel_(k){
-        if (k==='worship') return '敬拜聯盟 / Worship Alliance';
-        if (k==='media') return '影像大師 / Media Master';
-        if (k==='logistic') return '後勤特工 / Logistic Specialist';
-        if (k==='support') return '聖工支援隊 / Divine Supporter';
-        if (k==='finance') return '財務公司 / Finance Dept';
-        return k || '—';
-      }
       var groupHtml = groups.map(function(g){
-        var cls = mapGroupKey_(g);
-        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<span class="groupBadge '+cls+'">'+escapeHtml(groupLabel_(cls))+'</span>';
-        return '<span class="groupBadge">'+escapeHtml(groupLabel_(cls))+'</span>';
+        var canonicalGroup = normalizeServingGroupKey(g);
+        var cls = servingGroupCss(canonicalGroup);
+        if (cls) return '<span class="groupBadge '+cls+'">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
+        return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
       }).join('');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
@@ -797,7 +801,6 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
@@ -854,19 +857,6 @@
       res = res || {};
       var m = res.member || {};
       var labelsById = res.memberLabelsById || {};
-      function groupLabel(k){
-        var up = String(k||'').toUpperCase();
-        if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
-        if (up==='MEDIA') return '影像大師 / Media Master';
-        if (up==='LOGISTIC') return '後勤特工 / Logistic Specialist';
-        if (up==='SUPPORT') return '聖工支援隊 / Divine Supporter';
-        if (up==='FINANCE') return '財務公司 / Finance Dept';
-        return up || 'OTHER';
-      }
-      function groupCss(k){
-        var x = String(k||'').toLowerCase();
-        return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
-      }
       function positionEnFromKey_(k){
         var parts = String(k||'').split('_');
         if (parts.length <= 1) return String(k||'');
@@ -878,11 +868,11 @@
         return labelsById[mid] || mid;
       }
 
-      var memberGroups = (m.servingGroups || []).map(function(g){ return String(g||'').trim().toUpperCase(); }).filter(Boolean);
+      var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
       var groupButtons = memberGroups.map(function(g){
-        var isActive = (String(State.servingGroup||'').toUpperCase() === g);
-        var cls = 'groupBadge '+groupCss(g)+(isActive ? ' activeGroup' : '');
-        return '<button class="'+cls+'" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(groupLabel(g))+'</button>';
+        var isActive = (normalizeServingGroupKey(State.servingGroup) === g);
+        var cls = 'groupBadge '+servingGroupCss(g)+(isActive ? ' activeGroup' : '');
+        return '<button class="'+cls+'" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(servingGroupLabel(g))+'</button>';
       }).join('');
 
       var events = Array.isArray(res.events) ? res.events : [];
@@ -895,8 +885,8 @@
       });
       var months = Object.keys(monthMap).sort();
       var selectedMonth = (months.indexOf(State.servingMonth) >= 0) ? State.servingMonth : (months[0] || '');
-      var selectedGroup = (memberGroups.indexOf(String(State.servingGroup||'').toUpperCase()) >= 0)
-        ? String(State.servingGroup||'').toUpperCase()
+      var selectedGroup = (memberGroups.indexOf(normalizeServingGroupKey(State.servingGroup)) >= 0)
+        ? normalizeServingGroupKey(State.servingGroup)
         : (memberGroups[0] || '');
 
       var monthButtons = months.map(function(k){
@@ -905,7 +895,7 @@
       }).join('');
 
       var positions = (res.positions || []).filter(function(p){
-        var g = String(p.group||'').trim().toUpperCase();
+        var g = normalizeServingGroupKey(p.group);
         return (!selectedGroup || g === selectedGroup);
       });
       var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth].events : [];
@@ -952,7 +942,7 @@
           '<div class="miniBtnRow">'+(groupButtons || '<span class="pill">—</span>')+'</div>'+
         '</div>'+
         '<div class="card">'+
-          '<div><span class="groupBadge '+groupCss(selectedGroup)+'">'+escapeHtml(groupLabel(selectedGroup))+'</span></div>'+
+          '<div><span class="groupBadge '+servingGroupCss(selectedGroup)+'">'+escapeHtml(servingGroupLabel(selectedGroup))+'</span></div>'+
           tableHtml+
         '</div>'+
         '<div class="card"><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
@@ -1002,10 +992,10 @@
     function viewSelfHoliday(m){
       m = m || {}; var a = m.away || {};
       return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
-        '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from1||''))+'" />'+
-        '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to1||''))+'" />'+
-        '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from2||''))+'" />'+
-        '<div class="label">假期 2 To</div><input id="hTo2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to2||''))+'" />'+
+        '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.from1||''))+'" />'+
+        '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.to1||''))+'" />'+
+        '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.from2||''))+'" />'+
+        '<div class="label">假期 2 To</div><input id="hTo2" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.to2||''))+'" />'+
         '<div class="miniBtnRow"><button id="btnHolidaySave" class="primary">✅ 儲存 / Save</button><button id="btnHolidayBack" class="danger">⬅️ 返回 / Back</button></div><div id="holidayMsg"></div></div>';
     }
 
@@ -1227,7 +1217,7 @@
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
         if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-          window.location.href = '?';
+          navigateToLivePortal();
         };
         $('btnNew').onclick = function(){
           State.view = 'form';
@@ -1239,16 +1229,28 @@
         };
         $('btnScan').onclick = function(){
           $('msg').innerHTML = showBox('warn','正在打開掃描器…','Opening scanner…');
-          var opened = openExternalScannerPopup_(function(payload){
-            State.view = 'scan';
-            render();
-            handleScanPayload_(payload);
+          var opened = openExternalScanner_({
+            flow:'reg',
+            onPayload:function(payload){
+              State.view = 'scan';
+              render();
+              handleScanPayload_(payload);
+            },
+            onCancel:function(){
+              $('msg').innerHTML = showBox('warn','已取消掃描','Scan cancelled.');
+            },
+            onError:function(detail){
+              State.view = 'scan';
+              render();
+              $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>');
+            },
+            onPopupBlocked:function(){
+              State.view = 'scan';
+              render();
+              $('scanMsg').innerHTML = showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>');
+            }
           });
-          if(!opened){
-            State.view = 'scan';
-            render();
-            $('scanMsg').innerHTML = showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>');
-          }
+          if(opened){ $('msg').innerHTML = showBox('warn','請在彈出視窗完成掃描','Complete scanning in the popup.'); }
         };
         return;
       }
@@ -1420,9 +1422,6 @@
 
     function bindSelfHome(){
       var selfMsgEl = $('selfMsg');
-      if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-        window.location.href = '?';
-      };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;
@@ -1518,14 +1517,14 @@
     function bindServing(){
       function needsServingDataRefresh(){
         var res = State.lastResult || {};
-        var selectedGroup = String(State.servingGroup||'').trim().toUpperCase();
+        var selectedGroup = normalizeServingGroupKey(State.servingGroup);
         var selectedMonth = String(State.servingMonth||'').trim();
         if (!res.ok) return true;
         if (!selectedGroup) return false;
 
         var positions = Array.isArray(res.positions) ? res.positions : [];
         var hasGroupPositions = positions.some(function(p){
-          return String((p && p.group) || '').trim().toUpperCase() === selectedGroup;
+          return normalizeServingGroupKey((p && p.group) || '') === selectedGroup;
         });
         if (!hasGroupPositions) return true;
 

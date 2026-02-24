@@ -199,11 +199,15 @@
       authRole:null,
       authFlash:null,
 
+      // Check-in image upload handoff
+      pendingCheckinPayload:null,
+
       // Manual UI state
       manualLastQuery:'',
       manualSelectedId:null,
       manualLocked:false,
-      servingOpenGroup:null
+      servingOpenGroup:null,
+      uploadCheckinAutoPick:false
     };
 
     const EXTERNAL_SCANNER_URL = 'https://<org>.github.io/<repo>/scanner/';
@@ -214,6 +218,10 @@
     var STABLE_REQUIRED_MS = 250;
 
     function $(id){ return document.getElementById(id); }
+
+    function shouldShowCrossPortalSwitch(){
+      return !(App && App.token);
+    }
 
     function getApiEndpoint(){
       try{
@@ -243,15 +251,39 @@
       });
     }
 
+    function callApiViaGas(fn, args){
+      return new Promise(function(resolve, reject){
+        try{
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          runner[fn].apply(runner, args || []);
+        }catch(err){
+          reject(err);
+        }
+      });
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
-      if(endpoint){
-        return callApiViaRpc(endpoint, fn, args);
+      var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+
+      if(forceRpcOnce){
+        window.CCF_FORCE_RPC_ONCE = false;
+        if(endpoint) return callApiViaRpc(endpoint, fn, args);
       }
-      return new Promise(function(resolve, reject){
-        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-        runner[fn].apply(runner, args);
+
+      return callApiViaGas(fn, args).catch(function(err){
+        if(endpoint){
+          var msg = String((err && err.message) || err || 'GAS call failed');
+          throw {
+            code:'E530',
+            zh:'GAS 連線失敗，請改用 Git 再試',
+            en:'GAS failed. Please retry with Git API.',
+            detail: msg,
+            gasFailed:true
+          };
+        }
+        throw err;
       });
     }
 
@@ -300,7 +332,13 @@
         return null;
       }
       var state = randomStateToken_();
-      pendingExternalScanner_ = { state: state, flow: flow, onPayload: opts.onPayload };
+      pendingExternalScanner_ = {
+        state: state,
+        flow: flow,
+        onPayload: opts.onPayload,
+        onCancel: opts.onCancel,
+        onError: opts.onError
+      };
 
       var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
       var origin = '';
@@ -311,9 +349,11 @@
       target.searchParams.set('flow', flow);
 
       var w = null;
-      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
+      try{ w = window.open(target.toString(), '_blank', 'width=460,height=760'); }catch(e){}
       if(!w){
-        try{ window.location.href = target.toString(); }catch(e2){}
+        pendingExternalScanner_ = null;
+        if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        return null;
       }
       return state;
     }
@@ -322,11 +362,16 @@
       if(!pendingExternalScanner_) return;
       if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
       var data = event.data || {};
-      if(!data || data.type !== 'CCF_QR_RESULT') return;
-      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
-      var cb = pendingExternalScanner_.onPayload;
+      if(!data || String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var type = String(data.type || '');
+      if(type !== 'CCF_QR_RESULT' && type !== 'CCF_QR_CANCEL' && type !== 'CCF_QR_ERROR') return;
+      var cbPayload = pendingExternalScanner_.onPayload;
+      var cbCancel = pendingExternalScanner_.onCancel;
+      var cbError = pendingExternalScanner_.onError;
       pendingExternalScanner_ = null;
-      if(typeof cb === 'function') cb(data.payload);
+      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
+      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
+      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
     });
 
     function escapeHtml(s){
@@ -449,6 +494,22 @@
         escapeHtml((res && res.en) || 'Error'),
         detail
       );
+    }
+
+
+    function bindGasRetryActions_(targetId, retryFn, includeUpload){
+      var retryId = targetId + '_retryGit';
+      var uploadId = targetId + '_uploadQr';
+      setTimeout(function(){
+        var r = $(retryId);
+        if(r) r.onclick = function(){ window.CCF_FORCE_RPC_ONCE = true; retryFn(); };
+        var u = $(uploadId);
+        if(u && includeUpload) u.onclick = function(){ var i = $('checkinQrImageInput'); if(i){ i.value=''; i.click(); } };
+      }, 0);
+      return '<div class="miniBtnRow">'+
+        '<button id="'+retryId+'" class="alt" type="button">改用 Git 再試 / Retry with Git API</button>'+
+        (includeUpload ? '<button id="'+uploadId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button>' : '')+
+      '</div>';
     }
 
     function attachScrollControls_(root){
@@ -1048,11 +1109,14 @@
 
     // ===== Views =====
     function viewLogin(){
+      var switchBtn = shouldShowCrossPortalSwitch()
+        ? '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'
+        : '';
       return ''+
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">🔐 LOG IN / 登入</div>'+
-            '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'+
+            switchBtn+
           '</div>'+
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
@@ -1128,11 +1192,14 @@
           '<div class="small" id="checkinEventKey"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="goScanCheckin" class="primary">📷 掃描 QR 卡 / Scan QR badge</button>'+
+            '<button id="btnCheckinUploadQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<input id="checkinQrImageInput" type="file" accept="image/*" class="hide" />'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="goManualCheckin" class="alt">🔎 手動搜尋 / Manual search</button>'+
             '<button id="backMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>'+
+          '<div id="checkinMenuMsg"></div>'+
         '</div>';
     }
 
@@ -1458,7 +1525,25 @@
         function onCapturedLogin(text){
           toggleVideoWrap_('videoLogin', false);
           $('loginCam').classList.add('hide');
-          applyLoginPayload_(text);
+          callApi('api_login', text).then(function(res){
+            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+            App.token = res.token;
+            App.staff = res.staff;
+            try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
+            App.view='menu';
+            render();
+          }).catch(function(err){
+            if(err && err.gasFailed){
+              showErr('msg', {
+                code: err.code || 'E530',
+                zh: err.zh || 'GAS 連線失敗，請改用 Git 再試',
+                en: err.en || 'GAS failed. Please retry with Git API.',
+                detailHtml: bindGasRetryActions_('msg', function(){ onCapturedLogin(text); }, true)
+              });
+              return;
+            }
+            showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
+          });
         }
 
         startScan('videoLogin', onCapturedLogin, 'msg');
@@ -1530,6 +1615,32 @@
       ensureEventKey_();
       setEventKeyLine_('checkinEventKey');
       $('goScanCheckin').onclick = function(){ App.view='scanCheckin'; render(); };
+
+      if ($('btnCheckinUploadQr') && $('checkinQrImageInput')){
+        $('btnCheckinUploadQr').onclick = function(){
+          clear('checkinMenuMsg');
+          var input = $('checkinQrImageInput');
+          input.value = '';
+          input.click();
+        };
+
+        $('checkinQrImageInput').onchange = function(ev){
+          clear('checkinMenuMsg');
+          var f = ev && ev.target && ev.target.files && ev.target.files[0];
+          if(!f) return;
+          $('checkinMenuMsg').innerHTML = '<div class="small">正在解碼 QR… / Decoding QR…</div>';
+          decodeQrFromImageFile_(f).then(function(payload){
+            App.pendingCheckinPayload = String(payload || '');
+            App.view='scanCheckin';
+            render();
+          }).catch(function(err){
+            showErr('checkinMenuMsg', err || {code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+          }).finally(function(){
+            ev.target.value = '';
+          });
+        };
+      }
+
       $('goManualCheckin').onclick = function(){ App.view='manualCheckin'; render(); };
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
     }
@@ -1629,6 +1740,10 @@
         });
       }
 
+      function onCaptured(text){
+        submitCheckinPayload(text, false);
+      }
+
       function start(){
         clear('scanMsg');
         var cam = $('scanCam');
@@ -1638,13 +1753,25 @@
 
       function startExternal(){
         clear('scanMsg');
-        openExternalScanner_({
+        var opened = openExternalScanner_({
           flow:'checkin',
           onPayload:onCaptured,
+          onPopupBlocked:function(){
+            showBox('scanMsg', 'warn', '未能打開彈出視窗，已保留內置掃描器', 'Popup blocked; built-in scanner is still available.');
+          },
+          onCancel:function(){
+            showBox('scanMsg', 'warn', '已取消掃描', 'Scan cancelled.');
+          },
           onError:function(msg){
-            showBox('scanMsg', 'err', '外部掃描器未設定', 'External scanner is not configured', '<div class="small">'+escapeHtml(msg||'')+'</div>');
+            var text = String(msg||'');
+            if(text.indexOf('not configured') !== -1){
+              showBox('scanMsg', 'err', '外部掃描器未設定', 'External scanner is not configured', '<div class="small">'+escapeHtml(text)+'</div>');
+              return;
+            }
+            showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:text});
           }
         });
+        if(!opened){ return; }
       }
 
       camBindSwitchButton_('btnSwitchCamCheckin', function(){
@@ -1686,6 +1813,13 @@
         stopScan();
         App.view='checkinMenu'; render();
       };
+
+      if(App.pendingCheckinPayload){
+        var pendingPayload = App.pendingCheckinPayload;
+        App.pendingCheckinPayload = null;
+        onCaptured(pendingPayload);
+        return;
+      }
 
       showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
     }
