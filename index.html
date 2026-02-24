@@ -917,8 +917,14 @@
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartLoginScan" class="primary">📷 掃描 QR 登入 / Scan QR to log in</button>'+
+            '<button id="btnLoginMoreOptions" class="alt">⚙️ 更多選項（緊急用） / More options (emergency only)</button>'+
+          '</div>'+
+          '<div id="loginMoreOptionsBox" class="card hide" style="margin-top:10px;">'+
+            '<div class="small">緊急備援：僅在相機完全不可用時使用。<br/>Emergency fallback: use only when camera is unavailable.</div>'+
+            '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnLoginUploadQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<input id="loginQrImageInput" type="file" accept="image/*" class="hide" />'+
+            '</div>'+
           '</div>'+
           '<div id="loginCam" class="card hide" style="margin-top:10px;">'+
             '<div class="big">📷 掃描中… / Scanning…</div>'+
@@ -1272,6 +1278,27 @@
         window.location.href = '?mode=reg';
       };
 
+      if ($('btnLoginMoreOptions') && $('loginMoreOptionsBox')){
+        $('btnLoginMoreOptions').onclick = function(){
+          var box = $('loginMoreOptionsBox');
+          if(!box) return;
+          box.classList.toggle('hide');
+        };
+      }
+
+      function applyLoginPayload_(payload){
+        callApi('api_login', payload).then(function(res){
+          if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+          App.token = res.token;
+          App.staff = res.staff;
+          try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
+          App.view='menu';
+          render();
+        }).catch(function(){
+          showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
+        });
+      }
+
       $('btnStartLoginScan').onclick = function(){
         clear('msg');
         $('loginCam').classList.remove('hide');
@@ -1289,16 +1316,7 @@
         function onCapturedLogin(text){
           toggleVideoWrap_('videoLogin', false);
           $('loginCam').classList.add('hide');
-          callApi('api_login', text).then(function(res){
-            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-            App.token = res.token;
-            App.staff = res.staff;
-            try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
-            App.view='menu';
-            render();
-          }).catch(function(){
-            showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
-          });
+          applyLoginPayload_(text);
         }
 
         startScan('videoLogin', onCapturedLogin, 'msg');
@@ -1318,20 +1336,28 @@
           showBox('msg', 'warn', '讀取圖片中…', 'Reading image…');
           decodeQrFromImageFile_(f).then(function(payload){
             showBox('msg', 'warn', '處理中…', 'Working…');
-            return callApi('api_login', payload);
-          }).then(function(res){
-            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-            App.token = res.token;
-            App.staff = res.staff;
-            try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
-            App.view='menu';
-            render();
+            return payload;
+          }).then(function(payload){
+            applyLoginPayload_(payload);
           }).catch(function(err){
             if(err && err.code){ showErr('msg', err); return; }
             showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
           });
         };
       }
+
+      try{
+        var qp = new URLSearchParams(window.location.search || '');
+        var handoff = String(qp.get('handoff') || '').trim();
+        if(!handoff){
+          handoff = String(sessionStorage.getItem('ccf_qr_handoff_payload') || '').trim();
+        }
+        if(handoff){
+          sessionStorage.removeItem('ccf_qr_handoff_payload');
+          showBox('msg', 'warn', '接收掃描結果中…', 'Receiving handoff payload…');
+          applyLoginPayload_(handoff);
+        }
+      }catch(e){}
 
       $('btnInternalOk').onclick = function(){
         clear('msg');

@@ -1112,31 +1112,7 @@
     function bindScan(){
       var v = $('video');
 
-      function restartScan(){
-        $('scanMsg').innerHTML = '';
-        startScan(v, onCaptured, function(e){
-          var detail = (e && e.detailHtml) ? e.detailHtml : '';
-          if(!detail && e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
-          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
-        });
-      }
-
-      $('btnCancelScan').onclick = function(){
-        stopScan();
-        State.view='home';
-        render();
-      };
-
-      if($('btnStartScanCam')) $('btnStartScanCam').onclick = function(){
-        restartScan();
-      };
-
-      camBindSwitchButton_($('btnSwitchCam'), function(){
-        stopScan();
-        restartScan();
-      });
-
-      function onCaptured(text){
+      function applySelfPortalPayload_(text){
         $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
 
         callApi('api_reg_self_lookup_public', text).then(function(res){
@@ -1165,7 +1141,47 @@
         });
       }
 
+      function restartScan(){
+        $('scanMsg').innerHTML = '';
+        startScan(v, onCaptured, function(e){
+          var detail = (e && e.detailHtml) ? e.detailHtml : '';
+          if(!detail && e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
+          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
+        });
+      }
+
+      $('btnCancelScan').onclick = function(){
+        stopScan();
+        State.view='home';
+        render();
+      };
+
+      if($('btnStartScanCam')) $('btnStartScanCam').onclick = function(){
+        restartScan();
+      };
+
+      camBindSwitchButton_($('btnSwitchCam'), function(){
+        stopScan();
+        restartScan();
+      });
+
+      function onCaptured(text){
+        applySelfPortalPayload_(text);
+      }
+
       $('scanMsg').innerHTML = showBox('warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
+
+      try{
+        var qp = new URLSearchParams(window.location.search || '');
+        var handoff = String(qp.get('handoff') || '').trim();
+        if(!handoff){
+          handoff = String(sessionStorage.getItem('ccf_qr_handoff_payload') || '').trim();
+        }
+        if(handoff){
+          sessionStorage.removeItem('ccf_qr_handoff_payload');
+          applySelfPortalPayload_(handoff);
+        }
+      }catch(e){}
     }
 
     function bindSelfHome(){
