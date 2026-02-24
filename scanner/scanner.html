@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CCF QR Scanner / 粵語基督徒團契</title>
+  <link rel="stylesheet" href="./scanner.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header class="topbar">
+      <h1>📷 掃描 QR / Scan QR</h1>
+      <p class="sub">請把 QR 置中對準鏡頭 / Center the QR in the camera view.</p>
+    </header>
+
+    <section class="card">
+      <div class="videoWrap">
+        <video id="video" playsinline muted autoplay></video>
+      </div>
+      <div id="status" class="status" aria-live="polite"></div>
+      <div class="actions">
+        <button id="btnRetry" class="alt" type="button">重新嘗試 / Retry</button>
+        <button id="btnCancel" class="danger" type="button">取消 / Cancel</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="./scanner.js"></script>
+</body>
+</html>
