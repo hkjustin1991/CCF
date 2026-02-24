@@ -64,6 +64,22 @@ function doGetReg_(e){
 
 function api_reg_ping_public(){ return { ok:true, regVersion: REG_VERSION }; }
 
+
+function api_reg_log_scanner_e420_public(payload){
+  try{
+    const p = payload || {};
+    regLogActivity_('REG_SCANNER_E420', '', 'E420', {
+      stage: String(p.stage || ''),
+      diagnostics: p.diagnostics || {},
+      deviceId: String(p.deviceId || ''),
+      ua: String(p.ua || '')
+    });
+    return { ok:true };
+  }catch(e){
+    return { ok:false, code:'E500', zh:'系統錯誤', en:'System error', detail:String(e&&e.message||e) };
+  }
+}
+
 /******** Greetings helper ********/
 function regPickGreetings_(nameZh, nameEn, preferredName){
   const zh = String(nameZh || '').trim();

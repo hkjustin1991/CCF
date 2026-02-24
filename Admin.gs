@@ -267,6 +267,24 @@ function api_admin_login(input){
   return { ok:true, token, actor: actor };
 }
 
+
+function api_admin_log_scanner_e420_public(payload){
+  try{
+    const p = payload || {};
+    const actor = { id:'PUBLIC', role:'PUBLIC' };
+    const details = {
+      stage: String(p.stage || ''),
+      diagnostics: p.diagnostics || {},
+      deviceId: String(p.deviceId || ''),
+      ua: String(p.ua || '')
+    };
+    admin_audit_(actor, 'SCANNER_E420', JSON.stringify(details), 'scanner');
+    return { ok:true };
+  }catch(e){
+    return { ok:false, code:'E500', zh:'系統錯誤', en:'System error', detail:String(e&&e.message||e) };
+  }
+}
+
 function api_admin_ping(token){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;

@@ -124,6 +124,46 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+
+function doPost(e) {
+  try {
+    const raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
+    const body = JSON.parse(raw);
+    const fn = String(body.fn || '').trim();
+    const args = Array.isArray(body.args) ? body.args : [];
+    const result = invokeRpcFunction_(fn, args);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, result: result }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      ok: false,
+      error: {
+        message: String(err && err.message ? err.message : err),
+        name: String(err && err.name ? err.name : 'Error')
+      }
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function invokeRpcFunction_(fn, args){
+  if (!/^[a-zA-Z0-9_]+$/.test(fn)) {
+    throw new Error('Invalid function name.');
+  }
+
+  const allowedPrefixes = ['api_', 'admin_', 'reg_'];
+  const isAllowed = allowedPrefixes.some(prefix => fn.indexOf(prefix) === 0);
+  if (!isAllowed) {
+    throw new Error('Function not exposed over RPC.');
+  }
+
+  const target = this[fn];
+  if (typeof target !== 'function') {
+    throw new Error('Function not found: ' + fn);
+  }
+
+  return target.apply(null, args || []);
+}
+
 /******** Helpers ********/
 function openSs_(){ return SpreadsheetApp.openById(SPREADSHEET_ID); }
 function nowUk_(){ return new Date(); }
@@ -736,6 +776,26 @@ function api_log_activity(token, action, details) {
 
   sh.appendRow([ts, staff.id, staff.nameZh || '', staff.nameEn || '', String(action||'').trim(), String(details||'').trim(), eventKey]);
   return { ok:true };
+}
+
+
+function api_log_scanner_e420(payload){
+  try{
+    const sh = ensureActivityLogSheet_();
+    const ts = nowUk_();
+    const eventKey = getDefaultEventKey_();
+    const p = payload || {};
+    const details = {
+      stage: String(p.stage || ''),
+      diagnostics: p.diagnostics || {},
+      deviceId: String(p.deviceId || ''),
+      ua: String(p.ua || '')
+    };
+    sh.appendRow([ts, 'PUBLIC', 'PUBLIC', 'PUBLIC', 'SCANNER_E420', JSON.stringify(details), eventKey]);
+    return { ok:true };
+  }catch(e){
+    return { ok:false, code:'E500', zh:'系統錯誤', en:'System error', detail:String(e&&e.message||e) };
+  }
 }
 
 /******** Check-in dedupe lookup ********/
@@ -1638,32 +1698,41 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   let byNameEn = staff.nameEn||'';
 
   if (staff.isSuper){
-    const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-    if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+    if (adminQrPayloadOptional){
+      const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
 
-    const admin = mi.byId[parsed.id];
-    if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
+      const admin = mi.byId[parsed.id];
+      if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
-    const admSt = normalizeStatus_(admin.status);
-    if (admSt !== STATUS_ADMIN){
-      return {
-        ok:false,
-        code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
-      };
+      const admSt = normalizeStatus_(admin.status);
+      if (admSt !== STATUS_ADMIN){
+        return {
+          ok:false,
+          code:'E491',
+          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
+          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        };
+      }
+      if (!admin.key || admin.key !== parsed.key){
+        return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
+      }
+
+      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
+      auditNameZh = admin.nameZh || 'ADMIN';
+      auditNameEn = admin.nameEn || 'ADMIN';
+
+      byId = admin.id;
+      byNameZh = admin.nameZh || '';
+      byNameEn = admin.nameEn || '';
+    } else {
+      auditLabel = 'SUPERUSER';
+      auditNameZh = staff.nameZh || 'SUPERUSER';
+      auditNameEn = staff.nameEn || 'SUPERUSER';
+      byId = staff.id;
+      byNameZh = staff.nameZh || '';
+      byNameEn = staff.nameEn || '';
     }
-    if (!admin.key || admin.key !== parsed.key){
-      return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
-    }
-
-    auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-    auditNameZh = admin.nameZh || 'ADMIN';
-    auditNameEn = admin.nameEn || 'ADMIN';
-
-    byId = admin.id;
-    byNameZh = admin.nameZh || '';
-    byNameEn = admin.nameEn || '';
 
   } else {
     const parsed = parseQrPayloadStrict_(reauthQrPayload);
