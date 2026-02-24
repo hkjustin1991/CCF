@@ -905,6 +905,71 @@
     }
 
     /* ---------- Login (no camera here; QR login via server is handled elsewhere) ---------- */
+
+
+    var EXTERNAL_SCANNER_URL = String(window.EXTERNAL_SCANNER_URL || '');
+    var EXTERNAL_SCANNER_ORIGIN = String(window.EXTERNAL_SCANNER_ORIGIN || '');
+    var pendingExternalScanner_ = null;
+
+    if(!EXTERNAL_SCANNER_ORIGIN && EXTERNAL_SCANNER_URL){
+      try{ EXTERNAL_SCANNER_ORIGIN = String(new URL(EXTERNAL_SCANNER_URL, window.location.href).origin || ''); }catch(e){}
+    }
+
+    function cameraPolicyAllowed_(){
+      try{
+        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function') return !!document.featurePolicy.allowsFeature('camera');
+        if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function') return !!document.permissionsPolicy.allowsFeature('camera');
+      }catch(e){}
+      return true;
+    }
+    function shouldPreferExternalScanner_(){
+      var topSelf = true;
+      try{ topSelf = (window.top === window.self); }catch(e){ topSelf = false; }
+      return !cameraPolicyAllowed_() || !topSelf;
+    }
+    function randomStateToken_(){
+      var arr = new Uint8Array(16);
+      if(window.crypto && window.crypto.getRandomValues){ window.crypto.getRandomValues(arr); }
+      else { for(var i=0;i<arr.length;i++) arr[i]=Math.floor(Math.random()*256); }
+      var out='';
+      for(var j=0;j<arr.length;j++) out += arr[j].toString(16).padStart(2,'0');
+      return out;
+    }
+    function openExternalScanner_(opts){
+      opts = opts || {};
+      var flow = String(opts.flow || '');
+      if(!EXTERNAL_SCANNER_URL){
+        if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
+        return null;
+      }
+      var state = randomStateToken_();
+      pendingExternalScanner_ = { state: state, flow: flow, onPayload: opts.onPayload };
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      var origin = '';
+      try{ origin = String(window.location.origin || ''); }catch(e){}
+      if(!origin && window.location){ origin = window.location.protocol + '//' + window.location.host; }
+      target.searchParams.set('origin', origin);
+      target.searchParams.set('state', state);
+      target.searchParams.set('flow', flow);
+
+      var w = null;
+      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
+      if(!w){ try{ window.location.href = target.toString(); }catch(e2){} }
+      return state;
+    }
+
+    window.addEventListener('message', function(event){
+      if(!pendingExternalScanner_) return;
+      if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
+      var data = event.data || {};
+      if(!data || data.type !== 'CCF_QR_RESULT') return;
+      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var cb = pendingExternalScanner_.onPayload;
+      pendingExternalScanner_ = null;
+      if(typeof cb === 'function') cb(data.payload);
+    });
+
     function viewLogin(){
       return ''+
         '<div class="card">'+
@@ -1130,6 +1195,7 @@
           '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnOpenExternal" class="btnBack" type="button">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
           '</div>'+
@@ -1152,7 +1218,37 @@
           });
         }
         modal.querySelector('#btnStartCam').onclick = beginScan;
-        showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
+        var btnOpenExternal = modal.querySelector('#btnOpenExternal');
+        if(btnOpenExternal){
+          btnOpenExternal.onclick = function(){
+            clear('scanMsg');
+            openExternalScanner_({
+              flow:'admin_login',
+              onPayload:function(payload){
+                showBox('scanMsg','warn','處理中…','Working…');
+                callApi('api_admin_login', payload).then(function(res){
+                  if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                  closeModal(modal);
+                  onLoginRes(res);
+                }).catch(function(){
+                  showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+                });
+              },
+              onError:function(msg){
+                showErr('scanMsg', {code:'E500', zh:'外部掃描器未設定', en:'External scanner is not configured', detail: String(msg||'')});
+              }
+            });
+          };
+        }
+        if(shouldPreferExternalScanner_() && btnOpenExternal){
+          btnOpenExternal.classList.remove('btnBack');
+          btnOpenExternal.classList.add('btnMain');
+          modal.querySelector('#btnStartCam').classList.remove('btnMain');
+          modal.querySelector('#btnStartCam').classList.add('btnBack');
+          showBox('scanMsg','warn','建議使用外部掃描器','Open external scanner is recommended in this browser.');
+        }else{
+          showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
+        }
       };
 
       function onLoginRes(res){
@@ -3020,6 +3116,7 @@
         '<div class="small">請掃描你本人同工 QR 作確認。<br/>Please scan your own staff QR to confirm.</div>'+
         '<div class="videoWrap" style="margin-top:10px;"><video id="vReauth" playsinline></video></div>'+
         '<div class="miniBtnRow">'+
+          '<button id="btnOpenExternal" class="btnBack" type="button">🌐 使用外部掃描器 / Open external scanner</button>'+
           '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
         '</div>'+
         '<div id="msg"></div>'
@@ -3027,9 +3124,7 @@
       m.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(m); };
 
       var vEl = m.querySelector('#vReauth');
-      startScan(vEl, function(qr, err){
-        if(err){ showErr('msg', err); return; }
-
+      function handleReauthPayload_(qr){
         showBox('msg','warn','處理中…','Working…');
 
         if(mode === 'contact'){
@@ -3048,7 +3143,32 @@
         }).catch(function(){
           showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
+      }
+
+      startScan(vEl, function(qr, err){
+        if(err){ showErr('msg', err); return; }
+        handleReauthPayload_(qr);
       });
+
+      var btnOpenExternal = m.querySelector('#btnOpenExternal');
+      if(btnOpenExternal){
+        btnOpenExternal.onclick = function(){
+          clear('msg');
+          openExternalScanner_({
+            flow:'admin_reauth',
+            onPayload:handleReauthPayload_,
+            onError:function(msg){
+              showErr('msg', {code:'E500', zh:'外部掃描器未設定', en:'External scanner is not configured', detail: String(msg||'')});
+            }
+          });
+        };
+      }
+
+      if(shouldPreferExternalScanner_() && btnOpenExternal){
+        btnOpenExternal.classList.remove('btnBack');
+        btnOpenExternal.classList.add('btnMain');
+        showBox('msg','warn','建議使用外部掃描器','Open external scanner is recommended in this browser.');
+      }
     }
 
     function renderContactResult_(modalOverlay, res){

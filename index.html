@@ -251,6 +251,80 @@
       });
     }
 
+
+
+    var EXTERNAL_SCANNER_URL = String(window.EXTERNAL_SCANNER_URL || '');
+    var EXTERNAL_SCANNER_ORIGIN = String(window.EXTERNAL_SCANNER_ORIGIN || '');
+    var pendingExternalScanner_ = null;
+
+    if(!EXTERNAL_SCANNER_ORIGIN && EXTERNAL_SCANNER_URL){
+      try{ EXTERNAL_SCANNER_ORIGIN = String(new URL(EXTERNAL_SCANNER_URL, window.location.href).origin || ''); }catch(e){}
+    }
+
+    function cameraPolicyAllowed_(){
+      try{
+        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function'){
+          return !!document.featurePolicy.allowsFeature('camera');
+        }
+        if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function'){
+          return !!document.permissionsPolicy.allowsFeature('camera');
+        }
+      }catch(e){}
+      return true;
+    }
+    function shouldPreferExternalScanner_(){
+      var topSelf = true;
+      try{ topSelf = (window.top === window.self); }catch(e){ topSelf = false; }
+      return !cameraPolicyAllowed_() || !topSelf;
+    }
+    function randomStateToken_(){
+      var arr = new Uint8Array(16);
+      if(window.crypto && window.crypto.getRandomValues){
+        window.crypto.getRandomValues(arr);
+      }else{
+        for(var i=0;i<arr.length;i++) arr[i]=Math.floor(Math.random()*256);
+      }
+      var out='';
+      for(var j=0;j<arr.length;j++){ out += arr[j].toString(16).padStart(2,'0'); }
+      return out;
+    }
+    function openExternalScanner_(opts){
+      opts = opts || {};
+      var flow = String(opts.flow || '');
+      if(!EXTERNAL_SCANNER_URL){
+        if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
+        return null;
+      }
+      var state = randomStateToken_();
+      pendingExternalScanner_ = { state: state, flow: flow, onPayload: opts.onPayload };
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      var origin = '';
+      try{ origin = String(window.location.origin || ''); }catch(e){}
+      if(!origin && window.location){ origin = window.location.protocol + '//' + window.location.host; }
+      target.searchParams.set('origin', origin);
+      target.searchParams.set('state', state);
+      target.searchParams.set('flow', flow);
+
+      var w = null;
+      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
+      if(!w){
+        try{ window.location.href = target.toString(); }catch(e2){}
+      }
+      return state;
+    }
+
+    window.addEventListener('message', function(event){
+      if(!pendingExternalScanner_) return;
+      if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
+      var data = event.data || {};
+      if(!data || data.type !== 'CCF_QR_RESULT') return;
+      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var cb = pendingExternalScanner_.onPayload;
+      pendingExternalScanner_ = null;
+      if(typeof cb === 'function') cb(data.payload);
+    });
+
     function escapeHtml(s){
       s = String(s || '');
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -1004,6 +1078,7 @@
             '</div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnOpenExternalScan" class="alt">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnRestartScan" class="primary">🔁 再次掃描 / Scan again</button>'+
             '<button id="backCheckinMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>'+
@@ -1467,9 +1542,24 @@
         startScan('videoCheckin', onCaptured, 'scanMsg');
       }
 
+      function startExternal(){
+        clear('scanMsg');
+        openExternalScanner_({
+          flow:'checkin',
+          onPayload:onCaptured,
+          onError:function(msg){
+            showBox('scanMsg', 'err', '外部掃描器未設定', 'External scanner is not configured', '<div class="small">'+escapeHtml(msg||'')+'</div>');
+          }
+        });
+      }
+
       camBindSwitchButton_('btnSwitchCamCheckin', function(){
         start();
       });
+
+      $('btnOpenExternalScan').onclick = function(){
+        startExternal();
+      };
 
       $('btnStopCam').onclick = function(){
         stopScan();
@@ -1485,7 +1575,16 @@
         App.view='checkinMenu'; render();
       };
 
-      showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
+      var preferExternal = shouldPreferExternalScanner_();
+      if(preferExternal){
+        $('btnOpenExternalScan').classList.remove('alt');
+        $('btnOpenExternalScan').classList.add('primary');
+        $('btnRestartScan').classList.remove('primary');
+        $('btnRestartScan').classList.add('alt');
+        showBox('scanMsg', 'warn', '建議使用外部掃描器', 'Open external scanner is recommended in this browser.');
+      }else{
+        showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
+      }
     }
 
     function bindManualCheckin(){
