@@ -165,6 +165,41 @@
   <script>
     function $(id){ return document.getElementById(id); }
 
+    function showBootError_(details){
+      var root = $('app') || document.body;
+      var msg = '';
+      try{
+        msg = (details && details.message) ? String(details.message) : String(details || 'Unknown boot error');
+      }catch(e){
+        msg = 'Unknown boot error';
+      }
+      var token = 'BOOT-' + Date.now() + '-' + (msg.slice(0, 24).replace(/[^A-Za-z0-9]+/g, '_') || 'error');
+      var diag = '';
+      try{
+        diag = (details && details.stack) ? String(details.stack) : msg;
+      }catch(e){ diag = msg; }
+      root.innerHTML =
+        '<div class="wrap">'+
+          '<div class="card msgBox err" style="display:block">'+
+            '<div class="big err">⚠️ 暫時未能開啟頁面 / We can't open this page right now</div>'+
+            '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
+            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
+            '<details style="margin-top:10px">'+
+              '<summary style="cursor:pointer;font-weight:700">同工診斷資料 / Staff diagnostics</summary>'+
+              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+escapeHtml(diag)+'</pre>'+
+            '</details>'+
+          '</div>'+
+        '</div>';
+      try{ console.error('[boot-fail]', token, details); }catch(e){}
+    }
+
+    window.addEventListener('error', function(evt){
+      showBootError_(evt && (evt.error || evt.message || evt));
+    });
+    window.addEventListener('unhandledrejection', function(evt){
+      showBootError_(evt && evt.reason ? evt.reason : evt);
+    });
+
     function getApiEndpoint(){
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
@@ -2023,7 +2058,7 @@
 
 // init
     startGlobalClock_();
-    render();
+    try { render(); } catch (e) { showBootError_(e); }
   </script>
 </body>
 </html>
