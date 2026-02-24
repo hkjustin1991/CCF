@@ -1179,6 +1179,13 @@
     }
 
     function bindLogin(){
+      function applyAdminLoginPayload_(payload){
+        showBox('loginMsg','warn','處理中…','Working…');
+        callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
+          showErr('loginMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+
       $('btnInternal').onclick = function(){
         clear('loginMsg');
         var v = String($('internalField').value||'').trim();
@@ -1250,6 +1257,18 @@
           showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
         }
       };
+
+      try{
+        var qp = new URLSearchParams(window.location.search || '');
+        var handoff = String(qp.get('handoff') || '').trim();
+        if(!handoff){
+          handoff = String(sessionStorage.getItem('ccf_qr_handoff_payload') || '').trim();
+        }
+        if(handoff){
+          sessionStorage.removeItem('ccf_qr_handoff_payload');
+          applyAdminLoginPayload_(handoff);
+        }
+      }catch(e){}
 
       function onLoginRes(res){
         if(!res || !res.ok){ showErr('loginMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
