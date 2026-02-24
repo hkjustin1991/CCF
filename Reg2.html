@@ -235,6 +235,17 @@
               .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
     }
 
+    function toDmy(ymd){
+      var s = String(ymd || '').trim();
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m) return '';
+      var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+      if(y < 1000 || y > 9999 || mo < 1 || mo > 12) return '';
+      var dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() !== y || dt.getMonth() !== (mo - 1) || dt.getDate() !== d) return '';
+      return m[3] + '/' + m[2] + '/' + m[1];
+    }
+
     function getDeviceId(){
       try{
         var id = localStorage.getItem('ccf_reg_deviceId');
@@ -927,10 +938,10 @@
     function viewSelfHoliday(m){
       m = m || {}; var a = m.away || {};
       return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
-        '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from1||''))+'" />'+
-        '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to1||''))+'" />'+
-        '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.from2||''))+'" />'+
-        '<div class="label">假期 2 To</div><input id="hTo2" placeholder="DD/MM/YYYY" value="'+escapeHtml(dmy(a.to2||''))+'" />'+
+        '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.from1||''))+'" />'+
+        '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.to1||''))+'" />'+
+        '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.from2||''))+'" />'+
+        '<div class="label">假期 2 To</div><input id="hTo2" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.to2||''))+'" />'+
         '<div class="miniBtnRow"><button id="btnHolidaySave" class="primary">✅ 儲存 / Save</button><button id="btnHolidayBack" class="danger">⬅️ 返回 / Back</button></div><div id="holidayMsg"></div></div>';
     }
 
