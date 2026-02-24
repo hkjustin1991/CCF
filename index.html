@@ -199,6 +199,9 @@
       authRole:null,
       authFlash:null,
 
+      // Check-in image upload handoff
+      pendingCheckinPayload:null,
+
       // Manual UI state
       manualLastQuery:'',
       manualSelectedId:null,
@@ -1121,13 +1124,14 @@
           '<div class="small" id="checkinEventKey"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="goScanCheckin" class="primary">📷 掃描 QR 卡 / Scan QR badge</button>'+
-            '<button id="goUploadCheckin" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<button id="btnCheckinUploadQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<input id="checkinQrImageInput" type="file" accept="image/*" class="hide" />'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="goManualCheckin" class="alt">🔎 手動搜尋 / Manual search</button>'+
             '<button id="backMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>'+
+          '<div id="checkinMenuMsg"></div>'+
         '</div>';
     }
 
@@ -1543,13 +1547,32 @@
       ensureEventKey_();
       setEventKeyLine_('checkinEventKey');
       $('goScanCheckin').onclick = function(){ App.view='scanCheckin'; render(); };
-      if($('goUploadCheckin') && $('checkinQrImageInput')){
-        $('goUploadCheckin').onclick = function(){
-          App.uploadCheckinAutoPick = true;
-          App.view='scanCheckin';
-          render();
+
+      if ($('btnCheckinUploadQr') && $('checkinQrImageInput')){
+        $('btnCheckinUploadQr').onclick = function(){
+          clear('checkinMenuMsg');
+          var input = $('checkinQrImageInput');
+          input.value = '';
+          input.click();
+        };
+
+        $('checkinQrImageInput').onchange = function(ev){
+          clear('checkinMenuMsg');
+          var f = ev && ev.target && ev.target.files && ev.target.files[0];
+          if(!f) return;
+          $('checkinMenuMsg').innerHTML = '<div class="small">正在解碼 QR… / Decoding QR…</div>';
+          decodeQrFromImageFile_(f).then(function(payload){
+            App.pendingCheckinPayload = String(payload || '');
+            App.view='scanCheckin';
+            render();
+          }).catch(function(err){
+            showErr('checkinMenuMsg', err || {code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+          }).finally(function(){
+            ev.target.value = '';
+          });
         };
       }
+
       $('goManualCheckin').onclick = function(){ App.view='manualCheckin'; render(); };
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
     }
@@ -1736,6 +1759,13 @@
         stopScan();
         App.view='checkinMenu'; render();
       };
+
+      if(App.pendingCheckinPayload){
+        var pendingPayload = App.pendingCheckinPayload;
+        App.pendingCheckinPayload = null;
+        onCaptured(pendingPayload);
+        return;
+      }
 
       showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
     }
