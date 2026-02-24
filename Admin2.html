@@ -972,13 +972,19 @@
     }
     function openExternalScanner_(opts){
       opts = opts || {};
-      var flow = String(opts.flow || '');
+      var flow = String(opts.flow || 'admin');
       if(!EXTERNAL_SCANNER_URL){
         if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
         return null;
       }
       var state = randomStateToken_();
-      pendingExternalScanner_ = { state: state, flow: flow, onPayload: opts.onPayload };
+      pendingExternalScanner_ = {
+        state: state,
+        flow: flow,
+        onPayload: opts.onPayload,
+        onCancel: opts.onCancel,
+        onError: opts.onError
+      };
 
       var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
       var origin = '';
@@ -989,8 +995,12 @@
       target.searchParams.set('flow', flow);
 
       var w = null;
-      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
-      if(!w){ try{ window.location.href = target.toString(); }catch(e2){} }
+      try{ w = window.open(target.toString(), '_blank', 'width=460,height=760'); }catch(e){}
+      if(!w){
+        pendingExternalScanner_ = null;
+        if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        return null;
+      }
       return state;
     }
 
@@ -998,11 +1008,16 @@
       if(!pendingExternalScanner_) return;
       if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
       var data = event.data || {};
-      if(!data || data.type !== 'CCF_QR_RESULT') return;
-      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
-      var cb = pendingExternalScanner_.onPayload;
+      if(!data || String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var type = String(data.type || '');
+      if(type !== 'CCF_QR_RESULT' && type !== 'CCF_QR_CANCEL' && type !== 'CCF_QR_ERROR') return;
+      var cbPayload = pendingExternalScanner_.onPayload;
+      var cbCancel = pendingExternalScanner_.onCancel;
+      var cbError = pendingExternalScanner_.onError;
       pendingExternalScanner_ = null;
-      if(typeof cb === 'function') cb(data.payload);
+      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
+      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
+      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
     });
 
     function viewLogin(){
@@ -3192,10 +3207,16 @@
         btnOpenExternal.onclick = function(){
           clear('msg');
           openExternalScanner_({
-            flow:'admin_reauth',
+            flow:'admin',
             onPayload:handleReauthPayload_,
+            onCancel:function(){
+              showBox('msg','warn','已取消掃描','Scan cancelled.');
+            },
+            onPopupBlocked:function(){
+              showBox('msg','warn','未能打開彈出視窗，請使用下方內置掃描器','Popup blocked; please use built-in scanner below.');
+            },
             onError:function(msg){
-              showErr('msg', {code:'E500', zh:'外部掃描器未設定', en:'External scanner is not configured', detail: String(msg||'')});
+              showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
             }
           });
         };
