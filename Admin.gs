@@ -189,6 +189,10 @@ const ADMIN_CACHE_LOWATT_TTL = 10 * 60;
 function doGetAdmin_(e){
   const t = HtmlService.createTemplateFromFile(ADMIN_TEMPLATE);
   t.ADMIN_VERSION = ADMIN_VERSION;
+  const scannerCfg = getExternalScannerConfig_();
+  t.EXTERNAL_SCANNER_URL = scannerCfg.url;
+  t.EXTERNAL_SCANNER_ORIGIN = scannerCfg.origin;
+  t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
 
   // Official portal naming
   t.ADMIN_TITLE_ZH = '粵語基督徒團契 - ❤️爱使我们相聚在一起❤️';
