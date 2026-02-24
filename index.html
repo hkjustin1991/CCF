@@ -219,61 +219,40 @@
 
     function $(id){ return document.getElementById(id); }
 
-    var BOOT_STATES = {
-      START:'BOOT_START',
-      RENDER_OK:'BOOT_RENDER_OK',
-      ERROR:'BOOT_ERROR'
-    };
-    var BOOT_PAGE_TYPE = 'staff-portal';
-    var BOOT_UI_VERSION = 'staff12-ui1-bluefix2';
-    var bootDiag = { state:BOOT_STATES.START, error:'' };
-
-    function bootDebugEnabled_(){
-      try{ return (new URLSearchParams(window.location.search || '')).get('debug') === '1'; }
-      catch(e){ return false; }
-    }
-
-    function ensureBootDebugLine_(){
-      if (!bootDebugEnabled_()) return null;
-      var el = document.getElementById('bootDebugLine');
-      if (el) return el;
-      el = document.createElement('div');
-      el.id = 'bootDebugLine';
-      el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;padding:2px 8px;font-size:11px;line-height:1.2;color:#5a6b90;background:rgba(255,255,255,.78);border-top:1px solid rgba(10,30,80,.08);pointer-events:none;z-index:20;text-align:left;';
-      document.body.appendChild(el);
-      return el;
-    }
-
-    function updateBootState_(state, errMsg){
-      bootDiag.state = state;
-      bootDiag.error = errMsg ? String(errMsg) : '';
-      var el = ensureBootDebugLine_();
-      if (el){
-        el.textContent = 'debug boot=' + bootDiag.state + (bootDiag.error ? (' | ' + bootDiag.error) : '');
+    function showBootError_(details){
+      var root = $('app') || document.body;
+      var msg = '';
+      try{
+        msg = (details && details.message) ? String(details.message) : String(details || 'Unknown boot error');
+      }catch(e){
+        msg = 'Unknown boot error';
       }
+      var token = 'BOOT-' + Date.now() + '-' + (msg.slice(0, 24).replace(/[^A-Za-z0-9]+/g, '_') || 'error');
+      var diag = '';
+      try{
+        diag = (details && details.stack) ? String(details.stack) : msg;
+      }catch(e){ diag = msg; }
+      root.innerHTML =
+        '<div class="wrap">'+
+          '<div class="card msgBox err" style="display:block">'+
+            '<div class="big err">⚠️ 暫時未能開啟頁面 / We can't open this page right now</div>'+
+            '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
+            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
+            '<details style="margin-top:10px">'+
+              '<summary style="cursor:pointer;font-weight:700">同工診斷資料 / Staff diagnostics</summary>'+
+              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+escapeHtml(diag)+'</pre>'+
+            '</details>'+
+          '</div>'+
+        '</div>';
+      try{ console.error('[boot-fail]', token, details); }catch(e){}
     }
 
-    function reportBootFailure_(err){
-      var msg = (err && err.message) ? String(err.message) : String(err || 'Unknown boot error');
-      var payload = {
-        pageType: BOOT_PAGE_TYPE,
-        uiVersion: BOOT_UI_VERSION,
-        appVersionTag: '<?= APP_VERSION ?>',
-        errorMessage: msg,
-        startupState: BOOT_STATES.ERROR,
-        ts: (new Date()).toISOString()
-      };
-      try{ console.error('[boot-failure]', payload); }catch(e){}
-
-      var endpoint = getApiEndpoint();
-      if (!endpoint) return;
-
-      setTimeout(function(){
-        callApiViaRpc(endpoint, 'api_client_diag_log', [payload]).catch(function(rpcErr){
-          try{ console.warn('[boot-failure-rpc-unavailable]', rpcErr); }catch(e){}
-        });
-      }, 0);
-    }
+    window.addEventListener('error', function(evt){
+      showBootError_(evt && (evt.error || evt.message || evt));
+    });
+    window.addEventListener('unhandledrejection', function(evt){
+      showBootError_(evt && evt.reason ? evt.reason : evt);
+    });
 
     function shouldShowCrossPortalSwitch(){
       return !(App && App.token);
@@ -2780,15 +2759,7 @@
     }
 
     // Boot
-    updateBootState_(BOOT_STATES.START);
-    try{
-      render();
-      updateBootState_(BOOT_STATES.RENDER_OK);
-    }catch(err){
-      updateBootState_(BOOT_STATES.ERROR, (err && err.message) ? err.message : String(err || 'Boot failed'));
-      reportBootFailure_(err);
-      throw err;
-    }
+    try { render(); } catch (e) { showBootError_(e); }
   </script>
 </body>
 </html>
