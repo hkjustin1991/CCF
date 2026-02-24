@@ -282,6 +282,32 @@
       return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
     }
 
+    function normalizeServingGroupKey(g){
+      var up = String(g||'').trim().toUpperCase();
+      if (!up) return '';
+      if (up === 'WORSHIP' || up === 'WORSHIP ALLIANCE' || up === '敬拜聯盟') return 'WORSHIP';
+      if (up === 'MEDIA' || up === 'MEDIA MASTER' || up === '影像大師') return 'MEDIA';
+      if (up === 'LOGISTIC' || up === 'LOGISTICS' || up === 'LOGISTIC SPECIALIST' || up === '後勤特工') return 'LOGISTIC';
+      if (up === 'SUPPORT' || up === 'DIVINE SUPPORTER' || up === '聖工支援隊') return 'SUPPORT';
+      if (up === 'FINANCE' || up === 'FINANCE DEPT' || up === '財務公司') return 'FINANCE';
+      return up;
+    }
+
+    function servingGroupCss(k){
+      var x = normalizeServingGroupKey(k).toLowerCase();
+      return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
+    }
+
+    function servingGroupLabel(k){
+      var up = normalizeServingGroupKey(k);
+      if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
+      if (up==='MEDIA') return '影像大師 / Media Master';
+      if (up==='LOGISTIC') return '後勤特工 / Logistic Specialist';
+      if (up==='SUPPORT') return '聖工支援隊 / Divine Supporter';
+      if (up==='FINANCE') return '財務公司 / Finance Dept';
+      return up || 'OTHER';
+    }
+
     var State = {
       view: 'home',          // home | form | scan | success | selfHome | selfAttendance | selfServing | selfLive | selfHoliday
       flow: 'create',        // create | self_update
@@ -657,27 +683,11 @@
       var serviceAttended = (snap.attendance && typeof snap.attendance.attended !== 'undefined') ? snap.attendance.attended : 0;
       var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
-      function mapGroupKey_(g){
-        var up = String(g||'').trim().toUpperCase();
-        if (up === 'WORSHIP' || up === 'WORSHIP ALLIANCE' || up === '敬拜聯盟') return 'worship';
-        if (up === 'MEDIA' || up === 'MEDIA MASTER' || up === '影像大師') return 'media';
-        if (up === 'LOGISTIC' || up === 'LOGISTICS' || up === 'LOGISTIC SPECIALIST' || up === '後勤特工') return 'logistic';
-        if (up === 'SUPPORT' || up === 'DIVINE SUPPORTER' || up === '聖工支援隊') return 'support';
-        if (up === 'FINANCE' || up === 'FINANCE DEPT' || up === '財務公司') return 'finance';
-        return String(g||'').toLowerCase();
-      }
-      function groupLabel_(k){
-        if (k==='worship') return '敬拜聯盟 / Worship Alliance';
-        if (k==='media') return '影像大師 / Media Master';
-        if (k==='logistic') return '後勤特工 / Logistic Specialist';
-        if (k==='support') return '聖工支援隊 / Divine Supporter';
-        if (k==='finance') return '財務公司 / Finance Dept';
-        return k || '—';
-      }
       var groupHtml = groups.map(function(g){
-        var cls = mapGroupKey_(g);
-        if (cls === 'worship' || cls === 'media' || cls === 'logistic' || cls === 'support' || cls === 'finance') return '<span class="groupBadge '+cls+'">'+escapeHtml(groupLabel_(cls))+'</span>';
-        return '<span class="groupBadge">'+escapeHtml(groupLabel_(cls))+'</span>';
+        var canonicalGroup = normalizeServingGroupKey(g);
+        var cls = servingGroupCss(canonicalGroup);
+        if (cls) return '<span class="groupBadge '+cls+'">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
+        return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
       }).join('');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
@@ -771,19 +781,6 @@
       res = res || {};
       var m = res.member || {};
       var labelsById = res.memberLabelsById || {};
-      function groupLabel(k){
-        var up = String(k||'').toUpperCase();
-        if (up==='WORSHIP') return '敬拜聯盟 / Worship Alliance';
-        if (up==='MEDIA') return '影像大師 / Media Master';
-        if (up==='LOGISTIC') return '後勤特工 / Logistic Specialist';
-        if (up==='SUPPORT') return '聖工支援隊 / Divine Supporter';
-        if (up==='FINANCE') return '財務公司 / Finance Dept';
-        return up || 'OTHER';
-      }
-      function groupCss(k){
-        var x = String(k||'').toLowerCase();
-        return (x==='worship'||x==='media'||x==='logistic'||x==='support'||x==='finance') ? x : '';
-      }
       function positionEnFromKey_(k){
         var parts = String(k||'').split('_');
         if (parts.length <= 1) return String(k||'');
@@ -795,11 +792,11 @@
         return labelsById[mid] || mid;
       }
 
-      var memberGroups = (m.servingGroups || []).map(function(g){ return String(g||'').trim().toUpperCase(); }).filter(Boolean);
+      var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
       var groupButtons = memberGroups.map(function(g){
-        var isActive = (String(State.servingGroup||'').toUpperCase() === g);
-        var cls = 'groupBadge '+groupCss(g)+(isActive ? ' activeGroup' : '');
-        return '<button class="'+cls+'" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(groupLabel(g))+'</button>';
+        var isActive = (normalizeServingGroupKey(State.servingGroup) === g);
+        var cls = 'groupBadge '+servingGroupCss(g)+(isActive ? ' activeGroup' : '');
+        return '<button class="'+cls+'" data-serving-group="'+escapeHtml(g)+'">'+escapeHtml(servingGroupLabel(g))+'</button>';
       }).join('');
 
       var events = Array.isArray(res.events) ? res.events : [];
@@ -812,8 +809,8 @@
       });
       var months = Object.keys(monthMap).sort();
       var selectedMonth = (months.indexOf(State.servingMonth) >= 0) ? State.servingMonth : (months[0] || '');
-      var selectedGroup = (memberGroups.indexOf(String(State.servingGroup||'').toUpperCase()) >= 0)
-        ? String(State.servingGroup||'').toUpperCase()
+      var selectedGroup = (memberGroups.indexOf(normalizeServingGroupKey(State.servingGroup)) >= 0)
+        ? normalizeServingGroupKey(State.servingGroup)
         : (memberGroups[0] || '');
 
       var monthButtons = months.map(function(k){
@@ -822,7 +819,7 @@
       }).join('');
 
       var positions = (res.positions || []).filter(function(p){
-        var g = String(p.group||'').trim().toUpperCase();
+        var g = normalizeServingGroupKey(p.group);
         return (!selectedGroup || g === selectedGroup);
       });
       var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth].events : [];
@@ -869,7 +866,7 @@
           '<div class="miniBtnRow">'+(groupButtons || '<span class="pill">—</span>')+'</div>'+
         '</div>'+
         '<div class="card">'+
-          '<div><span class="groupBadge '+groupCss(selectedGroup)+'">'+escapeHtml(groupLabel(selectedGroup))+'</span></div>'+
+          '<div><span class="groupBadge '+servingGroupCss(selectedGroup)+'">'+escapeHtml(servingGroupLabel(selectedGroup))+'</span></div>'+
           tableHtml+
         '</div>'+
         '<div class="card"><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
@@ -1420,14 +1417,14 @@
     function bindServing(){
       function needsServingDataRefresh(){
         var res = State.lastResult || {};
-        var selectedGroup = String(State.servingGroup||'').trim().toUpperCase();
+        var selectedGroup = normalizeServingGroupKey(State.servingGroup);
         var selectedMonth = String(State.servingMonth||'').trim();
         if (!res.ok) return true;
         if (!selectedGroup) return false;
 
         var positions = Array.isArray(res.positions) ? res.positions : [];
         var hasGroupPositions = positions.some(function(p){
-          return String((p && p.group) || '').trim().toUpperCase() === selectedGroup;
+          return normalizeServingGroupKey((p && p.group) || '') === selectedGroup;
         });
         if (!hasGroupPositions) return true;
 
