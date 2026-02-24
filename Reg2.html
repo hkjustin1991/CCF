@@ -281,7 +281,13 @@
         return null;
       }
       var state = randomStateToken_();
-      pendingExternalScanner_ = { state: state, flow: String(opts.flow || ''), onPayload: opts.onPayload };
+      pendingExternalScanner_ = {
+        state: state,
+        flow: String(opts.flow || 'reg'),
+        onPayload: opts.onPayload,
+        onCancel: opts.onCancel,
+        onError: opts.onError
+      };
 
       var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
       var origin = '';
@@ -292,8 +298,12 @@
       target.searchParams.set('flow', pendingExternalScanner_.flow);
 
       var w = null;
-      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
-      if(!w){ try{ window.location.href = target.toString(); }catch(e2){} }
+      try{ w = window.open(target.toString(), '_blank', 'width=460,height=760'); }catch(e){}
+      if(!w){
+        pendingExternalScanner_ = null;
+        if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        return null;
+      }
       return state;
     }
 
@@ -301,11 +311,16 @@
       if(!pendingExternalScanner_) return;
       if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
       var data = event.data || {};
-      if(!data || data.type !== 'CCF_QR_RESULT') return;
-      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
-      var cb = pendingExternalScanner_.onPayload;
+      if(!data || String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var type = String(data.type || '');
+      if(type !== 'CCF_QR_RESULT' && type !== 'CCF_QR_CANCEL' && type !== 'CCF_QR_ERROR') return;
+      var cbPayload = pendingExternalScanner_.onPayload;
+      var cbCancel = pendingExternalScanner_.onCancel;
+      var cbError = pendingExternalScanner_.onError;
       pendingExternalScanner_ = null;
-      if(typeof cb === 'function') cb(data.payload);
+      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
+      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
+      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
     });
 
     function normalizeVrm(s){
@@ -589,71 +604,10 @@
 
     /******** Views ********/
     function openExternalScannerPopup_(onCaptured){
-      var popup = window.open('', 'ccfReg2QrScanner', 'width=460,height=720,noopener=no,noreferrer=no');
-      if(!popup){
-        return false;
-      }
-
-      var popupHtml = ''+
-        '<!doctype html><html><head><meta charset="utf-8" />'+
-        '<meta name="viewport" content="width=device-width,initial-scale=1" />'+
-        '<title>Scan QR</title>'+
-        '<style>'+
-          'body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;padding:14px;background:#eefbe9;color:#0d1b3d;}'+
-          '.card{background:#fff;border:1px solid rgba(10,30,80,0.12);border-radius:14px;padding:14px;}'+
-          '.video{width:100%;aspect-ratio:4/3;background:#000;border-radius:12px;object-fit:contain;}'+
-          '.msg{font-size:14px;color:#5a6b90;margin-top:10px;line-height:1.45;}'+
-          'button{width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid rgba(10,30,80,0.12);font-weight:800;background:#eef4ff;color:#0d1b3d;}'+
-          'details{margin-top:10px;border:1px dashed rgba(10,30,80,0.2);border-radius:12px;padding:10px;background:#fffaf0;}'+
-          'summary{font-weight:800;cursor:pointer;}'+
-          'input[type=file]{margin-top:10px;width:100%;}'+
-        '</style></head><body>'+
-        '<div class="card">'+
-          '<div style="font-weight:900;font-size:20px;">📷 掃描 QR / Scan QR</div>'+
-          '<video id="video" class="video" playsinline muted autoplay></video>'+
-          '<div id="msg" class="msg">Opening camera...</div>'+
-          '<button id="btnRetry" type="button">Tap again / 再按一次</button>'+
-          '<details><summary>Emergency only: upload QR image</summary>'+
-            '<div class="msg">Use only when camera is unavailable.</div>'+
-            '<input id="file" type="file" accept="image/*" />'+
-          '</details>'+
-        '</div>'+
-        '<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"><\/script>'+
-        '<script>'+
-          '(function(){'+
-            'var stream=null, raf=null, detector=null;'+
-            'var video=document.getElementById("video");'+
-            'var msg=document.getElementById("msg");'+
-            'function stop(){ if(raf) cancelAnimationFrame(raf); raf=null; if(stream){ try{ stream.getTracks().forEach(function(t){t.stop();}); }catch(e){} } stream=null; }'+
-            'function send(payload){ try{ if(window.opener && !window.opener.closed){ window.opener.postMessage({ type:"ccf-reg2-qr", payload:String(payload||"") }, "*"); } }catch(e){} stop(); window.close(); }'+
-            'function loop(){ if(!video || video.readyState<2){ raf=requestAnimationFrame(loop); return; }'+
-              'try{ if("BarcodeDetector" in window){ detector = detector || new BarcodeDetector({ formats:["qr_code"] }); detector.detect(video).then(function(codes){ var v=(codes&&codes.length&&codes[0].rawValue)?codes[0].rawValue:null; if(v){ send(v); return; } raf=requestAnimationFrame(loop); }).catch(function(){ raf=requestAnimationFrame(loop); }); return; } }catch(e){}'+
-              'try{ var c=document.createElement("canvas"); var x=c.getContext("2d",{ willReadFrequently:true }); c.width=video.videoWidth; c.height=video.videoHeight; x.drawImage(video,0,0,c.width,c.height); var img=x.getImageData(0,0,c.width,c.height); var qr=window.jsQR?window.jsQR(img.data,c.width,c.height):null; if(qr&&qr.data){ send(qr.data); return; } }catch(e){}'+
-              'raf=requestAnimationFrame(loop);'+
-            '}'+
-            'function start(){ stop(); msg.textContent="Opening camera...";'+
-              'if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ msg.textContent="Camera not supported on this device."; return; }'+
-              'navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:"environment" } }, audio:false }).then(function(s){ stream=s; video.srcObject=s; return video.play(); }).then(function(){ msg.textContent="Scanning..."; loop(); }).catch(function(){ msg.textContent="Camera did not open. Tap again."; });'+
-            '}'+
-            'document.getElementById("btnRetry").onclick=start;'+
-            'document.getElementById("file").addEventListener("change", function(evt){ var f=evt.target&&evt.target.files&&evt.target.files[0]; if(!f) return; var fr=new FileReader(); fr.onload=function(){ var img=new Image(); img.onload=function(){ try{ var c=document.createElement("canvas"); var x=c.getContext("2d",{ willReadFrequently:true }); c.width=img.width; c.height=img.height; x.drawImage(img,0,0); var data=x.getImageData(0,0,c.width,c.height); var qr=window.jsQR?window.jsQR(data.data,c.width,c.height):null; if(qr&&qr.data){ send(qr.data); return; } msg.textContent="No QR code found in image."; }catch(e){ msg.textContent="Image decode failed."; } }; img.src=String(fr.result||""); }; fr.readAsDataURL(f); });'+
-            'window.addEventListener("beforeunload", stop); start();'+
-          '})();'+
-        '<\/script>'+
-        '</body></html>';
-
-      popup.document.open();
-      popup.document.write(popupHtml);
-      popup.document.close();
-
-      function onMessage(evt){
-        var data = evt && evt.data;
-        if(!data || data.type !== 'ccf-reg2-qr') return;
-        window.removeEventListener('message', onMessage);
-        if(typeof onCaptured === 'function') onCaptured(String(data.payload || ''));
-      }
-      window.addEventListener('message', onMessage);
-      return true;
+      return !!openExternalScanner_({
+        flow:'reg',
+        onPayload:onCaptured
+      });
     }
 
     function viewHome(){
@@ -1185,16 +1139,28 @@
         };
         $('btnScan').onclick = function(){
           $('msg').innerHTML = showBox('warn','正在打開掃描器…','Opening scanner…');
-          var opened = openExternalScannerPopup_(function(payload){
-            State.view = 'scan';
-            render();
-            handleScanPayload_(payload);
+          var opened = openExternalScanner_({
+            flow:'reg',
+            onPayload:function(payload){
+              State.view = 'scan';
+              render();
+              handleScanPayload_(payload);
+            },
+            onCancel:function(){
+              $('msg').innerHTML = showBox('warn','已取消掃描','Scan cancelled.');
+            },
+            onError:function(detail){
+              State.view = 'scan';
+              render();
+              $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>');
+            },
+            onPopupBlocked:function(){
+              State.view = 'scan';
+              render();
+              $('scanMsg').innerHTML = showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>');
+            }
           });
-          if(!opened){
-            State.view = 'scan';
-            render();
-            $('scanMsg').innerHTML = showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>');
-          }
+          if(opened){ $('msg').innerHTML = showBox('warn','請在彈出視窗完成掃描','Complete scanning in the popup.'); }
         };
         return;
       }

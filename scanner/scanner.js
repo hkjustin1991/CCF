@@ -32,6 +32,12 @@
     return origin || '*';
   }
 
+  function openerMissingNotice(extra){
+    var lines = ['無法回傳到原頁面（找不到 opener）。 / Unable to return result (no opener found).'];
+    if(extra) lines.push(String(extra));
+    setStatus(lines.join(' '));
+  }
+
   function postToOpener(type, payload, detail){
     if(!canPostToOpener()) return;
     var message = { type:type, state:state, flow:flow };
@@ -66,18 +72,30 @@
 
   function finishSuccess(payload){
     stopScan();
+    if(!canPostToOpener()){
+      openerMissingNotice('已掃描：' + String(payload || ''));
+      return;
+    }
     postToOpener('CCF_QR_RESULT', payload);
     window.close();
   }
 
   function finishCancel(detail){
     stopScan();
+    if(!canPostToOpener()){
+      openerMissingNotice('已取消掃描。 / Scan cancelled.');
+      return;
+    }
     postToOpener('CCF_QR_CANCEL', undefined, detail || 'cancelled');
     window.close();
   }
 
   function finishError(detail){
     stopScan();
+    if(!canPostToOpener()){
+      openerMissingNotice('相機錯誤：' + String(detail || 'unknown error'));
+      return;
+    }
     postToOpener('CCF_QR_ERROR', undefined, detail);
   }
 
@@ -158,5 +176,6 @@
   btnCancel.addEventListener('click', function(){ finishCancel('user_cancelled'); });
   window.addEventListener('beforeunload', function(){ stopScan(); });
 
+  if(!canPostToOpener()) openerMissingNotice('請返回原頁面重新開啟掃描器。 / Please return to the portal and reopen scanner.');
   startScan();
 })();
