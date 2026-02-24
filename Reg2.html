@@ -193,15 +193,39 @@
       });
     }
 
+    function callApiViaGas(fn, args){
+      return new Promise(function(resolve, reject){
+        try{
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          runner[fn].apply(runner, args || []);
+        }catch(err){
+          reject(err);
+        }
+      });
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
-      if(endpoint){
-        return callApiViaRpc(endpoint, fn, args);
+      var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+
+      if(forceRpcOnce){
+        window.CCF_FORCE_RPC_ONCE = false;
+        if(endpoint) return callApiViaRpc(endpoint, fn, args);
       }
-      return new Promise(function(resolve, reject){
-        var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-        runner[fn].apply(runner, args);
+
+      return callApiViaGas(fn, args).catch(function(err){
+        if(endpoint){
+          var msg = String((err && err.message) || err || 'GAS call failed');
+          throw {
+            code:'E530',
+            zh:'GAS 連線失敗，請改用 Git 再試',
+            en:'GAS failed. Please retry with Git API.',
+            detail: msg,
+            gasFailed:true
+          };
+        }
+        throw err;
       });
     }
 
@@ -1280,7 +1304,38 @@
         restartScan();
       });
 
-      function onCaptured(text){ handleScanPayload_(text); }
+      function onCaptured(text){
+        $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+
+        callApi('api_reg_self_lookup_public', text).then(function(res){
+          if(!res || !res.ok){
+            $('scanMsg').innerHTML = showServerErr(res);
+            return;
+          }
+
+          stopScan();
+          State.view = 'selfHome';
+          State.flow = 'self_update';
+          State.authQrPayload = text;
+          State.prefill = res.member;
+          State.lastResult = null;
+          callApi('api_reg_self_portal_snapshot_public', text).then(function(snap){
+            State.snapshot = (snap && snap.ok) ? snap : null;
+            render();
+          }).catch(function(){
+            State.snapshot = null;
+            render();
+          });
+
+        }).catch(function(err){
+          if(err && err.gasFailed){
+            $('scanMsg').innerHTML = showBox('err', err.zh || 'GAS 連線失敗，請改用 Git 再試', err.en || 'GAS failed. Please retry with Git API.', bindGasRetryButton_('scanMsg', function(){ onCaptured(text); }));
+            return;
+          }
+          var msg = (err && err.message) ? err.message : String(err||'');
+          $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        });
+      }
 
       $('scanMsg').innerHTML = showBox('warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
     }
