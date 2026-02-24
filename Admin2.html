@@ -1015,58 +1015,15 @@
       }
       resetStability();
     }
-    function collectCameraDiagnostics_(err){
-      var errName = (err && err.name) ? String(err.name) : 'UnknownError';
-      var errMessage = (err && err.message) ? String(err.message) : '';
-      var href = '';
-      try{ href = String((window.location && window.location.href) || ''); }catch(e){}
-      var isTop = false;
-      try{ isTop = (window.top === window.self); }catch(e){}
-      var secure = !!window.isSecureContext;
-      var policyCheck = 'unsupported';
-      try{
-        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function'){
-          policyCheck = !!document.featurePolicy.allowsFeature('camera');
-        }else if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function'){
-          policyCheck = !!document.permissionsPolicy.allowsFeature('camera');
-        }
-      }catch(e){
-        policyCheck = 'error:' + String((e && e.message) || e);
-      }
-      return {
-        href: href,
-        topSelf: isTop,
-        secureContext: secure,
-        featurePolicyCamera: policyCheck,
-        errorName: errName,
-        errorMessage: errMessage
-      };
-    }
     function buildCameraStartDetail_(err){
-      var d = collectCameraDiagnostics_(err);
-      var detail = [
-        'location.href=' + d.href,
-        'window.top===window.self=' + d.topSelf,
-        'isSecureContext=' + d.secureContext,
-        'cameraPolicy=' + d.featurePolicyCamera,
-        'error=' + d.errorName + (d.errorMessage ? (': ' + d.errorMessage) : '')
-      ].join(' | ');
-      if(d.errorName === 'NotAllowedError'){
-        detail += ' | 請允許相機權限 / Please allow camera permission.';
-        if(!d.topSelf) detail += ' | 如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.';
-        if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') detail += ' | 需使用 HTTPS。 / HTTPS is required.';
-      }
-      return { detail: detail, diagnostics: d };
-    }
-    function reportScannerE420_(stage, diagnostics){
-      try{
-        callApi('api_admin_log_scanner_e420_public', {
-          stage: String(stage || ''),
-          diagnostics: diagnostics || {},
-          deviceId: getDeviceId(),
-          ua: getUA()
-        });
-      }catch(e){}
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
     }
 
 
@@ -1080,6 +1037,56 @@
         };
       }, 0);
       return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
+    function bindImageQrFallback_(msgTarget, onDecoded){
+      var inputId = msgTarget + '_qrFile';
+      var btnId = msgTarget + '_qrFileBtn';
+      var statusId = msgTarget + '_qrFileStatus';
+      setTimeout(function(){
+        var input = $(inputId);
+        var btn = $(btnId);
+        var status = $(statusId);
+        if(!input || !btn) return;
+        btn.onclick = function(){
+          var f = input.files && input.files[0];
+          if(!f){ if(status) status.innerHTML = '請先選擇圖片 / Please choose an image first.'; return; }
+          var fr = new FileReader();
+          fr.onload = function(){
+            var img = new Image();
+            img.onload = function(){
+              try{
+                var c = document.createElement('canvas');
+                c.width = img.naturalWidth || img.width;
+                c.height = img.naturalHeight || img.height;
+                var x = c.getContext('2d', { willReadFrequently:true });
+                x.drawImage(img,0,0,c.width,c.height);
+                var d = x.getImageData(0,0,c.width,c.height);
+                var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
+                if(qr && qr.data){
+                  if(status) status.innerHTML = '已讀取 QR，處理中… / QR decoded, processing…';
+                  if(typeof onDecoded === 'function') onDecoded(String(qr.data||''));
+                }else{
+                  if(status) status.innerHTML = '無法從此圖片辨識 QR。請嘗試更清晰圖片。 / Cannot decode QR from this image. Try a clearer image.';
+                }
+              }catch(e){
+                if(status) status.innerHTML = '讀取圖片失敗 / Failed to read image';
+              }
+            };
+            img.onerror = function(){ if(status) status.innerHTML = '圖片格式不支援 / Unsupported image format'; };
+            img.src = fr.result;
+          };
+          fr.onerror = function(){ if(status) status.innerHTML = '檔案讀取失敗 / Failed to read file'; };
+          fr.readAsDataURL(f);
+        };
+      }, 0);
+      return ''+
+        '<div style="margin-top:10px;border-top:1px dashed #d6dcef;padding-top:10px;">'+
+          '<div class="small">相機被封鎖時可改用圖片解碼 / If camera is blocked, decode from image</div>'+
+          '<input id="'+inputId+'" type="file" accept="image/*" style="margin-top:6px;" />'+
+          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Decode QR image</button></div>'+
+          '<div id="'+statusId+'" class="small" style="margin-top:6px;"></div>'+
+        '</div>';
     }
 
     function startScan(videoEl, onCaptured){
@@ -1110,20 +1117,18 @@
         }).catch(function(err){
           if(allowFallback){ tryStart(constraintsFallback, false); return; }
           stopScan();
-          var detailObj = buildCameraStartDetail_(err);
-          console.error('E420 camera start failed', detailObj.diagnostics);
-          reportScannerE420_('start_failed', detailObj.diagnostics);
+          var detail = buildCameraStartDetail_(err);
           if(err && err.name === 'NotAllowedError'){
             onCaptured(null, {
               code:'E420',
               zh:'相機無法啟動',
               en:'Camera cannot start',
-              detail: detailObj.detail,
-              detailHtml: '<div class="small">'+escapeHtml(detailObj.detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); })
+              detail: detail,
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
             });
             return;
           }
-          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detailObj.detail});
+          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail});
         });
       }
 
@@ -1202,7 +1207,6 @@
           '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnOpenExternal" class="btnBack" type="button">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
           '</div>'+
@@ -1225,37 +1229,7 @@
           });
         }
         modal.querySelector('#btnStartCam').onclick = beginScan;
-        var btnOpenExternal = modal.querySelector('#btnOpenExternal');
-        if(btnOpenExternal){
-          btnOpenExternal.onclick = function(){
-            clear('scanMsg');
-            openExternalScanner_({
-              flow:'admin_login',
-              onPayload:function(payload){
-                showBox('scanMsg','warn','處理中…','Working…');
-                callApi('api_admin_login', payload).then(function(res){
-                  if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-                  closeModal(modal);
-                  onLoginRes(res);
-                }).catch(function(){
-                  showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-                });
-              },
-              onError:function(msg){
-                showErr('scanMsg', {code:'E500', zh:'外部掃描器未設定', en:'External scanner is not configured', detail: String(msg||'')});
-              }
-            });
-          };
-        }
-        if(shouldPreferExternalScanner_() && btnOpenExternal){
-          btnOpenExternal.classList.remove('btnBack');
-          btnOpenExternal.classList.add('btnMain');
-          modal.querySelector('#btnStartCam').classList.remove('btnMain');
-          modal.querySelector('#btnStartCam').classList.add('btnBack');
-          showBox('scanMsg','warn','建議使用外部掃描器','Open external scanner is recommended in this browser.');
-        }else{
-          showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
-        }
+        showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
       };
 
       try{
