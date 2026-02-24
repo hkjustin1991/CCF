@@ -1067,8 +1067,8 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = true;
-          btn.title = 'External scanner disabled: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.disabled = false;
+          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
       var msgEl = $(msgId || 'msg');
@@ -1212,7 +1212,7 @@
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試相機（Git 掃描） / Retry camera (Git scanner)</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -1272,7 +1272,17 @@
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         console.error('E420 camera unsupported', detail0.diagnostics);
         reportScannerE420_('unsupported', d0);
-        onCaptured(null, {code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail});
+        onCaptured(null, {
+          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
+          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+            bindCameraRetryButton_('scanMsg', function(){
+              openExternalScanner_({
+                flow:'admin',
+                onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
+                onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+              });
+            }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
+        });
         return;
       }
       var constraintsPreferred = { video: { facingMode: { ideal:'environment' } }, audio:false };
@@ -1300,11 +1310,28 @@
               zh:'相機無法啟動',
               en:'Camera cannot start',
               detail: detail,
-              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
+                bindCameraRetryButton_('scanMsg', function(){
+                  openExternalScanner_({
+                    flow:'admin',
+                    onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
+                    onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                  });
+                }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
             });
             return;
           }
-          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail});
+          onCaptured(null, {
+            code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail,
+            detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
+              bindCameraRetryButton_('scanMsg', function(){
+                openExternalScanner_({
+                  flow:'admin',
+                  onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
+                  onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                });
+              }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
+          });
         });
       }
 
