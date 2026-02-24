@@ -225,6 +225,59 @@
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
 
+    const EXTERNAL_SCANNER_URL = 'https://<org>.github.io/<repo>/scanner/';
+    const EXTERNAL_SCANNER_ORIGIN = 'https://<org>.github.io';
+    const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+
+    function makeExternalScannerState_(){
+      try{
+        if(window.crypto && window.crypto.getRandomValues){
+          var arr = new Uint32Array(4);
+          window.crypto.getRandomValues(arr);
+          return Array.prototype.map.call(arr, function(n){ return n.toString(16); }).join('');
+        }
+      }catch(e){}
+      return String(Date.now()) + '_' + String(Math.random()).slice(2);
+    }
+
+    function openExternalScanner_(onPayload, onStatus){
+      var state = makeExternalScannerState_();
+      var done = false;
+      var timer = null;
+      var poll = null;
+      var popup = null;
+
+      function clear(reason){
+        if(done) return;
+        done = true;
+        if(timer){ clearTimeout(timer); timer = null; }
+        if(poll){ clearInterval(poll); poll = null; }
+        window.removeEventListener('message', onMessage);
+        if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
+        if(typeof onStatus === 'function') onStatus(reason || 'closed');
+      }
+
+      function onMessage(ev){
+        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
+        var data = ev.data || {};
+        if(!data || data.state !== state) return;
+        if(data.type === 'scanner:cancel'){ clear('cancel'); return; }
+        if(data.type !== 'scanner:result' || !data.payload) return;
+        clear('success');
+        onPayload(String(data.payload), 'EXT_SCANNER');
+      }
+
+      window.addEventListener('message', onMessage);
+      var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
+      popup = window.open(url, 'ccf_ext_scanner', 'popup,width=460,height=760');
+      if(!popup){ clear('blocked'); return; }
+
+      timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
+      poll = setInterval(function(){
+        if(popup && popup.closed){ clear('popup_closed'); }
+      }, 400);
+    }
+
     function showBox(kind, zh, en, detail){
       detail = detail || '';
       var cls = (kind==='ok')?'ok':(kind==='err'?'err':'warn');
@@ -932,6 +985,7 @@
           '<div class="miniBtnRow">'+
             '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
+            '<button id="btnExternalScan" class="alt" type="button">🌐 外置掃描器 / External scanner</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'+
@@ -1136,7 +1190,7 @@
         restartScan();
       });
 
-      function onCaptured(text){
+      function onCaptured(text, source){
         $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
 
         callApi('api_reg_self_lookup_public', text).then(function(res){
@@ -1164,6 +1218,24 @@
           $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
         });
       }
+
+      $('btnExternalScan').onclick = function(){
+        stopScan();
+        openExternalScanner_(onCaptured, function(status){
+          if(status === 'success') return;
+          if(status === 'timeout'){
+            $('scanMsg').innerHTML = showBox('warn','外置掃描器逾時','External scanner timed out.');
+            return;
+          }
+          if(status === 'cancel' || status === 'popup_closed'){
+            $('scanMsg').innerHTML = showBox('warn','外置掃描已取消','External scanner cancelled.');
+            return;
+          }
+          if(status === 'blocked'){
+            $('scanMsg').innerHTML = showBox('err','彈出視窗被封鎖','Popup was blocked.');
+          }
+        });
+      };
 
       $('scanMsg').innerHTML = showBox('warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
     }

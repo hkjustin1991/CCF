@@ -400,6 +400,59 @@
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
 
+    const EXTERNAL_SCANNER_URL = 'https://<org>.github.io/<repo>/scanner/';
+    const EXTERNAL_SCANNER_ORIGIN = 'https://<org>.github.io';
+    const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+
+    function makeExternalScannerState_(){
+      try{
+        if(window.crypto && window.crypto.getRandomValues){
+          var arr = new Uint32Array(4);
+          window.crypto.getRandomValues(arr);
+          return Array.prototype.map.call(arr, function(n){ return n.toString(16); }).join('');
+        }
+      }catch(e){}
+      return String(Date.now()) + '_' + String(Math.random()).slice(2);
+    }
+
+    function openExternalScanner_(onPayload, onStatus){
+      var state = makeExternalScannerState_();
+      var done = false;
+      var timer = null;
+      var poll = null;
+      var popup = null;
+
+      function clear(reason){
+        if(done) return;
+        done = true;
+        if(timer){ clearTimeout(timer); timer = null; }
+        if(poll){ clearInterval(poll); poll = null; }
+        window.removeEventListener('message', onMessage);
+        if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
+        if(typeof onStatus === 'function') onStatus(reason || 'closed');
+      }
+
+      function onMessage(ev){
+        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
+        var data = ev.data || {};
+        if(!data || data.state !== state) return;
+        if(data.type === 'scanner:cancel'){ clear('cancel'); return; }
+        if(data.type !== 'scanner:result' || !data.payload) return;
+        clear('success');
+        onPayload(String(data.payload), 'EXT_SCANNER');
+      }
+
+      window.addEventListener('message', onMessage);
+      var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
+      popup = window.open(url, 'ccf_ext_scanner_admin', 'popup,width=460,height=760');
+      if(!popup){ clear('blocked'); return; }
+
+      timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
+      poll = setInterval(function(){
+        if(popup && popup.closed){ clear('popup_closed'); }
+      }, 400);
+    }
+
     function logAction(action, details, context){
       try{
         if(!App.token) return;
@@ -1131,6 +1184,7 @@
           '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
+            '<button id="btnExtScan" class="btnSub">🌐 外置掃描器 / External scanner</button>'+
             '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'
@@ -1138,20 +1192,37 @@
         modal.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(modal); };
 
         var vEl = modal.querySelector('#vLogin');
+        function submitLoginPayload(payload, source){
+          source = source || 'CAMERA';
+          showBox('scanMsg','warn','處理中…','Working…');
+          callApi('api_admin_login', payload).then(function(res){
+            if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            logAction('LOGIN_SOURCE', 'source=' + source, 'LOGIN|' + source);
+            closeModal(modal);
+            onLoginRes(res);
+          }).catch(function(){
+            showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        }
+
         function beginScan(){
           startScan(vEl, function(payload, err){
             if(err){ showErr('scanMsg', err); return; }
-            showBox('scanMsg','warn','處理中…','Working…');
-            callApi('api_admin_login', payload).then(function(res){
-              if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-              closeModal(modal);
-              onLoginRes(res);
-            }).catch(function(){
-              showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-            });
+            submitLoginPayload(payload, 'CAMERA');
           });
         }
         modal.querySelector('#btnStartCam').onclick = beginScan;
+        modal.querySelector('#btnExtScan').onclick = function(){
+          stopScan();
+          openExternalScanner_(function(payload, source){
+            submitLoginPayload(payload, source || 'EXT_SCANNER');
+          }, function(status){
+            if(status === 'success') return;
+            if(status === 'timeout'){ showBox('scanMsg','warn','外置掃描器逾時','External scanner timed out.'); return; }
+            if(status === 'cancel' || status === 'popup_closed'){ showBox('scanMsg','warn','外置掃描已取消','External scanner cancelled.'); return; }
+            if(status === 'blocked'){ showBox('scanMsg','err','彈出視窗被封鎖','Popup was blocked.'); }
+          });
+        };
         showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
       };
 

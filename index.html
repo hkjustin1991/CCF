@@ -206,6 +206,10 @@
       servingOpenGroup:null
     };
 
+    const EXTERNAL_SCANNER_URL = 'https://<org>.github.io/<repo>/scanner/';
+    const EXTERNAL_SCANNER_ORIGIN = 'https://<org>.github.io';
+    const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+
     var STABLE_REQUIRED_COUNT = 2;
     var STABLE_REQUIRED_MS = 250;
 
@@ -448,6 +452,63 @@
       }
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
+    function taggedDeviceId_(source){
+      var marker = source ? ('|' + String(source)) : '';
+      return String(getDeviceId() || '') + marker;
+    }
+    function taggedUa_(source){
+      var marker = source ? (' [' + String(source) + ']') : '';
+      return String(getUA() || '') + marker;
+    }
+
+    function makeExternalScannerState_(){
+      try{
+        if(window.crypto && window.crypto.getRandomValues){
+          var arr = new Uint32Array(4);
+          window.crypto.getRandomValues(arr);
+          return Array.prototype.map.call(arr, function(n){ return n.toString(16); }).join('');
+        }
+      }catch(e){}
+      return String(Date.now()) + '_' + String(Math.random()).slice(2);
+    }
+
+    function openExternalScanner_(onPayload, onStatus){
+      var state = makeExternalScannerState_();
+      var done = false;
+      var timer = null;
+      var poll = null;
+      var popup = null;
+
+      function clear(reason){
+        if(done) return;
+        done = true;
+        if(timer){ clearTimeout(timer); timer = null; }
+        if(poll){ clearInterval(poll); poll = null; }
+        window.removeEventListener('message', onMessage);
+        if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
+        if(typeof onStatus === 'function') onStatus(reason || 'closed');
+      }
+
+      function onMessage(ev){
+        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN){ return; }
+        var data = ev.data || {};
+        if(!data || data.state !== state){ return; }
+        if(data.type === 'scanner:cancel'){ clear('cancel'); return; }
+        if(data.type !== 'scanner:result' || !data.payload){ return; }
+        clear('success');
+        onPayload(String(data.payload), 'EXT_SCANNER');
+      }
+
+      window.addEventListener('message', onMessage);
+      var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
+      popup = window.open(url, 'ccf_ext_scanner', 'popup,width=460,height=760');
+      if(!popup){ clear('blocked'); return; }
+
+      timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
+      poll = setInterval(function(){
+        if(popup && popup.closed){ clear('popup_closed'); }
+      }, 400);
+    }
 
     function hiPref(p){
       var s = String(p||'').trim();
@@ -1005,6 +1066,7 @@
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnRestartScan" class="primary">🔁 再次掃描 / Scan again</button>'+
+            '<button id="btnExternalScan" class="alt">🌐 外置掃描器 / External scanner</button>'+
             '<button id="backCheckinMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'+
@@ -1449,13 +1511,14 @@
           isMinorNoticeHtml(!!m.isMinor);
       }
 
-      function onCaptured(text){
+      function onCaptured(text, source){
+        source = source || 'CAMERA';
         clear('scanMsg');
         toggleVideoWrap_('videoCheckin', false);
         var cam = $('scanCam');
         if (cam) cam.classList.add('hide');
         $('scanMsg').innerHTML = '<div class="small">處理中… / Processing…</div>';
-        callApi('api_checkin_scan', App.token, text, null, getDeviceId(), getUA()).then(renderCheckinResult).catch(function(){
+        callApi('api_checkin_scan', App.token, text, null, taggedDeviceId_(source), taggedUa_(source)).then(renderCheckinResult).catch(function(){
           showErr('scanMsg', {code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.'});
         });
       }
@@ -1478,6 +1541,24 @@
 
       $('btnRestartScan').onclick = function(){
         start();
+      };
+
+      $('btnExternalScan').onclick = function(){
+        stopScan();
+        openExternalScanner_(onCaptured, function(status){
+          if(status === 'success') return;
+          if(status === 'timeout'){
+            showBox('scanMsg', 'warn', '外置掃描器逾時', 'External scanner timed out.');
+            return;
+          }
+          if(status === 'cancel' || status === 'popup_closed'){
+            showBox('scanMsg', 'warn', '外置掃描已取消', 'External scanner cancelled.');
+            return;
+          }
+          if(status === 'blocked'){
+            showBox('scanMsg', 'err', '彈出視窗被封鎖', 'Popup was blocked.');
+          }
+        });
       };
 
       $('backCheckinMenu').onclick = function(){
