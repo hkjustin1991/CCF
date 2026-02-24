@@ -268,6 +268,11 @@
       return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
     }
 
+    function navigateToLivePortal(){
+      var target = window.location.origin + window.location.pathname;
+      window.location.href = target;
+    }
+
 
     function bindGasRetryButton_(targetId, retryFn){
       var btnId = targetId + '_retryGit';
@@ -714,7 +719,6 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
@@ -1143,7 +1147,7 @@
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
         if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-          window.location.href = '?';
+          navigateToLivePortal();
         };
         $('btnNew').onclick = function(){
           State.view = 'form';
@@ -1322,9 +1326,6 @@
 
     function bindSelfHome(){
       var selfMsgEl = $('selfMsg');
-      if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-        window.location.href = '?';
-      };
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;
