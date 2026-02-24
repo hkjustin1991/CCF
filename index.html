@@ -276,6 +276,80 @@
       });
     }
 
+
+
+    var EXTERNAL_SCANNER_URL = String(window.EXTERNAL_SCANNER_URL || '');
+    var EXTERNAL_SCANNER_ORIGIN = String(window.EXTERNAL_SCANNER_ORIGIN || '');
+    var pendingExternalScanner_ = null;
+
+    if(!EXTERNAL_SCANNER_ORIGIN && EXTERNAL_SCANNER_URL){
+      try{ EXTERNAL_SCANNER_ORIGIN = String(new URL(EXTERNAL_SCANNER_URL, window.location.href).origin || ''); }catch(e){}
+    }
+
+    function cameraPolicyAllowed_(){
+      try{
+        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function'){
+          return !!document.featurePolicy.allowsFeature('camera');
+        }
+        if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function'){
+          return !!document.permissionsPolicy.allowsFeature('camera');
+        }
+      }catch(e){}
+      return true;
+    }
+    function shouldPreferExternalScanner_(){
+      var topSelf = true;
+      try{ topSelf = (window.top === window.self); }catch(e){ topSelf = false; }
+      return !cameraPolicyAllowed_() || !topSelf;
+    }
+    function randomStateToken_(){
+      var arr = new Uint8Array(16);
+      if(window.crypto && window.crypto.getRandomValues){
+        window.crypto.getRandomValues(arr);
+      }else{
+        for(var i=0;i<arr.length;i++) arr[i]=Math.floor(Math.random()*256);
+      }
+      var out='';
+      for(var j=0;j<arr.length;j++){ out += arr[j].toString(16).padStart(2,'0'); }
+      return out;
+    }
+    function openExternalScanner_(opts){
+      opts = opts || {};
+      var flow = String(opts.flow || '');
+      if(!EXTERNAL_SCANNER_URL){
+        if(typeof opts.onError === 'function') opts.onError('External scanner URL is not configured.');
+        return null;
+      }
+      var state = randomStateToken_();
+      pendingExternalScanner_ = { state: state, flow: flow, onPayload: opts.onPayload };
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      var origin = '';
+      try{ origin = String(window.location.origin || ''); }catch(e){}
+      if(!origin && window.location){ origin = window.location.protocol + '//' + window.location.host; }
+      target.searchParams.set('origin', origin);
+      target.searchParams.set('state', state);
+      target.searchParams.set('flow', flow);
+
+      var w = null;
+      try{ w = window.open(target.toString(), '_blank', 'noopener,noreferrer'); }catch(e){}
+      if(!w){
+        try{ window.location.href = target.toString(); }catch(e2){}
+      }
+      return state;
+    }
+
+    window.addEventListener('message', function(event){
+      if(!pendingExternalScanner_) return;
+      if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
+      var data = event.data || {};
+      if(!data || data.type !== 'CCF_QR_RESULT') return;
+      if(String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
+      var cb = pendingExternalScanner_.onPayload;
+      pendingExternalScanner_ = null;
+      if(typeof cb === 'function') cb(data.payload);
+    });
+
     function escapeHtml(s){
       s = String(s || '');
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -636,58 +710,15 @@
       else wrap.classList.add('hide');
     }
 
-    function collectCameraDiagnostics_(err){
-      var errName = (err && err.name) ? String(err.name) : 'UnknownError';
-      var errMessage = (err && err.message) ? String(err.message) : '';
-      var href = '';
-      try{ href = String((window.location && window.location.href) || ''); }catch(e){}
-      var isTop = false;
-      try{ isTop = (window.top === window.self); }catch(e){}
-      var secure = !!window.isSecureContext;
-      var policyCheck = 'unsupported';
-      try{
-        if(document.featurePolicy && typeof document.featurePolicy.allowsFeature === 'function'){
-          policyCheck = !!document.featurePolicy.allowsFeature('camera');
-        }else if(document.permissionsPolicy && typeof document.permissionsPolicy.allowsFeature === 'function'){
-          policyCheck = !!document.permissionsPolicy.allowsFeature('camera');
-        }
-      }catch(e){
-        policyCheck = 'error:' + String((e && e.message) || e);
-      }
-      return {
-        href: href,
-        topSelf: isTop,
-        secureContext: secure,
-        featurePolicyCamera: policyCheck,
-        errorName: errName,
-        errorMessage: errMessage
-      };
-    }
     function buildCameraStartDetail_(err){
-      var d = collectCameraDiagnostics_(err);
-      var detail = [
-        'location.href=' + d.href,
-        'window.top===window.self=' + d.topSelf,
-        'isSecureContext=' + d.secureContext,
-        'cameraPolicy=' + d.featurePolicyCamera,
-        'error=' + d.errorName + (d.errorMessage ? (': ' + d.errorMessage) : '')
-      ].join(' | ');
-      if(d.errorName === 'NotAllowedError'){
-        detail += ' | 請允許相機權限 / Please allow camera permission.';
-        if(!d.topSelf) detail += ' | 如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.';
-        if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') detail += ' | 需使用 HTTPS。 / HTTPS is required.';
-      }
-      return { detail: detail, diagnostics: d };
-    }
-    function reportScannerE420_(stage, diagnostics){
-      try{
-        callApi('api_log_scanner_e420', {
-          stage: String(stage || ''),
-          diagnostics: diagnostics || {},
-          deviceId: getDeviceId(),
-          ua: getUA()
-        });
-      }catch(e){}
+      var name = (err && err.name) ? String(err.name) : '';
+      if(name !== 'NotAllowedError') return name;
+      var tips = [];
+      tips.push('NotAllowedError');
+      tips.push('請允許相機權限 / Please allow camera permission.');
+      if(window.top !== window.self) tips.push('如在 WhatsApp/FB/內嵌瀏覽器開啟，請改用系統瀏覽器。 / If opened in in-app browser, open in system browser.');
+      if(window.location && window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') tips.push('需使用 HTTPS。 / HTTPS is required.');
+      return tips.join(' ');
     }
     function bindCameraRetryButton_(msgTarget, retryFn){
       var btnId = msgTarget + '_retryCam';
@@ -699,6 +730,56 @@
         };
       }, 0);
       return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+    }
+
+    function bindImageQrFallback_(msgTarget, onDecoded){
+      var inputId = msgTarget + '_qrFile';
+      var btnId = msgTarget + '_qrFileBtn';
+      var statusId = msgTarget + '_qrFileStatus';
+      setTimeout(function(){
+        var input = $(inputId);
+        var btn = $(btnId);
+        var status = $(statusId);
+        if(!input || !btn) return;
+        btn.onclick = function(){
+          var f = input.files && input.files[0];
+          if(!f){ if(status) status.innerHTML = '請先選擇圖片 / Please choose an image first.'; return; }
+          var fr = new FileReader();
+          fr.onload = function(){
+            var img = new Image();
+            img.onload = function(){
+              try{
+                var c = document.createElement('canvas');
+                c.width = img.naturalWidth || img.width;
+                c.height = img.naturalHeight || img.height;
+                var x = c.getContext('2d', { willReadFrequently:true });
+                x.drawImage(img,0,0,c.width,c.height);
+                var d = x.getImageData(0,0,c.width,c.height);
+                var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
+                if(qr && qr.data){
+                  if(status) status.innerHTML = '已讀取 QR，處理中… / QR decoded, processing…';
+                  if(typeof onDecoded === 'function') onDecoded(String(qr.data||''));
+                }else{
+                  if(status) status.innerHTML = '無法從此圖片辨識 QR。請嘗試更清晰圖片。 / Cannot decode QR from this image. Try a clearer image.';
+                }
+              }catch(e){
+                if(status) status.innerHTML = '讀取圖片失敗 / Failed to read image';
+              }
+            };
+            img.onerror = function(){ if(status) status.innerHTML = '圖片格式不支援 / Unsupported image format'; };
+            img.src = fr.result;
+          };
+          fr.onerror = function(){ if(status) status.innerHTML = '檔案讀取失敗 / Failed to read file'; };
+          fr.readAsDataURL(f);
+        };
+      }, 0);
+      return ''+
+        '<div style="margin-top:10px;border-top:1px dashed #d6dcef;padding-top:10px;">'+
+          '<div class="small">相機被封鎖時可改用圖片解碼 / If camera is blocked, decode from image</div>'+
+          '<input id="'+inputId+'" type="file" accept="image/*" style="margin-top:6px;" />'+
+          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Decode QR image</button></div>'+
+          '<div id="'+statusId+'" class="small" style="margin-top:6px;"></div>'+
+        '</div>';
     }
 
     function startScan(videoId, onCaptured, msgTarget){
@@ -743,20 +824,18 @@
             return;
           }
           stopScan();
-          var detailObj = buildCameraStartDetail_(err);
-          console.error('E420 camera start failed', detailObj.diagnostics);
-          reportScannerE420_('start_failed', detailObj.diagnostics);
+          var detail = buildCameraStartDetail_(err);
           if(err && err.name === 'NotAllowedError'){
             showErr(msgTarget, {
               code:'E420',
               zh:'相機無法啟動',
               en:'Camera cannot start',
-              detail: detailObj.detail,
-              detailHtml: '<div class="small">'+escapeHtml(detailObj.detail)+'</div>' + bindCameraRetryButton_(msgTarget, function(){ tryStart(constraintsPreferred, true); })
+              detail: detail,
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_(msgTarget, function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded); })
             });
             return;
           }
-          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detailObj.detail });
+          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail });
         });
       }
       tryStart(constraintsPreferred, true);
@@ -958,8 +1037,14 @@
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartLoginScan" class="primary">📷 掃描 QR 登入 / Scan QR to log in</button>'+
+            '<button id="btnLoginMoreOptions" class="alt">⚙️ 更多選項（緊急用） / More options (emergency only)</button>'+
+          '</div>'+
+          '<div id="loginMoreOptionsBox" class="card hide" style="margin-top:10px;">'+
+            '<div class="small">緊急備援：僅在相機完全不可用時使用。<br/>Emergency fallback: use only when camera is unavailable.</div>'+
+            '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnLoginUploadQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<input id="loginQrImageInput" type="file" accept="image/*" class="hide" />'+
+            '</div>'+
           '</div>'+
           '<div id="loginCam" class="card hide" style="margin-top:10px;">'+
             '<div class="big">📷 掃描中… / Scanning…</div>'+
@@ -1047,6 +1132,7 @@
             '</div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
+            '<button id="btnOpenExternalScan" class="alt">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnRestartScan" class="primary">🔁 再次掃描 / Scan again</button>'+
             '<button id="btnUploadCheckin" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<button id="backCheckinMenu" class="alt">⬅️ 返回 / Back</button>'+
@@ -1316,6 +1402,27 @@
         window.location.href = '?mode=reg';
       };
 
+      if ($('btnLoginMoreOptions') && $('loginMoreOptionsBox')){
+        $('btnLoginMoreOptions').onclick = function(){
+          var box = $('loginMoreOptionsBox');
+          if(!box) return;
+          box.classList.toggle('hide');
+        };
+      }
+
+      function applyLoginPayload_(payload){
+        callApi('api_login', payload).then(function(res){
+          if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
+          App.token = res.token;
+          App.staff = res.staff;
+          try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
+          App.view='menu';
+          render();
+        }).catch(function(){
+          showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
+        });
+      }
+
       $('btnStartLoginScan').onclick = function(){
         clear('msg');
         $('loginCam').classList.remove('hide');
@@ -1371,20 +1478,28 @@
           showBox('msg', 'warn', '讀取圖片中…', 'Reading image…');
           decodeQrFromImageFile_(f).then(function(payload){
             showBox('msg', 'warn', '處理中…', 'Working…');
-            return callApi('api_login', payload);
-          }).then(function(res){
-            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
-            App.token = res.token;
-            App.staff = res.staff;
-            try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
-            App.view='menu';
-            render();
+            return payload;
+          }).then(function(payload){
+            applyLoginPayload_(payload);
           }).catch(function(err){
             if(err && err.code){ showErr('msg', err); return; }
             showErr('msg', { code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.' });
           });
         };
       }
+
+      try{
+        var qp = new URLSearchParams(window.location.search || '');
+        var handoff = String(qp.get('handoff') || '').trim();
+        if(!handoff){
+          handoff = String(sessionStorage.getItem('ccf_qr_handoff_payload') || '').trim();
+        }
+        if(handoff){
+          sessionStorage.removeItem('ccf_qr_handoff_payload');
+          showBox('msg', 'warn', '接收掃描結果中…', 'Receiving handoff payload…');
+          applyLoginPayload_(handoff);
+        }
+      }catch(e){}
 
       $('btnInternalOk').onclick = function(){
         clear('msg');
@@ -1540,9 +1655,24 @@
         startScan('videoCheckin', onCaptured, 'scanMsg');
       }
 
+      function startExternal(){
+        clear('scanMsg');
+        openExternalScanner_({
+          flow:'checkin',
+          onPayload:onCaptured,
+          onError:function(msg){
+            showBox('scanMsg', 'err', '外部掃描器未設定', 'External scanner is not configured', '<div class="small">'+escapeHtml(msg||'')+'</div>');
+          }
+        });
+      }
+
       camBindSwitchButton_('btnSwitchCamCheckin', function(){
         start();
       });
+
+      $('btnOpenExternalScan').onclick = function(){
+        startExternal();
+      };
 
       $('btnStopCam').onclick = function(){
         stopScan();

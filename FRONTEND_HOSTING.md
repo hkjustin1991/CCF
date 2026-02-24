@@ -11,9 +11,20 @@ Recommended hosts:
 - Any HTTPS domain you control
 
 Deploy static front-end files and open the hosted URL directly (not in an iframe):
-- `/index.html`
-- `/Reg2.html`
-- `/Admin2.html`
+- `/scanner/index.html` (mobile scanner + handoff entry)
+- `/index.html` (staff check-in)
+- `/Reg2.html` (self service)
+- `/Admin2.html` (admin)
+
+### GitHub Pages option (default branch)
+
+For this repo, enable Pages from **default branch** and use **`/(root)`** as source folder.
+
+Resulting scanner URL format:
+
+`https://<org-or-user>.github.io/CCF/scanner/`
+
+The scanner page hands the QR payload to one of the existing portal flows by appending `?handoff=<payload>` (also mirrored to `sessionStorage` as fallback).
 
 ## 2) Keep Apps Script as API backend
 
