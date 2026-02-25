@@ -1349,9 +1349,7 @@
             '</div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnOpenExternalScan" class="alt">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnRestartScan" class="primary">🔁 再次掃描 / Scan again</button>'+
-            '<button id="btnExternalScan" class="alt">🌐 外置掃描器 / External scanner</button>'+
             '<button id="backCheckinMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'+
@@ -1864,9 +1862,6 @@
         });
       }
 
-      function onCaptured(text){
-        submitCheckinPayload(text, false);
-      }
 
       function start(){
         clear('scanMsg');
@@ -1875,39 +1870,10 @@
         startScan('videoCheckin', onCaptured, 'scanMsg');
       }
 
-      function startExternal(){
-        clear('scanMsg');
-        var opened = openExternalScanner_({
-          flow:'checkin',
-          onPayload:onCaptured,
-          onPopupBlocked:function(){
-            showBox('scanMsg', 'warn', '未能打開彈出視窗，已保留內置掃描器', 'Popup blocked; built-in scanner is still available.');
-          },
-          onCancel:function(){
-            showBox('scanMsg', 'warn', '已取消掃描', 'Scan cancelled.');
-          },
-          onError:function(msg){
-            var text = String(msg||'');
-            if(text.indexOf('not configured') !== -1){
-              showBox('scanMsg', 'err', '外部掃描器未設定', 'External scanner is not configured', '<div class="small">'+escapeHtml(text)+'</div>');
-              return;
-            }
-            showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:text});
-          }
-        });
-        if(!opened){ return; }
-      }
-
       camBindSwitchButton_('btnSwitchCamCheckin', function(){
         start();
       });
 
-      applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']);
-
-      $('btnOpenExternalScan').onclick = function(){
-        if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']); return; }
-        startExternal();
-      };
 
       $('btnStopCam').onclick = function(){
         stopScan();
@@ -1918,28 +1884,6 @@
         start();
       };
 
-      $('btnExternalScan').onclick = function(){
-        if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']); return; }
-        stopScan();
-        openExternalScanner_(onCaptured, function(status){
-          if(status === 'success') return;
-          if(status === 'timeout'){
-            showBox('scanMsg', 'warn', '外置掃描器逾時', 'External scanner timed out.');
-            return;
-          }
-          if(status === 'cancel' || status === 'popup_closed'){
-            showBox('scanMsg', 'warn', '外置掃描已取消', 'External scanner cancelled.');
-            return;
-          }
-          if(status === 'blocked'){
-            showBox('scanMsg', 'err', '彈出視窗被封鎖', 'Popup was blocked.');
-            return;
-          }
-          if(status === 'config_invalid'){
-            applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']);
-          }
-        });
-      };
 
       $('backCheckinMenu').onclick = function(){
         stopScan();
