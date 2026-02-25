@@ -1122,8 +1122,6 @@
             var action = '';
             if (!mineInPosition && vacancy > 0){
               action = '<button class="alt btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
-            } else if (!mineInPosition) {
-              action = '<span class="chip">已滿 / Full</span>';
             }
 
             row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;"><div class="assignList">'+slotLines.join(' ')+'</div>'+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
