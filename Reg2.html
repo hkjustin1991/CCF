@@ -1048,8 +1048,7 @@
         var pm = raw.match(/\(([^()]+)\)\s*$/);
         if (pm && pm[1]) pref = String(pm[1]).trim();
         var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
-        var who = pref || base || mid;
-        return mid + ' · ' + who;
+        return pref || base || mid;
       }
 
       var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
@@ -1092,13 +1091,13 @@
       } else if (!positions.length){
         tableHtml = '<div class="msgBox warn">此組別沒有可用崗位 / No positions configured for this group.</div>';
       } else {
-        var header = '<tr><th style="text-align:left;min-width:230px;">Position / 崗位</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var header = '<tr><th style="text-align:left;min-width:230px;border:1px solid var(--border);padding:8px;background:#f8fbff;">Position / 崗位</th>'+monthEvents.map(function(ev){ return '<th style="border:1px solid var(--border);padding:8px;background:#f8fbff;">'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
         var body = positions.map(function(p){
           var key = String(p.position||'');
           var label = SERVING_POSITION_LABELS_REG2[key] || null;
           var zh = String((label && label.zh) || p.labelZh || key).trim();
           var en = String((label && label.en) || prettifyPositionEn_(key)).trim();
-          var row = '<tr><td><b>'+escapeHtml(zh+' / '+en)+'</b></td>';
+          var row = '<tr><td style=\"border:1px solid var(--border);padding:8px;vertical-align:top;\"><b>'+escapeHtml(zh+' / '+en)+'</b></td>';
 
           monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
@@ -1112,29 +1111,28 @@
               if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
               if (v === 'N/A'){ vacancy += 1; return '<span class="chip">N/A</span>'; }
               var txt = memberDisplay_(v);
-              if (v === mineId) mineInPosition = true;
+              if (v === mineId){
+                mineInPosition = true;
+                return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
+              }
               return '<span class="chip">'+escapeHtml(txt || v)+'</span>';
             });
             if (!slotLines.length){ vacancy = 1; slotLines = ['<span class="chip">空缺 / Empty</span>']; }
 
             var action = '';
-            if (mineInPosition){
-              action = (cell.canChange === false)
-                ? '<span class="chip">你已報名（6w鎖定） / Signed up (6w locked)</span>'
-                : '<button class="alt btnSmall" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">取消 / Remove</button>';
-            } else if (vacancy > 0){
-              action = '<button class="primary btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
-            } else {
+            if (!mineInPosition && vacancy > 0){
+              action = '<button class="alt btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
+            } else if (!mineInPosition) {
               action = '<span class="chip">已滿 / Full</span>';
             }
 
-            row += '<td><div class="assignList">'+slotLines.join(' ')+'</div><div style="margin-top:6px;">'+action+'</div></td>';
+            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;"><div class="assignList">'+slotLines.join(' ')+'</div>'+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
           });
           row += '</tr>';
           return row;
         }).join('');
 
-        tableHtml = '<div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div>';
+        tableHtml = '<div style=\"overflow:auto;margin-top:8px;\"><table style=\"width:100%;border-collapse:collapse;border:1px solid var(--border);\"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div>';
       }
 
       return ''+
@@ -1806,10 +1804,15 @@
           });
         };
       });
-      Array.prototype.slice.call(document.querySelectorAll('button[data-del]')).forEach(function(b){
+      Array.prototype.slice.call(document.querySelectorAll('button[data-del-self]')).forEach(function(b){
         b.onclick = function(){
           var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos');
-          if(!confirm('確認刪除？\nSure to delete?')) return;
+          var canChange = b.getAttribute('data-chg') !== '0';
+          if(!canChange){
+            $('servingMsg').innerHTML = showBox('warn','距離聚會少於 6 週，請聯絡組長更改。','<6 weeks to service. Please contact GL for changes.');
+            return;
+          }
+          if(!confirm('確認取消報名？\nSure to remove from rota?')) return;
           callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
