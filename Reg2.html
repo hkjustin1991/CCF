@@ -1106,10 +1106,11 @@
             var mineInPosition = false;
             var vacancy = 0;
 
+            var vacantChip = '<span class="chip">空缺 / Vacant</span>';
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
-              if (v === 'N/A'){ vacancy += 1; return '<span class="chip">N/A</span>'; }
+              if (!v){ vacancy += 1; return vacantChip; }
+              if (v === 'N/A'){ vacancy += 1; return vacantChip; }
               var txt = memberDisplay_(v);
               if (v === mineId){
                 mineInPosition = true;
@@ -1117,7 +1118,7 @@
               }
               return '<span class="chip">'+escapeHtml(txt || v)+'</span>';
             });
-            if (!slotLines.length){ vacancy = 1; slotLines = ['<span class="chip">空缺 / Empty</span>']; }
+            if (!slotLines.length){ vacancy = 1; slotLines = [vacantChip]; }
 
             var action = '';
             if (!mineInPosition && vacancy > 0){
