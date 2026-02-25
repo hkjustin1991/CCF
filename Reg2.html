@@ -397,13 +397,18 @@
 
     function navigateToLivePortal(){
       try{
-        var path = String(window.location.pathname || '');
-        if(/\.html$/i.test(path)){
-          window.location.href = path.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
+        var u = new URL(window.location.href);
+        if(/\.html$/i.test(u.pathname)){
+          u.pathname = u.pathname.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
+          u.search = '';
+          window.location.href = u.toString();
           return;
         }
+        u.searchParams.delete('mode');
+        window.location.href = u.toString();
+        return;
       }catch(e){}
-      window.location.href = '?';
+      window.location.href = '/';
     }
 
 
@@ -1006,6 +1011,29 @@
         '</div>';
     }
 
+
+    var SERVING_POSITION_LABELS_REG2 = {
+      Worship_Lead:{zh:'敬拜主領',en:'Lead'},
+      Worship_Singer_1:{zh:'和唱 1',en:'Singer 1'},
+      Worship_Singer_2:{zh:'和唱 2',en:'Singer 2'},
+      Worship_Pianist:{zh:'司琴',en:'Pianist'},
+      Worship_Drum:{zh:'鼓手',en:'Drummer'},
+      Worship_Instrument_1:{zh:'樂器 1',en:'Instrument 1'},
+      Worship_Instrument_2:{zh:'樂器 2',en:'Instrument 2'},
+      Media_AV:{zh:'影音',en:'Audio Visual'},
+      Media_PPT:{zh:'投影',en:'PPT'},
+      Media_PPTBuild:{zh:'PPT製作',en:'PPT Build'},
+      Support_BibleReader:{zh:'讀經員',en:'Bible Reader'},
+      Support_Prayer:{zh:'祈禱',en:'Prayer'},
+      Support_Communion:{zh:'聖餐襄禮',en:'Communion'},
+      Support_Care:{zh:'關顧組',en:'Care'},
+      Logistic_Welcome:{zh:'接待',en:'Welcome'},
+      Logistic_Venue:{zh:'場務',en:'Venue'},
+      Logistic_Refreshment:{zh:'茶水',en:'Refreshment'},
+      Finance_Offering:{zh:'財務',en:'Offering'},
+      Other:{zh:'其他',en:'Other'}
+    };
+
     function viewSelfServing(res){
       res = res || {};
       var m = res.member || {};
@@ -1019,7 +1047,7 @@
       }
       function memberDisplay_(id){
         var mid = String(id||'').trim().toUpperCase();
-        if (!mid) return '';
+        if (!mid || mid === 'N/A') return '';
         var raw = String(labelsById[mid] || '').trim();
         var pref = '';
         var pm = raw.match(/\(([^()]+)\)\s*$/);
@@ -1071,9 +1099,11 @@
       } else {
         var header = '<tr><th style="text-align:left;min-width:230px;">Position / 崗位</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
         var body = positions.map(function(p){
-          var zh = String(p.labelZh || '').trim();
-          var en = prettifyPositionEn_(p.position || '');
-          var row = '<tr><td><b>'+escapeHtml((zh ? zh : (p.position||''))+' / '+en)+'</b></td>';
+          var key = String(p.position||'');
+          var label = SERVING_POSITION_LABELS_REG2[key] || null;
+          var zh = String((label && label.zh) || p.labelZh || key).trim();
+          var en = String((label && label.en) || prettifyPositionEn_(key)).trim();
+          var row = '<tr><td><b>'+escapeHtml(zh+' / '+en)+'</b><div class="small">'+escapeHtml(key)+'</div></td>';
 
           monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
@@ -1084,16 +1114,13 @@
 
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
-              if (!v || v === 'N/A'){
-                vacancy += 1;
-                return '<span class="chip">空缺 / Empty</span>';
-              }
+              if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
+              if (v === 'N/A'){ return '<span class="chip">N/A</span>'; }
               var txt = memberDisplay_(v);
               if (v === mineId) mineInPosition = true;
-              return '<span class="chip">'+escapeHtml(txt)+'</span>';
+              return '<span class="chip">'+escapeHtml(txt || v)+'</span>';
             });
-
-            if (!slotLines.length) slotLines = ['<span class="chip">N/A</span>'];
+            if (!slotLines.length){ vacancy = 1; slotLines = ['<span class="chip">空缺 / Empty</span>']; }
 
             var action = '';
             if (mineInPosition){
