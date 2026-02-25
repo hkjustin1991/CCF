@@ -382,6 +382,8 @@ function getMembersIndex_() {
     byId[id] = {
       rowNumber: r + 2,
       id,
+      familyId: String(row[col['FamilyID']] || '').trim(),
+      memberLetter: String(row[col['MemberLetter']] || '').trim(),
       key: String(row[col['Key']] || '').trim(),
       nameZh: String(row[col['NameZh']] || '').trim(),
       nameEn: String(row[col['NameEn']] || '').trim(),
@@ -1486,10 +1488,51 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
   if (!staff.isSuper && !ALLOWED_STATUSES_FOR_PORTAL.includes(st)) return { ok:false, code:'E403', zh:'此功能只供同工使用', en:'Staff portal accounts only.' };
 
   const id = String(memberId||'').trim().toUpperCase();
-  const mi = getMembersIndex_().byId;
+  const miPayload = getMembersIndex_();
+  const mi = miPayload.byId;
   const m = mi[id];
   if (!m) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
   if (normalizeStatus_(m.status) === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
+
+  const familyId = String(m.familyId || '').trim();
+  const relatedMembers = [];
+  if (familyId){
+    Object.keys(mi).forEach(function(mid){
+      const rel = mi[mid];
+      if (!rel) return;
+      if (String(rel.familyId || '').trim() !== familyId) return;
+      if (normalizeStatus_(rel.status) === STATUS_DISABLED) return;
+      relatedMembers.push({
+        id: rel.id,
+        familyId: String(rel.familyId || '').trim(),
+        nameZh: rel.nameZh || '',
+        nameEn: rel.nameEn || '',
+        preferredName: rel.preferredName || '',
+        status: normalizeStatus_(rel.status),
+        isMinor: !!rel.isMinor,
+        todayCheckedIn: false,
+        todayTimeUk: '',
+        todayMethod: ''
+      });
+    });
+    relatedMembers.sort(function(a,b){ return String(a.id).localeCompare(String(b.id)); });
+  } else {
+    relatedMembers.push({
+      id: m.id,
+      familyId: '',
+      nameZh: m.nameZh || '',
+      nameEn: m.nameEn || '',
+      preferredName: m.preferredName || '',
+      status: normalizeStatus_(m.status),
+      isMinor: !!m.isMinor,
+      todayCheckedIn: false,
+      todayTimeUk: '',
+      todayMethod: ''
+    });
+  }
+
+  const familyIds = new Set(relatedMembers.map(function(x){ return x.id; }));
+  const todayByMemberId = {};
 
   const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
   const sh = getCheckinsSheet_();
@@ -1506,6 +1549,16 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       const row = data[i];
       const ev = String(row[1]||'').trim();
       const mid = String(row[2]||'').trim();
+
+      if (ev === eventKey && familyIds.has(mid) && !todayByMemberId[mid]){
+        const tsFamily = row[0] instanceof Date ? row[0] : new Date(row[0]);
+        todayByMemberId[mid] = {
+          timeUk: fmtUk_(tsFamily, 'HH:mm:ss'),
+          method: String(row[5]||''),
+          receiptId: String(row[9]||'')
+        };
+      }
+
       if (mid !== id) continue;
 
       if (ev && ev !== eventKey) hadPriorEvent = true;
@@ -1528,6 +1581,15 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
     }
   }
 
+  relatedMembers.forEach(function(rel){
+    const t = todayByMemberId[rel.id];
+    if (!t) return;
+    rel.todayCheckedIn = true;
+    rel.todayTimeUk = t.timeUk || '';
+    rel.todayMethod = t.method || '';
+    rel.todayReceiptId = t.receiptId || '';
+  });
+
   return {
     ok:true,
     member:{
@@ -1547,7 +1609,8 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       })()
     },
     today: today,
-    last4EventKeys: eventKeys
+    last4EventKeys: eventKeys,
+    relatedMembers: relatedMembers
   };
 }
 
