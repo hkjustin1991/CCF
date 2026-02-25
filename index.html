@@ -259,13 +259,18 @@
 
     function navigateToRegPortal(){
       try{
-        var path = String(window.location.pathname || '');
-        if(/\.html$/i.test(path)){
-          window.location.href = path.replace(/index\.html(?:\/)?$/i, 'Reg2.html');
+        var u = new URL(window.location.href);
+        if(/\.html$/i.test(u.pathname)){
+          u.pathname = u.pathname.replace(/index\.html(?:\/)?$/i, 'Reg2.html');
+          u.search = '';
+          window.location.href = u.toString();
           return;
         }
+        u.searchParams.set('mode','reg');
+        window.location.href = u.toString();
+        return;
       }catch(e){}
-      navigateToRegPortal();
+      window.location.href = '?mode=reg';
     }
 
     function getApiEndpoint(){
@@ -1909,7 +1914,25 @@
         return;
       }
 
-      showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
+      showBox('scanMsg', 'warn', '優先使用外置掃描器…', 'Starting external scanner…');
+      openExternalScanner_(onCaptured, function(status){
+        if(status === 'success') return;
+        if(status === 'timeout'){
+          showBox('scanMsg', 'warn', '外置掃描器逾時，請按「再次掃描」', 'External scanner timed out. Tap Scan again.');
+          return;
+        }
+        if(status === 'cancel' || status === 'popup_closed'){
+          showBox('scanMsg', 'warn', '外置掃描已取消，請按「再次掃描」', 'External scanner cancelled. Tap Scan again.');
+          return;
+        }
+        if(status === 'blocked'){
+          showBox('scanMsg', 'warn', '彈出視窗被封鎖，請按「再次掃描」', 'Popup blocked. Tap Scan again.');
+          return;
+        }
+        if(status === 'config_invalid'){
+          showBox('scanMsg', 'warn', '外置掃描器未設定，請按「再次掃描」', 'External scanner not configured. Tap Scan again.');
+        }
+      });
     }
 
     function bindManualCheckin(){

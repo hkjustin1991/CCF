@@ -842,13 +842,26 @@ function api_reg_self_serving_data_public(qrPayload){
     (matrix.events||[]).forEach(function(ev){
       cells[ev.eventKey] = {};
       filteredPositions.forEach(function(p){
-        const raw = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||{}).value || '';
+        const entries = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||[]);
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
-        const tokens = reg_buildServingTokensForWrite_(raw, max);
-        const slots = tokens.map(function(t){
-          const v = String(t||'').trim().toUpperCase();
-          return admin_isServingNaValue_(v) ? 'N/A' : v;
+        const slots = [];
+
+        (entries || []).forEach(function(e){
+          if (slots.length >= max) return;
+          const memberId = String((e && e.memberId) || '').trim().toUpperCase();
+          const rawVal = String((e && e.rawValue) || '').trim();
+          if (memberId){
+            slots.push(memberId);
+            return;
+          }
+          if (admin_isServingNaValue_(rawVal)){
+            slots.push('N/A');
+            return;
+          }
+          slots.push('N/A');
         });
+        while (slots.length < max) slots.push('N/A');
+
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
         cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
       });
