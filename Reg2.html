@@ -181,7 +181,7 @@
       root.innerHTML =
         '<div class="wrap">'+
           '<div class="card msgBox err" style="display:block">'+
-            '<div class="big err">⚠️ 暫時未能開啟頁面 / We can't open this page right now</div>'+
+            '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
             '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
@@ -411,8 +411,8 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = true;
-          btn.title = 'External scanner disabled: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.disabled = false;
+          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
       var msgEl = $(msgId || 'msg');
@@ -645,7 +645,7 @@
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試相機（Git 掃描） / Retry camera (Git scanner)</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -705,7 +705,19 @@
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         console.error('E420 camera unsupported', detail0.diagnostics);
         reportScannerE420_('unsupported', d0);
-        onError({ zh:'此裝置不支援相機', en:'Camera not supported', err: { name: detail0.detail } });
+        onError({
+          zh:'此裝置不支援相機', en:'Camera not supported', err: { name: detail0.detail },
+          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+            bindCameraRetryButton_('scanMsg', function(){
+              openExternalScanner_(onCaptured, function(status){
+                if(status === 'success') return;
+                if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
+                else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
+                else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+              });
+            }) +
+            bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+        });
         return;
       }
 
@@ -739,11 +751,30 @@
               zh:'相機無法啟動',
               en:'Camera cannot start',
               err: { name: detail },
-              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
+                bindCameraRetryButton_('scanMsg', function(){
+                  openExternalScanner_(onCaptured, function(status){
+                    if(status === 'success') return;
+                    if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
+                    else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
+                    else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                  });
+                }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
             });
             return;
           }
-          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: { name: detail } });
+          onError({
+            zh:'相機無法啟動', en:'Camera cannot start', err: { name: detail },
+            detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
+              bindCameraRetryButton_('scanMsg', function(){
+                openExternalScanner_(onCaptured, function(status){
+                  if(status === 'success') return;
+                  if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
+                  else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
+                  else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                });
+              }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+          });
         });
       }
 
