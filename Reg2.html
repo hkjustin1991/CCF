@@ -397,13 +397,18 @@
 
     function navigateToLivePortal(){
       try{
-        var path = String(window.location.pathname || '');
-        if(/Reg2\.html(?:\/)?$/i.test(path)){
-          window.location.href = path.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
+        var u = new URL(window.location.href);
+        if(/\.html$/i.test(u.pathname)){
+          u.pathname = u.pathname.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
+          u.search = '';
+          window.location.href = u.toString();
           return;
         }
+        u.searchParams.delete('mode');
+        window.location.href = u.toString();
+        return;
       }catch(e){}
-      window.location.href = '?';
+      window.location.href = './';
     }
 
 
