@@ -1483,7 +1483,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
-  if (!staff.isSuper && !(st === STATUS_STAFF || st === STATUS_ADMIN)) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  if (!staff.isSuper && !ALLOWED_STATUSES_FOR_PORTAL.includes(st)) return { ok:false, code:'E403', zh:'此功能只供同工使用', en:'Staff portal accounts only.' };
 
   const id = String(memberId||'').trim().toUpperCase();
   const mi = getMembersIndex_().byId;
