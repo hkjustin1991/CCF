@@ -181,7 +181,7 @@
       root.innerHTML =
         '<div class="wrap">'+
           '<div class="card msgBox err" style="display:block">'+
-            '<div class="big err">⚠️ 暫時未能開啟頁面 / We can't open this page right now</div>'+
+            '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
             '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
@@ -281,6 +281,17 @@
       return m[3] + '/' + m[2] + '/' + m[1];
     }
 
+    function toYmd(dmy){
+      var s = String(dmy || '').trim();
+      var m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if(!m) return '';
+      var d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
+      if(y < 1000 || y > 9999 || mo < 1 || mo > 12) return '';
+      var dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() !== y || dt.getMonth() !== (mo - 1) || dt.getDate() !== d) return '';
+      return m[3] + '-' + m[2] + '-' + m[1];
+    }
+
     function getDeviceId(){
       try{
         var id = localStorage.getItem('ccf_reg_deviceId');
@@ -308,8 +319,12 @@
       return String(Date.now()) + '_' + String(Math.random()).slice(2);
     }
 
-    function openExternalScanner_(onPayload, onStatus){
+    function openExternalScanner_(arg1, arg2){
+      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
+      var onPayload = opts.onPayload;
+      var onStatus = opts.onStatus;
       var state = makeExternalScannerState_();
+      var flow = String(opts.flow || '');
       var done = false;
       var timer = null;
       var poll = null;
@@ -328,23 +343,37 @@
       function onMessage(ev){
         if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
         var data = ev.data || {};
-        if(!data || data.state !== state) return;
-        if(data.type === 'scanner:cancel'){ clear('cancel'); return; }
-        if(data.type !== 'scanner:result' || !data.payload) return;
-        clear('success');
-        onPayload(String(data.payload), 'EXT_SCANNER');
+        if(!data || String(data.state || '') !== String(state)) return;
+
+        var type = String(data.type || '');
+        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ clear('cancel'); return; }
+        if(type === 'CCF_QR_ERROR'){
+          if(typeof opts.onError === 'function') opts.onError(data.detail || 'scanner error');
+          clear('error');
+          return;
+        }
+        if((type === 'scanner:result' || type === 'CCF_QR_RESULT') && data.payload){
+          clear('success');
+          if(typeof onPayload === 'function') onPayload(String(data.payload), 'EXT_SCANNER');
+          return;
+        }
       }
 
       window.addEventListener('message', onMessage);
-      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return; }
-      var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
-      popup = window.open(url, 'ccf_ext_scanner', 'popup,width=460,height=760');
-      if(!popup){ clear('blocked'); return; }
+      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return null; }
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      target.searchParams.set('state', state);
+      if(flow) target.searchParams.set('flow', flow);
+
+      popup = window.open(target.toString(), 'ccf_ext_scanner', 'popup,width=460,height=760');
+      if(!popup){ clear('blocked'); return null; }
 
       timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
       poll = setInterval(function(){
         if(popup && popup.closed){ clear('popup_closed'); }
       }, 400);
+      return state;
     }
 
     function showBox(kind, zh, en, detail){
@@ -367,8 +396,19 @@
     }
 
     function navigateToLivePortal(){
-      var target = window.location.origin + window.location.pathname;
-      window.location.href = target;
+      try{
+        var u = new URL(window.location.href);
+        if(/\.html$/i.test(u.pathname)){
+          u.pathname = u.pathname.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
+          u.search = '';
+          window.location.href = u.toString();
+          return;
+        }
+        u.searchParams.delete('mode');
+        window.location.href = u.toString();
+        return;
+      }catch(e){}
+      window.location.href = '/';
     }
 
 
@@ -411,8 +451,8 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = true;
-          btn.title = 'External scanner disabled: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.disabled = false;
+          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
       var msgEl = $(msgId || 'msg');
@@ -440,10 +480,12 @@
       for(var j=0;j<arr.length;j++) out += arr[j].toString(16).padStart(2,'0');
       return out;
     }
-    function openExternalScanner_(opts){
+    function openExternalScanner_(arg1, arg2){
+      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
       opts = opts || {};
       if(!EXTERNAL_SCANNER_CONFIG.ok){
         if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'External scanner configuration is invalid.');
+        if(typeof opts.onStatus === 'function') opts.onStatus('config_invalid');
         return null;
       }
       var state = randomStateToken_();
@@ -452,7 +494,8 @@
         flow: String(opts.flow || 'reg'),
         onPayload: opts.onPayload,
         onCancel: opts.onCancel,
-        onError: opts.onError
+        onError: opts.onError,
+        onStatus: opts.onStatus
       };
 
       var target = new URL(EXTERNAL_SCANNER_URL);
@@ -468,6 +511,7 @@
       if(!w){
         pendingExternalScanner_ = null;
         if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        if(typeof opts.onStatus === 'function') opts.onStatus('blocked');
         return null;
       }
       return state;
@@ -483,10 +527,20 @@
       var cbPayload = pendingExternalScanner_.onPayload;
       var cbCancel = pendingExternalScanner_.onCancel;
       var cbError = pendingExternalScanner_.onError;
+      var cbStatus = pendingExternalScanner_.onStatus;
       pendingExternalScanner_ = null;
-      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
-      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
-      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
+      if(type === 'CCF_QR_RESULT'){
+        if(typeof cbPayload === 'function') cbPayload(data.payload);
+        if(typeof cbStatus === 'function') cbStatus('success');
+      }
+      if(type === 'CCF_QR_CANCEL'){
+        if(typeof cbCancel === 'function') cbCancel(data.detail);
+        if(typeof cbStatus === 'function') cbStatus('cancel');
+      }
+      if(type === 'CCF_QR_ERROR'){
+        if(typeof cbError === 'function') cbError(data.detail);
+        if(typeof cbStatus === 'function') cbStatus('error');
+      }
     });
 
     function normalizeVrm(s){
@@ -645,7 +699,7 @@
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試相機（Git 掃描） / Retry camera (Git scanner)</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -705,7 +759,19 @@
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         console.error('E420 camera unsupported', detail0.diagnostics);
         reportScannerE420_('unsupported', d0);
-        onError({ zh:'此裝置不支援相機', en:'Camera not supported', err: { name: detail0.detail } });
+        onError({
+          zh:'此裝置不支援相機', en:'Camera not supported', err: { name: detail0.detail },
+          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+            bindCameraRetryButton_('scanMsg', function(){
+              openExternalScanner_(onCaptured, function(status){
+                if(status === 'success') return;
+                if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
+                else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
+                else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+              });
+            }) +
+            bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+        });
         return;
       }
 
@@ -739,11 +805,30 @@
               zh:'相機無法啟動',
               en:'Camera cannot start',
               err: { name: detail },
-              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
+                bindCameraRetryButton_('scanMsg', function(){
+                  openExternalScanner_(onCaptured, function(status){
+                    if(status === 'success') return;
+                    if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
+                    else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
+                    else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                  });
+                }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
             });
             return;
           }
-          onError({ zh:'相機無法啟動', en:'Camera cannot start', err: { name: detail } });
+          onError({
+            zh:'相機無法啟動', en:'Camera cannot start', err: { name: detail },
+            detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
+              bindCameraRetryButton_('scanMsg', function(){
+                openExternalScanner_(onCaptured, function(status){
+                  if(status === 'success') return;
+                  if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
+                  else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
+                  else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                });
+              }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
+          });
         });
       }
 
@@ -926,19 +1011,50 @@
         '</div>';
     }
 
+
+    var SERVING_POSITION_LABELS_REG2 = {
+      Worship_Lead:{zh:'敬拜主領',en:'Lead'},
+      Worship_Singer_1:{zh:'和唱 1',en:'Singer 1'},
+      Worship_Singer_2:{zh:'和唱 2',en:'Singer 2'},
+      Worship_Pianist:{zh:'司琴',en:'Pianist'},
+      Worship_Drum:{zh:'鼓手',en:'Drummer'},
+      Worship_Instrument_1:{zh:'樂器 1',en:'Instrument 1'},
+      Worship_Instrument_2:{zh:'樂器 2',en:'Instrument 2'},
+      Media_AV:{zh:'影音',en:'Audio Visual'},
+      Media_PPT:{zh:'投影',en:'PPT'},
+      Media_PPTBuild:{zh:'PPT製作',en:'PPT Build'},
+      Support_BibleReader:{zh:'讀經員',en:'Bible Reader'},
+      Support_Prayer:{zh:'祈禱',en:'Prayer'},
+      Support_Communion:{zh:'聖餐襄禮',en:'Communion'},
+      Support_Care:{zh:'關顧組',en:'Care'},
+      Logistic_Welcome:{zh:'接待',en:'Welcome'},
+      Logistic_Venue:{zh:'場務',en:'Venue'},
+      Logistic_Refreshment:{zh:'茶水',en:'Refreshment'},
+      Finance_Offering:{zh:'財務',en:'Offering'},
+      Other:{zh:'其他',en:'Other'}
+    };
+
     function viewSelfServing(res){
       res = res || {};
       var m = res.member || {};
       var labelsById = res.memberLabelsById || {};
-      function positionEnFromKey_(k){
+
+      function prettifyPositionEn_(k){
         var parts = String(k||'').split('_');
-        if (parts.length <= 1) return String(k||'');
-        return parts.slice(1).join(' ');
+        var tail = (parts.length > 1) ? parts.slice(1).join(' ') : String(k||'');
+        tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
+        return tail;
       }
-      function memberText_(id){
+      function memberDisplay_(id){
         var mid = String(id||'').trim().toUpperCase();
-        if (!mid) return '';
-        return labelsById[mid] || mid;
+        if (!mid || mid === 'N/A') return '';
+        var raw = String(labelsById[mid] || '').trim();
+        var pref = '';
+        var pm = raw.match(/\(([^()]+)\)\s*$/);
+        if (pm && pm[1]) pref = String(pm[1]).trim();
+        var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
+        var who = pref || base || mid;
+        return mid + ' · ' + who;
       }
 
       var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
@@ -981,28 +1097,48 @@
       } else if (!positions.length){
         tableHtml = '<div class="msgBox warn">此組別沒有可用崗位 / No positions configured for this group.</div>';
       } else {
-        var header = '<tr><th style="text-align:left;min-width:220px;">Position</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var header = '<tr><th style="text-align:left;min-width:230px;">Position / 崗位</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
         var body = positions.map(function(p){
-          var row = '<tr><td><b>'+escapeHtml((p.labelZh||p.position||'')+' / '+positionEnFromKey_(p.position||''))+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
+          var key = String(p.position||'');
+          var label = SERVING_POSITION_LABELS_REG2[key] || null;
+          var zh = String((label && label.zh) || p.labelZh || key).trim();
+          var en = String((label && label.en) || prettifyPositionEn_(key)).trim();
+          var row = '<tr><td><b>'+escapeHtml(zh+' / '+en)+'</b><div class="small">'+escapeHtml(key)+'</div></td>';
+
           monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
-            var slots = cell.slots || [];
-            var content = slots.map(function(id, idx){
-              if (id){
-                var display = memberText_(id);
-                if (id === m.id){
-                  if (cell.canChange === false) return '<span class="pill">'+escapeHtml(display)+'（6w鎖定）</span>';
-                  return '<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(display)+'</button>';
-                }
-                return '<span class="pill">'+escapeHtml(display)+'</span>';
-              }
-              return '<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+idx+'">空缺 / Empty</button>';
-            }).join(' ');
-            row += '<td>'+content+'</td>';
+            var slots = Array.isArray(cell.slots) ? cell.slots : [];
+            var mineId = String(m.id||'').trim().toUpperCase();
+            var mineInPosition = false;
+            var vacancy = 0;
+
+            var slotLines = slots.map(function(id){
+              var v = String(id||'').trim().toUpperCase();
+              if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
+              if (v === 'N/A'){ return '<span class="chip">N/A</span>'; }
+              var txt = memberDisplay_(v);
+              if (v === mineId) mineInPosition = true;
+              return '<span class="chip">'+escapeHtml(txt || v)+'</span>';
+            });
+            if (!slotLines.length){ vacancy = 1; slotLines = ['<span class="chip">空缺 / Empty</span>']; }
+
+            var action = '';
+            if (mineInPosition){
+              action = (cell.canChange === false)
+                ? '<span class="chip">你已報名（6w鎖定） / Signed up (6w locked)</span>'
+                : '<button class="alt btnSmall" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">取消 / Remove</button>';
+            } else if (vacancy > 0){
+              action = '<button class="primary btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
+            } else {
+              action = '<span class="chip">已滿 / Full</span>';
+            }
+
+            row += '<td><div class="assignList">'+slotLines.join(' ')+'</div><div style="margin-top:6px;">'+action+'</div></td>';
           });
           row += '</tr>';
           return row;
         }).join('');
+
         tableHtml = '<div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div>';
       }
 
@@ -1065,10 +1201,10 @@
     function viewSelfHoliday(m){
       m = m || {}; var a = m.away || {};
       return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
-        '<div class="label">假期 1 From</div><input id="hFrom1" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.from1||''))+'" />'+
-        '<div class="label">假期 1 To</div><input id="hTo1" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.to1||''))+'" />'+
-        '<div class="label">假期 2 From</div><input id="hFrom2" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.from2||''))+'" />'+
-        '<div class="label">假期 2 To</div><input id="hTo2" placeholder="DD/MM/YYYY" value="'+escapeHtml(toDmy(a.to2||''))+'" />'+
+        '<div class="label">假期 1 From</div><input id="hFrom1" type="date" value="'+escapeHtml(a.from1||'')+'" />'+
+        '<div class="label">假期 1 To</div><input id="hTo1" type="date" value="'+escapeHtml(a.to1||'')+'" />'+
+        '<div class="label">假期 2 From</div><input id="hFrom2" type="date" value="'+escapeHtml(a.from2||'')+'" />'+
+        '<div class="label">假期 2 To</div><input id="hTo2" type="date" value="'+escapeHtml(a.to2||'')+'" />'+
         '<div class="miniBtnRow"><button id="btnHolidaySave" class="primary">✅ 儲存 / Save</button><button id="btnHolidayBack" class="danger">⬅️ 返回 / Back</button></div><div id="holidayMsg"></div></div>';
     }
 
@@ -1643,14 +1779,17 @@
           var canChange = b.getAttribute('data-chg') !== '0';
           var prompt = canChange
             ? ('確認報名？\nSure to sign up?\n'+ev+' '+pos)
-            : ('已超過六週更改期限，仍要報名？\nAfter the 6-week cutoff, still sign up?\n\n如需更改或取消，請聯絡組長。\nFor changes/cancellations, please contact your GL.\n\n'+ev+' '+pos);
+            : ('<6 weeks to service. Please inform GL of this signing up.\n\n距離聚會少於 6 週，請通知組長你已報名。\n\n'+ev+' '+pos);
           if(!confirm(prompt)) return;
           callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
             if (r.warning && (r.warning.zh || r.warning.en)){
-              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 已超過六週更改期限', r.warning.en || '⚠️ Change/cancel cutoff passed');
+              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 距離聚會少於 6 週，請通知組長你已報名。', r.warning.en || '⚠️ <6 weeks to service. Please inform GL of this signing up.');
             }
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          }).catch(function(err){
+            var msg = (err && err.message) ? err.message : String(err||'');
+            $('servingMsg').innerHTML = showBox('err','報名失敗','Failed to sign up', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
           });
         };
       });
@@ -1661,6 +1800,9 @@
           callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
+          }).catch(function(err){
+            var msg = (err && err.message) ? err.message : String(err||'');
+            $('servingMsg').innerHTML = showBox('err','更改失敗','Failed to update', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
           });
         };
       });
@@ -1681,8 +1823,6 @@
       var missing = Object.keys(required).filter(function(k){ return !required[k]; });
       if (!holidayMsgEl){
         console.error('[bindHoliday] Missing #holidayMsg container.');
-      } else {
-        holidayMsgEl.innerHTML = showBox('warn','請假頁面已載入','Absence page loaded');
       }
       if (missing.length){
         var missingList = missing.map(function(id){ return '#'+id; }).join(', ');
@@ -1699,7 +1839,7 @@
       }
       saveBtn.onclick = function(){
         if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('warn','儲存中…','Saving…');
-        callApi('api_reg_self_set_holiday_public', State.authQrPayload, required.hFrom1.value.trim(), required.hTo1.value.trim(), required.hFrom2.value.trim(), required.hTo2.value.trim())
+        callApi('api_reg_self_set_holiday_public', State.authQrPayload, toDmy(required.hFrom1.value.trim()), toDmy(required.hTo1.value.trim()), toDmy(required.hFrom2.value.trim()), toDmy(required.hTo2.value.trim()))
           .then(function(r){
             if(!r||!r.ok){ if (holidayMsgEl) holidayMsgEl.innerHTML = showServerErr(r); return; }
             if (holidayMsgEl) holidayMsgEl.innerHTML = showBox('ok','已儲存','Saved');

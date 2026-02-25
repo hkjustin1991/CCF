@@ -845,7 +845,10 @@ function api_reg_self_serving_data_public(qrPayload){
         const raw = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||{}).value || '';
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
         const tokens = reg_buildServingTokensForWrite_(raw, max);
-        const slots = tokens.map(function(t){ return admin_isServingNaValue_(t) ? '' : String(t||'').trim().toUpperCase(); });
+        const slots = tokens.map(function(t){
+          const v = String(t||'').trim().toUpperCase();
+          return admin_isServingNaValue_(v) ? 'N/A' : v;
+        });
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
         cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
       });
