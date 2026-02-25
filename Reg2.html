@@ -396,8 +396,14 @@
     }
 
     function navigateToLivePortal(){
-      var target = window.location.origin + window.location.pathname;
-      window.location.href = target;
+      try{
+        var path = String(window.location.pathname || '');
+        if(/\.html$/i.test(path)){
+          window.location.href = path.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
+          return;
+        }
+      }catch(e){}
+      window.location.href = '?';
     }
 
 
@@ -1005,21 +1011,22 @@
       var m = res.member || {};
       var labelsById = res.memberLabelsById || {};
 
-      function positionEnFromKey_(k){
+      function prettifyPositionEn_(k){
         var parts = String(k||'').split('_');
-        if (parts.length <= 1) return String(k||'');
-        return parts.slice(1).join(' ');
+        var tail = (parts.length > 1) ? parts.slice(1).join(' ') : String(k||'');
+        tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
+        return tail;
       }
       function memberDisplay_(id){
         var mid = String(id||'').trim().toUpperCase();
         if (!mid) return '';
-        var raw = String(labelsById[mid] || mid).trim();
+        var raw = String(labelsById[mid] || '').trim();
         var pref = '';
         var pm = raw.match(/\(([^()]+)\)\s*$/);
         if (pm && pm[1]) pref = String(pm[1]).trim();
-        if (pref) return pref;
-        var main = raw.replace(/\([^()]*\)\s*$/,'').trim();
-        return main || mid;
+        var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
+        var who = pref || base || mid;
+        return mid + ' · ' + who;
       }
 
       var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
@@ -1062,41 +1069,49 @@
       } else if (!positions.length){
         tableHtml = '<div class="msgBox warn">此組別沒有可用崗位 / No positions configured for this group.</div>';
       } else {
-        var header = '<tr><th style="text-align:left;min-width:220px;">Position / 崗位</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
+        var header = '<tr><th style="text-align:left;min-width:230px;">Position / 崗位</th>'+monthEvents.map(function(ev){ return '<th>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</th>'; }).join('')+'</tr>';
         var body = positions.map(function(p){
-          var row = '<tr><td><b>'+escapeHtml((p.labelZh||p.position||'')+' / '+positionEnFromKey_(p.position||''))+'</b><div class="small">'+escapeHtml(p.position||'')+'</div></td>';
+          var zh = String(p.labelZh || '').trim();
+          var en = prettifyPositionEn_(p.position || '');
+          var row = '<tr><td><b>'+escapeHtml((zh ? zh : (p.position||''))+' / '+en)+'</b></td>';
+
           monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
             var slots = Array.isArray(cell.slots) ? cell.slots : [];
-            var assignedMine = false;
-            var assignedList = [];
-            var seen = {};
-            var emptyCount = 0;
-            slots.forEach(function(id){
+            var mineId = String(m.id||'').trim().toUpperCase();
+            var mineInPosition = false;
+            var vacancy = 0;
+
+            var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){ emptyCount += 1; return; }
-              if (v === String(m.id||'').trim().toUpperCase()) assignedMine = true;
-              var label = memberDisplay_(v);
-              if (!seen[label]){ seen[label]=1; assignedList.push(label); }
+              if (!v || v === 'N/A'){
+                vacancy += 1;
+                return '<span class="chip">空缺 / Empty</span>';
+              }
+              var txt = memberDisplay_(v);
+              if (v === mineId) mineInPosition = true;
+              return '<span class="chip">'+escapeHtml(txt)+'</span>';
             });
 
-            var parts = [];
-            if (assignedList.length){
-              parts.push(assignedList.map(function(lbl){ return '<span class="pill">'+escapeHtml(lbl)+'</span>'; }).join(' '));
+            if (!slotLines.length) slotLines = ['<span class="chip">N/A</span>'];
+
+            var action = '';
+            if (mineInPosition){
+              action = (cell.canChange === false)
+                ? '<span class="chip">你已報名（6w鎖定） / Signed up (6w locked)</span>'
+                : '<button class="alt btnSmall" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">取消 / Remove</button>';
+            } else if (vacancy > 0){
+              action = '<button class="primary btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
+            } else {
+              action = '<span class="chip">已滿 / Full</span>';
             }
-            if (assignedMine){
-              if (cell.canChange === false) parts.push('<span class="pill">你已報名（6w鎖定） / Signed up (6w locked)</span>');
-              else parts.push('<button class="alt" data-del="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">取消 / Remove</button>');
-            } else if (emptyCount > 0){
-              parts.push('<button class="primary" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up ('+emptyCount+')</button>');
-            } else if (!assignedList.length){
-              parts.push('<span class="pill">已滿 / Full</span>');
-            }
-            row += '<td>'+parts.join('<br/>')+'</td>';
+
+            row += '<td><div class="assignList">'+slotLines.join(' ')+'</div><div style="margin-top:6px;">'+action+'</div></td>';
           });
           row += '</tr>';
           return row;
         }).join('');
+
         tableHtml = '<div style="overflow:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;"><thead>'+header+'</thead><tbody>'+body+'</tbody></table></div>';
       }
 

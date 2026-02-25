@@ -256,6 +256,18 @@
       return !(App && App.token);
     }
 
+
+    function navigateToRegPortal(){
+      try{
+        var path = String(window.location.pathname || '');
+        if(/\.html$/i.test(path)){
+          window.location.href = path.replace(/index\.html(?:\/)?$/i, 'Reg2.html');
+          return;
+        }
+      }catch(e){}
+      navigateToRegPortal();
+    }
+
     function getApiEndpoint(){
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
@@ -1614,7 +1626,7 @@
     // ===== Bindings =====
     function bindLogin(){
       if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        window.location.href = '?mode=reg';
+        navigateToRegPortal();
       };
 
       function applyLoginPayload_(payload){
