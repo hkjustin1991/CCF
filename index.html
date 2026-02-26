@@ -182,6 +182,8 @@
     <footer class="footer">
       <div>© Cantonese Christian Fellowship</div>
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
+      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec">按此進入即時聚會平台 / Click here for live portal</a></div>
+      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">按此進入自助服務平台 / Click here for self-service portal</a></div>
     </footer>
   </div>
 
@@ -267,21 +269,11 @@
       return !(App && App.token);
     }
 
+    var REG_PORTAL_URL = 'https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg';
+
 
     function navigateToRegPortal(){
-      try{
-        var u = new URL(window.location.href);
-        if(/\.html$/i.test(u.pathname)){
-          u.pathname = u.pathname.replace(/index\.html(?:\/)?$/i, 'Reg2.html');
-          u.search = '';
-          window.location.href = u.toString();
-          return;
-        }
-        u.searchParams.set('mode','reg');
-        window.location.href = u.toString();
-        return;
-      }catch(e){}
-      window.location.href = '?mode=reg';
+      window.location.href = REG_PORTAL_URL;
     }
 
     function getApiEndpoint(){
@@ -1256,9 +1248,7 @@
 
     // ===== Views =====
     function viewLogin(){
-      var switchBtn = shouldShowCrossPortalSwitch()
-        ? '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'
-        : '';
+      var switchBtn = '';
       return ''+
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
@@ -1622,9 +1612,6 @@
 
     // ===== Bindings =====
     function bindLogin(){
-      if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        navigateToRegPortal();
-      };
 
       function applyLoginPayload_(payload){
         callApi('api_login', payload).then(function(res){
