@@ -408,20 +408,10 @@
       return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
     }
 
+    var LIVE_PORTAL_URL = 'https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec';
+
     function navigateToLivePortal(){
-      try{
-        var u = new URL(window.location.href);
-        if(/Reg2\.html(?:\/)?$/i.test(u.pathname)){
-          u.pathname = u.pathname.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
-          u.search = '';
-          window.location.href = u.toString();
-          return;
-        }
-        u.search = '';
-        window.location.href = u.toString();
-        return;
-      }catch(e){}
-      window.location.href = 'index.html';
+      window.location.href = LIVE_PORTAL_URL;
     }
 
 
@@ -905,7 +895,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
+            '<a id="btnSwitchToLive" class="alt btnSmall" href="'+escapeHtml(LIVE_PORTAL_URL)+'" target="_top" rel="noopener noreferrer">🔁 即時聚會平台 / Live portal</a>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
@@ -1438,9 +1428,6 @@
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
         applyExternalScannerGuard_('msg', []);
-        if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-          navigateToLivePortal();
-        };
         $('btnNew').onclick = function(){
           State.view = 'form';
           State.flow = 'create';
