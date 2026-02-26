@@ -565,6 +565,7 @@
       Media_PPT:            { zh:'投影', en:'PPT' },
       Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
       Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+      Support_Testimony:   { zh:'見證', en:'Testimony' },
       Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
       Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
       Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
@@ -586,6 +587,7 @@
       Media_PPT: 'media',
       Media_PPTBuild: 'media',
       Support_BibleReader: 'support',
+      Support_Testimony: 'support',
       Support_Prayer: 'support',
       Support_Communion: 'support',
       Support_Care: 'support',
@@ -708,11 +710,31 @@
       });
     }
 
+    function enableModalWheelScroll_(overlay){
+      var modal = overlay ? overlay.querySelector('.modal') : null;
+      if (!modal) return;
+      modal.addEventListener('wheel', function(e){
+        var target = e.target && e.target.closest ? e.target.closest('.tableWrap') : null;
+        var host = target || modal;
+        var dy = Number(e.deltaY || 0);
+        var dx = Number(e.deltaX || 0);
+        if (!dy && !dx) return;
+        var canV = host.scrollHeight > host.clientHeight;
+        var canH = host.scrollWidth > host.clientWidth;
+        if (!canV && !canH) return;
+        if (canV) host.scrollTop += dy;
+        if (canH && Math.abs(dx) > 0) host.scrollLeft += dx;
+        if (canH && e.shiftKey && Math.abs(dy) > Math.abs(dx)) host.scrollLeft += dy;
+        e.preventDefault();
+      }, { passive:false });
+    }
+
     function openModal(html){
       var o = document.createElement('div');
       o.className = 'overlay';
       o.innerHTML = '<div class="modal">'+html+'</div>';
       document.body.appendChild(o);
+      enableModalWheelScroll_(o);
       return o;
     }
     function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
@@ -1034,9 +1056,31 @@
       var groups = Array.isArray(member.groups) ? member.groups : [];
       return groups.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
     }
-    function buildMemberOptions_(members, groupKey){
+    function searchMembersForQuickEdit_(members, groupKey, q, limit){
+      var list = Array.isArray(members) ? members : [];
+      var query = String(q||'').trim().toLowerCase();
+      var max = Number(limit || 8);
+      if (max < 1) max = 8;
+      var out = [];
+      list.forEach(function(m){
+        if (out.length >= max) return;
+        if (!memberMatchesGroup_(m, groupKey)) return;
+        if (!query){ out.push(m); return; }
+        var hay = [
+          String(m.id||''),
+          String(m.nameZh||''),
+          String(m.nameEn||''),
+          String(m.preferredName||'')
+        ].join(' ').toLowerCase();
+        if (hay.indexOf(query) >= 0) out.push(m);
+      });
+      return out;
+    }
+
+    function buildMemberOptions_(members, groupKey, includeNa){
       var list = Array.isArray(members) ? members : [];
       var opts = '<option value="">選擇 / Select</option>';
+      if (includeNa) opts += '<option value="N/A">N/A</option>';
       list.forEach(function(m){
         if (!memberMatchesGroup_(m, groupKey)) return;
         opts += '<option value="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</option>';
@@ -1733,10 +1777,10 @@
                     '</button>';
                 }).filter(Boolean);
                 for (var slotIdx = entries.length; slotIdx < maxSlots; slotIdx++){
-                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+slotIdx+'" data-raw="">空缺 / Empty</button>');
                 }
                 if(!entries.length){
-                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="0" data-raw="">空缺 / Empty</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
@@ -2246,10 +2290,11 @@
         }
 
         var tokens = splitServingValues_(values[pos] || '');
+        var addMode = (!isNaN(idx) && idx >= tokens.length);
         var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
-        if (useIdx < 0) useIdx = 0;
-        var currentToken = tokens[useIdx] || rawValue || '—';
-        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''));
+        if (useIdx < 0) useIdx = addMode ? tokens.length : 0;
+        var currentToken = addMode ? '空缺 / Empty' : (tokens[useIdx] || rawValue || '—');
+        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), pos !== 'Other');
 
         function buildPayload_(){
           return positions.map(function(p){
@@ -2318,13 +2363,16 @@
 
         function swapToken_(nextToken){
           if (!nextToken) return;
-          tokens[useIdx] = nextToken;
+          if (useIdx >= tokens.length) tokens.push(nextToken);
+          else tokens[useIdx] = nextToken;
           values[pos] = tokens.filter(Boolean).join(', ');
           saveWithOverride_(false);
         }
         function deleteToken_(){
           if (useIdx >= 0 && useIdx < tokens.length){
             tokens.splice(useIdx, 1);
+          } else {
+            return;
           }
           values[pos] = tokens.filter(Boolean).join(', ');
           saveWithOverride_(false);
@@ -2333,16 +2381,18 @@
         modal.querySelector('.modal').innerHTML =
           '<div class="big">🧩 快速編輯 / Quick edit</div>'+
           '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(servingPositionLabel_({ position: pos }))+'</div>'+
-          '<div class="small" style="margin-top:6px;">目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span></div>'+
-          '<div class="label" style="margin-top:10px;">交換 / Swap</div>'+
+          '<div class="small" style="margin-top:6px;">'+(addMode ? '新增空缺 / Add to vacant slot' : '目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span>')+'</div>'+
+          '<div class="label" style="margin-top:10px;">'+(addMode ? '加入 / Add' : '交換 / Swap')+'</div>'+
           '<select id="quickSwapSelect" class="inputMini">'+options+'</select>'+
+          '<input id="quickMemberSearch" class="inputMini" style="margin-top:8px;" placeholder="輸入 CCF ID / 姓名搜尋 / Type CCF ID or name" />'+
+          '<div id="quickSuggest" class="suggestList"></div>'+
           (pos === 'Other'
             ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
             : '')+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
-            '<button id="btnQuickSwap" class="btnMain">✅ 交換 / Swap</button>'+
-            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
-            '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>'+
+            '<button id="btnQuickSwap" class="btnMain">✅ '+(addMode ? '加入 / Add' : '交換 / Swap')+'</button>'+
+            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '<button id="btnQuickNa" class="btnBack">N/A</button>')+
+            (addMode ? '' : '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>')+
             '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="quickMsg"></div>';
@@ -2352,8 +2402,32 @@
           var sel = modal.querySelector('#quickSwapSelect');
           var val = sel ? String(sel.value||'').trim() : '';
           if (!val) return;
-          swapToken_(formatServingToken_(memberMap, val));
+          swapToken_(val === 'N/A' ? 'N/A' : formatServingToken_(memberMap, val));
         };
+
+        function renderQuickSuggest_(){
+          var input = modal.querySelector('#quickMemberSearch');
+          var wrap = modal.querySelector('#quickSuggest');
+          if (!input || !wrap) return;
+          var picks = searchMembersForQuickEdit_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), input.value, 10);
+          wrap.innerHTML = picks.map(function(m){
+            return '<button type="button" class="suggestBtn" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
+          }).join('');
+          Array.prototype.slice.call(wrap.querySelectorAll('button[data-id]')).forEach(function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-id') || '').trim();
+              if (!id) return;
+              swapToken_(formatServingToken_(memberMap, id));
+            };
+          });
+        }
+        var quickSearch = modal.querySelector('#quickMemberSearch');
+        if (quickSearch){
+          quickSearch.oninput = renderQuickSuggest_;
+          renderQuickSuggest_();
+        }
+        var btnQuickNa = modal.querySelector('#btnQuickNa');
+        if (btnQuickNa) btnQuickNa.onclick = function(){ swapToken_('N/A'); };
         if (pos === 'Other'){
           modal.querySelector('#btnQuickUseText').onclick = function(){
             var input = modal.querySelector('#quickOtherText');
@@ -2362,7 +2436,8 @@
             swapToken_(val);
           };
         }
-        modal.querySelector('#btnQuickDelete').onclick = function(){
+        var delBtn = modal.querySelector('#btnQuickDelete');
+        if (delBtn) delBtn.onclick = function(){
           if (!confirm('確認刪除此安排？ / Confirm delete assignment?')) return;
           deleteToken_();
         };

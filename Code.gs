@@ -97,6 +97,7 @@ const SERVING_POSITION_GROUPS = {
   Media_PPT: 'MEDIA',
   Media_PPTBuild: 'MEDIA',
   Support_BibleReader: 'SUPPORT',
+  Support_Testimony: 'SUPPORT',
   Support_Prayer: 'SUPPORT',
   Support_Communion: 'SUPPORT',
   Support_Care: 'SUPPORT',
