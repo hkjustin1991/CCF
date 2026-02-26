@@ -190,7 +190,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <script>
-    try{ window.__CCF_LIVE_BOOT.parsed = true; }catch(e){}
+    window.__CCF_LIVE_BOOT = window.__CCF_LIVE_BOOT || { ts:Date.now() };
+    window.__CCF_LIVE_BOOT.parsed = true;
 
     var App = {
       token:null, staff:null,
@@ -2983,7 +2984,22 @@
         var st = window.__CCF_LIVE_BOOT || {};
         var root = document.getElementById('app');
         var hasUi = !!(root && String(root.innerHTML||'').trim());
-        if(!st.parsed) return fallback('main script parse did not complete');
+
+        if(!st.parsed){
+          // If core function exists, script likely parsed; try recover once.
+          if(typeof window.render === 'function'){
+            try{ window.render(); }catch(e){ return fallback('render exists but failed: ' + String(e && (e.message||e) || e)); }
+            hasUi = !!(root && String(root.innerHTML||'').trim());
+            if(!hasUi) return fallback('main script parsed but UI is empty after retry');
+            return;
+          }
+          return fallback('main script parse did not complete');
+        }
+
+        if(!hasUi && typeof window.render === 'function'){
+          try{ window.render(); }catch(e){ return fallback('main script parsed but render failed: ' + String(e && (e.message||e) || e)); }
+          hasUi = !!(root && String(root.innerHTML||'').trim());
+        }
         if(!hasUi) return fallback('main script parsed but UI is empty');
       }, 1200);
     })();
