@@ -1,4 +1,4 @@
-<!doctype html>
+ <!doctype html>
 <html>
 <head>
   <base target="_top">
@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff12-ui1-bluefix2
-   * For Code.gs: v2026-02-15.staff95
+   * UI VERSION: staff12-ui1 (restored full functions + self-check)
+   * For Code.gs: v2026-02-08.staff12
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -122,12 +122,6 @@
 
     .chipRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .chip{font-size:var(--fs-small);padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--muted)}
-    body.busyUi button{pointer-events:none;opacity:.72}
-    .familyList{margin-top:10px;border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
-    .familyRow{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border)}
-    .familyRow:last-child{border-bottom:none}
-    .familyRow input{width:auto;margin-top:2px;transform:scale(1.1)}
-    .receiptDetails{margin-top:10px}
     .chip.good{border-color:rgba(26,168,108,0.35);background:#edfff6;color:var(--good)}
     .chip.goodLight{border-color:rgba(26,168,108,0.25);background:#f2fff9;color:var(--good)}
     .chip.bad{border-color:rgba(217,60,94,0.35);background:#fff1f4;color:var(--bad)}
@@ -185,14 +179,9 @@
     </footer>
   </div>
 
-  <script>window.__CCF_LIVE_BOOT = { parsed:false, rendered:false, ts:Date.now() };</script>
-
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <script>
-    window.__CCF_LIVE_BOOT = window.__CCF_LIVE_BOOT || { ts:Date.now() };
-    window.__CCF_LIVE_BOOT.parsed = true;
-
     var App = {
       token:null, staff:null,
       view:'login',
@@ -221,7 +210,7 @@
       uploadCheckinAutoPick:false
     };
 
-    const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+    const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>) || 120000;
 
     var STABLE_REQUIRED_COUNT = 2;
     var STABLE_REQUIRED_MS = 250;
@@ -285,10 +274,10 @@
     }
 
     function getApiEndpoint(){
-      // Security: do not allow runtime endpoint override from query string.
-      // Use deployment-provided endpoint only.
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
+        var qp = new URLSearchParams(window.location.search || '');
+        if (qp.get('api')) return String(qp.get('api'));
       }catch(e){}
       return '';
     }
@@ -302,24 +291,13 @@
       }).then(function(resp){
         return resp.text().then(function(txt){
           var data;
-          try{ data = JSON.parse(txt); }catch(e){
-            var parseErr = new Error('Invalid API response');
-            parseErr.rpcType = 'parse';
-            throw parseErr;
-          }
+          try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
           if(!resp.ok || !data || !data.ok){
             var err = (data && data.error) ? data.error : { message:'API call failed' };
-            if (!err || typeof err !== 'object') err = { message:String(err || 'API call failed') };
-            err.rpcType = 'api';
             throw err;
           }
           return data.result;
         });
-      }).catch(function(err){
-        if (err && err.rpcType) throw err;
-        var netErr = err instanceof Error ? err : new Error(String(err || 'RPC network error'));
-        netErr.rpcType = 'network';
-        throw netErr;
       });
     }
 
@@ -334,45 +312,35 @@
       });
     }
 
-    var apiPendingCount_ = 0;
-    function setApiBusy_(on){
-      apiPendingCount_ += on ? 1 : -1;
-      if (apiPendingCount_ < 0) apiPendingCount_ = 0;
-      if (apiPendingCount_ > 0) document.body.classList.add('busyUi');
-      else document.body.classList.remove('busyUi');
-    }
-
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
       var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
-      var useRpcFirst = !!endpoint;
 
-      setApiBusy_(true);
-      function done(p){ return Promise.resolve(p).finally(function(){ setApiBusy_(false); }); }
-
-      if(forceRpcOnce && endpoint){
+      if(forceRpcOnce){
         window.CCF_FORCE_RPC_ONCE = false;
-        return done(callApiViaRpc(endpoint, fn, args));
+        if(endpoint) return callApiViaRpc(endpoint, fn, args);
       }
 
-      if(useRpcFirst){
-        return done(
-          callApiViaRpc(endpoint, fn, args).catch(function(err){
-            // Fallback only for transport/network failures to avoid duplicate writes.
-            if (err && err.rpcType === 'network') return callApiViaGas(fn, args);
-            throw err;
-          })
-        );
-      }
-
-      return done(callApiViaGas(fn, args));
+      return callApiViaGas(fn, args).catch(function(err){
+        if(endpoint){
+          var msg = String((err && err.message) || err || 'GAS call failed');
+          throw {
+            code:'E530',
+            zh:'GAS 連線失敗，請改用 Git 再試',
+            en:'GAS failed. Please retry with Git API.',
+            detail: msg,
+            gasFailed:true
+          };
+        }
+        throw err;
+      });
     }
 
 
 
-    var EXTERNAL_SCANNER_URL = String(window.CCF_EXTERNAL_SCANNER_URL || '').trim();
-    var EXTERNAL_SCANNER_ORIGIN = String(window.CCF_EXTERNAL_SCANNER_ORIGIN || '').trim();
+    var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify(EXTERNAL_SCANNER_URL || '') ?> || '').trim();
+    var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify(EXTERNAL_SCANNER_ORIGIN || '') ?> || '').trim();
     var pendingExternalScanner_ = null;
     var EXTERNAL_SCANNER_CONFIG_ERROR = '';
 
@@ -398,7 +366,7 @@
 
     function scannerConfigWarningHtml_(){
       var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return buildBoxHtml_('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
+      return showBox('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -608,18 +576,15 @@
       return isServingNaValue_(row.position) || isServingNaValue_(row.slot) || isServingNaValue_(row.memberId);
     }
 
-    function buildBoxHtml_(kind, titleZh, titleEn, detailHtml){
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
       detailHtml = detailHtml || '';
-      return '<div class="msgBox '+kind+'">' +
+      var el = $(targetId); if(!el) return;
+      el.innerHTML =
+        '<div class="msgBox '+kind+'">' +
           '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+titleZh+'</div>' +
           '<div class="msgEn">'+titleEn+'</div>' +
           (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '') +
         '</div>';
-    }
-
-    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
-      var el = $(targetId); if(!el) return;
-      el.innerHTML = buildBoxHtml_(kind, titleZh, titleEn, detailHtml);
     }
 
     function showErr(targetId, res){
@@ -1287,7 +1252,6 @@
       }
 
       var root = $('app');
-      try{ window.__CCF_LIVE_BOOT.rendered = true; }catch(e){}
       if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); applyExternalScannerGuard_('msg', []); restoreSession(); attachScrollControls_(root); return; }
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); attachScrollControls_(root); return; }
       if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); attachScrollControls_(root); return; }
@@ -1296,13 +1260,6 @@
       if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); attachScrollControls_(root); return; }
       if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); attachScrollControls_(root); return; }
       if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); attachScrollControls_(root); return; }
-
-      // Failsafe: unknown/invalid view should never leave app blank
-      App.view = 'login';
-      root.innerHTML = viewLogin();
-      bindLogin();
-      applyExternalScannerGuard_('msg', []);
-      attachScrollControls_(root);
     }
 
     // ===== Views =====
@@ -1853,8 +1810,6 @@
               '<div class="big ok">✅ 已簽到 / Already checked-in</div>'+
               '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
               chips+
-              '<div class="small">點擊查看完整收據 / Tap for full receipt</div>'+
-              '<details class="receiptDetails"><summary>Receipt details</summary>'+
               kvHtml([
                 {k:'經手 / By', v: formatHandledBy_(a.handledBy)},
                 {k:'時間 / Time', v:(a.timeUk||'')},
@@ -1862,7 +1817,6 @@
                 {k:'Receipt', v:(a.receiptId||'')},
                 {k:'電郵 / Email', v:(emailUi.zh || '')}
               ])+
-              '</details>'+
             '</div>' +
             isMinorNoticeHtml(!!m.isMinor);
           return;
@@ -1902,15 +1856,12 @@
             '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
             '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
             chips+
-            '<div class="small">點擊查看完整收據 / Tap for full receipt</div>'+
-            '<details class="receiptDetails"><summary>Receipt details</summary>'+
             kvHtml([
               {k:'經手 / By', v: formatHandledBy_(res.staff)},
               {k:'時間 / Time', v:(res.timeUk||'')},
               {k:'Receipt', v:(res.receiptId||'')},
               {k:'電郵 / Email', v: emailLine }
             ])+
-            '</details>'+
           '</div>' +
           newFriendWelcomeHtml(m) +
           isMinorNoticeHtml(!!m.isMinor);
@@ -2182,18 +2133,11 @@
               ])+
             '</div>'+
             todayBox+
-            (function(){
-              var fam = Array.isArray(res.familyMembers) ? res.familyMembers : [];
-              if (!fam.length) return '';
-              return '<div class="familyList"><div class="small"><b>同家庭成員 / Same family</b></div>'+
-                fam.map(function(f){
-                  var line = formatMemberNameLine_(f.nameZh, f.nameEn, f.preferredName) || f.id;
-                  var checked = (String(f.id||'').toUpperCase() === String(m.id||'').toUpperCase()) ? 'checked' : '';
-                  return '<label class="familyRow"><input type="checkbox" class="famTick" value="'+escapeHtml(f.id||'')+'" '+checked+' />'+
-                    '<div><div class="big" style="font-size:16px;">'+escapeHtml(f.id||'')+'</div><div class="small" style="margin-top:2px;">'+escapeHtml(line)+'</div></div></label>';
-                }).join('') +
-              '</div>';
-            })()+
+            '<div class="msgBox" style="margin-top:10px;">'+
+              '<div class="big">同家庭成員 / Same family</div>'+
+              '<div class="listWrap" style="margin-top:8px;">'+buildFamilyListHtml()+'</div>'+
+            '</div>'+
+            '<div id="manualBulkResult" style="margin-top:10px;"></div>'+
             isMinorNoticeHtml(!!m.isMinor)+
             '<div class="miniBtnRow">'+
               '<button id="btnManualConfirmFamily" class="primary">✅ 確認簽到所選 / Confirm selected</button>'+
@@ -2208,37 +2152,25 @@
             confirmEl.innerHTML = '';
           };
 
-          var btnC = $('btnManualConfirmCheckin');
-          if(btnC){
-            btnC.onclick = function(){
-              if(today) return;
-              btnC.disabled = true;
-              btnC.style.opacity = 0.55;
+          var btnBulk = $('btnManualConfirmFamily');
+          if(btnBulk){
+            btnBulk.disabled = (getSelectedIds().length===0);
+            btnBulk.onclick = function(){
+              var ids = getSelectedIds();
+              if(!ids.length) return;
 
-              var selectedIds = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked')).map(function(x){ return String(x.value||'').trim(); }).filter(Boolean);
-              // Replace panel with result ONLY (clean, no scroll)
-              confirmEl.innerHTML = '<div class="small">處理中… / Processing…</div>';
+              btnBulk.disabled = true;
+              btnBulk.style.opacity = 0.55;
+              var resultEl = $('manualBulkResult');
+              if(resultEl) resultEl.innerHTML = '<div class="small">處理中… / Processing…</div>';
 
-              if(!selectedIds.length) selectedIds = [m.id];
-              callApi('api_checkin_manual_bulk', App.token, selectedIds, null, getDeviceId(), getUA()).then(function(r2){
-                if(!r2 || !r2.ok){
-                  confirmEl.innerHTML = '';
-                  showErr('manualMsg', r2 || {code:'E500', zh:'系統錯誤', en:'Error'});
-                  // stay in confirm screen, add back button
-                  confirmEl.classList.remove('hide');
-                  confirmEl.innerHTML =
-                    '<div class="msgBox err">'+
-                      '<div class="big err">簽到失敗 / Failed</div>'+
-                      '<div class="msgEn">請返回再試 / Back and retry</div>'+
-                    '</div>'+
-                    '<div class="miniBtnRow">'+
-                      '<button id="btnManualBackSearch2" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
-                    '</div>';
-                  $('btnManualBackSearch2').onclick = function(){
-                    unlockSearchUi();
-                    confirmEl.classList.add('hide');
-                    confirmEl.innerHTML = '';
-                  };
+              var outcomes = [];
+
+              function runAt(i){
+                if(i >= ids.length){
+                  renderOutcomeSummary(outcomes);
+                  btnBulk.disabled = false;
+                  btnBulk.style.opacity = 1;
                   return;
                 }
                 var oneId = ids[i];
@@ -2268,47 +2200,29 @@
                 });
               }
 
-                // Render bulk summary
-                var rows = Array.isArray(r2.results) ? r2.results : [];
-                var okCount = 0;
-                var alreadyCount = 0;
-                var failCount = 0;
-                var detailRows = rows.map(function(it){
-                  var rr = it.result || {};
-                  var mm = rr.member || { id: it.id };
-                  var nameLine = formatMemberName_(mm) || mm.id || it.id;
-                  if (!rr.ok) failCount += 1;
-                  else if (rr.result === 'ALREADY') alreadyCount += 1;
-                  else okCount += 1;
-                  var receipt = (rr.result === 'ALREADY') ? ((rr.already||{}).receiptId||'') : (rr.receiptId||'');
-                  var stamp = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'') : (rr.timeUk||'');
-                  var method = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'manual') : 'manual';
-                  var statusTxt = !rr.ok ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
-                  return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+'<details class="receiptDetails"><summary>Receipt</summary>'+kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt}])+'</details></li>';
-                }).join('');
-                confirmEl.innerHTML =
-                  '<div class="msgBox ok">'+
-                    '<div class="big ok">✅ 完成簽到 / Bulk completed</div>'+
-                    '<div class="small">Checked-in: '+okCount+' · Already: '+alreadyCount+' · Failed: '+failCount+'</div>'+
-                    '<ul style="margin:8px 0 0 18px;padding:0;">'+detailRows+'</ul>'+
-                  '</div>'+
-                  '<div class="miniBtnRow">'+
-                    '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
-                    '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
+              function renderOutcomeSummary(rows){
+                var okCount = rows.filter(function(x){ return x.state==='ok'; }).length;
+                var alreadyCount = rows.filter(function(x){ return x.state==='already'; }).length;
+                var failCount = rows.filter(function(x){ return x.state==='fail'; }).length;
+                var resultEl2 = $('manualBulkResult');
+                if(!resultEl2) return;
+                resultEl2.innerHTML =
+                  '<div class="msgBox '+(failCount?'warn':'ok')+'">'+
+                    '<div class="big">結果總結 / Summary</div>'+
+                    '<div class="chipRow">'+
+                      '<span class="chip">✅ '+okCount+'</span>'+
+                      '<span class="chip warn">🕘 '+alreadyCount+'</span>'+
+                      '<span class="chip err">❌ '+failCount+'</span>'+
+                    '</div>'+
+                    '<div class="listWrap" style="margin-top:8px;">'+
+                      rows.map(function(r){
+                        return '<div class="nameItem"><div class="zh">'+escapeHtml(r.label+' · '+r.detail)+'</div></div>';
+                      }).join('')+
+                    '</div>'+
                   '</div>';
+              }
 
-                $('btnManualBackMenu').onclick = function(){ App.view='checkinMenu'; render(); };
-                $('btnManualBackSearch3').onclick = function(){
-                  unlockSearchUi();
-                  confirmEl.classList.add('hide');
-                  confirmEl.innerHTML = '';
-                  qEl.focus();
-                  doSearch();
-                };
-              }).catch(function(){
-                showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-                unlockSearchUi();
-              });
+              runAt(0);
             };
           }
         }).catch(function(){
@@ -2967,17 +2881,7 @@
 
     // Boot
     try { render(); } catch (e) { showBootError_(e); }
-    setTimeout(function(){
-      var root = $('app');
-      if (!root) return;
-      if (String(root.innerHTML || '').trim()) return;
-      try { render(); } catch (e) { showBootError_(e); return; }
-      if (!String(root.innerHTML || '').trim()) {
-        root.innerHTML = '<div class="card msgBox err"><div class="big err">⚠️ 頁面未能初始化 / Page failed to initialize</div><div class="msgEn">Please hard refresh or redeploy latest version.</div></div>';
-      }
-    }, 900);
   </script>
-
 </body>
 </html>
 
