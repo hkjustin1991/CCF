@@ -220,7 +220,7 @@
       uploadCheckinAutoPick:false
     };
 
-    const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(((typeof EXTERNAL_SCANNER_TIMEOUT_MS === 'undefined') ? 120000 : EXTERNAL_SCANNER_TIMEOUT_MS) || 120000) ?>) || 120000;
+    const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
 
     var STABLE_REQUIRED_COUNT = 2;
     var STABLE_REQUIRED_MS = 250;
@@ -357,8 +357,8 @@
 
 
 
-    var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify((typeof EXTERNAL_SCANNER_URL === 'undefined') ? '' : (EXTERNAL_SCANNER_URL || '')) ?> || '').trim();
-    var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify((typeof EXTERNAL_SCANNER_ORIGIN === 'undefined') ? '' : (EXTERNAL_SCANNER_ORIGIN || '')) ?> || '').trim();
+    var EXTERNAL_SCANNER_URL = String(window.CCF_EXTERNAL_SCANNER_URL || '').trim();
+    var EXTERNAL_SCANNER_ORIGIN = String(window.CCF_EXTERNAL_SCANNER_ORIGIN || '').trim();
     var pendingExternalScanner_ = null;
     var EXTERNAL_SCANNER_CONFIG_ERROR = '';
 
