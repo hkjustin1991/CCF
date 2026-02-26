@@ -408,20 +408,16 @@
       return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
     }
 
+    var LIVE_PORTAL_URL = 'https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec';
+
     function navigateToLivePortal(){
       try{
-        var u = new URL(window.location.href);
-        if(/Reg2\.html(?:\/)?$/i.test(u.pathname)){
-          u.pathname = u.pathname.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
-          u.search = '';
-          window.location.href = u.toString();
+        if(window.top && window.top.location){
+          window.top.location.href = LIVE_PORTAL_URL;
           return;
         }
-        u.search = '';
-        window.location.href = u.toString();
-        return;
       }catch(e){}
-      window.location.href = 'index.html';
+      window.location.href = LIVE_PORTAL_URL;
     }
 
 
