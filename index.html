@@ -2076,6 +2076,60 @@
           }
 
           var m = res.member || {};
+          var family = Array.isArray(res.relatedMembers) ? res.relatedMembers : [];
+          if(!family.length){
+            family = [{
+              id: m.id || '',
+              nameZh: m.nameZh || '',
+              nameEn: m.nameEn || '',
+              preferredName: m.preferredName || '',
+              isMinor: !!m.isMinor,
+              todayCheckedIn: !!res.today,
+              todayTimeUk: (res.today && res.today.timeUk) || '',
+              todayMethod: (res.today && res.today.method) || ''
+            }];
+          }
+
+          var selected = {};
+          family.forEach(function(f){ selected[String(f.id||'').toUpperCase()] = false; });
+          selected[String(m.id||'').toUpperCase()] = true;
+
+          function getSelectedIds(){
+            return family.filter(function(f){ return !!selected[String(f.id||'').toUpperCase()]; }).map(function(f){ return String(f.id||'').toUpperCase(); });
+          }
+
+          function buildFamilyListHtml(){
+            return family.map(function(f){
+              var fid = String(f.id||'').toUpperCase();
+              var line = formatMemberNameLine_(f.nameZh, f.nameEn, f.preferredName) || fid;
+              var checked = selected[fid] ? 'checked' : '';
+              var chips = '<span class="chip">'+escapeHtml(fid)+'</span>'+
+                (f.isMinor ? '<span class="chip warn">🧒 Minor</span>' : '')+
+                (f.todayCheckedIn ? '<span class="chip warn">✅ Today '+escapeHtml(f.todayTimeUk||'')+'</span>' : '');
+              return ''+
+                '<label class="nameItem" style="display:block;cursor:pointer;">'+
+                  '<div style="display:flex;gap:8px;align-items:flex-start;">'+
+                    '<input type="checkbox" class="famCk" data-mid="'+escapeHtml(fid)+'" '+checked+' style="margin-top:2px;" />'+
+                    '<div style="flex:1;">'+
+                      '<div class="zh">'+escapeHtml(line)+'</div>'+
+                      '<div class="chipRow">'+chips+'</div>'+
+                    '</div>'+
+                  '</div>'+
+                '</label>';
+            }).join('');
+          }
+
+          function bindFamilyChecks(){
+            Array.prototype.slice.call(confirmEl.querySelectorAll('.famCk')).forEach(function(el){
+              el.onchange = function(){
+                var mid = String(el.getAttribute('data-mid')||'').toUpperCase();
+                selected[mid] = !!el.checked;
+                var btn = $('btnManualConfirmFamily');
+                if(btn) btn.disabled = (getSelectedIds().length===0);
+              };
+            });
+          }
+
           var nameLine = formatMemberName_(m) || m.id || '';
           var pref = (m.preferredName||'').trim();
 
@@ -2084,7 +2138,7 @@
           if(today){
             todayBox =
               '<div class="msgBox already" style="margin-top:10px;">'+
-                '<div class="big ok">✅ 今日已簽到 / Already today</div>'+
+                '<div class="big ok">✅ 主會員今日已簽到 / Primary already today</div>'+
                 kvHtml([
                   {k:'經手 / By', v: formatHandledBy_(today.handledBy)},
                   {k:'時間 / Time', v: today.timeUk||''},
@@ -2096,7 +2150,7 @@
 
           confirmEl.innerHTML =
             '<div class="big">確認 / Confirm</div>'+
-            '<div class="small">此頁面只顯示確認，避免需要向下滑動。<br/>This view shows only confirmation to avoid scrolling.</div>'+
+            '<div class="small">可選擇同一家庭成員一併簽到。<br/>Select same-family members for bulk check-in.</div>'+
             '<div class="divider"></div>'+
             '<div class="msgBox ok" style="margin-top:0;">'+
               '<div class="big ok">👤 '+escapeHtml(nameLine)+'</div>'+
@@ -2128,9 +2182,11 @@
             })()+
             isMinorNoticeHtml(!!m.isMinor)+
             '<div class="miniBtnRow">'+
-              '<button id="btnManualConfirmCheckin" class="primary" '+(today?'disabled style="opacity:.55"':'')+'>✅ 確認簽到 / Confirm check-in</button>'+
+              '<button id="btnManualConfirmFamily" class="primary">✅ 確認簽到所選 / Confirm selected</button>'+
               '<button id="btnManualBackSearch" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
             '</div>';
+
+          bindFamilyChecks();
 
           $('btnManualBackSearch').onclick = function(){
             unlockSearchUi();
@@ -2171,6 +2227,32 @@
                   };
                   return;
                 }
+                var oneId = ids[i];
+                callApi('api_checkin_manual', App.token, oneId, null, getDeviceId(), getUA()).then(function(r2){
+                  var entry = { id:oneId, state:'fail', label:'失敗 / Failed', detail:'' };
+                  if(r2 && r2.ok){
+                    var mm = r2.member || { id: oneId };
+                    var nm = formatMemberName_(mm) || mm.id || oneId;
+                    if(r2.result === 'ALREADY'){
+                      var a = r2.already || {};
+                      entry.state = 'already';
+                      entry.label = '已簽到 / Already';
+                      entry.detail = nm + (a.timeUk ? (' @ '+a.timeUk) : '');
+                    } else {
+                      entry.state = 'ok';
+                      entry.label = '成功 / Checked-in';
+                      entry.detail = nm + (r2.timeUk ? (' @ '+r2.timeUk) : '');
+                    }
+                  } else {
+                    entry.detail = oneId + ' · ' + ((r2 && (r2.zh||r2.en||r2.code)) || 'Error');
+                  }
+                  outcomes.push(entry);
+                  runAt(i+1);
+                }).catch(function(){
+                  outcomes.push({ id:oneId, state:'fail', label:'失敗 / Failed', detail: oneId + ' · System error' });
+                  runAt(i+1);
+                });
+              }
 
                 // Render bulk summary
                 var rows = Array.isArray(r2.results) ? r2.results : [];
