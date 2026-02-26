@@ -702,7 +702,7 @@ function reg_buildServingTokensForWrite_(raw, maxSlots){
     : String(raw||'').split(',').map(v => String(v||'').trim()).filter(Boolean);
   const out = [];
   for (let i=0;i<Number(maxSlots||0);i++){
-    out.push(String(list[i]||'').trim() || 'N/A');
+    out.push(String(list[i]||'').trim());
   }
   return out;
 }
@@ -858,9 +858,9 @@ function api_reg_self_serving_data_public(qrPayload){
             slots.push('N/A');
             return;
           }
-          slots.push('N/A');
+          slots.push('');
         });
-        while (slots.length < max) slots.push('N/A');
+        while (slots.length < max) slots.push('');
 
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
         cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
@@ -931,8 +931,11 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
         return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
       }
-      const hasFree = tokens.some(function(t){ return admin_isServingNaValue_(t); });
+      const hasFree = tokens.some(function(t){ return !String(t||'').trim(); });
       if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+
+      if (admin_isServingNaValue_(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      if (currentAtSlot && !/^CCF\d{4}$/i.test(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
 
       tokens[idx] = id;
       sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));

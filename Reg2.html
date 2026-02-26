@@ -1129,7 +1129,7 @@
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
               if (!v){ vacancy += 1; return '<li><span class="chip">空缺 / Vacant</span></li>'; }
-              if (v === 'N/A'){ vacancy += 1; return '<li><span class="chip">空缺 / Vacant</span></li>'; }
+              if (v === 'N/A'){ return '<li><span class="chip">N/A</span></li>'; }
               var isSelf = (v === mineId);
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){

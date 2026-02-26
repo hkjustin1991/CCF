@@ -2359,6 +2359,7 @@ function admin_getMembersIndex_(){
   const col = admin_getMembersColMap_(sh);
 
   const byId = {};
+  const all = [];
   if (lastRow >= 2){
     const lastCol = sh.getLastColumn();
     const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
@@ -2368,7 +2369,7 @@ function admin_getMembersIndex_(){
       const id = String(row[col.ID]||'').trim().toUpperCase();
       if (!id) continue;
 
-      byId[id] = {
+      const memberRow = {
         rowNumber: r+2,
         id: id,
         key: String(row[col.Key]||'').trim(),
@@ -2390,10 +2391,12 @@ function admin_getMembersIndex_(){
         awayTo2: (col.AwayTo2!==undefined) ? admin_cellToYmd_(row[col.AwayTo2]) : '',
         roleExpires: (col.RoleExpires!==undefined) ? String(row[col.RoleExpires]||'').trim() : ''
       };
+      byId[id] = memberRow;
+      all.push(memberRow);
     }
   }
 
-  const payload = { byId: byId };
+  const payload = { byId: byId, all: all };
   cache.put(key, JSON.stringify(payload), 120);
   return payload;
 }
