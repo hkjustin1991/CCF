@@ -1277,6 +1277,13 @@
       if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); attachScrollControls_(root); return; }
       if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); attachScrollControls_(root); return; }
       if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); attachScrollControls_(root); return; }
+
+      // Failsafe: unknown/invalid view should never leave app blank
+      App.view = 'login';
+      root.innerHTML = viewLogin();
+      bindLogin();
+      applyExternalScannerGuard_('msg', []);
+      attachScrollControls_(root);
     }
 
     // ===== Views =====
