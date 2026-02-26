@@ -412,12 +412,10 @@
 
     function navigateToLivePortal(){
       try{
-        if(window.top && window.top.location){
-          window.top.location.href = LIVE_PORTAL_URL;
-          return;
-        }
+        window.open(LIVE_PORTAL_URL, '_top');
+        return;
       }catch(e){}
-      window.location.href = LIVE_PORTAL_URL;
+      window.location.assign(LIVE_PORTAL_URL);
     }
 
 
