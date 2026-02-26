@@ -1,7 +1,7 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-02-02.staff8
+ * v2026-02-15.staff95
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -29,6 +29,8 @@ const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 const TZ = 'Europe/London';
 const SESSION_TTL_SECONDS = 4 * 60 * 60;
 const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+const EXTERNAL_SCANNER_URL_DEFAULT = 'https://hkjustin1991.github.io/CCF/scanner/';
+const EXTERNAL_SCANNER_ORIGIN_DEFAULT = 'https://hkjustin1991.github.io';
 
 // Sheets
 const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
@@ -115,6 +117,12 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.TEXT);
   }
 
+  if (mode === 'scannercfg') {
+    var cfgDbg = getExternalScannerConfig_();
+    return ContentService.createTextOutput(JSON.stringify({ ok:true, appVersion:APP_VERSION, scanner:cfgDbg }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
 
@@ -130,16 +138,38 @@ function doGet(e) {
 }
 
 function getExternalScannerConfig_(){
-  try{
-    const p = PropertiesService.getScriptProperties();
-    return {
-      url: String(p.getProperty('EXTERNAL_SCANNER_URL') || '').trim(),
-      origin: String(p.getProperty('EXTERNAL_SCANNER_ORIGIN') || '').trim(),
-      timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS
-    };
-  }catch(e){
-    return { url:'', origin:'', timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS };
+  function pickNonEmpty_(vals){
+    for (var i = 0; i < vals.length; i++) {
+      var v = String(vals[i] || '').trim();
+      if (v) return v;
+    }
+    return '';
   }
+
+  var scriptProps = null;
+  var userProps = null;
+  try{ scriptProps = PropertiesService.getScriptProperties(); }catch(e){}
+  try{ userProps = PropertiesService.getUserProperties(); }catch(e){}
+
+  var url = pickNonEmpty_([
+    scriptProps && scriptProps.getProperty('EXTERNAL_SCANNER_URL'),
+    userProps && userProps.getProperty('EXTERNAL_SCANNER_URL'),
+    (typeof EXTERNAL_SCANNER_URL !== 'undefined' ? EXTERNAL_SCANNER_URL : ''),
+    EXTERNAL_SCANNER_URL_DEFAULT
+  ]);
+
+  var origin = pickNonEmpty_([
+    scriptProps && scriptProps.getProperty('EXTERNAL_SCANNER_ORIGIN'),
+    userProps && userProps.getProperty('EXTERNAL_SCANNER_ORIGIN'),
+    (typeof EXTERNAL_SCANNER_ORIGIN !== 'undefined' ? EXTERNAL_SCANNER_ORIGIN : ''),
+    EXTERNAL_SCANNER_ORIGIN_DEFAULT
+  ]);
+
+  return {
+    url: url,
+    origin: origin,
+    timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS
+  };
 }
 
 
@@ -395,6 +425,7 @@ function getMembersIndex_() {
       vrm: vrm1,
       vrm2: vrm2,
       roleExpires: roleExpires ? roleExpires.toISOString() : '',
+      familyId: ('FamilyID' in col) ? String(row[col['FamilyID']] || '').trim() : '',
       servingGroups: servingGroups,
       servingGlGroups: servingGlGroups
     };
@@ -1082,6 +1113,19 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
 }
 
 /******** Manual search (optimised) ********/
+function api_checkin_manual_bulk(token, memberIds, eventKeyOptional, deviceId, ua){
+  const ids = Array.isArray(memberIds) ? memberIds : [];
+  const out = [];
+  for (let i=0;i<ids.length;i++){
+    const id = String(ids[i] || '').trim().toUpperCase();
+    if (!id) continue;
+    const res = api_checkin_manual(token, id, eventKeyOptional, deviceId, ua);
+    out.push({ id:id, ok: !!(res && res.ok), result: res });
+  }
+  return { ok:true, results: out };
+}
+
+
 function api_search_members(token, query) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -1483,7 +1527,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
-  if (!staff.isSuper && !(st === STATUS_STAFF || st === STATUS_ADMIN)) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  if (!staff.isSuper && !ALLOWED_STATUSES_FOR_PORTAL.includes(st)) return { ok:false, code:'E403', zh:'此功能只供同工使用', en:'Staff portal accounts only.' };
 
   const id = String(memberId||'').trim().toUpperCase();
   const mi = getMembersIndex_().byId;
@@ -1528,6 +1572,24 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
     }
   }
 
+  var familyIdVal = String(m.familyId || '').trim();
+  const familyMembers = [];
+  if (familyIdVal){
+    Object.keys(mi).forEach(function(fid){
+      const fm = mi[fid];
+      if (!fm) return;
+      if (normalizeStatus_(fm.status) === STATUS_DISABLED) return;
+      if (String(fm.familyId||'').trim() !== familyIdVal) return;
+      familyMembers.push({
+        id: fm.id,
+        nameZh: fm.nameZh||'',
+        nameEn: fm.nameEn||'',
+        preferredName: fm.preferredName||''
+      });
+    });
+    familyMembers.sort(function(a,b){ return String(a.id||'').localeCompare(String(b.id||'')); });
+  }
+
   return {
     ok:true,
     member:{
@@ -1538,6 +1600,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       isMinor: !!m.isMinor,
       vrm: m.vrm||'',
       vrm2: m.vrm2||'',
+      familyId: familyIdVal,
       status: normalizeStatus_(m.status),
       isNewFriend: (function(){
         const stNorm = normalizeStatus_(m.status);
@@ -1546,6 +1609,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
         return !isNewFriendSuppressed_(eventKey, id);
       })()
     },
+    familyMembers: familyMembers,
     today: today,
     last4EventKeys: eventKeys
   };
