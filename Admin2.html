@@ -362,7 +362,7 @@
       root.innerHTML =
         '<div class="wrap">'+
           '<div class="card msgBox err" style="display:block">'+
-            '<div class="big err">⚠️ 暫時未能開啟頁面 / We can't open this page right now</div>'+
+            '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
             '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
@@ -472,8 +472,12 @@
       return String(Date.now()) + '_' + String(Math.random()).slice(2);
     }
 
-    function openExternalScanner_(onPayload, onStatus){
+    function openExternalScanner_(arg1, arg2){
+      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
+      var onPayload = opts.onPayload;
+      var onStatus = opts.onStatus;
       var state = makeExternalScannerState_();
+      var flow = String(opts.flow || '');
       var done = false;
       var timer = null;
       var poll = null;
@@ -492,23 +496,37 @@
       function onMessage(ev){
         if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
         var data = ev.data || {};
-        if(!data || data.state !== state) return;
-        if(data.type === 'scanner:cancel'){ clear('cancel'); return; }
-        if(data.type !== 'scanner:result' || !data.payload) return;
-        clear('success');
-        onPayload(String(data.payload), 'EXT_SCANNER');
+        if(!data || String(data.state || '') !== String(state)) return;
+
+        var type = String(data.type || '');
+        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ clear('cancel'); return; }
+        if(type === 'CCF_QR_ERROR'){
+          if(typeof opts.onError === 'function') opts.onError(data.detail || 'scanner error');
+          clear('error');
+          return;
+        }
+        if((type === 'scanner:result' || type === 'CCF_QR_RESULT') && data.payload){
+          clear('success');
+          if(typeof onPayload === 'function') onPayload(String(data.payload), 'EXT_SCANNER');
+          return;
+        }
       }
 
       window.addEventListener('message', onMessage);
-      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return; }
-      var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
-      popup = window.open(url, 'ccf_ext_scanner_admin', 'popup,width=460,height=760');
-      if(!popup){ clear('blocked'); return; }
+      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return null; }
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      target.searchParams.set('state', state);
+      if(flow) target.searchParams.set('flow', flow);
+
+      popup = window.open(target.toString(), 'ccf_ext_scanner_admin', 'popup,width=460,height=760');
+      if(!popup){ clear('blocked'); return null; }
 
       timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
       poll = setInterval(function(){
         if(popup && popup.closed){ clear('popup_closed'); }
       }, 400);
+      return state;
     }
 
     function logAction(action, details, context){
@@ -1067,8 +1085,8 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = true;
-          btn.title = 'External scanner disabled: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.disabled = false;
+          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
       var msgEl = $(msgId || 'msg');
@@ -1096,11 +1114,13 @@
       for(var j=0;j<arr.length;j++) out += arr[j].toString(16).padStart(2,'0');
       return out;
     }
-    function openExternalScanner_(opts){
+    function openExternalScanner_(arg1, arg2){
+      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
       opts = opts || {};
       var flow = String(opts.flow || 'admin');
       if(!EXTERNAL_SCANNER_CONFIG.ok){
         if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'External scanner configuration is invalid.');
+        if(typeof opts.onStatus === 'function') opts.onStatus('config_invalid');
         return null;
       }
       var state = randomStateToken_();
@@ -1109,7 +1129,8 @@
         flow: flow,
         onPayload: opts.onPayload,
         onCancel: opts.onCancel,
-        onError: opts.onError
+        onError: opts.onError,
+        onStatus: opts.onStatus
       };
 
       var target = new URL(EXTERNAL_SCANNER_URL);
@@ -1125,6 +1146,7 @@
       if(!w){
         pendingExternalScanner_ = null;
         if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        if(typeof opts.onStatus === 'function') opts.onStatus('blocked');
         return null;
       }
       return state;
@@ -1140,10 +1162,20 @@
       var cbPayload = pendingExternalScanner_.onPayload;
       var cbCancel = pendingExternalScanner_.onCancel;
       var cbError = pendingExternalScanner_.onError;
+      var cbStatus = pendingExternalScanner_.onStatus;
       pendingExternalScanner_ = null;
-      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
-      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
-      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
+      if(type === 'CCF_QR_RESULT'){
+        if(typeof cbPayload === 'function') cbPayload(data.payload);
+        if(typeof cbStatus === 'function') cbStatus('success');
+      }
+      if(type === 'CCF_QR_CANCEL'){
+        if(typeof cbCancel === 'function') cbCancel(data.detail);
+        if(typeof cbStatus === 'function') cbStatus('cancel');
+      }
+      if(type === 'CCF_QR_ERROR'){
+        if(typeof cbError === 'function') cbError(data.detail);
+        if(typeof cbStatus === 'function') cbStatus('error');
+      }
     });
 
     function viewLogin(){
@@ -1212,7 +1244,7 @@
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試相機（Git 掃描） / Retry camera (Git scanner)</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -1272,7 +1304,17 @@
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         console.error('E420 camera unsupported', detail0.diagnostics);
         reportScannerE420_('unsupported', d0);
-        onCaptured(null, {code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail});
+        onCaptured(null, {
+          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
+          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+            bindCameraRetryButton_('scanMsg', function(){
+              openExternalScanner_({
+                flow:'admin',
+                onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
+                onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+              });
+            }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
+        });
         return;
       }
       var constraintsPreferred = { video: { facingMode: { ideal:'environment' } }, audio:false };
@@ -1300,11 +1342,28 @@
               zh:'相機無法啟動',
               en:'Camera cannot start',
               detail: detail,
-              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_('scanMsg', function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
+                bindCameraRetryButton_('scanMsg', function(){
+                  openExternalScanner_({
+                    flow:'admin',
+                    onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
+                    onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                  });
+                }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
             });
             return;
           }
-          onCaptured(null, {code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail});
+          onCaptured(null, {
+            code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail,
+            detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
+              bindCameraRetryButton_('scanMsg', function(){
+                openExternalScanner_({
+                  flow:'admin',
+                  onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
+                  onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                });
+              }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
+          });
         });
       }
 
