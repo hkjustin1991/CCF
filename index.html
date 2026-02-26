@@ -185,9 +185,13 @@
     </footer>
   </div>
 
+  <script>window.__CCF_LIVE_BOOT = { parsed:false, rendered:false, ts:Date.now() };</script>
+
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <script>
+    try{ window.__CCF_LIVE_BOOT.parsed = true; }catch(e){}
+
     var App = {
       token:null, staff:null,
       view:'login',
@@ -1269,6 +1273,7 @@
       }
 
       var root = $('app');
+      try{ window.__CCF_LIVE_BOOT.rendered = true; }catch(e){}
       if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); applyExternalScannerGuard_('msg', []); restoreSession(); attachScrollControls_(root); return; }
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); attachScrollControls_(root); return; }
       if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); attachScrollControls_(root); return; }
@@ -2961,6 +2966,29 @@
       }
     }, 900);
   </script>
+
+  <script>
+    (function(){
+      function fallback(msg){
+        var root = document.getElementById('app');
+        if(!root) return;
+        root.innerHTML =
+          '<div class="card msgBox err">'+
+            '<div class="big err">⚠️ Live portal script failed to start</div>'+ 
+            '<div class="msgEn">Please redeploy latest Apps Script version and hard refresh.</div>'+ 
+            '<div class="small" style="margin-top:8px;word-break:break-all;">'+String(msg||'unknown')+'</div>'+ 
+          '</div>';
+      }
+      setTimeout(function(){
+        var st = window.__CCF_LIVE_BOOT || {};
+        var root = document.getElementById('app');
+        var hasUi = !!(root && String(root.innerHTML||'').trim());
+        if(!st.parsed) return fallback('main script parse did not complete');
+        if(!hasUi) return fallback('main script parsed but UI is empty');
+      }, 1200);
+    })();
+  </script>
+
 </body>
 </html>
 
