@@ -1247,7 +1247,8 @@
     // ===== Views =====
     function viewLogin(){
       var switchBtn = shouldShowCrossPortalSwitch()
-        ? '<a id="btnSwitchToReg" class="alt btnSmall" href="'+escapeHtml(REG_PORTAL_URL)+'" target="_top" rel="noopener noreferrer">🔁 自助平台 / Self portal</a>'
+        ? '<div><a id="btnSwitchToReg" href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">🔁 自助平台 / Self portal</a></div>'+
+          '<div class="small" style="margin-top:6px;word-break:break-all;"><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg</a></div>'
         : '';
       return ''+
         '<div class="card">'+
