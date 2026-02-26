@@ -397,6 +397,7 @@ function getMembersIndex_() {
       vrm: vrm1,
       vrm2: vrm2,
       roleExpires: roleExpires ? roleExpires.toISOString() : '',
+      familyId: ('FamilyID' in col) ? String(row[col['FamilyID']] || '').trim() : '',
       servingGroups: servingGroups,
       servingGlGroups: servingGlGroups
     };
@@ -1084,6 +1085,19 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
 }
 
 /******** Manual search (optimised) ********/
+function api_checkin_manual_bulk(token, memberIds, eventKeyOptional, deviceId, ua){
+  const ids = Array.isArray(memberIds) ? memberIds : [];
+  const out = [];
+  for (let i=0;i<ids.length;i++){
+    const id = String(ids[i] || '').trim().toUpperCase();
+    if (!id) continue;
+    const res = api_checkin_manual(token, id, eventKeyOptional, deviceId, ua);
+    out.push({ id:id, ok: !!(res && res.ok), result: res });
+  }
+  return { ok:true, results: out };
+}
+
+
 function api_search_members(token, query) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
@@ -1581,14 +1595,23 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
     }
   }
 
-  relatedMembers.forEach(function(rel){
-    const t = todayByMemberId[rel.id];
-    if (!t) return;
-    rel.todayCheckedIn = true;
-    rel.todayTimeUk = t.timeUk || '';
-    rel.todayMethod = t.method || '';
-    rel.todayReceiptId = t.receiptId || '';
-  });
+  const familyId = String(m.familyId || '').trim();
+  const familyMembers = [];
+  if (familyId){
+    Object.keys(mi).forEach(function(fid){
+      const fm = mi[fid];
+      if (!fm) return;
+      if (normalizeStatus_(fm.status) === STATUS_DISABLED) return;
+      if (String(fm.familyId||'').trim() !== familyId) return;
+      familyMembers.push({
+        id: fm.id,
+        nameZh: fm.nameZh||'',
+        nameEn: fm.nameEn||'',
+        preferredName: fm.preferredName||''
+      });
+    });
+    familyMembers.sort(function(a,b){ return String(a.id||'').localeCompare(String(b.id||'')); });
+  }
 
   return {
     ok:true,
@@ -1600,6 +1623,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       isMinor: !!m.isMinor,
       vrm: m.vrm||'',
       vrm2: m.vrm2||'',
+      familyId: familyId,
       status: normalizeStatus_(m.status),
       isNewFriend: (function(){
         const stNorm = normalizeStatus_(m.status);
@@ -1608,6 +1632,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
         return !isNewFriendSuppressed_(eventKey, id);
       })()
     },
+    familyMembers: familyMembers,
     today: today,
     last4EventKeys: eventKeys,
     relatedMembers: relatedMembers

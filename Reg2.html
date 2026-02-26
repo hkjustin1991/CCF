@@ -68,7 +68,10 @@
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
     .btnSmall{width:auto;min-height:auto;padding:8px 12px;font-size:13px;border-radius:999px;flex:0 0 auto}
-    .btnSignupSquare{border-radius:6px}
+    .btnSignupSquare{border-radius:10px!important}
+    .chip{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text);font-size:13px}
+    .assignListBullets{margin:0;padding-left:18px}
+    .assignListBullets li{margin:4px 0}
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
@@ -127,17 +130,7 @@
     .groupBadge.finance{background:#fff2cc;border-color:rgba(202,155,0,0.45);color:#7a5b00}
     .groupBadge.activeGroup{outline:3px solid rgba(30,60,120,0.25);transform:translateY(-1px)}
     .timeFallback{color:#d93c5e;font-weight:900}
-    .chip{
-      display:inline-block;
-      padding:4px 10px;
-      border:1px solid rgba(10,30,80,0.28);
-      border-radius:999px;
-      background:#fff;
-      color:#0d1b3d;
-      font-size:13px;
-      font-weight:700;
-      line-height:1.35;
-    }
+    body.busyUi button{pointer-events:none;opacity:.7}
 
     @media (pointer: coarse){
       button{ min-height: 52px; }
@@ -251,29 +244,37 @@
       });
     }
 
+    var apiPendingCount_ = 0;
+    function setApiBusy_(on){
+      apiPendingCount_ += on ? 1 : -1;
+      if (apiPendingCount_ < 0) apiPendingCount_ = 0;
+      if (apiPendingCount_ > 0) document.body.classList.add('busyUi');
+      else document.body.classList.remove('busyUi');
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
       var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+      var useRpcFirst = !!endpoint;
 
-      if(forceRpcOnce){
+      setApiBusy_(true);
+      function done(p){ return Promise.resolve(p).finally(function(){ setApiBusy_(false); }); }
+
+      if(forceRpcOnce && endpoint){
         window.CCF_FORCE_RPC_ONCE = false;
-        if(endpoint) return callApiViaRpc(endpoint, fn, args);
+        return done(callApiViaRpc(endpoint, fn, args));
       }
 
-      return callApiViaGas(fn, args).catch(function(err){
-        if(endpoint){
-          var msg = String((err && err.message) || err || 'GAS call failed');
-          throw {
-            code:'E530',
-            zh:'GAS 連線失敗，請改用 Git 再試',
-            en:'GAS failed. Please retry with Git API.',
-            detail: msg,
-            gasFailed:true
-          };
-        }
-        throw err;
-      });
+      if(useRpcFirst){
+        return done(
+          callApiViaRpc(endpoint, fn, args).catch(function(){
+            return callApiViaGas(fn, args);
+          })
+        );
+      }
+
+      return done(callApiViaGas(fn, args));
     }
 
     function escapeHtml(s){
@@ -410,17 +411,17 @@
     function navigateToLivePortal(){
       try{
         var u = new URL(window.location.href);
-        if(/\.html$/i.test(u.pathname)){
+        if(/Reg2\.html(?:\/)?$/i.test(u.pathname)){
           u.pathname = u.pathname.replace(/Reg2\.html(?:\/)?$/i, 'index.html');
           u.search = '';
           window.location.href = u.toString();
           return;
         }
-        u.searchParams.delete('mode');
+        u.search = '';
         window.location.href = u.toString();
         return;
       }catch(e){}
-      window.location.href = './';
+      window.location.href = 'index.html';
     }
 
 
@@ -1057,7 +1058,7 @@
         tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
         return tail;
       }
-      function memberDisplay_(id, allowIdFallback){
+      function memberDisplay_(id, isSelf){
         var mid = String(id||'').trim().toUpperCase();
         if (!mid || mid === 'N/A') return '';
         var raw = String(labelsById[mid] || '').trim();
@@ -1065,7 +1066,9 @@
         var pm = raw.match(/\(([^()]+)\)\s*$/);
         if (pm && pm[1]) pref = String(pm[1]).trim();
         var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
-        return pref || base || (allowIdFallback ? mid : '');
+        var out = pref || base;
+        if (out) return out;
+        return isSelf ? mid : '未命名 / Unknown';
       }
 
       var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
@@ -1123,26 +1126,26 @@
             var mineInPosition = false;
             var vacancy = 0;
 
-            var vacantChip = '<span class="chip">空缺 / Vacant</span>';
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
-              if (v === 'N/A'){ vacancy += 1; return '<span class="chip">N/A</span>'; }
-              var txt = memberDisplay_(v, v === mineId);
-              if (v === mineId){
+              if (!v){ vacancy += 1; return '<li><span class="chip">空缺 / Vacant</span></li>'; }
+              if (v === 'N/A'){ vacancy += 1; return '<li><span class="chip">空缺 / Vacant</span></li>'; }
+              var isSelf = (v === mineId);
+              var txt = memberDisplay_(v, isSelf);
+              if (isSelf){
                 mineInPosition = true;
-                return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
+                return '<li><button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button></li>';
               }
-              return '<span class="chip">'+escapeHtml(txt || '未命名 / Unknown')+'</span>';
+              return '<li><span class="chip">'+escapeHtml(txt)+'</span></li>';
             });
-            if (!slotLines.length){ vacancy = 1; slotLines = [vacantChip]; }
+            if (!slotLines.length){ vacancy = 1; slotLines = ['<li><span class="chip">空缺 / Vacant</span></li>']; }
 
             var action = '';
             if (!mineInPosition && vacancy > 0){
-              action = '<button class="alt btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
+              action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
             }
 
-            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;"><div class="assignList">'+slotLines.join(' ')+'</div>'+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
+            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;"><ul class="assignListBullets">'+slotLines.join('')+'</ul>'+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
           });
           row += '</tr>';
           return row;
@@ -1808,11 +1811,14 @@
             ? ('確認報名？\nSure to sign up?\n'+ev+' '+pos)
             : ('<6 weeks to service. Please inform GL of this signing up.\n\n距離聚會少於 6 週，請通知組長你已報名。\n\n'+ev+' '+pos);
           if(!confirm(prompt)) return;
+          $('servingMsg').innerHTML = showBox('warn','處理中…','Saving...');
           callApi('api_reg_self_serving_signup_public', State.authQrPayload, ev, pos, Number(slot||0)).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            var okMsg = showBox('ok','已報名','Signed up', '<div class="small">'+escapeHtml(ev+' '+pos)+'</div>');
             if (r.warning && (r.warning.zh || r.warning.en)){
-              $('servingMsg').innerHTML = showBox('warn', r.warning.zh || '⚠️ 距離聚會少於 6 週，請通知組長你已報名。', r.warning.en || '⚠️ <6 weeks to service. Please inform GL of this signing up.');
+              okMsg += showBox('warn', r.warning.zh || '⚠️ 距離聚會少於 6 週，請通知組長你已報名。', r.warning.en || '⚠️ <6 weeks to service. Please inform GL of this signing up.');
             }
+            $('servingMsg').innerHTML = okMsg;
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
           }).catch(function(err){
             var msg = (err && err.message) ? err.message : String(err||'');
@@ -1829,8 +1835,10 @@
             return;
           }
           if(!confirm('確認取消報名？\nSure to remove from rota?')) return;
+          $('servingMsg').innerHTML = showBox('warn','處理中…','Saving...');
           callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
+            $('servingMsg').innerHTML = showBox('ok','已取消報名','Removed from rota', '<div class="small">'+escapeHtml(ev+' '+pos)+'</div>');
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
           }).catch(function(err){
             var msg = (err && err.message) ? err.message : String(err||'');

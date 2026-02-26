@@ -1112,6 +1112,9 @@ function api_reg_self_set_holiday_public(qrPayload, fromDmy1, toDmy1, fromDmy2, 
     sh.getRange(row, col.AwayTo1+1).setValue(p1.to || '');
     sh.getRange(row, col.AwayFrom2+1).setValue(p2.from || '');
     sh.getRange(row, col.AwayTo2+1).setValue(p2.to || '');
+    if (typeof admin_appendAwayHistory_ === 'function') {
+      admin_appendAwayHistory_(id, [p1, p2].filter(function(x){ return x.from && x.to; }), { id:id, status:'MEMBER' });
+    }
 
     regLogActivity_('REG_SELF_HOLIDAY_SET', id, 'OK', { from1:p1.from||'', to1:p1.to||'', from2:p2.from||'', to2:p2.to||'' });
     if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
