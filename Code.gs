@@ -29,6 +29,8 @@ const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 const TZ = 'Europe/London';
 const SESSION_TTL_SECONDS = 4 * 60 * 60;
 const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
+const EXTERNAL_SCANNER_URL_DEFAULT = 'https://hkjustin1991.github.io/CCF/scanner/';
+const EXTERNAL_SCANNER_ORIGIN_DEFAULT = 'https://hkjustin1991.github.io';
 
 // Sheets
 const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
@@ -115,6 +117,12 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.TEXT);
   }
 
+  if (mode === 'scannercfg') {
+    var cfgDbg = getExternalScannerConfig_();
+    return ContentService.createTextOutput(JSON.stringify({ ok:true, appVersion:APP_VERSION, scanner:cfgDbg }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
 
@@ -130,16 +138,38 @@ function doGet(e) {
 }
 
 function getExternalScannerConfig_(){
-  try{
-    const p = PropertiesService.getScriptProperties();
-    return {
-      url: String(p.getProperty('EXTERNAL_SCANNER_URL') || '').trim(),
-      origin: String(p.getProperty('EXTERNAL_SCANNER_ORIGIN') || '').trim(),
-      timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS
-    };
-  }catch(e){
-    return { url:'', origin:'', timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS };
+  function pickNonEmpty_(vals){
+    for (var i = 0; i < vals.length; i++) {
+      var v = String(vals[i] || '').trim();
+      if (v) return v;
+    }
+    return '';
   }
+
+  var scriptProps = null;
+  var userProps = null;
+  try{ scriptProps = PropertiesService.getScriptProperties(); }catch(e){}
+  try{ userProps = PropertiesService.getUserProperties(); }catch(e){}
+
+  var url = pickNonEmpty_([
+    scriptProps && scriptProps.getProperty('EXTERNAL_SCANNER_URL'),
+    userProps && userProps.getProperty('EXTERNAL_SCANNER_URL'),
+    (typeof EXTERNAL_SCANNER_URL !== 'undefined' ? EXTERNAL_SCANNER_URL : ''),
+    EXTERNAL_SCANNER_URL_DEFAULT
+  ]);
+
+  var origin = pickNonEmpty_([
+    scriptProps && scriptProps.getProperty('EXTERNAL_SCANNER_ORIGIN'),
+    userProps && userProps.getProperty('EXTERNAL_SCANNER_ORIGIN'),
+    (typeof EXTERNAL_SCANNER_ORIGIN !== 'undefined' ? EXTERNAL_SCANNER_ORIGIN : ''),
+    EXTERNAL_SCANNER_ORIGIN_DEFAULT
+  ]);
+
+  return {
+    url: url,
+    origin: origin,
+    timeoutMs: EXTERNAL_SCANNER_TIMEOUT_MS
+  };
 }
 
 
