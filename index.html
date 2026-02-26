@@ -2954,9 +2954,6 @@
 
     // Boot
     try { render(); } catch (e) { showBootError_(e); }
-    window.addEventListener('DOMContentLoaded', function(){
-      try{ if (!($('app') && String($('app').innerHTML||'').trim())) render(); }catch(e){ showBootError_(e); }
-    });
     setTimeout(function(){
       var root = $('app');
       if (!root) return;
@@ -2966,43 +2963,6 @@
         root.innerHTML = '<div class="card msgBox err"><div class="big err">⚠️ 頁面未能初始化 / Page failed to initialize</div><div class="msgEn">Please hard refresh or redeploy latest version.</div></div>';
       }
     }, 900);
-  </script>
-
-  <script>
-    (function(){
-      function fallback(msg){
-        var root = document.getElementById('app');
-        if(!root) return;
-        root.innerHTML =
-          '<div class="card msgBox err">'+
-            '<div class="big err">⚠️ Live portal script failed to start</div>'+ 
-            '<div class="msgEn">Please redeploy latest Apps Script version and hard refresh.</div>'+ 
-            '<div class="small" style="margin-top:8px;word-break:break-all;">'+String(msg||'unknown')+'</div>'+ 
-          '</div>';
-      }
-      setTimeout(function(){
-        var st = window.__CCF_LIVE_BOOT || {};
-        var root = document.getElementById('app');
-        var hasUi = !!(root && String(root.innerHTML||'').trim());
-
-        if(!st.parsed){
-          // If core function exists, script likely parsed; try recover once.
-          if(typeof window.render === 'function'){
-            try{ window.render(); }catch(e){ return fallback('render exists but failed: ' + String(e && (e.message||e) || e)); }
-            hasUi = !!(root && String(root.innerHTML||'').trim());
-            if(!hasUi) return fallback('main script parsed but UI is empty after retry');
-            return;
-          }
-          return fallback('main script parse did not complete');
-        }
-
-        if(!hasUi && typeof window.render === 'function'){
-          try{ window.render(); }catch(e){ return fallback('main script parsed but render failed: ' + String(e && (e.message||e) || e)); }
-          hasUi = !!(root && String(root.innerHTML||'').trim());
-        }
-        if(!hasUi) return fallback('main script parsed but UI is empty');
-      }, 1200);
-    })();
   </script>
 
 </body>
