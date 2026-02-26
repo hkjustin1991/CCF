@@ -271,6 +271,12 @@
 
 
     function navigateToRegPortal(){
+      try{
+        if(window.top && window.top.location){
+          window.top.location.href = REG_PORTAL_URL;
+          return;
+        }
+      }catch(e){}
       window.location.href = REG_PORTAL_URL;
     }
 
