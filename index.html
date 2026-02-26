@@ -216,7 +216,7 @@
       uploadCheckinAutoPick:false
     };
 
-    const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>) || 120000;
+    const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(((typeof EXTERNAL_SCANNER_TIMEOUT_MS === 'undefined') ? 120000 : EXTERNAL_SCANNER_TIMEOUT_MS) || 120000) ?>) || 120000;
 
     var STABLE_REQUIRED_COUNT = 2;
     var STABLE_REQUIRED_MS = 250;
@@ -353,8 +353,8 @@
 
 
 
-    var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify(EXTERNAL_SCANNER_URL || '') ?> || '').trim();
-    var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify(EXTERNAL_SCANNER_ORIGIN || '') ?> || '').trim();
+    var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify((typeof EXTERNAL_SCANNER_URL === 'undefined') ? '' : (EXTERNAL_SCANNER_URL || '')) ?> || '').trim();
+    var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify((typeof EXTERNAL_SCANNER_ORIGIN === 'undefined') ? '' : (EXTERNAL_SCANNER_ORIGIN || '')) ?> || '').trim();
     var pendingExternalScanner_ = null;
     var EXTERNAL_SCANNER_CONFIG_ERROR = '';
 
@@ -2278,7 +2278,18 @@
                     '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
                   '</div>';
 
-              runAt(0);
+                $('btnManualBackMenu').onclick = function(){ App.view='checkinMenu'; render(); };
+                $('btnManualBackSearch3').onclick = function(){
+                  unlockSearchUi();
+                  confirmEl.classList.add('hide');
+                  confirmEl.innerHTML = '';
+                  qEl.focus();
+                  doSearch();
+                };
+              }).catch(function(){
+                showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+                unlockSearchUi();
+              });
             };
           }
         }).catch(function(){
@@ -2937,6 +2948,9 @@
 
     // Boot
     try { render(); } catch (e) { showBootError_(e); }
+    window.addEventListener('DOMContentLoaded', function(){
+      try{ if (!($('app') && String($('app').innerHTML||'').trim())) render(); }catch(e){ showBootError_(e); }
+    });
     setTimeout(function(){
       var root = $('app');
       if (!root) return;
