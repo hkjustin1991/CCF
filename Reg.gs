@@ -702,7 +702,7 @@ function reg_buildServingTokensForWrite_(raw, maxSlots){
     : String(raw||'').split(',').map(v => String(v||'').trim()).filter(Boolean);
   const out = [];
   for (let i=0;i<Number(maxSlots||0);i++){
-    out.push(String(list[i]||'').trim() || 'N/A');
+    out.push(String(list[i]||'').trim());
   }
   return out;
 }
@@ -842,10 +842,26 @@ function api_reg_self_serving_data_public(qrPayload){
     (matrix.events||[]).forEach(function(ev){
       cells[ev.eventKey] = {};
       filteredPositions.forEach(function(p){
-        const raw = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||{}).value || '';
+        const entries = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||[]);
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
-        const tokens = reg_buildServingTokensForWrite_(raw, max);
-        const slots = tokens.map(function(t){ return admin_isServingNaValue_(t) ? '' : String(t||'').trim().toUpperCase(); });
+        const slots = [];
+
+        (entries || []).forEach(function(e){
+          if (slots.length >= max) return;
+          const memberId = String((e && e.memberId) || '').trim().toUpperCase();
+          const rawVal = String((e && e.rawValue) || '').trim();
+          if (memberId){
+            slots.push(memberId);
+            return;
+          }
+          if (admin_isServingNaValue_(rawVal)){
+            slots.push('N/A');
+            return;
+          }
+          slots.push('');
+        });
+        while (slots.length < max) slots.push('');
+
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
         cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
       });
@@ -915,8 +931,11 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
         return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
       }
-      const hasFree = tokens.some(function(t){ return admin_isServingNaValue_(t); });
+      const hasFree = tokens.some(function(t){ return !String(t||'').trim(); });
       if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+
+      if (admin_isServingNaValue_(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      if (currentAtSlot && !/^CCF\d{4}$/i.test(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
 
       tokens[idx] = id;
       sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
@@ -1096,6 +1115,9 @@ function api_reg_self_set_holiday_public(qrPayload, fromDmy1, toDmy1, fromDmy2, 
     sh.getRange(row, col.AwayTo1+1).setValue(p1.to || '');
     sh.getRange(row, col.AwayFrom2+1).setValue(p2.from || '');
     sh.getRange(row, col.AwayTo2+1).setValue(p2.to || '');
+    if (typeof admin_appendAwayHistory_ === 'function') {
+      admin_appendAwayHistory_(id, [p1, p2].filter(function(x){ return x.from && x.to; }), { id:id, status:'MEMBER' });
+    }
 
     regLogActivity_('REG_SELF_HOLIDAY_SET', id, 'OK', { from1:p1.from||'', to1:p1.to||'', from2:p2.from||'', to2:p2.to||'' });
     if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
