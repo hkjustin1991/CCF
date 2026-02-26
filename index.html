@@ -380,7 +380,7 @@
 
     function scannerConfigWarningHtml_(){
       var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return showBox('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
+      return buildBoxHtml_('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -590,15 +590,18 @@
       return isServingNaValue_(row.position) || isServingNaValue_(row.slot) || isServingNaValue_(row.memberId);
     }
 
-    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
+    function buildBoxHtml_(kind, titleZh, titleEn, detailHtml){
       detailHtml = detailHtml || '';
-      var el = $(targetId); if(!el) return;
-      el.innerHTML =
-        '<div class="msgBox '+kind+'">' +
+      return '<div class="msgBox '+kind+'">' +
           '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+titleZh+'</div>' +
           '<div class="msgEn">'+titleEn+'</div>' +
           (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '') +
         '</div>';
+    }
+
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
+      var el = $(targetId); if(!el) return;
+      el.innerHTML = buildBoxHtml_(kind, titleZh, titleEn, detailHtml);
     }
 
     function showErr(targetId, res){
@@ -2927,6 +2930,15 @@
 
     // Boot
     try { render(); } catch (e) { showBootError_(e); }
+    setTimeout(function(){
+      var root = $('app');
+      if (!root) return;
+      if (String(root.innerHTML || '').trim()) return;
+      try { render(); } catch (e) { showBootError_(e); return; }
+      if (!String(root.innerHTML || '').trim()) {
+        root.innerHTML = '<div class="card msgBox err"><div class="big err">⚠️ 頁面未能初始化 / Page failed to initialize</div><div class="msgEn">Please hard refresh or redeploy latest version.</div></div>';
+      }
+    }, 900);
   </script>
 </body>
 </html>
