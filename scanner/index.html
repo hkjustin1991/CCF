@@ -3,137 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CCF Scanner Handoff</title>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#eef3ff;color:#10204a}
-    .wrap{max-width:760px;margin:0 auto;padding:14px}
-    .card{background:#fff;border:1px solid rgba(16,32,74,0.15);border-radius:14px;padding:14px;margin:10px 0;box-shadow:0 8px 20px rgba(16,32,74,0.08)}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
-    button,select{width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(16,32,74,0.2);font-size:16px}
-    button{font-weight:700;background:#fff;cursor:pointer}
-    button.primary{background:#e7fff2;border-color:#67bf91}
-    .videoWrap{border:1px solid rgba(16,32,74,0.15);border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3}
-    video{display:block;width:100%;height:100%;object-fit:cover}
-    .small{color:#4f618d;font-size:14px;line-height:1.4}
-    .msg{padding:10px;border-radius:10px;margin-top:10px}
-    .warn{background:#fff6e8;border:1px solid #e0b361}
-    .ok{background:#edfff4;border:1px solid #6fcf97}
-    .err{background:#fff0f4;border:1px solid #dd6b87}
-    .hide{display:none}
-  </style>
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <title>CCF QR Scanner / 粵語基督徒團契</title>
+  <link rel="stylesheet" href="./scanner.css" />
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <h2 style="margin:0 0 8px;">CCF QR Scanner Handoff</h2>
-    <div class="small">Use this hosted page for direct mobile camera permission on GitHub Pages, then hand off QR payload to the existing GAS portal flows without changing backend API calls.</div>
-  </div>
+  <main class="wrap">
+    <header class="topbar">
+      <h1>📷 掃描 QR / Scan QR</h1>
+      <p class="sub">請把 QR 置中對準鏡頭 / Center the QR in the camera view.</p>
+    </header>
 
-  <div class="card">
-    <label for="targetPortal"><strong>Portal flow</strong></label>
-    <select id="targetPortal">
-      <option value="../index.html">Staff check-in (index.html)</option>
-      <option value="../Reg2.html">Self service (Reg2.html)</option>
-      <option value="../Admin2.html">Admin login (Admin2.html)</option>
-    </select>
-    <div class="row" style="margin-top:10px;">
-      <button id="startBtn" class="primary">▶️ Start camera</button>
-      <button id="switchBtn">🔄 Switch camera</button>
-      <button id="stopBtn">⏹ Stop</button>
-    </div>
-    <details style="margin-top:10px;">
-      <summary>More options (emergency only)</summary>
-      <div class="small" style="margin-top:8px;">Use image upload only when camera cannot be used.</div>
-      <input id="fileInput" type="file" accept="image/*" style="margin-top:8px;width:100%;" />
-    </details>
-  </div>
+    <section class="card">
+      <div class="videoWrap">
+        <video id="video" playsinline muted autoplay></video>
+      </div>
+      <div id="status" class="status" aria-live="polite"></div>
+      <div class="actions">
+        <button id="btnRetry" class="alt" type="button">重新嘗試 / Retry</button>
+        <button id="btnCancel" class="danger" type="button">取消 / Cancel</button>
+      </div>
+    </section>
+  </main>
 
-  <div class="card">
-    <div class="videoWrap"><video id="video" playsinline muted></video></div>
-    <div id="msg" class="msg warn">Tap <strong>Start camera</strong> to request permission and begin scanning.</div>
-  </div>
-</div>
-
-<script>
-(function(){
-  var S={stream:null,scanning:false,raf:null,deviceId:''};
-  var $=function(id){return document.getElementById(id);};
-
-  function show(cls, txt){ var el=$('msg'); el.className='msg '+cls; el.innerHTML=txt; }
-  function stop(){ S.scanning=false; if(S.raf) cancelAnimationFrame(S.raf); S.raf=null; if(S.stream){ S.stream.getTracks().forEach(function(t){t.stop();}); } S.stream=null; }
-
-  function handoff(payload){
-    var target = $('targetPortal').value;
-    var url = new URL(target, window.location.href);
-    url.searchParams.set('handoff', payload);
-    try{ sessionStorage.setItem('ccf_qr_handoff_payload', payload); }catch(e){}
-    show('ok','Scanned. Redirecting to <code>'+url.pathname+'</code> …');
-    window.location.href = url.toString();
-  }
-
-  function loop(){
-    if(!S.scanning) return;
-    var v=$('video');
-    if(v.readyState < 2){ S.raf=requestAnimationFrame(loop); return; }
-    var c=document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight;
-    var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(v,0,0,c.width,c.height);
-    var img=x.getImageData(0,0,c.width,c.height);
-    var qr = window.jsQR ? window.jsQR(img.data,c.width,c.height) : null;
-    if(qr && qr.data){ stop(); handoff(String(qr.data)); return; }
-    S.raf=requestAnimationFrame(loop);
-  }
-
-  function start(){
-    stop();
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ show('err','Camera API is unavailable in this browser.'); return; }
-    var c={video:{facingMode:'environment'}};
-    if(S.deviceId) c={video:{deviceId:{exact:S.deviceId}}};
-    navigator.mediaDevices.getUserMedia(c).then(function(stream){
-      S.stream=stream;
-      var tr=stream.getVideoTracks()[0];
-      var settings=(tr&&tr.getSettings)?tr.getSettings():{};
-      S.deviceId=settings.deviceId||S.deviceId;
-      var v=$('video');
-      v.srcObject=stream;
-      return v.play();
-    }).then(function(){
-      S.scanning=true;
-      show('ok','Camera running. Point at QR code.');
-      loop();
-    }).catch(function(err){
-      show('err','Cannot start camera: '+String((err&&err.message)||err)+'. Please allow camera permission and open in a system browser.');
-    });
-  }
-
-  $('startBtn').onclick=start;
-  $('stopBtn').onclick=function(){ stop(); show('warn','Camera stopped.'); };
-  $('switchBtn').onclick=function(){
-    navigator.mediaDevices.enumerateDevices().then(function(ds){
-      var cams=ds.filter(function(d){return d.kind==='videoinput';});
-      if(cams.length<2){ show('warn','Only one camera detected.'); return; }
-      var idx=Math.max(0,cams.findIndex(function(d){return d.deviceId===S.deviceId;}));
-      S.deviceId=cams[(idx+1)%cams.length].deviceId;
-      start();
-    }).catch(function(){ show('err','Cannot enumerate cameras.'); });
-  };
-
-  $('fileInput').onchange=function(ev){
-    var f = ev && ev.target && ev.target.files && ev.target.files[0];
-    if(!f) return;
-    var img = new Image();
-    img.onload=function(){
-      var c=document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
-      var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0);
-      var d=x.getImageData(0,0,c.width,c.height);
-      var qr = window.jsQR ? window.jsQR(d.data,c.width,c.height) : null;
-      if(!qr || !qr.data){ show('err','QR not detected in image.'); return; }
-      handoff(String(qr.data));
-    };
-    img.onerror=function(){ show('err','Cannot read image file.'); };
-    img.src=URL.createObjectURL(f);
-  };
-})();
-</script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="./scanner.js"></script>
 </body>
 </html>
