@@ -1103,6 +1103,7 @@
         if (!mid || mid === 'N/A') return '';
         var raw = String(labelsById[mid] || '').trim();
         var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
+        base = base.replace(/^CCF\d{4}\s*[·•-]?\s*/i, '').trim();
         var out = base;
         if (out) return out;
         return isSelf ? mid : '未命名 / Unknown';

@@ -710,11 +710,31 @@
       });
     }
 
+    function enableModalWheelScroll_(overlay){
+      var modal = overlay ? overlay.querySelector('.modal') : null;
+      if (!modal) return;
+      modal.addEventListener('wheel', function(e){
+        var target = e.target && e.target.closest ? e.target.closest('.tableWrap') : null;
+        var host = target || modal;
+        var dy = Number(e.deltaY || 0);
+        var dx = Number(e.deltaX || 0);
+        if (!dy && !dx) return;
+        var canV = host.scrollHeight > host.clientHeight;
+        var canH = host.scrollWidth > host.clientWidth;
+        if (!canV && !canH) return;
+        if (canV) host.scrollTop += dy;
+        if (canH && Math.abs(dx) > 0) host.scrollLeft += dx;
+        if (canH && e.shiftKey && Math.abs(dy) > Math.abs(dx)) host.scrollLeft += dy;
+        e.preventDefault();
+      }, { passive:false });
+    }
+
     function openModal(html){
       var o = document.createElement('div');
       o.className = 'overlay';
       o.innerHTML = '<div class="modal">'+html+'</div>';
       document.body.appendChild(o);
+      enableModalWheelScroll_(o);
       return o;
     }
     function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
@@ -1036,9 +1056,31 @@
       var groups = Array.isArray(member.groups) ? member.groups : [];
       return groups.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
     }
-    function buildMemberOptions_(members, groupKey){
+    function searchMembersForQuickEdit_(members, groupKey, q, limit){
+      var list = Array.isArray(members) ? members : [];
+      var query = String(q||'').trim().toLowerCase();
+      var max = Number(limit || 8);
+      if (max < 1) max = 8;
+      var out = [];
+      list.forEach(function(m){
+        if (out.length >= max) return;
+        if (!memberMatchesGroup_(m, groupKey)) return;
+        if (!query){ out.push(m); return; }
+        var hay = [
+          String(m.id||''),
+          String(m.nameZh||''),
+          String(m.nameEn||''),
+          String(m.preferredName||'')
+        ].join(' ').toLowerCase();
+        if (hay.indexOf(query) >= 0) out.push(m);
+      });
+      return out;
+    }
+
+    function buildMemberOptions_(members, groupKey, includeNa){
       var list = Array.isArray(members) ? members : [];
       var opts = '<option value="">選擇 / Select</option>';
+      if (includeNa) opts += '<option value="N/A">N/A</option>';
       list.forEach(function(m){
         if (!memberMatchesGroup_(m, groupKey)) return;
         opts += '<option value="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</option>';
@@ -2252,7 +2294,7 @@
         var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
         if (useIdx < 0) useIdx = addMode ? tokens.length : 0;
         var currentToken = addMode ? '空缺 / Empty' : (tokens[useIdx] || rawValue || '—');
-        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''));
+        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), pos !== 'Other');
 
         function buildPayload_(){
           return positions.map(function(p){
@@ -2342,12 +2384,14 @@
           '<div class="small" style="margin-top:6px;">'+(addMode ? '新增空缺 / Add to vacant slot' : '目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span>')+'</div>'+
           '<div class="label" style="margin-top:10px;">'+(addMode ? '加入 / Add' : '交換 / Swap')+'</div>'+
           '<select id="quickSwapSelect" class="inputMini">'+options+'</select>'+
+          '<input id="quickMemberSearch" class="inputMini" style="margin-top:8px;" placeholder="輸入 CCF ID / 姓名搜尋 / Type CCF ID or name" />'+
+          '<div id="quickSuggest" class="suggestList"></div>'+
           (pos === 'Other'
             ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
             : '')+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
             '<button id="btnQuickSwap" class="btnMain">✅ '+(addMode ? '加入 / Add' : '交換 / Swap')+'</button>'+
-            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
+            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '<button id="btnQuickNa" class="btnBack">N/A</button>')+
             (addMode ? '' : '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>')+
             '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
@@ -2358,8 +2402,32 @@
           var sel = modal.querySelector('#quickSwapSelect');
           var val = sel ? String(sel.value||'').trim() : '';
           if (!val) return;
-          swapToken_(formatServingToken_(memberMap, val));
+          swapToken_(val === 'N/A' ? 'N/A' : formatServingToken_(memberMap, val));
         };
+
+        function renderQuickSuggest_(){
+          var input = modal.querySelector('#quickMemberSearch');
+          var wrap = modal.querySelector('#quickSuggest');
+          if (!input || !wrap) return;
+          var picks = searchMembersForQuickEdit_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), input.value, 10);
+          wrap.innerHTML = picks.map(function(m){
+            return '<button type="button" class="suggestBtn" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
+          }).join('');
+          Array.prototype.slice.call(wrap.querySelectorAll('button[data-id]')).forEach(function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-id') || '').trim();
+              if (!id) return;
+              swapToken_(formatServingToken_(memberMap, id));
+            };
+          });
+        }
+        var quickSearch = modal.querySelector('#quickMemberSearch');
+        if (quickSearch){
+          quickSearch.oninput = renderQuickSuggest_;
+          renderQuickSuggest_();
+        }
+        var btnQuickNa = modal.querySelector('#btnQuickNa');
+        if (btnQuickNa) btnQuickNa.onclick = function(){ swapToken_('N/A'); };
         if (pos === 'Other'){
           modal.querySelector('#btnQuickUseText').onclick = function(){
             var input = modal.querySelector('#quickOtherText');
