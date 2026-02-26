@@ -267,21 +267,11 @@
       return !(App && App.token);
     }
 
+    var REG_PORTAL_URL = 'https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg';
+
 
     function navigateToRegPortal(){
-      try{
-        var u = new URL(window.location.href);
-        if(/\.html$/i.test(u.pathname)){
-          u.pathname = u.pathname.replace(/index\.html(?:\/)?$/i, 'Reg2.html');
-          u.search = '';
-          window.location.href = u.toString();
-          return;
-        }
-        u.searchParams.set('mode','reg');
-        window.location.href = u.toString();
-        return;
-      }catch(e){}
-      window.location.href = '?mode=reg';
+      window.location.href = REG_PORTAL_URL;
     }
 
     function getApiEndpoint(){
@@ -1257,7 +1247,8 @@
     // ===== Views =====
     function viewLogin(){
       var switchBtn = shouldShowCrossPortalSwitch()
-        ? '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'
+        ? '<div><a id="btnSwitchToReg" href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">🔁 自助平台 / Self portal</a></div>'+
+          '<div class="small" style="margin-top:6px;word-break:break-all;"><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg</a></div>'
         : '';
       return ''+
         '<div class="card">'+
@@ -1622,9 +1613,6 @@
 
     // ===== Bindings =====
     function bindLogin(){
-      if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        navigateToRegPortal();
-      };
 
       function applyLoginPayload_(payload){
         callApi('api_login', payload).then(function(res){
