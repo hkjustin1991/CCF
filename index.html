@@ -1879,14 +1879,12 @@
 
 
       function start(){
-        clear('scanMsg');
-        var cam = $('scanCam');
-        if (cam) cam.classList.remove('hide');
-        startScan('videoCheckin', onCaptured, 'scanMsg');
+        // Keep check-in flow external-scanner-first even on retry/switch actions.
+        startExternalCheckin_();
       }
 
       camBindSwitchButton_('btnSwitchCamCheckin', function(){
-        start();
+        startExternalCheckin_();
       });
 
 
