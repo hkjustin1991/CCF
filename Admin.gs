@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-02-07.admin10
+ * v2026-02-15.admin95
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *

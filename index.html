@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff12-ui1 (restored full functions + self-check)
-   * For Code.gs: v2026-02-08.staff12
+   * UI VERSION: staff12-ui1-bluefix2
+   * For Code.gs: v2026-02-15.staff95
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -285,10 +285,10 @@
     }
 
     function getApiEndpoint(){
+      // Security: do not allow runtime endpoint override from query string.
+      // Use deployment-provided endpoint only.
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
-        var qp = new URLSearchParams(window.location.search || '');
-        if (qp.get('api')) return String(qp.get('api'));
       }catch(e){}
       return '';
     }
@@ -302,13 +302,24 @@
       }).then(function(resp){
         return resp.text().then(function(txt){
           var data;
-          try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
+          try{ data = JSON.parse(txt); }catch(e){
+            var parseErr = new Error('Invalid API response');
+            parseErr.rpcType = 'parse';
+            throw parseErr;
+          }
           if(!resp.ok || !data || !data.ok){
             var err = (data && data.error) ? data.error : { message:'API call failed' };
+            if (!err || typeof err !== 'object') err = { message:String(err || 'API call failed') };
+            err.rpcType = 'api';
             throw err;
           }
           return data.result;
         });
+      }).catch(function(err){
+        if (err && err.rpcType) throw err;
+        var netErr = err instanceof Error ? err : new Error(String(err || 'RPC network error'));
+        netErr.rpcType = 'network';
+        throw netErr;
       });
     }
 
@@ -347,8 +358,10 @@
 
       if(useRpcFirst){
         return done(
-          callApiViaRpc(endpoint, fn, args).catch(function(){
-            return callApiViaGas(fn, args);
+          callApiViaRpc(endpoint, fn, args).catch(function(err){
+            // Fallback only for transport/network failures to avoid duplicate writes.
+            if (err && err.rpcType === 'network') return callApiViaGas(fn, args);
+            throw err;
           })
         );
       }
