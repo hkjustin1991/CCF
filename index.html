@@ -1895,8 +1895,31 @@
         showBox('scanMsg', 'warn', '相機已停止', 'Camera stopped', '<div class="small">你可以按「再次掃描」重新開始。</div>');
       };
 
+      function startExternalCheckin_(){
+        stopScan();
+        showBox('scanMsg', 'warn', '優先使用外置掃描器…', 'Starting external scanner…');
+        openExternalScanner_(onCaptured, function(status){
+          if(status === 'success') return;
+          if(status === 'timeout'){
+            showBox('scanMsg', 'warn', '外置掃描器逾時，請按「再次掃描」', 'External scanner timed out. Tap Scan again.');
+            return;
+          }
+          if(status === 'cancel' || status === 'popup_closed'){
+            showBox('scanMsg', 'warn', '外置掃描已取消，請按「再次掃描」', 'External scanner cancelled. Tap Scan again.');
+            return;
+          }
+          if(status === 'blocked'){
+            showBox('scanMsg', 'warn', '彈出視窗被封鎖，請按「再次掃描」', 'Popup blocked. Tap Scan again.');
+            return;
+          }
+          if(status === 'config_invalid'){
+            showBox('scanMsg', 'warn', '外置掃描器未設定，請按「再次掃描」', 'External scanner not configured. Tap Scan again.');
+          }
+        });
+      }
+
       $('btnRestartScan').onclick = function(){
-        start();
+        startExternalCheckin_();
       };
 
 
@@ -1911,26 +1934,7 @@
         onCaptured(pendingPayload);
         return;
       }
-
-      showBox('scanMsg', 'warn', '優先使用外置掃描器…', 'Starting external scanner…');
-      openExternalScanner_(onCaptured, function(status){
-        if(status === 'success') return;
-        if(status === 'timeout'){
-          showBox('scanMsg', 'warn', '外置掃描器逾時，請按「再次掃描」', 'External scanner timed out. Tap Scan again.');
-          return;
-        }
-        if(status === 'cancel' || status === 'popup_closed'){
-          showBox('scanMsg', 'warn', '外置掃描已取消，請按「再次掃描」', 'External scanner cancelled. Tap Scan again.');
-          return;
-        }
-        if(status === 'blocked'){
-          showBox('scanMsg', 'warn', '彈出視窗被封鎖，請按「再次掃描」', 'Popup blocked. Tap Scan again.');
-          return;
-        }
-        if(status === 'config_invalid'){
-          showBox('scanMsg', 'warn', '外置掃描器未設定，請按「再次掃描」', 'External scanner not configured. Tap Scan again.');
-        }
-      });
+      startExternalCheckin_();
     }
 
     function bindManualCheckin(){
