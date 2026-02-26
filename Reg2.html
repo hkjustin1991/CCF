@@ -307,6 +307,41 @@
       return m[3] + '-' + m[2] + '-' + m[1];
     }
 
+
+    function parseYmd(ymd){
+      var s = String(ymd || '').trim();
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m) return null;
+      var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+      if(y < 1000 || y > 9999 || mo < 1 || mo > 12) return null;
+      var dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() !== y || dt.getMonth() !== (mo - 1) || dt.getDate() !== d) return null;
+      return dt;
+    }
+
+    function getTodayYmdUk(){
+      try{
+        var parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone:'Europe/London',
+          year:'numeric',
+          month:'2-digit',
+          day:'2-digit'
+        }).formatToParts(new Date());
+        var y='', m='', d='';
+        parts.forEach(function(p){
+          if (p.type === 'year') y = p.value;
+          if (p.type === 'month') m = p.value;
+          if (p.type === 'day') d = p.value;
+        });
+        if (y && m && d) return y + '-' + m + '-' + d;
+      }catch(e){}
+      var now = new Date();
+      var yy = String(now.getFullYear());
+      var mm = String(now.getMonth()+1).padStart(2,'0');
+      var dd = String(now.getDate()).padStart(2,'0');
+      return yy + '-' + mm + '-' + dd;
+    }
+
     function getDeviceId(){
       try{
         var id = localStorage.getItem('ccf_reg_deviceId');
