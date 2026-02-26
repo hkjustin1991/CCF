@@ -1595,14 +1595,14 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
     }
   }
 
-  const familyId = String(m.familyId || '').trim();
+  var familyIdVal = String(m.familyId || '').trim();
   const familyMembers = [];
-  if (familyId){
+  if (familyIdVal){
     Object.keys(mi).forEach(function(fid){
       const fm = mi[fid];
       if (!fm) return;
       if (normalizeStatus_(fm.status) === STATUS_DISABLED) return;
-      if (String(fm.familyId||'').trim() !== familyId) return;
+      if (String(fm.familyId||'').trim() !== familyIdVal) return;
       familyMembers.push({
         id: fm.id,
         nameZh: fm.nameZh||'',
@@ -1623,7 +1623,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       isMinor: !!m.isMinor,
       vrm: m.vrm||'',
       vrm2: m.vrm2||'',
-      familyId: familyId,
+      familyId: familyIdVal,
       status: normalizeStatus_(m.status),
       isNewFriend: (function(){
         const stNorm = normalizeStatus_(m.status);
