@@ -1041,7 +1041,7 @@
         tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
         return tail;
       }
-      function memberDisplay_(id){
+      function memberDisplay_(id, allowIdFallback){
         var mid = String(id||'').trim().toUpperCase();
         if (!mid || mid === 'N/A') return '';
         var raw = String(labelsById[mid] || '').trim();
@@ -1049,7 +1049,7 @@
         var pm = raw.match(/\(([^()]+)\)\s*$/);
         if (pm && pm[1]) pref = String(pm[1]).trim();
         var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
-        return pref || base || mid;
+        return pref || base || (allowIdFallback ? mid : '');
       }
 
       var memberGroups = Array.from(new Set((m.servingGroups || []).map(function(g){ return normalizeServingGroupKey(g); }).filter(Boolean)));
@@ -1110,14 +1110,20 @@
             var vacantChip = '<span class="chip">空缺 / Vacant</span>';
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
+<<<<<<< codex/update-slot-renderer-for-self-service-ui
+              if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
+              if (v === 'N/A'){ vacancy += 1; return '<span class="chip">N/A</span>'; }
+              var txt = memberDisplay_(v, v === mineId);
+=======
               if (!v){ vacancy += 1; return vacantChip; }
               if (v === 'N/A'){ vacancy += 1; return vacantChip; }
               var txt = memberDisplay_(v);
+>>>>>>> main
               if (v === mineId){
                 mineInPosition = true;
                 return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
               }
-              return '<span class="chip">'+escapeHtml(txt || v)+'</span>';
+              return '<span class="chip">'+escapeHtml(txt || '未命名 / Unknown')+'</span>';
             });
             if (!slotLines.length){ vacancy = 1; slotLines = [vacantChip]; }
 
