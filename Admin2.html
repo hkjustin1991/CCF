@@ -565,6 +565,7 @@
       Media_PPT:            { zh:'投影', en:'PPT' },
       Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
       Support_BibleReader:  { zh:'讀經員', en:'Bible Reader' },
+      Support_Testimony:   { zh:'見證', en:'Testimony' },
       Support_Prayer:       { zh:'祈禱', en:'Prayer (Monthly)' },
       Support_Communion:    { zh:'聖餐襄禮', en:'Communion Assist (Monthly)' },
       Support_Care:         { zh:'關顧組', en:'Newcomer Care' },
@@ -586,6 +587,7 @@
       Media_PPT: 'media',
       Media_PPTBuild: 'media',
       Support_BibleReader: 'support',
+      Support_Testimony: 'support',
       Support_Prayer: 'support',
       Support_Communion: 'support',
       Support_Care: 'support',
@@ -1733,10 +1735,10 @@
                     '</button>';
                 }).filter(Boolean);
                 for (var slotIdx = entries.length; slotIdx < maxSlots; slotIdx++){
-                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+slotIdx+'" data-raw="">空缺 / Empty</button>');
                 }
                 if(!entries.length){
-                  entries.push('<span class="emptySlotOutline">空缺 / Empty</span>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="0" data-raw="">空缺 / Empty</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
@@ -2246,9 +2248,10 @@
         }
 
         var tokens = splitServingValues_(values[pos] || '');
+        var addMode = (!isNaN(idx) && idx >= tokens.length);
         var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
-        if (useIdx < 0) useIdx = 0;
-        var currentToken = tokens[useIdx] || rawValue || '—';
+        if (useIdx < 0) useIdx = addMode ? tokens.length : 0;
+        var currentToken = addMode ? '空缺 / Empty' : (tokens[useIdx] || rawValue || '—');
         var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''));
 
         function buildPayload_(){
@@ -2318,13 +2321,16 @@
 
         function swapToken_(nextToken){
           if (!nextToken) return;
-          tokens[useIdx] = nextToken;
+          if (useIdx >= tokens.length) tokens.push(nextToken);
+          else tokens[useIdx] = nextToken;
           values[pos] = tokens.filter(Boolean).join(', ');
           saveWithOverride_(false);
         }
         function deleteToken_(){
           if (useIdx >= 0 && useIdx < tokens.length){
             tokens.splice(useIdx, 1);
+          } else {
+            return;
           }
           values[pos] = tokens.filter(Boolean).join(', ');
           saveWithOverride_(false);
@@ -2333,16 +2339,16 @@
         modal.querySelector('.modal').innerHTML =
           '<div class="big">🧩 快速編輯 / Quick edit</div>'+
           '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(servingPositionLabel_({ position: pos }))+'</div>'+
-          '<div class="small" style="margin-top:6px;">目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span></div>'+
-          '<div class="label" style="margin-top:10px;">交換 / Swap</div>'+
+          '<div class="small" style="margin-top:6px;">'+(addMode ? '新增空缺 / Add to vacant slot' : '目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span>')+'</div>'+
+          '<div class="label" style="margin-top:10px;">'+(addMode ? '加入 / Add' : '交換 / Swap')+'</div>'+
           '<select id="quickSwapSelect" class="inputMini">'+options+'</select>'+
           (pos === 'Other'
             ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
             : '')+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
-            '<button id="btnQuickSwap" class="btnMain">✅ 交換 / Swap</button>'+
+            '<button id="btnQuickSwap" class="btnMain">✅ '+(addMode ? '加入 / Add' : '交換 / Swap')+'</button>'+
             (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
-            '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>'+
+            (addMode ? '' : '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>')+
             '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="quickMsg"></div>';
@@ -2362,7 +2368,8 @@
             swapToken_(val);
           };
         }
-        modal.querySelector('#btnQuickDelete').onclick = function(){
+        var delBtn = modal.querySelector('#btnQuickDelete');
+        if (delBtn) delBtn.onclick = function(){
           if (!confirm('確認刪除此安排？ / Confirm delete assignment?')) return;
           deleteToken_();
         };
