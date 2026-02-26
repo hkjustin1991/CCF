@@ -271,11 +271,7 @@
 
 
     function navigateToRegPortal(){
-      try{
-        window.open(REG_PORTAL_URL, '_top');
-        return;
-      }catch(e){}
-      window.location.assign(REG_PORTAL_URL);
+      window.location.href = REG_PORTAL_URL;
     }
 
     function getApiEndpoint(){
@@ -1251,7 +1247,7 @@
     // ===== Views =====
     function viewLogin(){
       var switchBtn = shouldShowCrossPortalSwitch()
-        ? '<button id="btnSwitchToReg" class="alt btnSmall">🔁 自助平台 / Self portal</button>'
+        ? '<a id="btnSwitchToReg" class="alt btnSmall" href="'+escapeHtml(REG_PORTAL_URL)+'" target="_top" rel="noopener noreferrer">🔁 自助平台 / Self portal</a>'
         : '';
       return ''+
         '<div class="card">'+
@@ -1616,9 +1612,6 @@
 
     // ===== Bindings =====
     function bindLogin(){
-      if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        navigateToRegPortal();
-      };
 
       function applyLoginPayload_(payload){
         callApi('api_login', payload).then(function(res){

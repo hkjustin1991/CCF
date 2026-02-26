@@ -411,11 +411,7 @@
     var LIVE_PORTAL_URL = 'https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec';
 
     function navigateToLivePortal(){
-      try{
-        window.open(LIVE_PORTAL_URL, '_top');
-        return;
-      }catch(e){}
-      window.location.assign(LIVE_PORTAL_URL);
+      window.location.href = LIVE_PORTAL_URL;
     }
 
 
@@ -899,7 +895,7 @@
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
-            '<button id="btnSwitchToLive" class="alt btnSmall" type="button">🔁 即時聚會平台 / Live portal</button>'+
+            '<a id="btnSwitchToLive" class="alt btnSmall" href="'+escapeHtml(LIVE_PORTAL_URL)+'" target="_top" rel="noopener noreferrer">🔁 即時聚會平台 / Live portal</a>'+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
@@ -1432,9 +1428,6 @@
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
         applyExternalScannerGuard_('msg', []);
-        if ($('btnSwitchToLive')) $('btnSwitchToLive').onclick = function(){
-          navigateToLivePortal();
-        };
         $('btnNew').onclick = function(){
           State.view = 'form';
           State.flow = 'create';
