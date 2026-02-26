@@ -967,7 +967,7 @@
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試相機（Git 掃描） / Retry camera (Git scanner)</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">GAS 相機失敗，改用 Git 外置掃描登入 / GAS camera failed, open Git scanner sign-in</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -1020,7 +1020,9 @@
         '</div>';
     }
 
-    function startScan(videoId, onCaptured, msgTarget){
+    function startScan(videoId, onCaptured, msgTarget, opts){
+      opts = opts || {};
+      var externalFlow = String(opts.externalFlow || '');
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         var d0 = collectCameraDiagnostics_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
@@ -1031,11 +1033,15 @@
           code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
           detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
             bindCameraRetryButton_(msgTarget, function(){
-              openExternalScanner_(function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); }, function(status){
-                if(status === 'success') return;
-                if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
-                else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
-                else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+              openExternalScanner_({
+                flow: externalFlow,
+                onPayload: function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); },
+                onStatus: function(status){
+                  if(status === 'success') return;
+                  if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
+                  else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
+                  else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+                }
               });
             }) +
             bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded, 'UPLOAD_QR'); })
@@ -1083,11 +1089,15 @@
               detail: detail,
               detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
                 bindCameraRetryButton_(msgTarget, function(){
-                  openExternalScanner_(function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); }, function(status){
-                    if(status === 'success') return;
-                    if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
-                    else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
-                    else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+                  openExternalScanner_({
+                    flow: externalFlow,
+                    onPayload: function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); },
+                    onStatus: function(status){
+                      if(status === 'success') return;
+                      if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
+                      else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
+                      else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+                    }
                   });
                 }) +
                 bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded, 'UPLOAD_QR'); })
@@ -1098,11 +1108,15 @@
             code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail,
             detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
               bindCameraRetryButton_(msgTarget, function(){
-                openExternalScanner_(function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); }, function(status){
-                  if(status === 'success') return;
-                  if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
-                  else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
-                  else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+                openExternalScanner_({
+                  flow: externalFlow,
+                  onPayload: function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); },
+                  onStatus: function(status){
+                    if(status === 'success') return;
+                    if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
+                    else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
+                    else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+                  }
                 });
               }) +
               bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded, 'UPLOAD_QR'); })
@@ -1701,7 +1715,7 @@
 
         camBindSwitchButton_('btnSwitchCamLogin', function(){
           clear('msg');
-          startScan('videoLogin', onCapturedLogin, 'msg');
+          startScan('videoLogin', onCapturedLogin, 'msg', { externalFlow:'login' });
         });
 
         function onCapturedLogin(text){
@@ -1728,7 +1742,7 @@
           });
         }
 
-        startScan('videoLogin', onCapturedLogin, 'msg');
+        startScan('videoLogin', onCapturedLogin, 'msg', { externalFlow:'login' });
       };
 
       if ($('btnLoginUploadQr') && $('loginQrImageInput')){
