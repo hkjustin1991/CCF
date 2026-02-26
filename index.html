@@ -734,74 +734,6 @@
       return String(getUA() || '') + marker;
     }
 
-    function makeExternalScannerState_(){
-      try{
-        if(window.crypto && window.crypto.getRandomValues){
-          var arr = new Uint32Array(4);
-          window.crypto.getRandomValues(arr);
-          return Array.prototype.map.call(arr, function(n){ return n.toString(16); }).join('');
-        }
-      }catch(e){}
-      return String(Date.now()) + '_' + String(Math.random()).slice(2);
-    }
-
-    function openExternalScanner_(arg1, arg2){
-      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
-      var onPayload = opts.onPayload;
-      var onStatus = opts.onStatus;
-      var state = makeExternalScannerState_();
-      var flow = String(opts.flow || '');
-      var done = false;
-      var timer = null;
-      var poll = null;
-      var popup = null;
-
-      function clear(reason){
-        if(done) return;
-        done = true;
-        if(timer){ clearTimeout(timer); timer = null; }
-        if(poll){ clearInterval(poll); poll = null; }
-        window.removeEventListener('message', onMessage);
-        if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
-        if(typeof onStatus === 'function') onStatus(reason || 'closed');
-      }
-
-      function onMessage(ev){
-        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
-        var data = ev.data || {};
-        if(!data || String(data.state || '') !== String(state)) return;
-
-        var type = String(data.type || '');
-        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ clear('cancel'); return; }
-        if(type === 'CCF_QR_ERROR'){
-          if(typeof opts.onError === 'function') opts.onError(data.detail || 'scanner error');
-          clear('error');
-          return;
-        }
-        if((type === 'scanner:result' || type === 'CCF_QR_RESULT') && data.payload){
-          clear('success');
-          if(typeof onPayload === 'function') onPayload(String(data.payload), 'EXT_SCANNER');
-          return;
-        }
-      }
-
-      window.addEventListener('message', onMessage);
-      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return null; }
-
-      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
-      target.searchParams.set('state', state);
-      if(flow) target.searchParams.set('flow', flow);
-
-      popup = window.open(target.toString(), 'ccf_ext_scanner', 'popup,width=460,height=760');
-      if(!popup){ clear('blocked'); return null; }
-
-      timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
-      poll = setInterval(function(){
-        if(popup && popup.closed){ clear('popup_closed'); }
-      }, 400);
-      return state;
-    }
-
     function hiPref(p){
       var s = String(p||'').trim();
       if(!s) return '';
@@ -969,6 +901,9 @@
       }, 0);
       return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">GAS 相機失敗，改用 Git 外置掃描登入 / GAS camera failed, open Git scanner sign-in</button></div>';
     }
+
+    function collectCameraDiagnostics_(){ return {}; }
+    function reportScannerE420_(){}
 
     function bindImageQrFallback_(msgTarget, onDecoded){
       var inputId = msgTarget + '_qrFile';
@@ -2222,109 +2157,104 @@
             confirmEl.innerHTML = '';
           };
 
-          var btnC = $('btnManualConfirmCheckin');
-          if(btnC){
-            btnC.onclick = function(){
-              if(today) return;
-              btnC.disabled = true;
-              btnC.style.opacity = 0.55;
+var btnC = $('btnManualConfirmFamily');
+if (btnC) {
+  function updateConfirmEnabled_(){
+    var any = confirmEl.querySelectorAll('.famTick:checked').length > 0;
+    btnC.disabled = !any;
+  }
+  Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick')).forEach(function(ck){
+    ck.onchange = updateConfirmEnabled_;
+  });
+  updateConfirmEnabled_();
 
-              var selectedIds = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked')).map(function(x){ return String(x.value||'').trim(); }).filter(Boolean);
-              // Replace panel with result ONLY (clean, no scroll)
-              confirmEl.innerHTML = '<div class="small">處理中… / Processing…</div>';
+  btnC.onclick = function(){
+    clear('manualMsg');
 
-              if(!selectedIds.length) selectedIds = [m.id];
-              callApi('api_checkin_manual_bulk', App.token, selectedIds, null, getDeviceId(), getUA()).then(function(r2){
-                if(!r2 || !r2.ok){
-                  confirmEl.innerHTML = '';
-                  showErr('manualMsg', r2 || {code:'E500', zh:'系統錯誤', en:'Error'});
-                  // stay in confirm screen, add back button
-                  confirmEl.classList.remove('hide');
-                  confirmEl.innerHTML =
-                    '<div class="msgBox err">'+
-                      '<div class="big err">簽到失敗 / Failed</div>'+
-                      '<div class="msgEn">請返回再試 / Back and retry</div>'+
-                    '</div>'+
-                    '<div class="miniBtnRow">'+
-                      '<button id="btnManualBackSearch2" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
-                    '</div>';
-                  $('btnManualBackSearch2').onclick = function(){
-                    unlockSearchUi();
-                    confirmEl.classList.add('hide');
-                    confirmEl.innerHTML = '';
-                  };
-                  return;
-                }
-                var oneId = ids[i];
-                callApi('api_checkin_manual', App.token, oneId, null, getDeviceId(), getUA()).then(function(r2){
-                  var entry = { id:oneId, state:'fail', label:'失敗 / Failed', detail:'' };
-                  if(r2 && r2.ok){
-                    var mm = r2.member || { id: oneId };
-                    var nm = formatMemberName_(mm) || mm.id || oneId;
-                    if(r2.result === 'ALREADY'){
-                      var a = r2.already || {};
-                      entry.state = 'already';
-                      entry.label = '已簽到 / Already';
-                      entry.detail = nm + (a.timeUk ? (' @ '+a.timeUk) : '');
-                    } else {
-                      entry.state = 'ok';
-                      entry.label = '成功 / Checked-in';
-                      entry.detail = nm + (r2.timeUk ? (' @ '+r2.timeUk) : '');
-                    }
-                  } else {
-                    entry.detail = oneId + ' · ' + ((r2 && (r2.zh||r2.en||r2.code)) || 'Error');
-                  }
-                  outcomes.push(entry);
-                  runAt(i+1);
-                }).catch(function(){
-                  outcomes.push({ id:oneId, state:'fail', label:'失敗 / Failed', detail: oneId + ' · System error' });
-                  runAt(i+1);
-                });
-              }
+    var selectedIds = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked'))
+      .map(function(x){ return String(x.value || '').trim(); })
+      .filter(Boolean);
 
-                // Render bulk summary
-                var rows = Array.isArray(r2.results) ? r2.results : [];
-                var okCount = 0;
-                var alreadyCount = 0;
-                var failCount = 0;
-                var detailRows = rows.map(function(it){
-                  var rr = it.result || {};
-                  var mm = rr.member || { id: it.id };
-                  var nameLine = formatMemberName_(mm) || mm.id || it.id;
-                  if (!rr.ok) failCount += 1;
-                  else if (rr.result === 'ALREADY') alreadyCount += 1;
-                  else okCount += 1;
-                  var receipt = (rr.result === 'ALREADY') ? ((rr.already||{}).receiptId||'') : (rr.receiptId||'');
-                  var stamp = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'') : (rr.timeUk||'');
-                  var method = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'manual') : 'manual';
-                  var statusTxt = !rr.ok ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
-                  return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+'<details class="receiptDetails"><summary>Receipt</summary>'+kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt}])+'</details></li>';
-                }).join('');
-                confirmEl.innerHTML =
-                  '<div class="msgBox ok">'+
-                    '<div class="big ok">✅ 完成簽到 / Bulk completed</div>'+
-                    '<div class="small">Checked-in: '+okCount+' · Already: '+alreadyCount+' · Failed: '+failCount+'</div>'+
-                    '<ul style="margin:8px 0 0 18px;padding:0;">'+detailRows+'</ul>'+
-                  '</div>'+
-                  '<div class="miniBtnRow">'+
-                    '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
-                    '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
-                  '</div>';
+    if(!selectedIds.length){
+      showErr('manualMsg', { code:'E400', zh:'請至少選擇一位', en:'Please select at least one person.' });
+      updateConfirmEnabled_();
+      return;
+    }
 
-                $('btnManualBackMenu').onclick = function(){ App.view='checkinMenu'; render(); };
-                $('btnManualBackSearch3').onclick = function(){
-                  unlockSearchUi();
-                  confirmEl.classList.add('hide');
-                  confirmEl.innerHTML = '';
-                  qEl.focus();
-                  doSearch();
-                };
-              }).catch(function(){
-                showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
-                unlockSearchUi();
-              });
-            };
-          }
+    confirmEl.innerHTML = '<div class="small">處理中… / Processing…</div>';
+
+    callApi('api_checkin_manual_bulk', App.token, selectedIds, null, getDeviceId(), getUA())
+      .then(function(r2){
+        if(!r2 || !r2.ok){
+          confirmEl.innerHTML = '';
+          showErr('manualMsg', r2 || { code:'E500', zh:'系統錯誤', en:'System error' });
+          confirmEl.classList.remove('hide');
+          confirmEl.innerHTML =
+            '<div class="msgBox err">'+
+              '<div class="big err">簽到失敗 / Failed</div>'+
+              '<div class="msgEn">請返回再試 / Back and retry</div>'+
+            '</div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnManualBackSearch2" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
+            '</div>';
+          $('btnManualBackSearch2').onclick = function(){
+            unlockSearchUi();
+            confirmEl.classList.add('hide');
+            confirmEl.innerHTML = '';
+          };
+          return;
+        }
+
+        var rows = Array.isArray(r2.results) ? r2.results : [];
+        var okCount = 0, alreadyCount = 0, failCount = 0;
+
+        var detailRows = rows.map(function(it){
+          var rr = (it && it.result) ? it.result : {};
+          var mm = rr.member || { id: (it ? it.id : '') };
+          var nameLine = formatMemberName_(mm) || mm.id || (it ? it.id : '');
+
+          if(!rr.ok) failCount += 1;
+          else if(rr.result === 'ALREADY') alreadyCount += 1;
+          else okCount += 1;
+
+          var receipt = (rr.result === 'ALREADY') ? ((rr.already||{}).receiptId||'') : (rr.receiptId||'');
+          var stamp   = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'')    : (rr.timeUk||'');
+          var method  = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'')    : (rr.method||'manual');
+          var statusTxt = (!rr.ok) ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
+
+          return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+
+                 '<details class="receiptDetails"><summary>Receipt</summary>'+
+                 kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt}])+
+                 '</details></li>';
+        }).join('');
+
+        confirmEl.innerHTML =
+          '<div class="msgBox ok">'+
+            '<div class="big ok">✅ 完成簽到 / Bulk completed</div>'+
+            '<div class="small">Checked-in: '+okCount+' · Already: '+alreadyCount+' · Failed: '+failCount+'</div>'+
+            (detailRows ? '<ul style="margin:8px 0 0 18px;padding:0;">'+detailRows+'</ul>' : '')+
+          '</div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
+            '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
+          '</div>';
+
+        $('btnManualBackMenu').onclick = function(){ App.view='checkinMenu'; render(); };
+        $('btnManualBackSearch3').onclick = function(){
+          unlockSearchUi();
+          confirmEl.classList.add('hide');
+          confirmEl.innerHTML = '';
+          qEl.focus();
+          doSearch();
+        };
+      })
+      .catch(function(){
+        confirmEl.innerHTML = '';
+        showErr('manualMsg', { code:'E500', zh:'系統錯誤', en:'System error' });
+        unlockSearchUi();
+      });
+  };
+}
         }).catch(function(){
           confirmEl.innerHTML = '';
           showErr('manualMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
@@ -2643,18 +2573,6 @@
       qEl.oninput = function(){
         clearTimeout(App.vrmDebounceT);
         App.vrmDebounceT = setTimeout(doSearch, 250);
-      };
-      qEl.onkeydown = function(ev){
-        if (!ev || ev.key !== 'Enter') return;
-        doSearch();
-      };
-      qEl.onkeydown = function(ev){
-        if (!ev || ev.key !== 'Enter') return;
-        doSearch();
-      };
-      qEl.onkeydown = function(ev){
-        if (!ev || ev.key !== 'Enter') return;
-        doSearch();
       };
       qEl.onkeydown = function(ev){
         if (!ev || ev.key !== 'Enter') return;
