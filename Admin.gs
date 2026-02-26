@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-02-07.admin10
+ * v2026-02-15.admin95
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -704,6 +704,7 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
   sh.getRange(rowNumber, col.AwayTo1+1).setValue(p1.to || '');
   sh.getRange(rowNumber, col.AwayFrom2+1).setValue(p2.from || '');
   sh.getRange(rowNumber, col.AwayTo2+1).setValue(p2.to || '');
+  admin_appendAwayHistory_(id, [p1, p2].filter(function(x){ return x.from && x.to; }), s.actor);
 
   admin_audit_(
     s.actor,
@@ -1087,15 +1088,18 @@ function api_admin_matrix(token, fromDate, toDate, q){
   members.sort((a,b)=> a.id.localeCompare(b.id));
 
   const away = {};
+  const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
   events.forEach(function(ev){
     const d = admin_eventDateFromKey_(ev);
     if (!d) return;
     members.forEach(function(m){
       const ap = admin_getAwayPeriodForMember_(m.id);
-      const periods = (ap && ap.periods) ? ap.periods : [];
+      var periods = (ap && ap.periods) ? ap.periods.slice() : [];
+      var hist = historyMap[m.id] || [];
+      periods = periods.concat(hist);
       const hit = periods.some(function(p){
-        const from = admin_parseYmd_(p.fromYmd || '');
-        const to = admin_parseYmd_(p.toYmd || '');
+        const from = admin_parseYmd_(p.fromYmd || p.from || '');
+        const to = admin_parseYmd_(p.toYmd || p.to || '');
         if (!from || !to) return false;
         return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
       });
@@ -1540,6 +1544,41 @@ function admin_ensureAwaySheet_(){
     sh.getRange(1,1,1,6).setFontWeight('bold');
   }
   return sh;
+}
+function admin_appendAwayHistory_(memberId, periods, actor){
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!id) return;
+  const sh = admin_ensureAwaySheet_();
+  const now = nowUk_();
+  const role = (actor && actor.id === 'SUPERUSER') ? 'SUPERUSER' : String((actor && actor.status) || '').trim().toUpperCase();
+  const by = String((actor && actor.id) || '').trim().toUpperCase();
+  const list = Array.isArray(periods) ? periods : [];
+  if (!list.length){
+    sh.appendRow([id, '', '', now, by, role]);
+    return;
+  }
+  list.forEach(function(p){
+    sh.appendRow([id, String((p && p.from) || '').trim(), String((p && p.to) || '').trim(), now, by, role]);
+  });
+}
+function admin_getAwayHistoryPeriodsMap_(memberIds){
+  const out = {};
+  const ids = new Set((Array.isArray(memberIds)?memberIds:[]).map(function(x){ return String(x||'').trim().toUpperCase(); }).filter(Boolean));
+  if (!ids.size) return out;
+  const sh = admin_ensureAwaySheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return out;
+  const rows = sh.getRange(2,1,last-1,6).getValues();
+  rows.forEach(function(r){
+    const id = String(r[0]||'').trim().toUpperCase();
+    if (!ids.has(id)) return;
+    const from = String(r[1]||'').trim();
+    const to = String(r[2]||'').trim();
+    if (!from || !to) return;
+    out[id] = out[id] || [];
+    out[id].push({ fromYmd: from, toYmd: to });
+  });
+  return out;
 }
 function admin_normalizeAwayPeriod_(fromYmd, toYmd){
   const f = admin_parseDmyToYmd_(fromYmd);
@@ -2320,6 +2359,7 @@ function admin_getMembersIndex_(){
   const col = admin_getMembersColMap_(sh);
 
   const byId = {};
+  const all = [];
   if (lastRow >= 2){
     const lastCol = sh.getLastColumn();
     const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
@@ -2329,7 +2369,7 @@ function admin_getMembersIndex_(){
       const id = String(row[col.ID]||'').trim().toUpperCase();
       if (!id) continue;
 
-      byId[id] = {
+      const memberRow = {
         rowNumber: r+2,
         id: id,
         key: String(row[col.Key]||'').trim(),
@@ -2351,10 +2391,12 @@ function admin_getMembersIndex_(){
         awayTo2: (col.AwayTo2!==undefined) ? admin_cellToYmd_(row[col.AwayTo2]) : '',
         roleExpires: (col.RoleExpires!==undefined) ? String(row[col.RoleExpires]||'').trim() : ''
       };
+      byId[id] = memberRow;
+      all.push(memberRow);
     }
   }
 
-  const payload = { byId: byId };
+  const payload = { byId: byId, all: all };
   cache.put(key, JSON.stringify(payload), 120);
   return payload;
 }

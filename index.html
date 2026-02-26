@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff12-ui1 (restored full functions + self-check)
-   * For Code.gs: v2026-02-08.staff12
+   * UI VERSION: staff12-ui1-bluefix2
+   * For Code.gs: v2026-02-15.staff95
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -122,6 +122,12 @@
 
     .chipRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .chip{font-size:var(--fs-small);padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--muted)}
+    body.busyUi button{pointer-events:none;opacity:.72}
+    .familyList{margin-top:10px;border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
+    .familyRow{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border)}
+    .familyRow:last-child{border-bottom:none}
+    .familyRow input{width:auto;margin-top:2px;transform:scale(1.1)}
+    .receiptDetails{margin-top:10px}
     .chip.good{border-color:rgba(26,168,108,0.35);background:#edfff6;color:var(--good)}
     .chip.goodLight{border-color:rgba(26,168,108,0.25);background:#f2fff9;color:var(--good)}
     .chip.bad{border-color:rgba(217,60,94,0.35);background:#fff1f4;color:var(--bad)}
@@ -233,7 +239,7 @@
       root.innerHTML =
         '<div class="wrap">'+
           '<div class="card msgBox err" style="display:block">'+
-            '<div class="big err">⚠️ 暫時未能開啟頁面 / We can't open this page right now</div>'+
+            '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
             '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
@@ -256,11 +262,28 @@
       return !(App && App.token);
     }
 
+
+    function navigateToRegPortal(){
+      try{
+        var u = new URL(window.location.href);
+        if(/\.html$/i.test(u.pathname)){
+          u.pathname = u.pathname.replace(/index\.html(?:\/)?$/i, 'Reg2.html');
+          u.search = '';
+          window.location.href = u.toString();
+          return;
+        }
+        u.searchParams.set('mode','reg');
+        window.location.href = u.toString();
+        return;
+      }catch(e){}
+      window.location.href = '?mode=reg';
+    }
+
     function getApiEndpoint(){
+      // Security: do not allow runtime endpoint override from query string.
+      // Use deployment-provided endpoint only.
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
-        var qp = new URLSearchParams(window.location.search || '');
-        if (qp.get('api')) return String(qp.get('api'));
       }catch(e){}
       return '';
     }
@@ -274,13 +297,24 @@
       }).then(function(resp){
         return resp.text().then(function(txt){
           var data;
-          try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
+          try{ data = JSON.parse(txt); }catch(e){
+            var parseErr = new Error('Invalid API response');
+            parseErr.rpcType = 'parse';
+            throw parseErr;
+          }
           if(!resp.ok || !data || !data.ok){
             var err = (data && data.error) ? data.error : { message:'API call failed' };
+            if (!err || typeof err !== 'object') err = { message:String(err || 'API call failed') };
+            err.rpcType = 'api';
             throw err;
           }
           return data.result;
         });
+      }).catch(function(err){
+        if (err && err.rpcType) throw err;
+        var netErr = err instanceof Error ? err : new Error(String(err || 'RPC network error'));
+        netErr.rpcType = 'network';
+        throw netErr;
       });
     }
 
@@ -295,29 +329,39 @@
       });
     }
 
+    var apiPendingCount_ = 0;
+    function setApiBusy_(on){
+      apiPendingCount_ += on ? 1 : -1;
+      if (apiPendingCount_ < 0) apiPendingCount_ = 0;
+      if (apiPendingCount_ > 0) document.body.classList.add('busyUi');
+      else document.body.classList.remove('busyUi');
+    }
+
     function callApi(fn){
       var args = Array.prototype.slice.call(arguments, 1);
       var endpoint = getApiEndpoint();
       var forceRpcOnce = !!window.CCF_FORCE_RPC_ONCE;
+      var useRpcFirst = !!endpoint;
 
-      if(forceRpcOnce){
+      setApiBusy_(true);
+      function done(p){ return Promise.resolve(p).finally(function(){ setApiBusy_(false); }); }
+
+      if(forceRpcOnce && endpoint){
         window.CCF_FORCE_RPC_ONCE = false;
-        if(endpoint) return callApiViaRpc(endpoint, fn, args);
+        return done(callApiViaRpc(endpoint, fn, args));
       }
 
-      return callApiViaGas(fn, args).catch(function(err){
-        if(endpoint){
-          var msg = String((err && err.message) || err || 'GAS call failed');
-          throw {
-            code:'E530',
-            zh:'GAS 連線失敗，請改用 Git 再試',
-            en:'GAS failed. Please retry with Git API.',
-            detail: msg,
-            gasFailed:true
-          };
-        }
-        throw err;
-      });
+      if(useRpcFirst){
+        return done(
+          callApiViaRpc(endpoint, fn, args).catch(function(err){
+            // Fallback only for transport/network failures to avoid duplicate writes.
+            if (err && err.rpcType === 'network') return callApiViaGas(fn, args);
+            throw err;
+          })
+        );
+      }
+
+      return done(callApiViaGas(fn, args));
     }
 
 
@@ -349,7 +393,7 @@
 
     function scannerConfigWarningHtml_(){
       var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return showBox('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
+      return buildBoxHtml_('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -360,8 +404,8 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = true;
-          btn.title = 'External scanner disabled: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.disabled = false;
+          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
       var msgEl = $(msgId || 'msg');
@@ -396,11 +440,13 @@
       for(var j=0;j<arr.length;j++){ out += arr[j].toString(16).padStart(2,'0'); }
       return out;
     }
-    function openExternalScanner_(opts){
+    function openExternalScanner_(arg1, arg2){
+      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
       opts = opts || {};
       var flow = String(opts.flow || '');
       if(!EXTERNAL_SCANNER_CONFIG.ok){
         if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'External scanner configuration is invalid.');
+        if(typeof opts.onStatus === 'function') opts.onStatus('config_invalid');
         return null;
       }
       var state = randomStateToken_();
@@ -409,7 +455,8 @@
         flow: flow,
         onPayload: opts.onPayload,
         onCancel: opts.onCancel,
-        onError: opts.onError
+        onError: opts.onError,
+        onStatus: opts.onStatus
       };
 
       var target = new URL(EXTERNAL_SCANNER_URL);
@@ -425,6 +472,7 @@
       if(!w){
         pendingExternalScanner_ = null;
         if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
+        if(typeof opts.onStatus === 'function') opts.onStatus('blocked');
         return null;
       }
       return state;
@@ -440,10 +488,20 @@
       var cbPayload = pendingExternalScanner_.onPayload;
       var cbCancel = pendingExternalScanner_.onCancel;
       var cbError = pendingExternalScanner_.onError;
+      var cbStatus = pendingExternalScanner_.onStatus;
       pendingExternalScanner_ = null;
-      if(type === 'CCF_QR_RESULT' && typeof cbPayload === 'function') cbPayload(data.payload);
-      if(type === 'CCF_QR_CANCEL' && typeof cbCancel === 'function') cbCancel(data.detail);
-      if(type === 'CCF_QR_ERROR' && typeof cbError === 'function') cbError(data.detail);
+      if(type === 'CCF_QR_RESULT'){
+        if(typeof cbPayload === 'function') cbPayload(data.payload);
+        if(typeof cbStatus === 'function') cbStatus('success');
+      }
+      if(type === 'CCF_QR_CANCEL'){
+        if(typeof cbCancel === 'function') cbCancel(data.detail);
+        if(typeof cbStatus === 'function') cbStatus('cancel');
+      }
+      if(type === 'CCF_QR_ERROR'){
+        if(typeof cbError === 'function') cbError(data.detail);
+        if(typeof cbStatus === 'function') cbStatus('error');
+      }
     });
 
     function escapeHtml(s){
@@ -545,15 +603,18 @@
       return isServingNaValue_(row.position) || isServingNaValue_(row.slot) || isServingNaValue_(row.memberId);
     }
 
-    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
+    function buildBoxHtml_(kind, titleZh, titleEn, detailHtml){
       detailHtml = detailHtml || '';
-      var el = $(targetId); if(!el) return;
-      el.innerHTML =
-        '<div class="msgBox '+kind+'">' +
+      return '<div class="msgBox '+kind+'">' +
           '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+titleZh+'</div>' +
           '<div class="msgEn">'+titleEn+'</div>' +
           (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '') +
         '</div>';
+    }
+
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
+      var el = $(targetId); if(!el) return;
+      el.innerHTML = buildBoxHtml_(kind, titleZh, titleEn, detailHtml);
     }
 
     function showErr(targetId, res){
@@ -679,8 +740,12 @@
       return String(Date.now()) + '_' + String(Math.random()).slice(2);
     }
 
-    function openExternalScanner_(onPayload, onStatus){
+    function openExternalScanner_(arg1, arg2){
+      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
+      var onPayload = opts.onPayload;
+      var onStatus = opts.onStatus;
       var state = makeExternalScannerState_();
+      var flow = String(opts.flow || '');
       var done = false;
       var timer = null;
       var poll = null;
@@ -697,25 +762,39 @@
       }
 
       function onMessage(ev){
-        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN){ return; }
+        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
         var data = ev.data || {};
-        if(!data || data.state !== state){ return; }
-        if(data.type === 'scanner:cancel'){ clear('cancel'); return; }
-        if(data.type !== 'scanner:result' || !data.payload){ return; }
-        clear('success');
-        onPayload(String(data.payload), 'EXT_SCANNER');
+        if(!data || String(data.state || '') !== String(state)) return;
+
+        var type = String(data.type || '');
+        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ clear('cancel'); return; }
+        if(type === 'CCF_QR_ERROR'){
+          if(typeof opts.onError === 'function') opts.onError(data.detail || 'scanner error');
+          clear('error');
+          return;
+        }
+        if((type === 'scanner:result' || type === 'CCF_QR_RESULT') && data.payload){
+          clear('success');
+          if(typeof onPayload === 'function') onPayload(String(data.payload), 'EXT_SCANNER');
+          return;
+        }
       }
 
       window.addEventListener('message', onMessage);
-      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return; }
-      var url = EXTERNAL_SCANNER_URL + '?state=' + encodeURIComponent(state);
-      popup = window.open(url, 'ccf_ext_scanner', 'popup,width=460,height=760');
-      if(!popup){ clear('blocked'); return; }
+      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return null; }
+
+      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
+      target.searchParams.set('state', state);
+      if(flow) target.searchParams.set('flow', flow);
+
+      popup = window.open(target.toString(), 'ccf_ext_scanner', 'popup,width=460,height=760');
+      if(!popup){ clear('blocked'); return null; }
 
       timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
       poll = setInterval(function(){
         if(popup && popup.closed){ clear('popup_closed'); }
       }, 400);
+      return state;
     }
 
     function hiPref(p){
@@ -883,7 +962,7 @@
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試啟動相機 / Retry camera</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">改用 Git 靜態掃描登入 / Use Git static scanner sign-in</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -943,7 +1022,12 @@
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         console.error('E420 camera unsupported', detail0.diagnostics);
         reportScannerE420_('unsupported', d0);
-        showErr(msgTarget, { code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail });
+        showErr(msgTarget, {
+          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
+          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+            bindCameraRetryButton_(msgTarget, function(){ openExternalFallback_(); }) +
+            bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded, 'UPLOAD_QR'); })
+        });
         return;
       }
       toggleVideoWrap_(videoId, true);
@@ -951,6 +1035,20 @@
       var constraintsPreferred = camBuildPreferredConstraints_();
       var constraintsFacingFallback = { video: { facingMode: { ideal:'environment' } }, audio:false };
       var constraintsFallback  = { video: true, audio:false };
+
+      function openExternalFallback_(){
+        var flow = (msgTarget === 'msg' && videoId === 'videoLogin') ? 'login' : '';
+        openExternalScanner_({
+          flow: flow,
+          onPayload: function(payload){ stopScan(); onCaptured(payload, 'EXT_SCANNER'); },
+          onStatus: function(status){
+            if(status === 'success') return;
+            if(status === 'blocked') showBox(msgTarget,'warn','彈出視窗被封鎖','Popup blocked');
+            else if(status === 'config_invalid') showErr(msgTarget, {code:'E420', zh:'外置掃描器未設定', en:'External scanner is not configured', detail: EXTERNAL_SCANNER_CONFIG.message || ''});
+            else showBox(msgTarget,'warn','外置掃描未完成','External scanner did not complete');
+          }
+        });
+      }
 
       function tryStart(constraints, allowFallback){
         navigator.mediaDevices.getUserMedia(constraints).then(function(stream){
@@ -985,11 +1083,18 @@
               zh:'相機無法啟動',
               en:'Camera cannot start',
               detail: detail,
-              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' + bindCameraRetryButton_(msgTarget, function(){ tryStart(constraintsPreferred, true); }) + bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded); })
+              detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
+                bindCameraRetryButton_(msgTarget, function(){ openExternalFallback_(); }) +
+                bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded, 'UPLOAD_QR'); })
             });
             return;
           }
-          showErr(msgTarget, { code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail });
+          showErr(msgTarget, {
+            code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail,
+            detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
+              bindCameraRetryButton_(msgTarget, function(){ openExternalFallback_(); }) +
+              bindImageQrFallback_(msgTarget, function(decoded){ stopScan(); onCaptured(decoded, 'UPLOAD_QR'); })
+          });
         });
       }
       tryStart(constraintsPreferred, true);
@@ -1194,14 +1299,8 @@
           '<div class="small">請掃描你自己的個人 QR code 以登入。<br/>Please scan your personal QR code to log in.</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartLoginScan" class="primary">📷 掃描 QR 登入 / Scan QR to log in</button>'+
-            '<button id="btnLoginMoreOptions" class="alt">⚙️ 更多選項（緊急用） / More options (emergency only)</button>'+
-          '</div>'+
-          '<div id="loginMoreOptionsBox" class="card hide" style="margin-top:10px;">'+
-            '<div class="small">緊急備援：僅在相機完全不可用時使用。<br/>Emergency fallback: use only when camera is unavailable.</div>'+
-            '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnLoginUploadQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<input id="loginQrImageInput" type="file" accept="image/*" class="hide" />'+
-            '</div>'+
           '</div>'+
           '<div id="loginCam" class="card hide" style="margin-top:10px;">'+
             '<div class="big">📷 掃描中… / Scanning…</div>'+
@@ -1290,9 +1389,7 @@
             '</div>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnOpenExternalScan" class="alt">🌐 使用外部掃描器 / Open external scanner</button>'+
             '<button id="btnRestartScan" class="primary">🔁 再次掃描 / Scan again</button>'+
-            '<button id="btnExternalScan" class="alt">🌐 外置掃描器 / External scanner</button>'+
             '<button id="backCheckinMenu" class="alt">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'+
@@ -1557,16 +1654,8 @@
     // ===== Bindings =====
     function bindLogin(){
       if ($('btnSwitchToReg')) $('btnSwitchToReg').onclick = function(){
-        window.location.href = '?mode=reg';
+        navigateToRegPortal();
       };
-
-      if ($('btnLoginMoreOptions') && $('loginMoreOptionsBox')){
-        $('btnLoginMoreOptions').onclick = function(){
-          var box = $('loginMoreOptionsBox');
-          if(!box) return;
-          box.classList.toggle('hide');
-        };
-      }
 
       function applyLoginPayload_(payload){
         callApi('api_login', payload).then(function(res){
@@ -1744,6 +1833,8 @@
               '<div class="big ok">✅ 已簽到 / Already checked-in</div>'+
               '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
               chips+
+              '<div class="small">點擊查看完整收據 / Tap for full receipt</div>'+
+              '<details class="receiptDetails"><summary>Receipt details</summary>'+
               kvHtml([
                 {k:'經手 / By', v: formatHandledBy_(a.handledBy)},
                 {k:'時間 / Time', v:(a.timeUk||'')},
@@ -1751,6 +1842,7 @@
                 {k:'Receipt', v:(a.receiptId||'')},
                 {k:'電郵 / Email', v:(emailUi.zh || '')}
               ])+
+              '</details>'+
             '</div>' +
             isMinorNoticeHtml(!!m.isMinor);
           return;
@@ -1790,12 +1882,15 @@
             '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
             '<div class="msgEn">'+escapeHtml(nameLine)+'</div>'+
             chips+
+            '<div class="small">點擊查看完整收據 / Tap for full receipt</div>'+
+            '<details class="receiptDetails"><summary>Receipt details</summary>'+
             kvHtml([
               {k:'經手 / By', v: formatHandledBy_(res.staff)},
               {k:'時間 / Time', v:(res.timeUk||'')},
               {k:'Receipt', v:(res.receiptId||'')},
               {k:'電郵 / Email', v: emailLine }
             ])+
+            '</details>'+
           '</div>' +
           newFriendWelcomeHtml(m) +
           isMinorNoticeHtml(!!m.isMinor);
@@ -1813,9 +1908,6 @@
         });
       }
 
-      function onCaptured(text){
-        submitCheckinPayload(text, false);
-      }
 
       function start(){
         clear('scanMsg');
@@ -1824,39 +1916,10 @@
         startScan('videoCheckin', onCaptured, 'scanMsg');
       }
 
-      function startExternal(){
-        clear('scanMsg');
-        var opened = openExternalScanner_({
-          flow:'checkin',
-          onPayload:onCaptured,
-          onPopupBlocked:function(){
-            showBox('scanMsg', 'warn', '未能打開彈出視窗，已保留內置掃描器', 'Popup blocked; built-in scanner is still available.');
-          },
-          onCancel:function(){
-            showBox('scanMsg', 'warn', '已取消掃描', 'Scan cancelled.');
-          },
-          onError:function(msg){
-            var text = String(msg||'');
-            if(text.indexOf('not configured') !== -1){
-              showBox('scanMsg', 'err', '外部掃描器未設定', 'External scanner is not configured', '<div class="small">'+escapeHtml(text)+'</div>');
-              return;
-            }
-            showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:text});
-          }
-        });
-        if(!opened){ return; }
-      }
-
       camBindSwitchButton_('btnSwitchCamCheckin', function(){
         start();
       });
 
-      applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']);
-
-      $('btnOpenExternalScan').onclick = function(){
-        if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']); return; }
-        startExternal();
-      };
 
       $('btnStopCam').onclick = function(){
         stopScan();
@@ -1867,28 +1930,6 @@
         start();
       };
 
-      $('btnExternalScan').onclick = function(){
-        if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']); return; }
-        stopScan();
-        openExternalScanner_(onCaptured, function(status){
-          if(status === 'success') return;
-          if(status === 'timeout'){
-            showBox('scanMsg', 'warn', '外置掃描器逾時', 'External scanner timed out.');
-            return;
-          }
-          if(status === 'cancel' || status === 'popup_closed'){
-            showBox('scanMsg', 'warn', '外置掃描已取消', 'External scanner cancelled.');
-            return;
-          }
-          if(status === 'blocked'){
-            showBox('scanMsg', 'err', '彈出視窗被封鎖', 'Popup was blocked.');
-            return;
-          }
-          if(status === 'config_invalid'){
-            applyExternalScannerGuard_('scanMsg', ['btnOpenExternalScan','btnExternalScan']);
-          }
-        });
-      };
 
       $('backCheckinMenu').onclick = function(){
         stopScan();
@@ -1902,7 +1943,25 @@
         return;
       }
 
-      showBox('scanMsg', 'warn', '請按「再次掃描」以啟動相機', 'Tap "Scan again" to start camera.');
+      showBox('scanMsg', 'warn', '優先使用外置掃描器…', 'Starting external scanner…');
+      openExternalScanner_(onCaptured, function(status){
+        if(status === 'success') return;
+        if(status === 'timeout'){
+          showBox('scanMsg', 'warn', '外置掃描器逾時，請按「再次掃描」', 'External scanner timed out. Tap Scan again.');
+          return;
+        }
+        if(status === 'cancel' || status === 'popup_closed'){
+          showBox('scanMsg', 'warn', '外置掃描已取消，請按「再次掃描」', 'External scanner cancelled. Tap Scan again.');
+          return;
+        }
+        if(status === 'blocked'){
+          showBox('scanMsg', 'warn', '彈出視窗被封鎖，請按「再次掃描」', 'Popup blocked. Tap Scan again.');
+          return;
+        }
+        if(status === 'config_invalid'){
+          showBox('scanMsg', 'warn', '外置掃描器未設定，請按「再次掃描」', 'External scanner not configured. Tap Scan again.');
+        }
+      });
     }
 
     function bindManualCheckin(){
@@ -2049,6 +2108,18 @@
               ])+
             '</div>'+
             todayBox+
+            (function(){
+              var fam = Array.isArray(res.familyMembers) ? res.familyMembers : [];
+              if (!fam.length) return '';
+              return '<div class="familyList"><div class="small"><b>同家庭成員 / Same family</b></div>'+
+                fam.map(function(f){
+                  var line = formatMemberNameLine_(f.nameZh, f.nameEn, f.preferredName) || f.id;
+                  var checked = (String(f.id||'').toUpperCase() === String(m.id||'').toUpperCase()) ? 'checked' : '';
+                  return '<label class="familyRow"><input type="checkbox" class="famTick" value="'+escapeHtml(f.id||'')+'" '+checked+' />'+
+                    '<div><div class="big" style="font-size:16px;">'+escapeHtml(f.id||'')+'</div><div class="small" style="margin-top:2px;">'+escapeHtml(line)+'</div></div></label>';
+                }).join('') +
+              '</div>';
+            })()+
             isMinorNoticeHtml(!!m.isMinor)+
             '<div class="miniBtnRow">'+
               '<button id="btnManualConfirmCheckin" class="primary" '+(today?'disabled style="opacity:.55"':'')+'>✅ 確認簽到 / Confirm check-in</button>'+
@@ -2068,10 +2139,12 @@
               btnC.disabled = true;
               btnC.style.opacity = 0.55;
 
+              var selectedIds = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked')).map(function(x){ return String(x.value||'').trim(); }).filter(Boolean);
               // Replace panel with result ONLY (clean, no scroll)
               confirmEl.innerHTML = '<div class="small">處理中… / Processing…</div>';
 
-              callApi('api_checkin_manual', App.token, m.id, null, getDeviceId(), getUA()).then(function(r2){
+              if(!selectedIds.length) selectedIds = [m.id];
+              callApi('api_checkin_manual_bulk', App.token, selectedIds, null, getDeviceId(), getUA()).then(function(r2){
                 if(!r2 || !r2.ok){
                   confirmEl.innerHTML = '';
                   showErr('manualMsg', r2 || {code:'E500', zh:'系統錯誤', en:'Error'});
@@ -2093,48 +2166,34 @@
                   return;
                 }
 
-                // Render success / already
-                var mm = r2.member || {};
-                var nm = formatMemberName_(mm) || mm.id || '';
-                if(r2.result === 'ALREADY'){
-                  var a = r2.already || {};
-                  var emailUi = a.emailUi || emailUiFromStatus(a.emailStatus||'');
-                  confirmEl.innerHTML =
-                    '<div class="msgBox already">'+
-                      '<div class="big ok">✅ 已簽到 / Already</div>'+
-                      '<div class="msgEn">'+escapeHtml(nm)+'</div>'+
-                      kvHtml([
-                        {k:'經手 / By', v: formatHandledBy_(a.handledBy)},
-                        {k:'時間 / Time', v:a.timeUk||''},
-                        {k:'方式 / Method', v:a.method||''},
-                        {k:'Receipt', v:a.receiptId||''},
-                        {k:'電郵 / Email', v:(emailUi.zh||'')}
-                      ])+
-                    '</div>'+
-                    '<div class="miniBtnRow">'+
-                      '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
-                      '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
-                    '</div>';
-                } else {
-                  var emailLine = (r2.emailUi && (r2.emailUi.zh||'')) ? (r2.emailUi.zh + (r2.emailToMasked?(' ('+r2.emailToMasked+')'):'') ) : '';
-                  confirmEl.innerHTML =
-                    '<div class="msgBox ok">'+
-                      '<div class="big ok">✅ 簽到成功 / Checked-in</div>'+
-                      '<div class="msgEn">'+escapeHtml(nm)+'</div>'+
-                      kvHtml([
-                        {k:'經手 / By', v: formatHandledBy_(r2.staff)},
-                        {k:'時間 / Time', v:r2.timeUk||''},
-                        {k:'Receipt', v:r2.receiptId||''},
-                        {k:'電郵 / Email', v:emailLine}
-                      ])+
-                    '</div>'+
-                    newFriendWelcomeHtml(mm)+
-                    isMinorNoticeHtml(!!mm.isMinor)+
-                    '<div class="miniBtnRow">'+
-                      '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
-                      '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
-                    '</div>';
-                }
+                // Render bulk summary
+                var rows = Array.isArray(r2.results) ? r2.results : [];
+                var okCount = 0;
+                var alreadyCount = 0;
+                var failCount = 0;
+                var detailRows = rows.map(function(it){
+                  var rr = it.result || {};
+                  var mm = rr.member || { id: it.id };
+                  var nameLine = formatMemberName_(mm) || mm.id || it.id;
+                  if (!rr.ok) failCount += 1;
+                  else if (rr.result === 'ALREADY') alreadyCount += 1;
+                  else okCount += 1;
+                  var receipt = (rr.result === 'ALREADY') ? ((rr.already||{}).receiptId||'') : (rr.receiptId||'');
+                  var stamp = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'') : (rr.timeUk||'');
+                  var method = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'manual') : 'manual';
+                  var statusTxt = !rr.ok ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
+                  return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+'<details class="receiptDetails"><summary>Receipt</summary>'+kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt}])+'</details></li>';
+                }).join('');
+                confirmEl.innerHTML =
+                  '<div class="msgBox ok">'+
+                    '<div class="big ok">✅ 完成簽到 / Bulk completed</div>'+
+                    '<div class="small">Checked-in: '+okCount+' · Already: '+alreadyCount+' · Failed: '+failCount+'</div>'+
+                    '<ul style="margin:8px 0 0 18px;padding:0;">'+detailRows+'</ul>'+
+                  '</div>'+
+                  '<div class="miniBtnRow">'+
+                    '<button id="btnManualBackMenu" class="primary">⬅️ 返回簽到選單 / Back</button>'+
+                    '<button id="btnManualBackSearch3" class="alt">🔎 再搜尋 / Search again</button>'+
+                  '</div>';
 
                 $('btnManualBackMenu').onclick = function(){ App.view='checkinMenu'; render(); };
                 $('btnManualBackSearch3').onclick = function(){
@@ -2806,6 +2865,15 @@
 
     // Boot
     try { render(); } catch (e) { showBootError_(e); }
+    setTimeout(function(){
+      var root = $('app');
+      if (!root) return;
+      if (String(root.innerHTML || '').trim()) return;
+      try { render(); } catch (e) { showBootError_(e); return; }
+      if (!String(root.innerHTML || '').trim()) {
+        root.innerHTML = '<div class="card msgBox err"><div class="big err">⚠️ 頁面未能初始化 / Page failed to initialize</div><div class="msgEn">Please hard refresh or redeploy latest version.</div></div>';
+      }
+    }, 900);
   </script>
 </body>
 </html>
