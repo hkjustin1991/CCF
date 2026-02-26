@@ -68,6 +68,7 @@
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
     .btnSmall{width:auto;min-height:auto;padding:8px 12px;font-size:13px;border-radius:999px;flex:0 0 auto}
+    .btnSignupSquare{border-radius:6px}
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
@@ -1106,22 +1107,29 @@
             var mineInPosition = false;
             var vacancy = 0;
 
+            var vacantChip = '<span class="chip">空缺 / Vacant</span>';
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
+<<<<<<< codex/update-slot-renderer-for-self-service-ui
               if (!v){ vacancy += 1; return '<span class="chip">空缺 / Empty</span>'; }
               if (v === 'N/A'){ vacancy += 1; return '<span class="chip">N/A</span>'; }
               var txt = memberDisplay_(v, v === mineId);
+=======
+              if (!v){ vacancy += 1; return vacantChip; }
+              if (v === 'N/A'){ vacancy += 1; return vacantChip; }
+              var txt = memberDisplay_(v);
+>>>>>>> main
               if (v === mineId){
                 mineInPosition = true;
                 return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
               }
               return '<span class="chip">'+escapeHtml(txt || '未命名 / Unknown')+'</span>';
             });
-            if (!slotLines.length){ vacancy = 1; slotLines = ['<span class="chip">空缺 / Empty</span>']; }
+            if (!slotLines.length){ vacancy = 1; slotLines = [vacantChip]; }
 
             var action = '';
             if (!mineInPosition && vacancy > 0){
-              action = '<button class="alt btnSmall" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
+              action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
             } else if (!mineInPosition) {
               action = '<span class="chip">已滿 / Full</span>';
             }
