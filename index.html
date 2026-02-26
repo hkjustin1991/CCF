@@ -371,8 +371,8 @@
 
 
 
-    var EXTERNAL_SCANNER_URL = String(window.CCF_EXTERNAL_SCANNER_URL || '').trim();
-    var EXTERNAL_SCANNER_ORIGIN = String(window.CCF_EXTERNAL_SCANNER_ORIGIN || '').trim();
+    var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify(EXTERNAL_SCANNER_URL || '') ?> || 'https://hkjustin1991.github.io/CCF/scanner/').trim();
+    var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify(EXTERNAL_SCANNER_ORIGIN || '') ?> || 'https://hkjustin1991.github.io').trim();
     var pendingExternalScanner_ = null;
     var EXTERNAL_SCANNER_CONFIG_ERROR = '';
 
