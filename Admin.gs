@@ -170,6 +170,16 @@ const ADMIN_SERVING_POSITION_MAX = {
 const ADMIN_SERVING_POSITION_MIN = {
   Finance_Offering: 2
 };
+const ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS = {
+  Media_PPTBuild: true
+};
+
+function admin_filterDuplicateConflictPositions_(positions){
+  const list = Array.isArray(positions) ? positions : [];
+  return list.filter(function(pos){
+    return !ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS[pos];
+  });
+}
 function admin_servingPositionLabel_(pos){
   const label = ADMIN_SERVING_POSITION_LABELS[pos];
   if (label) return label.en + ' / ' + label.zh;
@@ -468,6 +478,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
   const scopeGroup = admin_normalizeServingGroup_(scopeGroupKey || '');
+  const eventDateYmd = ev.replace('SundayService_', '');
 
   const list = Array.isArray(rows) ? rows : [];
   const cleaned = [];
@@ -530,20 +541,21 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   Object.keys(duplicateMap).forEach(function(id){
     if (!changedMembers.has(id)) return;
     const positions = duplicateMap[id] || [];
-    if (positions.length <= 1) return;
+    const effectivePositions = admin_filterDuplicateConflictPositions_(positions);
+    if (effectivePositions.length <= 1) return;
     if (scopeGroup){
       const touchesScopedGroup = positions.some(function(p){ return (ADMIN_SERVING_POSITION_GROUP[p] || '') === scopeGroup; });
       if (!touchesScopedGroup) return;
     }
-    const normalized = positions.slice().sort();
-    const existing = existingDupMap[id] || [];
+    const normalized = effectivePositions.slice().sort();
+    const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
     if (admin_memberHasAdminStatus_(id, membersById)){
-      duplicateWarn.push({ memberId: id, positions: positions.slice(0, 2), reason: 'admin_member_override', newlyIntroduced:true });
+      duplicateWarn.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, reason: 'admin_member_override', newlyIntroduced:true });
       return;
     }
-    duplicateDetails.push({ memberId: id, positions: positions.slice(0, 2), newlyIntroduced:true });
+    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -580,7 +592,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       return admin_err_('E409','同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.', detail);
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, canOverride:true };
+      return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
@@ -588,7 +600,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       return admin_err_('E409','事奉安排與離開期重疊','Serving assignment overlaps away period.');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, canOverride:true };
+      return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (hasAdminWarnings){
@@ -602,6 +614,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         zh:'ADMIN 成員可覆蓋規則，請確認是否繼續',
         en:'ADMIN member can override rules. Please confirm to continue.',
         adminWarnings: adminWarnings,
+        dateYmd: eventDateYmd,
         canOverride:true
       };
     }
@@ -2003,9 +2016,8 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
   matrix.positions.forEach(function(pos){
     if (!pos.colIndex) return;
     const raw = String(row[pos.colIndex-1] || '').trim();
-    if (!raw) return;
-    const values = admin_splitServingValues_(raw);
-    values.forEach(function(val){
+    const values = raw ? admin_splitServingValues_(raw) : [];
+    values.forEach(function(val, valueIdx){
       const rawUpper = String(val||'').trim().toUpperCase();
       const ids = admin_extractMemberIdsFromServingValue_(val);
       const memberId = ids && ids.length ? ids[0] : rawUpper;
@@ -2013,7 +2025,7 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
         eventKey: eventKey,
         group: pos.group,
         position: pos.position,
-        slot: '',
+        slot: String(valueIdx + 1),
         memberId: memberId,
         rawValue: val,
         checkedIn: checkedInSet && !!(ids && ids.length) && checkedInSet.has(memberId)
@@ -2025,6 +2037,23 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
       entry.preferredName = String(m.preferredName || '');
       out.push(entry);
     });
+
+    const maxSlots = Number(ADMIN_SERVING_POSITION_MAX[pos.position] || 1);
+    if (!maxSlots || maxSlots <= 0) return;
+    for (let slotIdx = values.length; slotIdx < maxSlots; slotIdx++){
+      out.push({
+        eventKey: eventKey,
+        group: pos.group,
+        position: pos.position,
+        slot: String(slotIdx + 1),
+        memberId: '',
+        rawValue: '',
+        checkedIn: false,
+        nameZh: '',
+        nameEn: '',
+        preferredName: ''
+      });
+    }
   });
 
   out.sort((a,b)=>{
@@ -2032,6 +2061,8 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
     if (g !== 0) return g;
     const p = String(a.position||'').localeCompare(String(b.position||''));
     if (p !== 0) return p;
+    const s = Number(a.slot || 0) - Number(b.slot || 0);
+    if (s !== 0) return s;
     return String(a.memberId||'').localeCompare(String(b.memberId||''));
   });
   return out;
@@ -2067,7 +2098,7 @@ function admin_getDuplicatePositionMapFromValues_(valuesByPos){
   });
   const out = {};
   for (const id in map){
-    const arr = map[id] || [];
+    const arr = admin_filterDuplicateConflictPositions_(map[id] || []);
     if (arr.length <= 1) continue;
     out[id] = arr.slice().sort();
   }
