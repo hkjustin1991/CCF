@@ -70,8 +70,8 @@
     .btnSmall{width:auto;min-height:auto;padding:8px 12px;font-size:13px;border-radius:999px;flex:0 0 auto}
     .btnSignupSquare{border-radius:10px!important}
     .chip{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text);font-size:13px}
-    .assignListBullets{margin:0;padding-left:18px}
-    .assignListBullets li{margin:4px 0}
+    .assignListPlain{display:flex;flex-direction:column;gap:6px}
+    .vacancyFocus{border-color:rgba(217,60,94,0.45)!important;background:#fff1f4!important;color:#9f1239!important;font-weight:900}
     .divider{height:1px;background:var(--border);margin:12px 0}
     .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
     .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
@@ -161,7 +161,7 @@
 
     <footer class="small" style="padding:8px 4px;">
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
-      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec">按此進入即時聚會平台 / Click here for live portal</a></div>
+      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec">按此進入聚會資訊平台 / Click here for service information portal</a></div>
       <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">按此進入自助服務平台 / Click here for self-service portal</a></div>
     </footer>
   </div>
@@ -305,6 +305,41 @@
       var dt = new Date(y, mo - 1, d);
       if (dt.getFullYear() !== y || dt.getMonth() !== (mo - 1) || dt.getDate() !== d) return '';
       return m[3] + '-' + m[2] + '-' + m[1];
+    }
+
+
+    function parseYmd(ymd){
+      var s = String(ymd || '').trim();
+      var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if(!m) return null;
+      var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+      if(y < 1000 || y > 9999 || mo < 1 || mo > 12) return null;
+      var dt = new Date(y, mo - 1, d);
+      if (dt.getFullYear() !== y || dt.getMonth() !== (mo - 1) || dt.getDate() !== d) return null;
+      return dt;
+    }
+
+    function getTodayYmdUk(){
+      try{
+        var parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone:'Europe/London',
+          year:'numeric',
+          month:'2-digit',
+          day:'2-digit'
+        }).formatToParts(new Date());
+        var y='', m='', d='';
+        parts.forEach(function(p){
+          if (p.type === 'year') y = p.value;
+          if (p.type === 'month') m = p.value;
+          if (p.type === 'day') d = p.value;
+        });
+        if (y && m && d) return y + '-' + m + '-' + d;
+      }catch(e){}
+      var now = new Date();
+      var yy = String(now.getFullYear());
+      var mm = String(now.getMonth()+1).padStart(2,'0');
+      var dd = String(now.getDate()).padStart(2,'0');
+      return yy + '-' + mm + '-' + dd;
     }
 
     function getDeviceId(){
@@ -967,7 +1002,7 @@
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
             '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
-            '<button id="btnSelfLive" class="alt">📡 即時聚會 / Live service</button>'+
+            '<button id="btnSelfLive" class="alt">📡 聚會資訊 / Service information</button>'+
             '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
@@ -1028,6 +1063,7 @@
       Media_PPT:{zh:'投影',en:'PPT'},
       Media_PPTBuild:{zh:'PPT製作',en:'PPT Build'},
       Support_BibleReader:{zh:'讀經員',en:'Bible Reader'},
+      Support_Testimony:{zh:'見證',en:'Testimony'},
       Support_Prayer:{zh:'祈禱',en:'Prayer'},
       Support_Communion:{zh:'聖餐襄禮',en:'Communion'},
       Support_Care:{zh:'關顧組',en:'Care'},
@@ -1049,15 +1085,30 @@
         tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
         return tail;
       }
+      function isVacancyHighlightMonth_(eventKey){
+        var ymd = String(eventKey||'').replace('SundayService_','');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
+        var evDate = parseYmd(ymd);
+        if (!evDate) return false;
+        var today = parseYmd(getTodayYmdUk());
+        if (!today) return false;
+        var cur = new Date(today.getFullYear(), today.getMonth(), 1);
+        var next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+        var evMonth = new Date(evDate.getFullYear(), evDate.getMonth(), 1);
+        return evMonth.getTime() === cur.getTime() || evMonth.getTime() === next.getTime();
+      }
+
+      function isMediaPosition_(position){
+        return /^Media_/i.test(String(position||'').trim());
+      }
+
       function memberDisplay_(id, isSelf){
         var mid = String(id||'').trim().toUpperCase();
         if (!mid || mid === 'N/A') return '';
         var raw = String(labelsById[mid] || '').trim();
-        var pref = '';
-        var pm = raw.match(/\(([^()]+)\)\s*$/);
-        if (pm && pm[1]) pref = String(pm[1]).trim();
         var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
-        var out = pref || base;
+        base = base.replace(/^CCF\d{4}\s*[·•-]?\s*/i, '').trim();
+        var out = base;
         if (out) return out;
         return isSelf ? mid : '未命名 / Unknown';
       }
@@ -1108,7 +1159,7 @@
           var label = SERVING_POSITION_LABELS_REG2[key] || null;
           var zh = String((label && label.zh) || p.labelZh || key).trim();
           var en = String((label && label.en) || prettifyPositionEn_(key)).trim();
-          var row = '<tr><td style=\"border:1px solid var(--border);padding:8px;vertical-align:top;\"><b>'+escapeHtml(zh+' / '+en)+'</b></td>';
+          var row = '<tr><td style=\"border:1px solid var(--border);padding:8px;vertical-align:top;\"><b>'+escapeHtml(zh)+'</b><br/><span class="small" style="margin-top:2px;display:inline-block;">'+escapeHtml(en)+'</span></td>';
 
           monthEvents.forEach(function(ev){
             var cell = (((res.cells||{})[ev.eventKey]||{})[p.position]||{});
@@ -1116,27 +1167,34 @@
             var mineId = String(m.id||'').trim().toUpperCase();
             var mineInPosition = false;
             var vacancy = 0;
+            var assignedCount = 0;
 
+            slots.forEach(function(id){
+              var v0 = String(id||'').trim().toUpperCase();
+              if (v0 && v0 !== 'N/A') assignedCount += 1;
+            });
+            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey) && !(isMediaPosition_(p.position) && assignedCount > 0);
             var slotLines = slots.map(function(id){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){ vacancy += 1; return '<li><span class="chip">空缺 / Vacant</span></li>'; }
-              if (v === 'N/A'){ return '<li><span class="chip">N/A</span></li>'; }
+              if (!v){ vacancy += 1; return ''; }
+              if (v === 'N/A'){ return ''; }
               var isSelf = (v === mineId);
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){
                 mineInPosition = true;
-                return '<li><button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button></li>';
+                return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
               }
-              return '<li><span class="chip">'+escapeHtml(txt)+'</span></li>';
-            });
-            if (!slotLines.length){ vacancy = 1; slotLines = ['<li><span class="chip">空缺 / Vacant</span></li>']; }
+              return '<span class="chip">'+escapeHtml(txt)+'</span>';
+            }).filter(Boolean);
+            if (!slots.length){ vacancy = 1; }
 
             var action = '';
             if (!mineInPosition && vacancy > 0){
               action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
             }
 
-            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;"><ul class="assignListBullets">'+slotLines.join('')+'</ul>'+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
+            var linesHtml = slotLines.length ? ('<div class="assignListPlain">'+slotLines.join('')+'</div>') : '';
+            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;">'+linesHtml+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
           });
           row += '</tr>';
           return row;
@@ -1157,7 +1215,7 @@
           '<div><span class="groupBadge '+servingGroupCss(selectedGroup)+'">'+escapeHtml(servingGroupLabel(selectedGroup))+'</span></div>'+
           tableHtml+
         '</div>'+
-        '<div class="card"><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div><div id="servingMsg"></div></div>';
+        '<div class="card"><div id="servingMsg"></div><div class="miniBtnRow"><button id="btnServingBack" class="danger">⬅️ 返回 / Back</button></div></div>';
     }
 
     function viewSelfLive(res){
@@ -1192,7 +1250,7 @@
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
         return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul></div>';
       }).join('');
-      return '<div class="card"><div class="big">📡 即時聚會 / Live service</div>'+
+      return '<div class="card"><div class="big">📡 聚會資訊 / Service information</div>'+
         '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
         '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
         '<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>'+
@@ -1804,6 +1862,7 @@
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
             var okMsg = showBox('ok','已報名','Signed up', '<div class="small">'+escapeHtml(ev+' '+pos)+'</div>');
             if (r.warning && (r.warning.zh || r.warning.en)){
+              showDismissableWarning_(r.warning.zh || '⚠️ 距離聚會少於 6 週，請通知組長你已報名。', r.warning.en || '⚠️ <6 weeks to service. Please inform GL of this signing up.');
               okMsg += showBox('warn', r.warning.zh || '⚠️ 距離聚會少於 6 週，請通知組長你已報名。', r.warning.en || '⚠️ <6 weeks to service. Please inform GL of this signing up.');
             }
             $('servingMsg').innerHTML = okMsg;
@@ -1819,7 +1878,10 @@
           var ev=b.getAttribute('data-ev'), pos=b.getAttribute('data-pos');
           var canChange = b.getAttribute('data-chg') !== '0';
           if(!canChange){
-            $('servingMsg').innerHTML = showBox('warn','距離聚會少於 6 週，請聯絡組長更改。','<6 weeks to service. Please contact GL for changes.');
+            var wz='距離聚會少於 6 週，請聯絡組長更改。';
+            var we='<6 weeks to service. Please contact GL for changes.';
+            showDismissableWarning_(wz, we);
+            $('servingMsg').innerHTML = showBox('warn',wz,we);
             return;
           }
           if(!confirm('確認取消報名？\nSure to remove from rota?')) return;
@@ -2040,6 +2102,19 @@
           setTimeout(function(){ State.view='home'; State.authQrPayload=null; State.prefill=null; State.snapshot=null; render(); }, 900);
         }).catch(function(){ $('formMsg').innerHTML = showBox('err','系統錯誤','System error'); });
       };
+    }
+
+    function showDismissableWarning_(zh, en){
+      var modal = openModal(
+        '<div class="big warn">⚠️ 注意 / Notice</div>'+
+        '<div class="small" style="margin-top:10px;">'+escapeHtml(String(zh||''))+'</div>'+
+        '<div class="small" style="margin-top:8px;">'+escapeHtml(String(en||''))+'</div>'+
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="warnDismiss" class="primary">知道了 / Dismiss</button>'+
+        '</div>'
+      );
+      var btn = modal.querySelector('#warnDismiss');
+      if (btn) btn.onclick = function(){ closeModal(modal); };
     }
 
     function readFormData_(){
