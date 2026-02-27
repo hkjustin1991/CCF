@@ -1053,12 +1053,10 @@
 
     var SERVING_POSITION_LABELS_REG2 = {
       Worship_Lead:{zh:'敬拜主領',en:'Lead'},
-      Worship_Singer_1:{zh:'和唱 1',en:'Singer 1'},
-      Worship_Singer_2:{zh:'和唱 2',en:'Singer 2'},
+      Worship_Singer:{zh:'和唱',en:'Singer'},
       Worship_Pianist:{zh:'司琴',en:'Pianist'},
       Worship_Drum:{zh:'鼓手',en:'Drummer'},
-      Worship_Instrument_1:{zh:'樂器 1',en:'Instrument 1'},
-      Worship_Instrument_2:{zh:'樂器 2',en:'Instrument 2'},
+      Worship_Instrument:{zh:'樂器',en:'Instrument'},
       Media_AV:{zh:'影音',en:'Audio Visual'},
       Media_PPT:{zh:'投影',en:'PPT'},
       Media_PPTBuild:{zh:'PPT製作',en:'PPT Build'},
@@ -1376,8 +1374,10 @@
             '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
             '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
             '<button id="btnExternalScan" class="alt" type="button">🌐 外置掃描器 / External scanner</button>'+
+            '<button id="btnUploadScanQr" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
           '</div>'+
+          '<input id="scanQrImageInput" type="file" accept="image/*" class="hide" />'+
           '<div id="scanMsg"></div>'+
         '</div>';
     }
@@ -1604,6 +1604,35 @@
     function bindScan(){
       var v = $('video');
 
+      function decodeScanQrImageFile_(file){
+        return new Promise(function(resolve, reject){
+          try{
+            if(!file){ reject({code:'E415', zh:'請先選擇圖片', en:'Please choose an image first.'}); return; }
+            var fr = new FileReader();
+            fr.onload = function(){
+              var img = new Image();
+              img.onload = function(){
+                try{
+                  var c = document.createElement('canvas');
+                  c.width = img.naturalWidth || img.width;
+                  c.height = img.naturalHeight || img.height;
+                  var ctx = c.getContext('2d', { willReadFrequently:true });
+                  ctx.drawImage(img, 0, 0, c.width, c.height);
+                  var d = ctx.getImageData(0,0,c.width,c.height);
+                  var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
+                  if(qr && qr.data){ resolve(String(qr.data||'')); return; }
+                  reject({code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+                }catch(e){ reject({code:'E500', zh:'圖片解碼失敗', en:'Image decode failed'}); }
+              };
+              img.onerror = function(){ reject({code:'E415', zh:'無法載入圖片', en:'Unable to read image.'}); };
+              img.src = fr.result;
+            };
+            fr.onerror = function(){ reject({code:'E415', zh:'無法讀取檔案', en:'Unable to read file.'}); };
+            fr.readAsDataURL(file);
+          }catch(e){ reject({code:'E500', zh:'系統錯誤', en:'System error'}); }
+        });
+      }
+
       function restartScan(){
         $('scanMsg').innerHTML = '';
         startScan(v, onCaptured, function(e){
@@ -1618,6 +1647,26 @@
         State.view='home';
         render();
       };
+
+      if($('btnUploadScanQr') && $('scanQrImageInput')){
+        $('btnUploadScanQr').onclick = function(){
+          var input = $('scanQrImageInput');
+          input.value = '';
+          input.click();
+        };
+        $('scanQrImageInput').onchange = function(ev){
+          var f = ev && ev.target && ev.target.files && ev.target.files[0];
+          if(!f) return;
+          $('scanMsg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
+          decodeScanQrImageFile_(f).then(function(payload){
+            onCaptured(payload, 'UPLOAD_QR');
+          }).catch(function(err){
+            $('scanMsg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
+          }).finally(function(){
+            ev.target.value = '';
+          });
+        };
+      }
 
       if($('btnStartScanCam')) $('btnStartScanCam').onclick = function(){
         restartScan();

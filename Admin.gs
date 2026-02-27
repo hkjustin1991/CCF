@@ -93,12 +93,10 @@ const ADMIN_SERVING_SHEET_NAME = 'Serving';
 const ADMIN_SERVING_AWAY_SHEET_NAME = 'Serving_Away';
 const ADMIN_SERVING_POSITIONS = [
   'Worship_Lead',
-  'Worship_Singer_1',
-  'Worship_Singer_2',
+  'Worship_Singer',
   'Worship_Pianist',
   'Worship_Drum',
-  'Worship_Instrument_1',
-  'Worship_Instrument_2',
+  'Worship_Instrument',
   'Media_AV',
   'Media_PPT',
   'Media_PPTBuild',
@@ -115,12 +113,10 @@ const ADMIN_SERVING_POSITIONS = [
 ];
 const ADMIN_SERVING_POSITION_LABELS = {
   Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
-  Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
-  Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
+  Worship_Singer:       { zh:'和唱', en:'Singer' },
   Worship_Pianist:      { zh:'司琴', en:'Pianist' },
   Worship_Drum:         { zh:'鼓手', en:'Drummer' },
-  Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
-  Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+  Worship_Instrument:   { zh:'樂器', en:'Instrument' },
   Media_AV:             { zh:'影音', en:'Audio Visual' },
   Media_PPT:            { zh:'投影', en:'PPT' },
   Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
@@ -137,12 +133,10 @@ const ADMIN_SERVING_POSITION_LABELS = {
 };
 const ADMIN_SERVING_POSITION_GROUP = {
   Worship_Lead:         'worship',
-  Worship_Singer_1:     'worship',
-  Worship_Singer_2:     'worship',
+  Worship_Singer:       'worship',
   Worship_Pianist:      'worship',
   Worship_Drum:         'worship',
-  Worship_Instrument_1: 'worship',
-  Worship_Instrument_2: 'worship',
+  Worship_Instrument:   'worship',
   Media_AV:             'media',
   Media_PPT:            'media',
   Media_PPTBuild:       'media',
@@ -158,6 +152,8 @@ const ADMIN_SERVING_POSITION_GROUP = {
   Other:                'other'
 };
 const ADMIN_SERVING_POSITION_MAX = {
+  Worship_Singer: 2,
+  Worship_Instrument: 2,
   Media_AV: 2,
   Media_PPTBuild: 2,
   Support_Communion: 2,
@@ -1537,19 +1533,82 @@ function admin_ensureServingEventKeys_(sh){
   }
 }
 function admin_ensureServingHeaders_(sh){
-  const existing = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(v => String(v||'').trim());
-  if (!existing[0]) existing[0] = 'EventKey';
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  const existing = sh.getRange(1,1,1,lastCol).getValues()[0].map(v => String(v||'').trim());
   const desired = ['EventKey'].concat(ADMIN_SERVING_POSITIONS.map(admin_servingHeaderLabel_));
-  let needUpdate = false;
-  desired.forEach(function(label, idx){
-    if (existing[idx] !== label){
-      needUpdate = true;
-    }
+
+  const headerNeedsMigration = existing.some(function(h){
+    const raw = String(h || '').trim();
+    return raw.indexOf('Worship_Singer_1') >= 0 || raw.indexOf('Worship_Singer_2') >= 0 || raw.indexOf('Worship_Instrument_1') >= 0 || raw.indexOf('Worship_Instrument_2') >= 0;
   });
-  if (!needUpdate && existing.length >= desired.length) return;
-  sh.getRange(1,1,1,Math.max(existing.length, desired.length)).clearContent();
-  sh.getRange(1,1,1,desired.length).setValues([desired]);
-  sh.getRange(1,1,1,desired.length).setFontWeight('bold');
+  const sameHeader = (existing.length === desired.length) && desired.every(function(label, idx){ return existing[idx] === label; });
+  if (!headerNeedsMigration && sameHeader) return;
+
+  const data = (lastRow > 0 && lastCol > 0) ? sh.getRange(1,1,lastRow,lastCol).getValues() : [];
+  const oldHeaders = data.length ? data[0].map(v => String(v||'').trim()) : existing;
+  const keyByCol = oldHeaders.map(admin_extractServingKey_);
+
+  function mergedValue_(vals, maxSlots){
+    const out = [];
+    const seen = {};
+    vals.forEach(function(raw){
+      admin_splitServingValues_(raw).forEach(function(token){
+        const t = String(token||'').trim();
+        if (!t) return;
+        const k = t.toUpperCase();
+        if (seen[k]) return;
+        if (out.length >= maxSlots) return;
+        seen[k] = true;
+        out.push(t);
+      });
+    });
+    return out.join(', ');
+  }
+
+  const newData = [desired];
+  for (let r=1; r<data.length; r++){
+    const row = data[r];
+    const valueByKey = {};
+    for (let c=1; c<oldHeaders.length; c++){
+      const key = keyByCol[c];
+      if (!key) continue;
+      const raw = String(row[c] || '').trim();
+      if (!raw) continue;
+      if (!valueByKey[key]) valueByKey[key] = [];
+      valueByKey[key].push(raw);
+    }
+
+    const outRow = [String(row[0] || '').trim()];
+    ADMIN_SERVING_POSITIONS.forEach(function(pos){
+      let merged = '';
+      if (pos === 'Worship_Singer'){
+        merged = mergedValue_((valueByKey['Worship_Singer'] || []).concat(valueByKey['Worship_Singer_1'] || [], valueByKey['Worship_Singer_2'] || []), Number(ADMIN_SERVING_POSITION_MAX[pos] || 1));
+      } else if (pos === 'Worship_Instrument'){
+        merged = mergedValue_((valueByKey['Worship_Instrument'] || []).concat(valueByKey['Worship_Instrument_1'] || [], valueByKey['Worship_Instrument_2'] || []), Number(ADMIN_SERVING_POSITION_MAX[pos] || 1));
+      } else {
+        merged = mergedValue_(valueByKey[pos] || [], Number(ADMIN_SERVING_POSITION_MAX[pos] || 1));
+      }
+      outRow.push(merged);
+    });
+    newData.push(outRow);
+  }
+
+  const targetCols = desired.length;
+  if (sh.getMaxColumns() < targetCols){
+    sh.insertColumnsAfter(sh.getMaxColumns(), targetCols - sh.getMaxColumns());
+  }
+  sh.getRange(1,1,Math.max(1, newData.length), targetCols).clearContent();
+  if (newData.length){
+    sh.getRange(1,1,newData.length,targetCols).setValues(newData);
+  } else {
+    sh.getRange(1,1,1,targetCols).setValues([desired]);
+  }
+  sh.getRange(1,1,1,targetCols).setFontWeight('bold');
+  const extraCols = sh.getLastColumn() - targetCols;
+  if (extraCols > 0){
+    sh.deleteColumns(targetCols + 1, extraCols);
+  }
 }
 function admin_ensureAwaySheet_(){
   const ss = admin_openSs_();
@@ -1866,13 +1925,21 @@ function admin_servingLabelToKeyMap_(){
   return map;
 }
 const ADMIN_SERVING_LABEL_TO_KEY = admin_servingLabelToKeyMap_();
+const ADMIN_SERVING_LEGACY_KEY_ALIAS = {
+  Worship_Singer_1: 'Worship_Singer',
+  Worship_Singer_2: 'Worship_Singer',
+  Worship_Instrument_1: 'Worship_Instrument',
+  Worship_Instrument_2: 'Worship_Instrument'
+};
 function admin_extractServingKey_(header){
   const raw = String(header||'').trim();
   if (!raw) return '';
   if (ADMIN_SERVING_POSITIONS.indexOf(raw) >= 0) return raw;
+  if (ADMIN_SERVING_LEGACY_KEY_ALIAS[raw]) return ADMIN_SERVING_LEGACY_KEY_ALIAS[raw];
   const slash = raw.split('/');
   const first = String(slash[0]||'').trim();
   if (ADMIN_SERVING_POSITIONS.indexOf(first) >= 0) return first;
+  if (ADMIN_SERVING_LEGACY_KEY_ALIAS[first]) return ADMIN_SERVING_LEGACY_KEY_ALIAS[first];
   const byLabel = ADMIN_SERVING_LABEL_TO_KEY[raw];
   if (byLabel) return byLabel;
   for (const key in ADMIN_SERVING_LABEL_TO_KEY){
