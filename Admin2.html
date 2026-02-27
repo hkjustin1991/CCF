@@ -1826,11 +1826,17 @@
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
                 var minReq = positionMinRequired_(pos.position);
                 var currentCount = (cell && cell.length) ? cell.length : 0;
+                var assignedMemberCount = (cell || []).filter(function(entry){
+                  var mid = String((entry && entry.memberId) || '').trim().toUpperCase();
+                  return !!mid && mid !== 'N/A';
+                }).length;
                 var ymd = eventDateYmdFromKey(ev.eventKey||'');
                 var evDate = parseYmd(ymd);
                 var today = parseYmd(getTodayYmdUk());
                 var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
+                var isMediaPos = /^Media_/i.test(String(pos.position||''));
                 var urgentGap = (diff >= 0 && diff < 28 && currentCount < minReq);
+                if (isMediaPos && assignedMemberCount > 0) urgentGap = false;
                 var maxSlots = Number(pos.max || 1);
                 var existingEntries = (cell && cell.length) ? cell : [];
                 var entries = existingEntries.map(function(entry, idx){
