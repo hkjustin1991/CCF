@@ -1578,9 +1578,7 @@
             if(!f) return;
             $('msg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
             decodeQrImageFile_(f).then(function(payload){
-              State.view = 'scan';
-              render();
-              handleScanPayload_(payload);
+              handleScanPayload_(payload, 'msg');
             }).catch(function(err){
               $('msg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
             }).finally(function(){
@@ -1650,12 +1648,14 @@
     }
 
     /******** Bindings ********/
-    function handleScanPayload_(text){
-      $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+    function handleScanPayload_(text, msgElId){
+      var targetId = msgElId || 'scanMsg';
+      var target = $(targetId);
+      if (target) target.innerHTML = showBox('warn','讀取中…','Loading…');
 
       callApi('api_reg_self_lookup_public', text).then(function(res){
         if(!res || !res.ok){
-          $('scanMsg').innerHTML = showServerErr(res);
+          if (target) target.innerHTML = showServerErr(res);
           return;
         }
 
@@ -1675,7 +1675,7 @@
 
       }).catch(function(err){
         var msg = (err && err.message) ? err.message : String(err||'');
-        $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        if (target) target.innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
       });
     }
 
@@ -1810,6 +1810,11 @@
       };
 
       $('btnSelfServing').onclick = function(){
+        var groups = (((State.snapshot||{}).member||{}).servingGroups) || [];
+        if (!groups.length){
+          $('selfMsg').innerHTML = showBox('warn','你尚未加入任何事奉組別。請聯絡相關組長開始事奉（詳見 CCF WhatsApp Community）。','You are not in any serving group yet. Please speak to the relevant group leader to start serving (details in CCF WhatsApp Community).');
+          return;
+        }
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
         callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }

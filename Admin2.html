@@ -997,7 +997,7 @@
       return parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d;
     }
 
-    var SERVING_CLOSED_TOKEN = '__CLOSED__';
+    var SERVING_CLOSED_TOKEN = 'CLOSED';
     function isServingClosedToken_(value){
       var up = String(value||'').trim().toUpperCase();
       return (up === SERVING_CLOSED_TOKEN || up === 'CLOSED');
