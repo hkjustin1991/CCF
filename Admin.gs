@@ -518,7 +518,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     }
     const minAllowed = ADMIN_SERVING_POSITION_MIN[r.position] || 0;
     if (minAllowed && ids.length > 0 && ids.length < minAllowed){
-      return admin_err_('E409','崗位人數不足','Not enough people for this position.');
+      return admin_conflict_('崗位人數不足','Not enough people for this position.', '', 'POSITION_MIN_REQUIRED', 'SERVING_ASSIGNMENT');
     }
     ids.forEach(function(id){
       const groupKey = ADMIN_SERVING_POSITION_GROUP[r.position] || '';
@@ -577,7 +577,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   };
   const hasAdminWarnings = (adminWarnings.conflicts.length || adminWarnings.duplicates.length);
   if (invalidGroupAssignments.length){
-    return admin_err_('E409','成員不屬於該事奉組別','Member is not in the required serving group.');
+    return admin_conflict_('成員不屬於該事奉組別','Member is not in the required serving group.', '', 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_ASSIGNMENT');
   }
   if (duplicateDetails.length){
     if (!canOverride){
@@ -585,26 +585,28 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         const labels = (d.positions || []).map(admin_servingPositionLabel_);
         return d.memberId + ': ' + labels.join(', ');
       }).join(' | ');
-      return admin_err_('E409','同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.', detail);
+      return admin_conflict_('同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
+      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
     const detail = conflicts.map(function(c){
       return (c.memberId||'') + ' ' + String(c.from||'') + ' - ' + String(c.to||'');
     }).join(' | ');
-    return admin_err_('E409','事奉安排與假期重疊。請組員先刪除/更改假期，再安排事奉。','Serving assignment overlaps holiday period. Please ask the member to clear/update holiday before assignment.', detail);
+    return admin_conflict_('事奉安排與假期重疊。請組員先刪除/更改假期，再安排事奉。','Serving assignment overlaps holiday period. Please ask the member to clear/update holiday before assignment.', detail, 'HOLIDAY_OVERLAP', 'SERVING_ASSIGNMENT');
   }
   if (hasAdminWarnings){
     if (!canOverride){
-      return admin_err_('E409','ADMIN 成員已安排重疊（需管理員確認）','ADMIN member scheduling overlap requires admin confirmation.');
+      return admin_conflict_('ADMIN 成員已安排重疊（需管理員確認）','ADMIN member scheduling overlap requires admin confirmation.', '', 'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED', 'SERVING_ASSIGNMENT');
     }
     if (!overrideAway){
       return {
         ok:false,
         code:'E409',
+        subCode:'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED',
+        subGroup:'SERVING_ASSIGNMENT',
         zh:'ADMIN 成員可覆蓋規則，請確認是否繼續',
         en:'ADMIN member can override rules. Please confirm to continue.',
         adminWarnings: adminWarnings,
@@ -765,7 +767,7 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
     const aFrom = admin_parseYmd_(p1.from), aTo = admin_parseYmd_(p1.to);
     const bFrom = admin_parseYmd_(p2.from), bTo = admin_parseYmd_(p2.to);
     if (aFrom && aTo && bFrom && bTo && aFrom.getTime() <= bTo.getTime() && bFrom.getTime() <= aTo.getTime()){
-      return admin_err_('E409','兩段假期不可重疊','Holiday periods cannot overlap.');
+      return admin_conflict_('兩段假期不可重疊','Holiday periods cannot overlap.', '', 'HOLIDAY_PERIOD_OVERLAP', 'HOLIDAY');
     }
   }
 
@@ -774,7 +776,7 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
     const detail = assignmentConflicts.map(function(it){
       return (it.dateYmd || '') + ' ' + (admin_servingPositionZh_(it.position || '') || it.position || '');
     }).join(' | ');
-    return admin_err_('E409','設定假期前，請先取消該時段已編排的事奉。','Please cancel existing serving assignments in the selected holiday period before saving holiday.', detail);
+    return admin_conflict_('設定假期前，請先取消該時段已編排的事奉。','Please cancel existing serving assignments in the selected holiday period before saving holiday.', detail, 'HOLIDAY_HAS_SERVING_ASSIGNMENTS', 'HOLIDAY');
   }
 
   sh.getRange(rowNumber, col.AwayFrom1+1).setValue(p1.from || '');
@@ -1457,7 +1459,7 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
     admin_audit_(s.actor, 'STATUS_CHANGE_BLOCK_ADMIN', JSON.stringify({
       memberId:id, oldStatus:oldStatus, requestedTo:ns, effectiveActorId:effectiveActorId
     }), 'status');
-    return admin_err_('E409', zh, en);
+    return admin_conflict_(zh, en, '', 'CONFLICT_GENERIC', 'RULE');
   }
 
   // Ensure RoleExpires column exists (for TEMP/HELPER expiry)
@@ -1531,10 +1533,15 @@ function admin_hasGroupOverlap_(a, b){
   return (b || []).some(g => set.has(g));
 }
 
-function admin_err_(code, zh, en, detail){
+function admin_err_(code, zh, en, detail, subCode, subGroup){
   const out = { ok:false, code:String(code||'E500'), zh:String(zh||'系統錯誤'), en:String(en||'System error') };
   if (detail) out.detail = String(detail);
+  if (subCode) out.subCode = String(subCode);
+  if (subGroup) out.subGroup = String(subGroup);
   return out;
+}
+function admin_conflict_(zh, en, detail, subCode, subGroup){
+  return admin_err_('E409', zh, en, detail, subCode || 'CONFLICT', subGroup || 'RULE');
 }
 
 function admin_todayUkYmd_(){
