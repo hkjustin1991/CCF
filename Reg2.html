@@ -1115,17 +1115,19 @@
         tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
         return tail;
       }
-      function isVacancyHighlightMonth_(eventKey){
+      function isVacancyHighlightMonth_(eventKey, position){
         var ymd = String(eventKey||'').replace('SundayService_','');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
         var evDate = parseYmd(ymd);
         if (!evDate) return false;
         var today = parseYmd(getTodayYmdUk());
         if (!today) return false;
-        var cur = new Date(today.getFullYear(), today.getMonth(), 1);
-        var next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-        var evMonth = new Date(evDate.getFullYear(), evDate.getMonth(), 1);
-        return evMonth.getTime() === cur.getTime() || evMonth.getTime() === next.getTime();
+        var dayMs = 24 * 60 * 60 * 1000;
+        var diffDays = Math.floor((new Date(evDate.getFullYear(), evDate.getMonth(), evDate.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / dayMs);
+        if (diffDays < 0 || diffDays >= 42) return false;
+
+        var pos = String(position||'').trim();
+        return /^Worship_/i.test(pos) || /^Logistic_/i.test(pos);
       }
 
       function isMediaPosition_(position){
@@ -1199,7 +1201,7 @@
             var vacancy = 0;
             var firstVacancyIdx = -1;
 
-            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey);
+            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey, p.position);
             var slotLines = slots.map(function(id, idx){
               var v = String(id||'').trim().toUpperCase();
               if (!v){
