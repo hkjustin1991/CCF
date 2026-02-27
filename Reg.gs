@@ -856,11 +856,16 @@ function api_reg_self_serving_data_public(qrPayload){
         const entries = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||[]);
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
         const slots = [];
+        var isClosed = false;
 
         (entries || []).forEach(function(e){
           if (slots.length >= max) return;
           const memberId = String((e && e.memberId) || '').trim().toUpperCase();
           const rawVal = String((e && e.rawValue) || '').trim();
+          if (admin_isServingClosedValue_(rawVal)){
+            isClosed = true;
+            return;
+          }
           if (memberId){
             slots.push(memberId);
             return;
@@ -874,7 +879,7 @@ function api_reg_self_serving_data_public(qrPayload){
         while (slots.length < max) slots.push('');
 
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
-        cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
+        cells[ev.eventKey][p.position] = { slots: isClosed ? [] : slots, canSignup: !isClosed, canChange: canChange };
       });
     });
 
@@ -900,6 +905,16 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
     const mi = admin_getMembersIndex_();
     const member = mi.byId[id];
     if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return { ok:false, code:'E409', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
+
+    const awayMap = admin_getAwayPeriodsMap_([id]) || {};
+    const periods = (awayMap[id] && awayMap[id].periods) ? awayMap[id].periods : [];
+    const onHoliday = periods.some(function(p){
+      const from = admin_parseYmd_(p.fromYmd || '');
+      const to = admin_parseYmd_(p.toYmd || '');
+      if (!from || !to || !evDate) return false;
+      return from.getTime() <= evDate.getTime() && evDate.getTime() <= to.getTime();
+    });
+    if (onHoliday) return { ok:false, code:'E409', zh:'此日期與你的假期重疊，請先刪除或更改假期後再報名。', en:'This date overlaps your holiday. Please clear or update your holiday period before signing up.' };
 
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
@@ -947,17 +962,35 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
       if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
       const tokens = reg_buildServingTokensForWrite_(raw, max);
-      const currentAtSlot = String(tokens[idx]||'').trim();
-      if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
-        return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+      if (admin_isServingClosedValue_(raw)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+
+      function isSignupOpenToken_(token){
+        const v = String(token||'').trim();
+        if (!v) return true;
+        if (admin_isServingNaValue_(v)) return true;
+        return false;
       }
-      const hasFree = tokens.some(function(t){ return !String(t||'').trim(); });
-      if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
 
-      if (admin_isServingNaValue_(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
-      if (currentAtSlot && !/^CCF\d{4}$/i.test(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      let targetIdx = idx;
+      const currentAtSlot = String(tokens[targetIdx]||'').trim();
+      const hasOpenSlot = tokens.some(function(t){ return isSignupOpenToken_(t); });
+      if (!hasOpenSlot) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
 
-      tokens[idx] = id;
+      if (!isSignupOpenToken_(currentAtSlot)){
+        const fallbackIdx = tokens.findIndex(function(t){ return isSignupOpenToken_(t); });
+        if (fallbackIdx < 0) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+        targetIdx = fallbackIdx;
+      }
+
+      const targetToken = String(tokens[targetIdx]||'').trim();
+      if (!isSignupOpenToken_(targetToken)){
+        if (targetToken && /^CCF\d{4}$/i.test(targetToken)){
+          return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+        }
+        return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      }
+
+      tokens[targetIdx] = id;
       sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
       regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
       return {
@@ -1121,6 +1154,14 @@ function api_reg_self_set_holiday_public(qrPayload, fromDmy1, toDmy1, fromDmy2, 
         const bFrom = admin_parseYmd_(periods[j].from), bTo = admin_parseYmd_(periods[j].to);
         if (aFrom.getTime() <= bTo.getTime() && bFrom.getTime() <= aTo.getTime()) return { ok:false, code:'E409', zh:'兩段假期不可重疊', en:'Holiday periods cannot overlap.' };
       }
+    }
+
+    const assignmentConflicts = (typeof admin_getServingAssignmentsForMemberInPeriods_ === 'function')
+      ? admin_getServingAssignmentsForMemberInPeriods_(id, periods)
+      : [];
+    if (assignmentConflicts.length){
+      const detail = assignmentConflicts.map(function(it){ return (it.dateYmd||'') + ' ' + (admin_servingPositionZh_(it.position||'') || it.position || ''); }).join(' | ');
+      return { ok:false, code:'E409', zh:'設定假期前，請先取消該時段已報名的事奉。', en:'Please cancel serving dates within the selected holiday period before saving holiday.', detail: detail };
     }
 
     const sh = getMembersSheet_();

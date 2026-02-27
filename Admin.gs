@@ -592,12 +592,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     }
   }
   if (conflicts.length){
-    if (!canOverride){
-      return admin_err_('E409','事奉安排與離開期重疊','Serving assignment overlaps away period.');
-    }
-    if (!overrideAway){
-      return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, dateYmd: eventDateYmd, canOverride:true };
-    }
+    const detail = conflicts.map(function(c){
+      return (c.memberId||'') + ' ' + String(c.from||'') + ' - ' + String(c.to||'');
+    }).join(' | ');
+    return admin_err_('E409','事奉安排與假期重疊。請組員先刪除/更改假期，再安排事奉。','Serving assignment overlaps holiday period. Please ask the member to clear/update holiday before assignment.', detail);
   }
   if (hasAdminWarnings){
     if (!canOverride){
@@ -653,6 +651,58 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       duplicates: duplicateWarn
     }
   };
+}
+
+function admin_isYmdWithinAnyPeriods_(ymd, periods){
+  const d = admin_parseYmd_(ymd);
+  if (!d) return false;
+  const list = Array.isArray(periods) ? periods : [];
+  for (let i=0;i<list.length;i++){
+    const p = list[i] || {};
+    const from = admin_parseYmd_(p.from || p.fromYmd || '');
+    const to = admin_parseYmd_(p.to || p.toYmd || '');
+    if (!from || !to) continue;
+    if (from.getTime() <= d.getTime() && d.getTime() <= to.getTime()) return true;
+  }
+  return false;
+}
+function admin_getServingAssignmentsForMemberInPeriods_(memberId, periods){
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!id) return [];
+  const list = Array.isArray(periods) ? periods : [];
+  if (!list.length) return [];
+
+  const sh = admin_getServingSheet_();
+  if (!sh) return [];
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 2) return [];
+
+  const matrix = admin_getServingMatrix_(sh);
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const out = [];
+
+  rows.forEach(function(row){
+    const eventKey = String(row[0] || '').trim();
+    if (!admin_isSundayServiceKey_(eventKey)) return;
+    const dateYmd = eventKey.replace('SundayService_', '');
+    if (!admin_isYmdWithinAnyPeriods_(dateYmd, list)) return;
+    matrix.positions.forEach(function(pos){
+      if (!pos || !pos.colIndex) return;
+      const raw = String(row[pos.colIndex - 1] || '').trim();
+      if (!raw) return;
+      const ids = admin_extractMemberIdsFromServingValue_(raw);
+      if (ids.indexOf(id) < 0) return;
+      out.push({ eventKey:eventKey, dateYmd:dateYmd, position:String(pos.position||'') });
+    });
+  });
+
+  out.sort(function(a,b){
+    const d = String(a.dateYmd||'').localeCompare(String(b.dateYmd||''));
+    if (d !== 0) return d;
+    return String(a.position||'').localeCompare(String(b.position||''));
+  });
+  return out;
 }
 
 /**
@@ -711,6 +761,21 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
 
   const p1 = periods[0] || { from:'', to:'' };
   const p2 = periods[1] || { from:'', to:'' };
+  if (p1.from && p2.from){
+    const aFrom = admin_parseYmd_(p1.from), aTo = admin_parseYmd_(p1.to);
+    const bFrom = admin_parseYmd_(p2.from), bTo = admin_parseYmd_(p2.to);
+    if (aFrom && aTo && bFrom && bTo && aFrom.getTime() <= bTo.getTime() && bFrom.getTime() <= aTo.getTime()){
+      return admin_err_('E409','兩段假期不可重疊','Holiday periods cannot overlap.');
+    }
+  }
+
+  const assignmentConflicts = admin_getServingAssignmentsForMemberInPeriods_(id, [p1, p2].filter(function(x){ return x.from && x.to; }));
+  if (assignmentConflicts.length){
+    const detail = assignmentConflicts.map(function(it){
+      return (it.dateYmd || '') + ' ' + (admin_servingPositionZh_(it.position || '') || it.position || '');
+    }).join(' | ');
+    return admin_err_('E409','設定假期前，請先取消該時段已編排的事奉。','Please cancel existing serving assignments in the selected holiday period before saving holiday.', detail);
+  }
 
   sh.getRange(rowNumber, col.AwayFrom1+1).setValue(p1.from || '');
   sh.getRange(rowNumber, col.AwayTo1+1).setValue(p1.to || '');
@@ -2064,6 +2129,10 @@ function admin_getServingEventRowLookup_(sh){
 function admin_isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();
   return (v === 'N/A' || v === 'NA');
+}
+function admin_isServingClosedValue_(value){
+  const v = String(value || '').trim().toUpperCase();
+  return (v === 'CLOSED' || v === '__CLOSED__');
 }
 function admin_isServingNaRow_(row){
   return admin_isServingNaValue_(row.position) || admin_isServingNaValue_(row.slot) || admin_isServingNaValue_(row.memberId);

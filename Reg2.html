@@ -161,7 +161,6 @@
 
     <footer class="small" style="padding:8px 4px;">
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
-      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec">按此進入聚會資訊平台 / Click here for service information portal</a></div>
       <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">按此進入自助服務平台 / Click here for self-service portal</a></div>
     </footer>
   </div>
@@ -653,6 +652,7 @@
       snapshot: null,
       servingMonth: '',
       servingGroup: '',
+      servingRefreshTimer: null,
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -1003,7 +1003,6 @@
       if (away.from2 && away.to2) awayHtml += '<div>假期 2 / Holiday 2: '+escapeHtml(away.from2)+' ~ '+escapeHtml(away.to2)+'</div>';
       if (!awayHtml) awayHtml = '<div>未設定 / Not set</div>';
       var memberSince = (snap.memberSinceEarliest || (snap.member && snap.member.memberSinceEarliest) || '');
-      var servingDisabled = groups.length ? '' : 'disabled';
 
       return ''+
         '<div class="card">'+
@@ -1033,7 +1032,7 @@
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
-            '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
+            '<button id="btnSelfServing" class="alt">🧩 事奉報名/更改 / Serving</button>'+
             '<button id="btnSelfLive" class="alt">📡 聚會資訊 / Service information</button>'+
             '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
@@ -1202,14 +1201,17 @@
             var firstVacancyIdx = -1;
 
             var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey, p.position);
+            var canSignup = (cell.canSignup !== false);
             var slotLines = slots.map(function(id, idx){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){
-                vacancy += 1;
-                if (firstVacancyIdx < 0) firstVacancyIdx = idx;
-                return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+              if (!v || v === 'N/A'){
+                if (canSignup){
+                  vacancy += 1;
+                  if (firstVacancyIdx < 0) firstVacancyIdx = idx;
+                  return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+                }
+                return '';
               }
-              if (v === 'N/A'){ return '<span class="chip">N/A</span>'; }
               var isSelf = (v === mineId);
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){
@@ -1218,14 +1220,15 @@
               }
               return '<span class="chip">'+escapeHtml(txt)+'</span>';
             });
-            if (!slotLines.length){
+            slotLines = slotLines.filter(Boolean);
+            if (!slotLines.length && canSignup){
               vacancy = 1;
               firstVacancyIdx = 0;
               slotLines = ['<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>'];
             }
 
             var action = '';
-            if (!mineInPosition && vacancy > 0){
+            if (canSignup && !mineInPosition && vacancy > 0){
               var slotToUse = (firstVacancyIdx >= 0) ? firstVacancyIdx : 0;
               action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+slotToUse+'">報名 / Sign up</button>';
             }
@@ -1522,6 +1525,10 @@
 
     function render(){
       stopScan();
+      if (State.view !== 'selfServing' && State.servingRefreshTimer){
+        clearInterval(State.servingRefreshTimer);
+        State.servingRefreshTimer = null;
+      }
 
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
@@ -1571,9 +1578,7 @@
             if(!f) return;
             $('msg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
             decodeQrImageFile_(f).then(function(payload){
-              State.view = 'scan';
-              render();
-              handleScanPayload_(payload);
+              handleScanPayload_(payload, 'msg');
             }).catch(function(err){
               $('msg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
             }).finally(function(){
@@ -1643,12 +1648,14 @@
     }
 
     /******** Bindings ********/
-    function handleScanPayload_(text){
-      $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+    function handleScanPayload_(text, msgElId){
+      var targetId = msgElId || 'scanMsg';
+      var target = $(targetId);
+      if (target) target.innerHTML = showBox('warn','讀取中…','Loading…');
 
       callApi('api_reg_self_lookup_public', text).then(function(res){
         if(!res || !res.ok){
-          $('scanMsg').innerHTML = showServerErr(res);
+          if (target) target.innerHTML = showServerErr(res);
           return;
         }
 
@@ -1668,7 +1675,7 @@
 
       }).catch(function(err){
         var msg = (err && err.message) ? err.message : String(err||'');
-        $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        if (target) target.innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
       });
     }
 
@@ -1803,6 +1810,11 @@
       };
 
       $('btnSelfServing').onclick = function(){
+        var groups = (((State.snapshot||{}).member||{}).servingGroups) || [];
+        if (!groups.length){
+          $('selfMsg').innerHTML = showBox('warn','你尚未加入任何事奉組別。請聯絡相關組長開始事奉（詳見 CCF WhatsApp Community）。','You are not in any serving group yet. Please speak to the relevant group leader to start serving (details in CCF WhatsApp Community).');
+          return;
+        }
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
         callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
@@ -1911,6 +1923,20 @@
       }
 
       $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
+      if (State.servingRefreshTimer) clearInterval(State.servingRefreshTimer);
+      State.servingRefreshTimer = setInterval(function(){
+        if (State.view !== 'selfServing') return;
+        callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){
+            if ($('servingMsg')) $('servingMsg').innerHTML = showServerErr(res);
+            return;
+          }
+          State.lastResult = res;
+          render();
+        }).catch(function(){
+          if ($('servingMsg')) $('servingMsg').innerHTML = showBox('err','系統錯誤','System error');
+        });
+      }, 180000);
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-month]')).forEach(function(b){
         b.onclick = function(){
           State.servingMonth = String(b.getAttribute('data-serving-month')||'').trim();
