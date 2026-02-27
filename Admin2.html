@@ -341,7 +341,8 @@
       matrixState:null,
       servingPlanOpenGroups:{},
       servingPlanInfoOpenGroups:{},
-      servingGroupOverview:null
+      servingGroupOverview:null,
+      servingPlanTimer:null
     };
 
     function $(id){ return document.getElementById(id); }
@@ -995,11 +996,18 @@
       var en = new Date(Date.UTC(2026, parts.m-1, 1)).toLocaleString('en', { month:'short' });
       return parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d;
     }
+
+    var SERVING_CLOSED_TOKEN = '__CLOSED__';
+    function isServingClosedToken_(value){
+      var up = String(value||'').trim().toUpperCase();
+      return (up === SERVING_CLOSED_TOKEN || up === 'CLOSED');
+    }
     function formatServingEntry_(entry){
       var raw = String(entry.rawValue || entry.memberId || '').trim();
       if (!raw) return '';
       var upper = raw.toUpperCase();
       if (upper === 'N/A' || upper === 'NA') return 'N/A';
+      if (isServingClosedToken_(upper)) return '🔒 Closed';
       var isCcf = /^CCF\d{4}$/.test(upper);
       if (!isCcf) return raw;
       var hasName = entry.nameZh || entry.nameEn;
@@ -1927,6 +1935,8 @@
       }
 
       App.refreshServingPlan = loadServingPlan;
+      if (App.servingPlanTimer) clearInterval(App.servingPlanTimer);
+      App.servingPlanTimer = setInterval(function(){ loadServingPlan(); }, 180000);
       loadServingPlan();
     }
 
@@ -1961,9 +1971,19 @@
           var up = String(token||'').trim().toUpperCase();
           return (up === 'N/A' || up === 'NA');
         }
+        function isClosedToken_(token){
+          return isServingClosedToken_(token);
+        }
+        var closedMap = {};
 
         displayPositions.forEach(function(pos){
-          var initial = splitServingValues_(values[pos] || '');
+          var initialRaw = String(values[pos] || '').trim();
+          if (isClosedToken_(initialRaw)){
+            closedMap[pos] = true;
+            assignedMap[pos] = [];
+            return;
+          }
+          var initial = splitServingValues_(initialRaw);
           assignedMap[pos] = initial.map(function(token){
             if (isNaToken_(token)) return 'N/A';
             var id = extractMemberId_(token);
@@ -1973,6 +1993,9 @@
 
         function renderAssignedList_(pos){
           var list = assignedMap[pos] || [];
+          if (closedMap[pos]){
+            return '<div class="small">🔒 Closed / 已關閉</div>';
+          }
           if (!list.length){
             return '<div class="small">—</div>';
           }
@@ -2010,6 +2033,7 @@
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
                      '<button type="button" class="btnBack assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
+                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">'+(closedMap[pos] ? '🔓 重開 / Reopen' : '🔒 關閉 / Close')+'</button>'+
                    '</div>'+
                    '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
@@ -2026,7 +2050,7 @@
             if (ta) values[pos] = String(ta.value||'').trim();
             return;
           }
-          values[pos] = (assignedMap[pos] || []).join(', ');
+          values[pos] = closedMap[pos] ? SERVING_CLOSED_TOKEN : (assignedMap[pos] || []).join(', ');
         }
         function refreshAssigned_(pos){
           var box = modal.querySelector('.assignList[data-pos="'+pos+'"]');
@@ -2037,6 +2061,7 @@
           var token = String(memberId||'').trim();
           if (!token) return;
           if (isNaToken_(token)){
+            closedMap[pos] = false;
             assignedMap[pos] = ['N/A'];
             refreshAssigned_(pos);
             return;
@@ -2045,6 +2070,7 @@
           if (!id) return;
           var current = assignedMap[pos] || [];
           if (current.some(function(t){ return extractMemberId_(t) === id; })) return;
+          closedMap[pos] = false;
           assignedMap[pos] = current.filter(function(t){ return !isNaToken_(t); });
           assignedMap[pos].push(formatServingToken_(memberMap, id));
           refreshAssigned_(pos);
@@ -2132,6 +2158,16 @@
             btn.onclick = function(){
               var pos = String(btn.getAttribute('data-pos')||'');
               addAssigned_(pos, 'N/A');
+            };
+          });
+          Array.prototype.slice.call(modal.querySelectorAll('.assignClose')).forEach(function(btn){
+            btn.onclick = function(){
+              var pos = String(btn.getAttribute('data-pos')||'');
+              closedMap[pos] = !closedMap[pos];
+              if (closedMap[pos]) assignedMap[pos] = [];
+              refreshAssigned_(pos);
+              var rowBtn = modal.querySelector('.assignClose[data-pos="'+pos+'"]');
+              if (rowBtn) rowBtn.textContent = closedMap[pos] ? '🔓 重開 / Reopen' : '🔒 關閉 / Close';
             };
           });
           Array.prototype.slice.call(modal.querySelectorAll('.assignSelect')).forEach(function(sel){
@@ -2364,7 +2400,9 @@
           return;
         }
 
-        var tokens = splitServingValues_(values[pos] || '');
+        var rawPositionValue = String(values[pos] || '').trim();
+        var isClosedNow = isServingClosedToken_(rawPositionValue);
+        var tokens = isClosedNow ? [] : splitServingValues_(rawPositionValue);
         var addMode = (!isNaN(idx) && idx >= tokens.length);
         var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
         if (useIdx < 0) useIdx = addMode ? tokens.length : 0;
@@ -2446,6 +2484,14 @@
           values[pos] = tokens.filter(Boolean).join(', ');
           saveWithOverride_(false);
         }
+        function closePosition_(){
+          values[pos] = SERVING_CLOSED_TOKEN;
+          saveWithOverride_(false);
+        }
+        function reopenPosition_(){
+          values[pos] = '';
+          saveWithOverride_(false);
+        }
         function deleteToken_(){
           if (useIdx >= 0 && useIdx < tokens.length){
             tokens.splice(useIdx, 1);
@@ -2471,6 +2517,8 @@
             '<button id="btnQuickSwap" class="btnMain">✅ '+(addMode ? '加入 / Add' : '交換 / Swap')+'</button>'+
             (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '<button id="btnQuickNa" class="btnBack">N/A</button>')+
             (addMode ? '' : '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>')+
+            '<button id="btnQuickClosePos" class="btnDanger">🔒 關閉 / Close</button>'+
+            '<button id="btnQuickReopenPos" class="btnBack">🔓 重開 / Reopen</button>'+
             '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="quickMsg"></div>';
@@ -2514,6 +2562,13 @@
             swapToken_(val);
           };
         }
+        var closePosBtn = modal.querySelector('#btnQuickClosePos');
+        if (closePosBtn) closePosBtn.onclick = function(){ closePosition_(); };
+        var reopenPosBtn = modal.querySelector('#btnQuickReopenPos');
+        if (reopenPosBtn) reopenPosBtn.onclick = function(){ reopenPosition_(); };
+        if (closePosBtn) closePosBtn.style.display = isClosedNow ? 'none' : '';
+        if (reopenPosBtn) reopenPosBtn.style.display = isClosedNow ? '' : 'none';
+
         var delBtn = modal.querySelector('#btnQuickDelete');
         if (delBtn) delBtn.onclick = function(){
           if (!confirm('確認刪除此安排？ / Confirm delete assignment?')) return;
@@ -3623,6 +3678,10 @@
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
+      if (App.view !== 'servingPlan' && App.servingPlanTimer){
+        clearInterval(App.servingPlanTimer);
+        App.servingPlanTimer = null;
+      }
 
       if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); applyExternalScannerGuard_('msg', []); attachScrollControls_(root); return; }
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); attachScrollControls_(root); return; }

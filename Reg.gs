@@ -856,11 +856,16 @@ function api_reg_self_serving_data_public(qrPayload){
         const entries = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||[]);
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
         const slots = [];
+        var isClosed = false;
 
         (entries || []).forEach(function(e){
           if (slots.length >= max) return;
           const memberId = String((e && e.memberId) || '').trim().toUpperCase();
           const rawVal = String((e && e.rawValue) || '').trim();
+          if (admin_isServingClosedValue_(rawVal)){
+            isClosed = true;
+            return;
+          }
           if (memberId){
             slots.push(memberId);
             return;
@@ -874,7 +879,7 @@ function api_reg_self_serving_data_public(qrPayload){
         while (slots.length < max) slots.push('');
 
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
-        cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
+        cells[ev.eventKey][p.position] = { slots: isClosed ? [] : slots, canSignup: !isClosed, canChange: canChange };
       });
     });
 
@@ -947,17 +952,35 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
       if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
       const tokens = reg_buildServingTokensForWrite_(raw, max);
-      const currentAtSlot = String(tokens[idx]||'').trim();
-      if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
-        return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+      if (admin_isServingClosedValue_(raw)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+
+      function isSignupOpenToken_(token){
+        const v = String(token||'').trim();
+        if (!v) return true;
+        if (admin_isServingNaValue_(v)) return true;
+        return false;
       }
-      const hasFree = tokens.some(function(t){ return !String(t||'').trim(); });
-      if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
 
-      if (admin_isServingNaValue_(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
-      if (currentAtSlot && !/^CCF\d{4}$/i.test(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      let targetIdx = idx;
+      const currentAtSlot = String(tokens[targetIdx]||'').trim();
+      const hasOpenSlot = tokens.some(function(t){ return isSignupOpenToken_(t); });
+      if (!hasOpenSlot) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
 
-      tokens[idx] = id;
+      if (!isSignupOpenToken_(currentAtSlot)){
+        const fallbackIdx = tokens.findIndex(function(t){ return isSignupOpenToken_(t); });
+        if (fallbackIdx < 0) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
+        targetIdx = fallbackIdx;
+      }
+
+      const targetToken = String(tokens[targetIdx]||'').trim();
+      if (!isSignupOpenToken_(targetToken)){
+        if (targetToken && /^CCF\d{4}$/i.test(targetToken)){
+          return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+        }
+        return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      }
+
+      tokens[targetIdx] = id;
       sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
       regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
       return {

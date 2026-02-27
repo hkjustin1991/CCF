@@ -2065,6 +2065,10 @@ function admin_isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();
   return (v === 'N/A' || v === 'NA');
 }
+function admin_isServingClosedValue_(value){
+  const v = String(value || '').trim().toUpperCase();
+  return (v === '__CLOSED__' || v === 'CLOSED');
+}
 function admin_isServingNaRow_(row){
   return admin_isServingNaValue_(row.position) || admin_isServingNaValue_(row.slot) || admin_isServingNaValue_(row.memberId);
 }

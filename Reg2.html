@@ -1115,17 +1115,19 @@
         tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
         return tail;
       }
-      function isVacancyHighlightMonth_(eventKey){
+      function isVacancyHighlightMonth_(eventKey, position){
         var ymd = String(eventKey||'').replace('SundayService_','');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
         var evDate = parseYmd(ymd);
         if (!evDate) return false;
         var today = parseYmd(getTodayYmdUk());
         if (!today) return false;
-        var cur = new Date(today.getFullYear(), today.getMonth(), 1);
-        var next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-        var evMonth = new Date(evDate.getFullYear(), evDate.getMonth(), 1);
-        return evMonth.getTime() === cur.getTime() || evMonth.getTime() === next.getTime();
+        var dayMs = 24 * 60 * 60 * 1000;
+        var diffDays = Math.floor((new Date(evDate.getFullYear(), evDate.getMonth(), evDate.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / dayMs);
+        if (diffDays < 0 || diffDays >= 42) return false;
+
+        var pos = String(position||'').trim();
+        return /^Worship_/i.test(pos) || /^Logistic_/i.test(pos);
       }
 
       function isMediaPosition_(position){
@@ -1199,15 +1201,18 @@
             var vacancy = 0;
             var firstVacancyIdx = -1;
 
-            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey);
+            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey, p.position);
+            var canSignup = (cell.canSignup !== false);
             var slotLines = slots.map(function(id, idx){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){
-                vacancy += 1;
-                if (firstVacancyIdx < 0) firstVacancyIdx = idx;
-                return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+              if (!v || v === 'N/A'){
+                if (canSignup){
+                  vacancy += 1;
+                  if (firstVacancyIdx < 0) firstVacancyIdx = idx;
+                  return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+                }
+                return '';
               }
-              if (v === 'N/A'){ return '<span class="chip">N/A</span>'; }
               var isSelf = (v === mineId);
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){
@@ -1216,14 +1221,15 @@
               }
               return '<span class="chip">'+escapeHtml(txt)+'</span>';
             });
-            if (!slotLines.length){
+            slotLines = slotLines.filter(Boolean);
+            if (!slotLines.length && canSignup){
               vacancy = 1;
               firstVacancyIdx = 0;
               slotLines = ['<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>'];
             }
 
             var action = '';
-            if (!mineInPosition && vacancy > 0){
+            if (canSignup && !mineInPosition && vacancy > 0){
               var slotToUse = (firstVacancyIdx >= 0) ? firstVacancyIdx : 0;
               action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+slotToUse+'">報名 / Sign up</button>';
             }

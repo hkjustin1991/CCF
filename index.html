@@ -2264,7 +2264,7 @@ if (btnC) {
 
       startClock();
       refresh();
-      App.intervalId = setInterval(function(){ refresh(); }, 120000);
+      App.intervalId = setInterval(function(){ refresh(); }, 180000);
 
       function refresh(){
         var box = $('rtBox');
@@ -2439,7 +2439,9 @@ if (btnC) {
           return;
         }
 
-        var groupKeys = Object.keys(SERVING_GROUP_LABELS);
+        var groupKeys = Object.keys(SERVING_GROUP_LABELS).filter(function(key){
+          return list.some(function(r){ return String(r.group||'').toUpperCase() === key; });
+        });
         var openGroup = App.servingOpenGroup;
         var summaryHtml =
           '<div class="chipRow" style="margin-top:8px;">' +
