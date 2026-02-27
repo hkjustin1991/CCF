@@ -856,11 +856,16 @@ function api_reg_self_serving_data_public(qrPayload){
         const entries = (((matrix.cells||{})[ev.eventKey]||{})[p.position]||[]);
         const max = ADMIN_SERVING_POSITION_MAX[p.position] || 1;
         const slots = [];
+        var isClosed = false;
 
         (entries || []).forEach(function(e){
           if (slots.length >= max) return;
           const memberId = String((e && e.memberId) || '').trim().toUpperCase();
           const rawVal = String((e && e.rawValue) || '').trim();
+          if (admin_isServingClosedValue_(rawVal)){
+            isClosed = true;
+            return;
+          }
           if (memberId){
             slots.push(memberId);
             return;
@@ -874,7 +879,7 @@ function api_reg_self_serving_data_public(qrPayload){
         while (slots.length < max) slots.push('');
 
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
-        cells[ev.eventKey][p.position] = { slots: slots, canSignup: true, canChange: canChange };
+        cells[ev.eventKey][p.position] = { slots: isClosed ? [] : slots, canSignup: !isClosed, canChange: canChange };
       });
     });
 
@@ -899,7 +904,17 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
 
     const mi = admin_getMembersIndex_();
     const member = mi.byId[id];
-    if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return { ok:false, code:'E409', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
+    if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return regConflict_('你不屬於此事奉組別', 'You are not in this serving group.', '', 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_SIGNUP');
+
+    const awayMap = admin_getAwayPeriodsMap_([id]) || {};
+    const periods = (awayMap[id] && awayMap[id].periods) ? awayMap[id].periods : [];
+    const onHoliday = periods.some(function(p){
+      const from = admin_parseYmd_(p.fromYmd || '');
+      const to = admin_parseYmd_(p.toYmd || '');
+      if (!from || !to || !evDate) return false;
+      return from.getTime() <= evDate.getTime() && evDate.getTime() <= to.getTime();
+    });
+    if (onHoliday) return regConflict_('此日期與你的假期重疊，請先刪除或更改假期後再報名。', 'This date overlaps your holiday. Please clear or update your holiday period before signing up.', '', 'HOLIDAY_OVERLAP', 'SERVING_SIGNUP');
 
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
@@ -934,6 +949,8 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
         return {
           ok:false,
           code:'E409',
+          subCode:'DUPLICATE_ASSIGNMENT',
+          subGroup:'SERVING_SIGNUP',
           zh:'同一活動不可同時擔任多個崗位',
           en:'Duplicate serving assignments for the same event are not allowed.',
           detail: dateYmd + '｜重覆崗位: ' + existingZhList.join('、') + ' → ' + targetZh
@@ -947,17 +964,35 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       if (idx >= max) return { ok:false, code:'E416', zh:'空缺序號錯誤', en:'Invalid slot index.' };
       if (ids.indexOf(id) >= 0) return { ok:true, eventKey:ev, position:pos };
       const tokens = reg_buildServingTokensForWrite_(raw, max);
-      const currentAtSlot = String(tokens[idx]||'').trim();
-      if (currentAtSlot && !admin_isServingNaValue_(currentAtSlot) && /^CCF\d{4}$/i.test(currentAtSlot)){
-        return { ok:false, code:'E409', zh:'此空缺已被佔用', en:'This slot is already occupied.' };
+      if (admin_isServingClosedValue_(raw)) return regConflict_('此位置不接受報名', 'This slot is not open for sign up.', '', 'POSITION_CLOSED', 'SERVING_SIGNUP');
+
+      function isSignupOpenToken_(token){
+        const v = String(token||'').trim();
+        if (!v) return true;
+        if (admin_isServingNaValue_(v)) return true;
+        return false;
       }
-      const hasFree = tokens.some(function(t){ return !String(t||'').trim(); });
-      if (!hasFree) return { ok:false, code:'E409', zh:'此崗位已滿額', en:'This position is full.' };
 
-      if (admin_isServingNaValue_(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
-      if (currentAtSlot && !/^CCF\d{4}$/i.test(currentAtSlot)) return { ok:false, code:'E409', zh:'此位置不接受報名', en:'This slot is not open for sign up.' };
+      let targetIdx = idx;
+      const currentAtSlot = String(tokens[targetIdx]||'').trim();
+      const hasOpenSlot = tokens.some(function(t){ return isSignupOpenToken_(t); });
+      if (!hasOpenSlot) return regConflict_('此崗位已滿額', 'This position is full.', '', 'POSITION_FULL', 'SERVING_SIGNUP');
 
-      tokens[idx] = id;
+      if (!isSignupOpenToken_(currentAtSlot)){
+        const fallbackIdx = tokens.findIndex(function(t){ return isSignupOpenToken_(t); });
+        if (fallbackIdx < 0) return regConflict_('此崗位已滿額', 'This position is full.', '', 'POSITION_FULL', 'SERVING_SIGNUP');
+        targetIdx = fallbackIdx;
+      }
+
+      const targetToken = String(tokens[targetIdx]||'').trim();
+      if (!isSignupOpenToken_(targetToken)){
+        if (targetToken && /^CCF\d{4}$/i.test(targetToken)){
+          return regConflict_('此空缺已被佔用', 'This slot is already occupied.', '', 'SLOT_OCCUPIED', 'SERVING_SIGNUP');
+        }
+        return regConflict_('此位置不接受報名', 'This slot is not open for sign up.', '', 'POSITION_NOT_OPEN', 'SERVING_SIGNUP');
+      }
+
+      tokens[targetIdx] = id;
       sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
       regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
       return {
@@ -989,7 +1024,7 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
     const pos = String(position||'').trim();
     if (!admin_isSundayServiceKey_(ev)) return { ok:false, code:'E416', zh:'活動格式錯誤', en:'Invalid eventKey.' };
     if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
-    if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return { ok:false, code:'E409', zh:'六週內不可更改，請聯絡組長', en:'Changes within 6 weeks are blocked. Please contact GL.' };
+    if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return regConflict_('六週內不可更改，請聯絡組長', 'Changes within 6 weeks are blocked. Please contact GL.', '', 'CHANGE_CUTOFF_WINDOW', 'SERVING_SIGNUP');
 
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
@@ -1119,8 +1154,16 @@ function api_reg_self_set_holiday_public(qrPayload, fromDmy1, toDmy1, fromDmy2, 
       if (!aFrom || !aTo || aTo.getTime() < aFrom.getTime()) return { ok:false, code:'E423', zh:'結束日期不可早於開始日期', en:'End date cannot be before start date.' };
       for (let j=i+1;j<periods.length;j++){
         const bFrom = admin_parseYmd_(periods[j].from), bTo = admin_parseYmd_(periods[j].to);
-        if (aFrom.getTime() <= bTo.getTime() && bFrom.getTime() <= aTo.getTime()) return { ok:false, code:'E409', zh:'兩段假期不可重疊', en:'Holiday periods cannot overlap.' };
+        if (aFrom.getTime() <= bTo.getTime() && bFrom.getTime() <= aTo.getTime()) return regConflict_('兩段假期不可重疊', 'Holiday periods cannot overlap.', '', 'HOLIDAY_PERIOD_OVERLAP', 'HOLIDAY');
       }
+    }
+
+    const assignmentConflicts = (typeof admin_getServingAssignmentsForMemberInPeriods_ === 'function')
+      ? admin_getServingAssignmentsForMemberInPeriods_(id, periods)
+      : [];
+    if (assignmentConflicts.length){
+      const detail = assignmentConflicts.map(function(it){ return (it.dateYmd||'') + ' ' + (admin_servingPositionZh_(it.position||'') || it.position || ''); }).join(' | ');
+      return regConflict_('設定假期前，請先取消該時段已報名的事奉。', 'Please cancel serving dates within the selected holiday period before saving holiday.', detail, 'HOLIDAY_HAS_SERVING_ASSIGNMENTS', 'HOLIDAY');
     }
 
     const sh = getMembersSheet_();
@@ -1825,6 +1868,15 @@ function regHtmlEscape_(s){
   s = String(s || '');
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
           .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+
+function regConflict_(zh, en, detail, subCode, subGroup){
+  const out = { ok:false, code:'E409', zh:String(zh||''), en:String(en||'') };
+  if (detail) out.detail = String(detail);
+  if (subCode) out.subCode = String(subCode);
+  if (subGroup) out.subGroup = String(subGroup);
+  return out;
 }
 
 function regErr_(code, zh, en, e){
