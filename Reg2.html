@@ -1197,17 +1197,17 @@
             var mineId = String(m.id||'').trim().toUpperCase();
             var mineInPosition = false;
             var vacancy = 0;
-            var assignedCount = 0;
+            var firstVacancyIdx = -1;
 
-            slots.forEach(function(id){
-              var v0 = String(id||'').trim().toUpperCase();
-              if (v0 && v0 !== 'N/A') assignedCount += 1;
-            });
-            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey) && !(isMediaPosition_(p.position) && assignedCount > 0);
-            var slotLines = slots.map(function(id){
+            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey);
+            var slotLines = slots.map(function(id, idx){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){ vacancy += 1; return ''; }
-              if (v === 'N/A'){ return ''; }
+              if (!v){
+                vacancy += 1;
+                if (firstVacancyIdx < 0) firstVacancyIdx = idx;
+                return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+              }
+              if (v === 'N/A'){ return '<span class="chip">N/A</span>'; }
               var isSelf = (v === mineId);
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){
@@ -1215,12 +1215,17 @@
                 return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
               }
               return '<span class="chip">'+escapeHtml(txt)+'</span>';
-            }).filter(Boolean);
-            if (!slots.length){ vacancy = 1; }
+            });
+            if (!slotLines.length){
+              vacancy = 1;
+              firstVacancyIdx = 0;
+              slotLines = ['<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>'];
+            }
 
             var action = '';
             if (!mineInPosition && vacancy > 0){
-              action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="0">報名 / Sign up</button>';
+              var slotToUse = (firstVacancyIdx >= 0) ? firstVacancyIdx : 0;
+              action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+slotToUse+'">報名 / Sign up</button>';
             }
 
             var linesHtml = slotLines.length ? ('<div class="assignListPlain">'+slotLines.join('')+'</div>') : '';
