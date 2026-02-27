@@ -913,25 +913,30 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       const colIndex = headerMap[pos];
       if (!colIndex) return { ok:false, code:'E500', zh:'崗位欄位不存在', en:'Position column not found.' };
 
-      // duplicate guard: same member cannot hold >1 position for same event
-      let existingPosition = '';
+      // duplicate guard: same member cannot hold >1 non-exempt position for same event
+      const existingPositions = [];
       ADMIN_SERVING_POSITIONS.forEach(function(p){
         const ci = headerMap[p];
-        if (!ci || existingPosition) return;
+        if (!ci) return;
         const idsAtPos = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, ci).getValue() || ''));
-        if (idsAtPos.indexOf(id) >= 0) existingPosition = p;
+        if (idsAtPos.indexOf(id) >= 0) existingPositions.push(p);
       });
-      const duplicateAllowed = reg_isDuplicateExemptPosition_(existingPosition) || reg_isDuplicateExemptPosition_(pos);
-      if (existingPosition && existingPosition !== pos && !duplicateAllowed){
+      const targetIsExempt = reg_isDuplicateExemptPosition_(pos);
+      const conflictingExisting = existingPositions.filter(function(p){
+        if (p === pos) return false;
+        if (reg_isDuplicateExemptPosition_(p)) return false;
+        return true;
+      });
+      if (conflictingExisting.length && !targetIsExempt){
         const dateYmd = ev.replace('SundayService_', '');
-        const existingZh = admin_servingPositionZh_(existingPosition || '') || existingPosition;
+        const existingZhList = conflictingExisting.map(function(p){ return admin_servingPositionZh_(p || '') || p; });
         const targetZh = admin_servingPositionZh_(pos || '') || pos;
         return {
           ok:false,
           code:'E409',
           zh:'同一活動不可同時擔任多個崗位',
           en:'Duplicate serving assignments for the same event are not allowed.',
-          detail: dateYmd + '｜重覆崗位: ' + existingZh + '、' + targetZh
+          detail: dateYmd + '｜重覆崗位: ' + existingZhList.join('、') + ' → ' + targetZh
         };
       }
 
