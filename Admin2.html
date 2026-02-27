@@ -555,12 +555,10 @@
     }
     var SERVING_POSITION_LABELS = {
       Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
-      Worship_Singer_1:     { zh:'和唱 1', en:'Singer 1' },
-      Worship_Singer_2:     { zh:'和唱 2', en:'Singer 2' },
+      Worship_Singer:       { zh:'和唱', en:'Singer' },
       Worship_Pianist:      { zh:'司琴', en:'Pianist' },
       Worship_Drum:         { zh:'鼓手', en:'Drummer' },
-      Worship_Instrument_1: { zh:'樂器 1', en:'Instrument 1' },
-      Worship_Instrument_2: { zh:'樂器 2', en:'Instrument 2' },
+      Worship_Instrument:   { zh:'樂器', en:'Instrument' },
       Media_AV:             { zh:'影音', en:'Audio Visual' },
       Media_PPT:            { zh:'投影', en:'PPT' },
       Media_PPTBuild:       { zh:'PPT製作', en:'PPT Preparation' },
@@ -577,12 +575,10 @@
     };
     var POSITION_GROUP = {
       Worship_Lead: 'worship',
-      Worship_Singer_1: 'worship',
-      Worship_Singer_2: 'worship',
+      Worship_Singer: 'worship',
       Worship_Pianist: 'worship',
       Worship_Drum: 'worship',
-      Worship_Instrument_1: 'worship',
-      Worship_Instrument_2: 'worship',
+      Worship_Instrument: 'worship',
       Media_AV: 'media',
       Media_PPT: 'media',
       Media_PPTBuild: 'media',
@@ -598,6 +594,8 @@
       Other: 'other'
     };
     var POSITION_MAX = {
+      Worship_Singer: 2,
+      Worship_Instrument: 2,
       Media_AV: 2,
       Media_PPTBuild: 2,
       Support_Communion: 2,
@@ -984,6 +982,13 @@
       var en = new Date(Date.UTC(2026, monthNum-1, 1)).toLocaleString('en', { month:'short' });
       return monthNum + '月 / ' + en;
     }
+
+    function formatYmdZhEn_(ymd){
+      var parts = parseYmdParts_(ymd);
+      if (!parts) return String(ymd||'');
+      var en = new Date(Date.UTC(2026, parts.m-1, 1)).toLocaleString('en', { month:'short' });
+      return parts.y + '-' + String(parts.m).padStart(2,'0') + '-' + String(parts.d).padStart(2,'0') + '（' + parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d + '）';
+    }
     function eventLabel_(ev){
       var parts = parseYmdParts_(ev.dateYmd);
       if (!parts) return escapeHtml(ev.eventKey||'');
@@ -1010,17 +1015,25 @@
       if (!s) return [];
       return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
     }
-    function buildAdminOverrideWarningHtml_(warnings){
+    function buildAdminOverrideWarningHtml_(warnings, dateYmd){
       var w = warnings || {};
       var lines = [];
       var conflicts = Array.isArray(w.conflicts) ? w.conflicts : [];
       var duplicates = Array.isArray(w.duplicates) ? w.duplicates : [];
+      var effectiveDate = String(dateYmd || '').trim();
       conflicts.forEach(function(c){
-        lines.push(escapeHtml(c.memberId||'') + ' holiday overlap: ' + escapeHtml(String(c.from||'')) + ' - ' + escapeHtml(String(c.to||'')));
+        var lineDate = String(c.dateYmd || effectiveDate || '').trim();
+        var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
+        lines.push(escapeHtml('成員: ' + (c.memberId||'') + '｜離開期重疊: ' + String(c.from||'') + ' - ' + String(c.to||'') + dateLabel));
       });
       duplicates.forEach(function(d){
-        var posLabels = (d.positions||[]).map(function(p){ return servingPositionLabel_({ position: p }); });
-        lines.push(escapeHtml(d.memberId||'') + ' duplicate positions: ' + escapeHtml(posLabels.join(', ')));
+        var posLabelsZh = (d.positions||[]).map(function(p){
+          var label = SERVING_POSITION_LABELS[p] || {};
+          return label.zh || servingPositionLabel_({ position: p });
+        });
+        var lineDate = String(d.dateYmd || effectiveDate || '').trim();
+        var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
+        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜重覆崗位: ' + posLabelsZh.join('、') + dateLabel));
       });
       if (!lines.length) return '';
       return lines.join('<br/>');
@@ -1229,6 +1242,8 @@
           '<div class="small">請掃描你自己的同工 QR 登入。<br/>Please scan your own staff QR to login.</div>'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnScanLogin" class="btnMain">📷 掃描 QR / Scan QR</button>'+
+            '<button id="btnUploadLoginQr" class="btnSub">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<input id="loginQrImageInput" type="file" accept="image/*" class="hide" />'+
           '</div>'+
           '<div class="divider"></div>'+
           '<div class="label">授權登入 / Authorised login</div>'+
@@ -1463,6 +1478,35 @@
     }
 
     function bindLogin(){
+      function decodeLoginQrImageFile_(file){
+        return new Promise(function(resolve, reject){
+          try{
+            if(!file){ reject({code:'E415', zh:'請先選擇圖片', en:'Please choose an image first.'}); return; }
+            var fr = new FileReader();
+            fr.onload = function(){
+              var img = new Image();
+              img.onload = function(){
+                try{
+                  var c = document.createElement('canvas');
+                  c.width = img.naturalWidth || img.width;
+                  c.height = img.naturalHeight || img.height;
+                  var ctx = c.getContext('2d', { willReadFrequently:true });
+                  ctx.drawImage(img, 0, 0, c.width, c.height);
+                  var d = ctx.getImageData(0,0,c.width,c.height);
+                  var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
+                  if(qr && qr.data){ resolve(String(qr.data||'')); return; }
+                  reject({code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+                }catch(e){ reject({code:'E500', zh:'圖片解碼失敗', en:'Image decode failed'}); }
+              };
+              img.onerror = function(){ reject({code:'E415', zh:'無法載入圖片', en:'Unable to read image.'}); };
+              img.src = fr.result;
+            };
+            fr.onerror = function(){ reject({code:'E415', zh:'無法讀取檔案', en:'Unable to read file.'}); };
+            fr.readAsDataURL(file);
+          }catch(e){ reject({code:'E500', zh:'系統錯誤', en:'System error'}); }
+        });
+      }
+
       function applyAdminLoginPayload_(payload){
         showBox('loginMsg','warn','處理中…','Working…');
         callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
@@ -1531,6 +1575,28 @@
         };
         showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
       };
+
+      if($('btnUploadLoginQr') && $('loginQrImageInput')){
+        $('btnUploadLoginQr').onclick = function(){
+          clear('loginMsg');
+          var input = $('loginQrImageInput');
+          input.value = '';
+          input.click();
+        };
+        $('loginQrImageInput').onchange = function(ev){
+          clear('loginMsg');
+          var f = ev && ev.target && ev.target.files && ev.target.files[0];
+          if(!f) return;
+          showBox('loginMsg','warn','讀取圖片中…','Reading image…');
+          decodeLoginQrImageFile_(f).then(function(payload){
+            applyAdminLoginPayload_(payload);
+          }).catch(function(err){
+            showErr('loginMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+          }).finally(function(){
+            ev.target.value = '';
+          });
+        };
+      }
 
       try{
         var qp = new URLSearchParams(window.location.search || '');
@@ -2189,23 +2255,26 @@
                   if (res2.adminWarnings){
                     titleZh = 'ADMIN 可覆蓋規則（請確認）';
                     titleEn = 'ADMIN can override rules (please confirm).';
-                    detail = buildAdminOverrideWarningHtml_(res2.adminWarnings);
+                    detail = buildAdminOverrideWarningHtml_(res2.adminWarnings, res2.dateYmd);
                   }
                   if (res2.conflicts && res2.conflicts.length){
                     titleZh = '事奉安排與離開期重疊';
                     titleEn = 'Serving assignment overlaps away period.';
                     detail = res2.conflicts.map(function(c){
-                      return escapeHtml(c.memberId) + ' (' + escapeHtml(c.from) + ' - ' + escapeHtml(c.to) + ')';
+                      var dateLabel = formatYmdZhEn_(String(c.dateYmd || res2.dateYmd || '').trim());
+                      return escapeHtml((c.memberId||'') + '（離開期重疊: ' + (c.from||'') + ' - ' + (c.to||'') + '）' + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                     }).join('<br/>');
                   }
                   if (res2.duplicates && res2.duplicates.length){
                     titleZh = '同一會員重覆崗位';
                     titleEn = 'Duplicate serving assignments.';
                     detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                      var posLabels = (d.positions||[]).map(function(p){
-                        return servingPositionLabel_({ position: p });
+                      var posLabelsZh = (d.positions||[]).map(function(p){
+                        var label = SERVING_POSITION_LABELS[p] || {};
+                        return label.zh || p;
                       });
-                      return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
+                      var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
+                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                     }).join('<br/>');
                   }
                 showBox('servingEditMsg','warn', titleZh, titleEn, detail);
@@ -2217,7 +2286,7 @@
                   btn.onclick = function(){
                     callApi('api_admin_serving_event_save', App.token, ev, payload, true, filterGroupKey).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-                      var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {});
+                      var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {}, (res3 && res3.dateYmd) || ev.replace('SundayService_',''));
                       showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
                       closeModal(modal);
                       if (App.refreshServingPlan) App.refreshServingPlan();
@@ -2236,7 +2305,7 @@
                 showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
                 return;
               }
-              var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {});
+              var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {}, (res2 && res2.dateYmd) || ev.replace('SundayService_',''));
               showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
               closeModal(modal);
               if (App.refreshServingPlan) App.refreshServingPlan();
@@ -2317,23 +2386,26 @@
                 if (res2.adminWarnings){
                   titleZh = 'ADMIN 可覆蓋規則（請確認）';
                   titleEn = 'ADMIN can override rules (please confirm).';
-                  detail = buildAdminOverrideWarningHtml_(res2.adminWarnings);
+                  detail = buildAdminOverrideWarningHtml_(res2.adminWarnings, res2.dateYmd);
                 }
                 if (res2.conflicts && res2.conflicts.length){
                   titleZh = '事奉安排與離開期重疊';
                   titleEn = 'Serving assignment overlaps away period.';
                   detail = res2.conflicts.map(function(c){
-                    return escapeHtml(c.memberId) + ' (' + escapeHtml(c.from) + ' - ' + escapeHtml(c.to) + ')';
+                    var dateLabel = formatYmdZhEn_(String(c.dateYmd || res2.dateYmd || '').trim());
+                    return escapeHtml((c.memberId||'') + '（離開期重疊: ' + (c.from||'') + ' - ' + (c.to||'') + '）' + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                   }).join('<br/>');
                 }
                 if (res2.duplicates && res2.duplicates.length){
                   titleZh = '同一會員重覆崗位';
                   titleEn = 'Duplicate serving assignments.';
                   detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                    var posLabels = (d.positions||[]).map(function(p){
-                      return servingPositionLabel_({ position: p });
+                    var posLabelsZh = (d.positions||[]).map(function(p){
+                      var label = SERVING_POSITION_LABELS[p] || {};
+                      return label.zh || p;
                     });
-                    return escapeHtml(d.memberId) + ' → ' + escapeHtml(posLabels.join(', '));
+                    var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
+                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                   }).join('<br/>');
                 }
                 showBox('quickMsg','warn', titleZh, titleEn, detail);
@@ -2358,7 +2430,7 @@
               showErr('quickMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
               return;
             }
-            var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {});
+            var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {}, (res2 && res2.dateYmd) || ev.replace('SundayService_',''));
             showBox('quickMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
             closeModal(modal);
             if (App.refreshServingPlan) App.refreshServingPlan();
