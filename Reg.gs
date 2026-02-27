@@ -906,8 +906,8 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
     const member = mi.byId[id];
     if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return regConflict_('你不屬於此事奉組別', 'You are not in this serving group.', '', 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_SIGNUP');
 
-    const awayMap = admin_getAwayPeriodsMap_([id]) || {};
-    const periods = (awayMap[id] && awayMap[id].periods) ? awayMap[id].periods : [];
+    var awayPeriodsMap = admin_getAwayPeriodsMap_([id]) || {};
+    var periods = (awayPeriodsMap[id] && awayPeriodsMap[id].periods) ? awayPeriodsMap[id].periods : [];
     const onHoliday = periods.some(function(p){
       const from = admin_parseYmd_(p.fromYmd || '');
       const to = admin_parseYmd_(p.toYmd || '');
@@ -915,16 +915,6 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       return from.getTime() <= evDate.getTime() && evDate.getTime() <= to.getTime();
     });
     if (onHoliday) return regConflict_('此日期與你的假期重疊，請先刪除或更改假期後再報名。', 'This date overlaps your holiday. Please clear or update your holiday period before signing up.', '', 'HOLIDAY_OVERLAP', 'SERVING_SIGNUP');
-
-    const awayMap = admin_getAwayPeriodsMap_([id]) || {};
-    const periods = (awayMap[id] && awayMap[id].periods) ? awayMap[id].periods : [];
-    const onHoliday = periods.some(function(p){
-      const from = admin_parseYmd_(p.fromYmd || '');
-      const to = admin_parseYmd_(p.toYmd || '');
-      if (!from || !to || !evDate) return false;
-      return from.getTime() <= evDate.getTime() && evDate.getTime() <= to.getTime();
-    });
-    if (onHoliday) return { ok:false, code:'E409', zh:'此日期與你的假期重疊，請先刪除或更改假期後再報名。', en:'This date overlaps your holiday. Please clear or update your holiday period before signing up.' };
 
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
