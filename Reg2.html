@@ -161,7 +161,6 @@
 
     <footer class="small" style="padding:8px 4px;">
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
-      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec">按此進入聚會資訊平台 / Click here for service information portal</a></div>
       <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">按此進入自助服務平台 / Click here for self-service portal</a></div>
     </footer>
   </div>
@@ -653,6 +652,7 @@
       snapshot: null,
       servingMonth: '',
       servingGroup: '',
+      servingRefreshTimer: null,
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -1003,7 +1003,6 @@
       if (away.from2 && away.to2) awayHtml += '<div>假期 2 / Holiday 2: '+escapeHtml(away.from2)+' ~ '+escapeHtml(away.to2)+'</div>';
       if (!awayHtml) awayHtml = '<div>未設定 / Not set</div>';
       var memberSince = (snap.memberSinceEarliest || (snap.member && snap.member.memberSinceEarliest) || '');
-      var servingDisabled = groups.length ? '' : 'disabled';
 
       return ''+
         '<div class="card">'+
@@ -1033,7 +1032,7 @@
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
-            '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
+            '<button id="btnSelfServing" class="alt">🧩 事奉報名/更改 / Serving</button>'+
             '<button id="btnSelfLive" class="alt">📡 聚會資訊 / Service information</button>'+
             '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
@@ -1526,6 +1525,10 @@
 
     function render(){
       stopScan();
+      if (State.view !== 'selfServing' && State.servingRefreshTimer){
+        clearInterval(State.servingRefreshTimer);
+        State.servingRefreshTimer = null;
+      }
 
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
@@ -1915,6 +1918,20 @@
       }
 
       $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
+      if (State.servingRefreshTimer) clearInterval(State.servingRefreshTimer);
+      State.servingRefreshTimer = setInterval(function(){
+        if (State.view !== 'selfServing') return;
+        callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){
+            if ($('servingMsg')) $('servingMsg').innerHTML = showServerErr(res);
+            return;
+          }
+          State.lastResult = res;
+          render();
+        }).catch(function(){
+          if ($('servingMsg')) $('servingMsg').innerHTML = showBox('err','系統錯誤','System error');
+        });
+      }, 180000);
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-month]')).forEach(function(b){
         b.onclick = function(){
           State.servingMonth = String(b.getAttribute('data-serving-month')||'').trim();
