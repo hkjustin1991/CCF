@@ -916,6 +916,16 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
     });
     if (onHoliday) return regConflict_('此日期與你的假期重疊，請先刪除或更改假期後再報名。', 'This date overlaps your holiday. Please clear or update your holiday period before signing up.', '', 'HOLIDAY_OVERLAP', 'SERVING_SIGNUP');
 
+    const awayMap = admin_getAwayPeriodsMap_([id]) || {};
+    const periods = (awayMap[id] && awayMap[id].periods) ? awayMap[id].periods : [];
+    const onHoliday = periods.some(function(p){
+      const from = admin_parseYmd_(p.fromYmd || '');
+      const to = admin_parseYmd_(p.toYmd || '');
+      if (!from || !to || !evDate) return false;
+      return from.getTime() <= evDate.getTime() && evDate.getTime() <= to.getTime();
+    });
+    if (onHoliday) return { ok:false, code:'E409', zh:'此日期與你的假期重疊，請先刪除或更改假期後再報名。', en:'This date overlaps your holiday. Please clear or update your holiday period before signing up.' };
+
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
     try{
