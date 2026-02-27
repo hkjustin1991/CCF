@@ -474,6 +474,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
   const scopeGroup = admin_normalizeServingGroup_(scopeGroupKey || '');
+  const eventDateYmd = ev.replace('SundayService_', '');
 
   const list = Array.isArray(rows) ? rows : [];
   const cleaned = [];
@@ -547,10 +548,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
     if (admin_memberHasAdminStatus_(id, membersById)){
-      duplicateWarn.push({ memberId: id, positions: effectivePositions.slice(0, 2), reason: 'admin_member_override', newlyIntroduced:true });
+      duplicateWarn.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, reason: 'admin_member_override', newlyIntroduced:true });
       return;
     }
-    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), newlyIntroduced:true });
+    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -587,7 +588,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       return admin_err_('E409','同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.', detail);
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, canOverride:true };
+      return { ok:false, code:'E409', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
@@ -595,7 +596,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       return admin_err_('E409','事奉安排與離開期重疊','Serving assignment overlaps away period.');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, canOverride:true };
+      return { ok:false, code:'E409', zh:'事奉安排與離開期重疊', en:'Serving assignment overlaps away period.', conflicts: conflicts, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (hasAdminWarnings){
@@ -609,6 +610,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         zh:'ADMIN 成員可覆蓋規則，請確認是否繼續',
         en:'ADMIN member can override rules. Please confirm to continue.',
         adminWarnings: adminWarnings,
+        dateYmd: eventDateYmd,
         canOverride:true
       };
     }

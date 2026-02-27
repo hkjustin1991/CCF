@@ -696,6 +696,17 @@ function regSelfServingEditable_(eventDate){
   return weeks >= 6;
 }
 
+function reg_isDuplicateExemptPosition_(position){
+  const pos = String(position||'').trim();
+  if (!pos) return false;
+  try{
+    if (typeof ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS !== 'undefined' && ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS){
+      return !!ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS[pos];
+    }
+  }catch(e){}
+  return false;
+}
+
 function reg_buildServingTokensForWrite_(raw, maxSlots){
   const list = (typeof admin_splitServingValues_ === 'function')
     ? admin_splitServingValues_(raw)
@@ -910,13 +921,17 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
         const idsAtPos = admin_extractMemberIdsFromServingValue_(String(sh.getRange(rowIndex, ci).getValue() || ''));
         if (idsAtPos.indexOf(id) >= 0) existingPosition = p;
       });
-      if (existingPosition && existingPosition !== pos){
+      const duplicateAllowed = reg_isDuplicateExemptPosition_(existingPosition) || reg_isDuplicateExemptPosition_(pos);
+      if (existingPosition && existingPosition !== pos && !duplicateAllowed){
+        const dateYmd = ev.replace('SundayService_', '');
+        const existingZh = admin_servingPositionZh_(existingPosition || '') || existingPosition;
+        const targetZh = admin_servingPositionZh_(pos || '') || pos;
         return {
           ok:false,
           code:'E409',
           zh:'同一活動不可同時擔任多個崗位',
           en:'Duplicate serving assignments for the same event are not allowed.',
-          detail: existingPosition + ' -> ' + pos
+          detail: dateYmd + '｜重覆崗位: ' + existingZh + '、' + targetZh
         };
       }
 
