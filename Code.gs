@@ -87,10 +87,12 @@ const MEMBERS_OPTIONAL_HEADERS = [
 const SERVING_SHEET_NAME = 'Serving';
 const SERVING_POSITION_GROUPS = {
   Worship_Lead: 'WORSHIP',
+  Worship_Singer: 'WORSHIP',
   Worship_Singer_1: 'WORSHIP',
   Worship_Singer_2: 'WORSHIP',
   Worship_Pianist: 'WORSHIP',
   Worship_Drum: 'WORSHIP',
+  Worship_Instrument: 'WORSHIP',
   Worship_Instrument_1: 'WORSHIP',
   Worship_Instrument_2: 'WORSHIP',
   Media_AV: 'MEDIA',
