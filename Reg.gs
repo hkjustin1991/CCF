@@ -1093,7 +1093,7 @@ function api_reg_self_live_service_public(qrPayload){
 
     const todayYmd = admin_todayUkYmd_();
     const today = admin_parseYmd_(todayYmd) || new Date();
-    const todayDow = today.getUTCDay();
+    const todayDow = today.getDay();
     const offsetToPrevSunday = (todayDow === 0) ? 7 : todayDow;
     const prevSunday = new Date(today.getTime() - offsetToPrevSunday*24*60*60*1000);
     const prevYmd = admin_fmtYmd_(prevSunday);
@@ -1980,7 +1980,7 @@ function regIsOptedOut_(optOutRaw){
   const v = String(optOutRaw || '').trim().toUpperCase();
   if (!v) return false;
   if (v === '0' || v === 'N' || v === 'NO' || v === 'FALSE') return false;
-  return ['1','Y','YES','TRUE','OPTOUT'].includes(v) || v.length > 0;
+  return ['1','Y','YES','TRUE','OPTOUT'].includes(v);
 }
 
 /******** Logging (canonical; duplicates removed) ********/
