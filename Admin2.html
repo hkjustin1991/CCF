@@ -1169,7 +1169,7 @@
       conflicts.forEach(function(c){
         var lineDate = String(c.dateYmd || effectiveDate || '').trim();
         var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
-        lines.push(escapeHtml('成員: ' + (c.memberId||'') + '｜離開期重疊: ' + String(c.from||'') + ' - ' + String(c.to||'') + dateLabel));
+        lines.push(escapeHtml('成員: ' + (c.memberId||'') + '｜離開期重疊: ' + String(c.from||'') + ' - ' + String(c.to||'') + ' / Member: ' + (c.memberId||'') + '｜Holiday overlap: ' + String(c.from||'') + ' - ' + String(c.to||'') + dateLabel));
       });
       duplicates.forEach(function(d){
         var posLabelsZh = (d.positions||[]).map(function(p){
@@ -1178,11 +1178,28 @@
         });
         var lineDate = String(d.dateYmd || effectiveDate || '').trim();
         var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
-        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜重覆崗位: ' + posLabelsZh.join('、') + dateLabel));
+        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜重覆崗位: ' + posLabelsZh.join('、') + ' / Member: ' + (d.memberId||'') + '｜Duplicate positions: ' + posLabelsZh.join(', ') + dateLabel));
       });
       if (!lines.length) return '';
       return lines.join('<br/>');
     }
+
+    function overrideConfirmTitleByContext_(res){
+      var r = res || {};
+      var hasDup = !!((r.duplicates && r.duplicates.length) || (r.adminWarnings && r.adminWarnings.duplicates && r.adminWarnings.duplicates.length) || r.subCode === 'DUPLICATE_ASSIGNMENT');
+      var hasHoliday = !!((r.conflicts && r.conflicts.length) || (r.adminWarnings && r.adminWarnings.conflicts && r.adminWarnings.conflicts.length) || r.subCode === 'HOLIDAY_OVERLAP');
+      if (hasDup && !hasHoliday){
+        return { zh:'❗ 你確定要覆蓋此重覆崗位安排嗎？', en:'❗ Are you sure you want to override this position duplication?' };
+      }
+      if (hasHoliday && !hasDup){
+        return { zh:'❗ 你確定要覆蓋此假期重疊安排嗎？', en:'❗ Are you sure you want to override this holiday overlap?' };
+      }
+      if (hasDup && hasHoliday){
+        return { zh:'❗ 你確定要覆蓋此重覆崗位 / 假期重疊安排嗎？', en:'❗ Are you sure you want to override this position duplication / holiday overlap?' };
+      }
+      return { zh:'❗ 你確定要覆蓋此安排嗎？', en:'❗ Are you sure you want to override this assignment?' };
+    }
+
     function extractMemberId_(token){
       var m = String(token||'').match(/CCF\\d{4}/i);
       return m ? String(m[0]||'').toUpperCase() : '';
@@ -1953,7 +1970,7 @@
                 var today = parseYmd(getTodayYmdUk());
                 var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
                 var isMediaPos = /^Media_/i.test(String(pos.position||''));
-                var urgentGap = (!hasClosed) && (diff >= 0 && diff < 42 && assignedMemberCount < minReq);
+                var urgentGap = (!hasClosed) && (diff >= 0 && diff < 28 && assignedMemberCount < minReq);
                 if (isMediaPos && assignedMemberCount > 0) urgentGap = false;
                 var entries = existingEntries.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
@@ -2461,12 +2478,14 @@
                     titleZh = '事奉安排與離開期重疊';
                     titleEn = 'Serving assignment overlaps holiday period.';
                   } else if (res2.subCode === 'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED'){
-                    titleZh = 'ADMIN 可覆蓋規則（請確認）';
-                    titleEn = 'ADMIN can override rules (please confirm).';
+                    var overrideTitle = overrideConfirmTitleByContext_(res2);
+                    titleZh = overrideTitle.zh;
+                    titleEn = overrideTitle.en;
                   }
                   if (res2.adminWarnings){
-                    titleZh = 'ADMIN 可覆蓋規則（請確認）';
-                    titleEn = 'ADMIN can override rules (please confirm).';
+                    var overrideTitle = overrideConfirmTitleByContext_(res2);
+                    titleZh = overrideTitle.zh;
+                    titleEn = overrideTitle.en;
                     detail = buildAdminOverrideWarningHtml_(res2.adminWarnings, res2.dateYmd);
                   }
                   if (res2.conflicts && res2.conflicts.length){
@@ -2609,12 +2628,14 @@
                   titleZh = '事奉安排與離開期重疊';
                   titleEn = 'Serving assignment overlaps holiday period.';
                 } else if (res2.subCode === 'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED'){
-                  titleZh = 'ADMIN 可覆蓋規則（請確認）';
-                  titleEn = 'ADMIN can override rules (please confirm).';
+                  var overrideTitle = overrideConfirmTitleByContext_(res2);
+                  titleZh = overrideTitle.zh;
+                  titleEn = overrideTitle.en;
                 }
                 if (res2.adminWarnings){
-                  titleZh = 'ADMIN 可覆蓋規則（請確認）';
-                  titleEn = 'ADMIN can override rules (please confirm).';
+                  var overrideTitle = overrideConfirmTitleByContext_(res2);
+                  titleZh = overrideTitle.zh;
+                  titleEn = overrideTitle.en;
                   detail = buildAdminOverrideWarningHtml_(res2.adminWarnings, res2.dateYmd);
                 }
                 if (res2.conflicts && res2.conflicts.length){

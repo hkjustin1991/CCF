@@ -512,7 +512,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
 
   const duplicateMap = {};
   const duplicateDetails = [];
-  const duplicateWarn = [];
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
@@ -581,10 +580,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    if (admin_memberHasAdminStatus_(id, membersById)){
-      duplicateWarn.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, reason: 'admin_member_override', newlyIntroduced:true });
-      return;
-    }
     duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
@@ -595,21 +590,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       return { memberId: id };
     }));
   }
-  const conflictWarn = [];
-  conflicts = conflicts.filter(function(c){
-    if (admin_memberHasAdminStatus_(c.memberId, membersById)){
-      conflictWarn.push({ memberId: c.memberId, from: c.from, to: c.to, reason: 'admin_member_override' });
-      return false;
-    }
-    return true;
-  });
   const role = String(s.actor.role||'').trim().toUpperCase();
   const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
-  const adminWarnings = {
-    conflicts: conflictWarn,
-    duplicates: duplicateWarn
-  };
-  const hasAdminWarnings = (adminWarnings.conflicts.length || adminWarnings.duplicates.length);
   if (invalidGroupAssignments.length){
     const detail = invalidGroupAssignments.map(function(x){
       return [String(x.memberId||''), String(x.position||''), String(x.group||'')].filter(Boolean).join(' → ');
@@ -634,24 +616,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     }).join(' | ');
     return { ok:false, code:'E409', subCode:'HOLIDAY_OVERLAP', subGroup:'SERVING_ASSIGNMENT', zh:'事奉安排與假期重疊。請組員先刪除/更改假期，再安排事奉。', en:'Serving assignment overlaps holiday period. Please ask the member to clear/update holiday before assignment.', detail:detail, conflicts:conflicts };
   }
-  if (hasAdminWarnings){
-    if (!canOverride){
-      return admin_conflict_('ADMIN 成員已安排重疊（需管理員確認）','ADMIN member scheduling overlap requires admin confirmation.', '', 'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED', 'SERVING_ASSIGNMENT');
-    }
-    if (!overrideAway){
-      return {
-        ok:false,
-        code:'E409',
-        subCode:'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED',
-        subGroup:'SERVING_ASSIGNMENT',
-        zh:'ADMIN 成員可覆蓋規則，請確認是否繼續',
-        en:'ADMIN member can override rules. Please confirm to continue.',
-        adminWarnings: adminWarnings,
-        dateYmd: eventDateYmd,
-        canOverride:true
-      };
-    }
-  }
+
 
   const matrix = admin_getServingMatrix_(sh);
   if (!matrix.eventCol){
@@ -683,8 +648,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     eventKey: ev,
     rows: cleaned.length,
     warnings:{
-      conflicts: conflictWarn,
-      duplicates: duplicateWarn
+      conflicts: [],
+      duplicates: []
     }
   };
 }
