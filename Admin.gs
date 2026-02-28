@@ -376,8 +376,30 @@ function api_admin_serving_plan_matrix(token, fromDate){
     events: matrix.events,
     positions: matrix.positions,
     cells: matrix.cells,
+    canEditByGroup: admin_getServingPlanEditMap_(s.actor, matrix.positions),
     maxMonths: ADMIN_SERVING_MONTHS_AHEAD
   };
+}
+
+function admin_canEditServingGroup_(actor, groupKey){
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return false;
+  const role = String((actor && actor.role) || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
+  if (role !== 'GL') return false;
+  const glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
+  return glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
+}
+
+function admin_getServingPlanEditMap_(actor, positions){
+  const out = {};
+  const list = Array.isArray(positions) ? positions : [];
+  list.forEach(function(pos){
+    const groupKey = admin_normalizeServingGroup_((pos && pos.group) || '');
+    if (!groupKey || Object.prototype.hasOwnProperty.call(out, groupKey)) return;
+    out[groupKey] = admin_canEditServingGroup_(actor, groupKey);
+  });
+  return out;
 }
 function api_admin_serving_group_overview(token, fromDate){
   const s = admin_requireSession_(token);
@@ -497,6 +519,9 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
   const scopeGroup = admin_normalizeServingGroup_(scopeGroupKey || '');
+  if (scopeGroup && !admin_canEditServingGroup_(s.actor, scopeGroup)){
+    return admin_err_('E403','你沒有權限編輯此組別','No permission to edit this serving group.');
+  }
   const eventDateYmd = ev.replace('SundayService_', '');
 
   const list = Array.isArray(rows) ? rows : [];
@@ -527,6 +552,12 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const oldValue = String(existingValues[r.position] || '').trim();
     const newValue = String(r.value || '').trim();
     const isChanged = (oldValue !== newValue);
+    if (isChanged){
+      const positionGroup = admin_normalizeServingGroup_(ADMIN_SERVING_POSITION_GROUP[r.position] || '');
+      if (!admin_canEditServingGroup_(s.actor, positionGroup)){
+        return admin_err_('E403','你沒有權限編輯此組別','No permission to edit this serving group.');
+      }
+    }
     if (isChanged) changedPositions.add(r.position);
     mergedValues[r.position] = newValue;
 
