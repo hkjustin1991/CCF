@@ -562,7 +562,7 @@ function api_reg_self_attendance_public(qrPayload, fromYmdOptional, toYmdOptiona
     const joinRaw = r.Member_Since || '';
     const joinDt = regSafeToDate_(joinRaw);
     if (joinRaw && !joinDt){
-      return { ok:false, code:'E422', zh:'會員入會日期格式錯誤，請聯絡影音同工', en:'Invalid member since date format. Please contact Media team.' };
+      regLogActivity_('REG_SELF_ATTENDANCE_INVALID_MEMBER_SINCE', parsed.id, 'WARN', { joinRaw: String(joinRaw) });
     }
     if (joinDt){
       const joinUtc = new Date(Date.UTC(joinDt.getFullYear(), joinDt.getMonth(), joinDt.getDate()));
@@ -658,6 +658,15 @@ function regDisplayNameForPortal_(m){
   return '(' + String((m && m.id) || '').trim().toUpperCase() + ')';
 }
 
+function reg_parseServingGroupsCsvSafe_(raw){
+  if (typeof admin_parseGroupsCsv_ === 'function') return admin_parseGroupsCsv_(raw);
+  return String(raw||'').split(',').map(function(v){ return String(v||'').trim(); }).filter(Boolean);
+}
+
+function reg_mergeServingGroups_(groupsA, groupsB){
+  return Array.from(new Set([].concat(groupsA || [], groupsB || []).filter(Boolean)));
+}
+
 function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
   const id = String(memberId||'').trim().toUpperCase();
   let earliest = null;
@@ -726,13 +735,20 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     const id = auth.parsed.id;
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
-    if (!member) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+    const rowGroups = reg_mergeServingGroups_(
+      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGroups),
+      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups)
+    );
+    const groups = member
+      ? reg_mergeServingGroups_(reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups), rowGroups)
+      : rowGroups;
 
     const att = api_reg_self_attendance_public(qrPayload, null, null);
     if (!att || !att.ok) return att;
 
+    if (!member && !groups.length) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
     const servingInsights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
-    const groups = Array.from(new Set(((member.servingGroups||[]).concat(member.servingGLGroups||[])).filter(Boolean)));
 
     const upcoming4 = [];
     const today = admin_parseYmd_(admin_todayUkYmd_()) || new Date();
@@ -748,22 +764,30 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     upcoming4.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
 
     const away = admin_getAwayPeriodForMember_(id) || {};
+    const profile = member || {};
+    const fallbackProfile = {
+      id: id,
+      nameZh: String((auth.row && auth.row.NameZh) || '').trim(),
+      nameEn: String((auth.row && auth.row.NameEn) || '').trim(),
+      preferredName: String((auth.row && auth.row.PreferredName) || '').trim()
+    };
+    const memberSinceRaw = profile.memberSinceRaw || (auth.row && auth.row.Member_Since);
 
     return {
       ok:true,
       member:{
         id: id,
-        nameZh: member.nameZh || '',
-        nameEn: member.nameEn || '',
-        preferredName: member.preferredName || '',
-        displayName: regDisplayNameForPortal_(member),
+        nameZh: profile.nameZh || fallbackProfile.nameZh,
+        nameEn: profile.nameEn || fallbackProfile.nameEn,
+        preferredName: profile.preferredName || fallbackProfile.preferredName,
+        displayName: regDisplayNameForPortal_(profile.id ? profile : fallbackProfile),
         servingGroups: groups,
         away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
-        memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, member.memberSinceRaw)
+        memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw)
       },
       attendance: att.stats,
       attendanceEvents: att.attendance,
-      memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, member.memberSinceRaw),
+      memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw),
       upcoming4: upcoming4
     };
   }catch(e){
@@ -782,7 +806,14 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
     const mi = admin_getMembersIndex_();
     const byId = (mi && mi.byId) ? mi.byId : {};
     const selfMember = byId[auth.parsed.id] || null;
-    const selfGroups = selfMember ? (selfMember.servingGroups || []).map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean) : [];
+    const rowGroups = reg_mergeServingGroups_(
+      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGroups),
+      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups)
+    );
+    const selfGroups = selfMember
+      ? reg_mergeServingGroups_(reg_mergeServingGroups_(selfMember.servingGroups, selfMember.servingGLGroups), rowGroups)
+          .map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean)
+      : rowGroups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
     if (selfGroups.indexOf(key) < 0){
       return { ok:false, code:'E403', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
     }
@@ -828,9 +859,14 @@ function api_reg_self_serving_data_public(qrPayload){
     const id = auth.parsed.id;
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
-    if (!member) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
-
-    const groups = Array.from(new Set(((member.servingGroups||[]).concat(member.servingGLGroups||[])).filter(Boolean)));
+    const rowGroups = reg_mergeServingGroups_(
+      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGroups),
+      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups)
+    );
+    const groups = member
+      ? reg_mergeServingGroups_(reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups), rowGroups)
+      : rowGroups;
+    if (!member && !groups.length) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
     const groupNorm = groups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
     const insights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
 
