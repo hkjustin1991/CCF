@@ -952,6 +952,12 @@
       }).filter(Boolean).join('');
       return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
     }
+    function renderServingGroupBubble_(groupKey){
+      var key = normalizeServingGroupKey_(groupKey);
+      var label = SERVING_GROUP_BADGES[key];
+      if (!label) return '<span class="groupBadge">—</span>';
+      return '<span class="'+label.cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
+    }
 
     var GL_MODE_TEXT = {
       roleLabelZh: '組長'
@@ -3964,6 +3970,61 @@
       };
     }
 
+    function openRemoveFromGroupFlow_(memberId, removableGroups, onDone){
+      if(!ensureNotEmbeddedForSensitive_()) return;
+      logAction('CLICK_REMOVE_GROUP', memberId, 'serving_group_remove');
+
+      var groups = Array.isArray(removableGroups) ? removableGroups.filter(Boolean) : [];
+      if (!groups.length){
+        showBox('app','warn','此會員沒有可移除的組別','No removable serving group for this member.');
+        return;
+      }
+      var todayYmd = getTodayYmdUk();
+      var defaultGroup = groups[0];
+
+      var m = openModal(
+        '<div class="big">🗑️ 移出組別 / Remove member from group</div>'+
+        '<div class="small">請確認以下操作（生效日為今天）。<br/>Please confirm this action (effective from today).</div>'+
+        '<div class="kv" style="margin-top:10px;">'+
+          '<div>Member</div><div><b>'+escapeHtml(memberId||'')+'</b></div>'+
+          '<div>Group</div><div id="rmGroupBubble">'+renderServingGroupBubble_(defaultGroup)+'</div>'+
+          '<div>生效日 / Effective date</div><div><span class="chip">'+escapeHtml(todayYmd)+' (from today)</span></div>'+
+        '</div>'+
+        (groups.length > 1
+          ? '<div class="label" style="margin-top:10px;">選擇組別 / Select group</div><select id="rmGroupSel">'+
+              groups.map(function(g){
+                var label = SERVING_GROUP_BADGES[g] || { zh:g, en:g };
+                return '<option value="'+escapeHtml(g)+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</option>';
+              }).join('')+
+            '</select>'
+          : '')+
+        '<div class="miniBtnRow">'+
+          '<button id="btnRmNext" class="btnDanger">確認並掃描 QR / Confirm & scan QR</button>'+
+          '<button id="btnRmCancel" class="btnBack">取消 / Cancel</button>'+
+        '</div>'+
+        '<div id="rmMsg"></div>'
+      );
+
+      function selectedGroup_(){
+        var sel = m.querySelector('#rmGroupSel');
+        return sel ? String(sel.value||'').trim() : defaultGroup;
+      }
+      var sel = m.querySelector('#rmGroupSel');
+      if (sel){
+        sel.onchange = function(){
+          var bubble = m.querySelector('#rmGroupBubble');
+          if (bubble) bubble.innerHTML = renderServingGroupBubble_(selectedGroup_());
+        };
+      }
+
+      m.querySelector('#btnRmCancel').onclick = function(){ closeModal(m); };
+      m.querySelector('#btnRmNext').onclick = function(){
+        var groupKey = selectedGroup_();
+        closeModal(m);
+        openReauthScan_('remove_group', memberId, { groupKey: groupKey, effectiveFrom: todayYmd }, onDone);
+      };
+    }
+
     function openStatusFlow_(memberId, currentStatus){
       if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_STATUS', memberId, 'status');
@@ -4007,7 +4068,7 @@
       };
     }
 
-    function openReauthScan_(mode, memberId, payload){
+    function openReauthScan_(mode, memberId, payload, onDone){
       logAction('OPEN_REAUTH', memberId+'|'+mode, mode);
 
       var m = openModal(
@@ -4030,6 +4091,31 @@
           callApi('api_admin_member_contact_reveal', App.token, memberId, payload, qr).then(function(res){
             if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
             renderContactResult_(m, res);
+          }).catch(function(){
+            showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+          return;
+        }
+
+        if(mode === 'remove_group'){
+          var req = payload || {};
+          callApi('api_admin_member_remove_from_group', App.token, memberId, req.groupKey, qr).then(function(res){
+            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            m.querySelector('.modal').innerHTML =
+              '<div class="big ok">✅ 已移出組別 / Member removed from group</div>'+
+              '<div class="small">此操作已被記錄。This action is logged.</div>'+
+              '<div class="kv" style="margin-top:10px;">'+
+                '<div>Member</div><div><b>'+escapeHtml(res.memberId||memberId||'')+'</b></div>'+
+                '<div>Group</div><div>'+renderServingGroupBubble_(res.group||req.groupKey||'')+'</div>'+
+                '<div>生效日 / Effective date</div><div><span class="chip">'+escapeHtml(String(res.effectiveFrom||req.effectiveFrom||''))+' (from today)</span></div>'+
+              '</div>'+
+              '<div class="miniBtnRow" style="margin-top:12px;">'+
+                '<button id="btnClose" class="btnBack">⬅️ 返回 / Back</button>'+
+              '</div>';
+            m.querySelector('#btnClose').onclick = function(){
+              closeModal(m);
+              if (typeof onDone === 'function') onDone(res);
+            };
           }).catch(function(){
             showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
           });
