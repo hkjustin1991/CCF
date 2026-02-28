@@ -164,7 +164,9 @@ const ADMIN_SERVING_POSITION_MAX = {
   Finance_Offering: 3
 };
 const ADMIN_SERVING_POSITION_MIN = {
-  Finance_Offering: 2
+  Finance_Offering: 2,
+  Support_Communion: 2,
+  Logistic_Refreshment: 2
 };
 const ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS = {
   Media_PPTBuild: true
@@ -176,6 +178,15 @@ function admin_filterDuplicateConflictPositions_(positions){
     return !ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS[pos];
   });
 }
+function admin_servingMinRequired_(position){
+  const key = String(position||'').trim();
+  if (Object.prototype.hasOwnProperty.call(ADMIN_SERVING_POSITION_MIN, key)){
+    return Number(ADMIN_SERVING_POSITION_MIN[key] || 0);
+  }
+  if (key === 'Other') return 0;
+  return 1;
+}
+
 function admin_servingPositionLabel_(pos){
   const label = ADMIN_SERVING_POSITION_LABELS[pos];
   if (label) return label.en + ' / ' + label.zh;
@@ -508,6 +519,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const membersById = mi.byId || {};
   const existingValues = admin_getServingValuesForEvent_(ev);
   const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
+  const mergedValues = Object.assign({}, existingValues);
 
   const changedPositions = new Set();
   const changedMembers = new Set();
@@ -517,6 +529,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const newValue = String(r.value || '').trim();
     const isChanged = (oldValue !== newValue);
     if (isChanged) changedPositions.add(r.position);
+    mergedValues[r.position] = newValue;
 
     const ids = admin_extractMemberIdsFromServingValue_(r.value);
     const maxAllowed = ADMIN_SERVING_POSITION_MAX[r.position] || 1;
@@ -528,7 +541,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         admin_servingPositionLabel_(r.position) + ': ' + ids.join(', ')
       );
     }
-    const minAllowed = ADMIN_SERVING_POSITION_MIN[r.position] || 0;
+    const minAllowed = admin_servingMinRequired_(r.position);
     if (minAllowed && ids.length > 0 && ids.length < minAllowed){
       return admin_conflict_('崗位人數不足','Not enough people for this position.', '', 'POSITION_MIN_REQUIRED', 'SERVING_ASSIGNMENT');
     }
@@ -541,10 +554,18 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         memberIdsForAway.push(id);
         changedMembers.add(id);
       }
-      if (!duplicateMap[id]) duplicateMap[id] = [];
-      duplicateMap[id].push(r.position);
     });
   }
+
+  ADMIN_SERVING_POSITIONS.forEach(function(pos){
+    const raw = String(mergedValues[pos] || '').trim();
+    if (!raw) return;
+    const ids = admin_extractMemberIdsFromServingValue_(raw);
+    ids.forEach(function(id){
+      if (!duplicateMap[id]) duplicateMap[id] = [];
+      duplicateMap[id].push(pos);
+    });
+  });
 
   Object.keys(duplicateMap).forEach(function(id){
     if (!changedMembers.has(id)) return;
@@ -610,7 +631,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const detail = conflicts.map(function(c){
       return (c.memberId||'') + ' ' + String(c.from||'') + ' - ' + String(c.to||'');
     }).join(' | ');
-    return admin_conflict_('事奉安排與假期重疊。請組員先刪除/更改假期，再安排事奉。','Serving assignment overlaps holiday period. Please ask the member to clear/update holiday before assignment.', detail, 'HOLIDAY_OVERLAP', 'SERVING_ASSIGNMENT');
+    return { ok:false, code:'E409', subCode:'HOLIDAY_OVERLAP', subGroup:'SERVING_ASSIGNMENT', zh:'事奉安排與假期重疊。請組員先刪除/更改假期，再安排事奉。', en:'Serving assignment overlaps holiday period. Please ask the member to clear/update holiday before assignment.', detail:detail, conflicts:conflicts };
   }
   if (hasAdminWarnings){
     if (!canOverride){
@@ -1869,7 +1890,7 @@ function admin_getServingInsightsForMember_(memberId){
       if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
 
-      const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
+      const minRequired = admin_servingMinRequired_(pos.position);
       const missing = Math.max(0, minRequired - ids.length);
       if (missing > 0 && evDate && evDate.getTime() >= today.getTime() && evDate.getTime() <= soon12w.getTime()){
         const gk = groupKey + '::' + eventKey;
@@ -1886,7 +1907,9 @@ function admin_getServingInsightsForMember_(memberId){
         gapsByGroupEvent[gk].positions.push({
           position: String(pos.position||''),
           label: admin_servingPositionZh_(String(pos.position||'')),
-          missing: missing
+          missing: missing,
+          assigned: ids.length,
+          minRequired: minRequired
         });
       }
 
@@ -1988,7 +2011,7 @@ function admin_buildServingGroupOverview_(fromYmd){
       const raw = String(row[pos.colIndex - 1] || '').trim();
       if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
-      const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
+      const minRequired = admin_servingMinRequired_(pos.position);
       const missing = Math.max(0, minRequired - ids.length);
       if (missing <= 0) return;
       const key = groupKey + '::' + eventKey;
@@ -1996,7 +2019,7 @@ function admin_buildServingGroupOverview_(fromYmd){
         gapMap[key] = { group: groupKey, eventKey:eventKey, dateYmd:dateYmd, totalMissing:0, positions:[] };
       }
       gapMap[key].totalMissing += missing;
-      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionZh_(String(pos.position||'')), missing:missing });
+      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionZh_(String(pos.position||'')), missing:missing, assigned:ids.length, minRequired:minRequired });
     });
   });
 
