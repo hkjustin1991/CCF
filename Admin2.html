@@ -946,28 +946,26 @@
       callApi('api_admin_serving_group_members', App.token, groupKey).then(function(res){
         if (!res || !res.ok) return;
         var members = Array.isArray(res.members) ? res.members : [];
-        var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
-        html += '<ul class="groupDialogList">'+members.map(function(m){
-          var canRm = !!res.canManage;
-          return '<li>'+escapeHtml(m.label||m.id||'—') + (canRm ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(m.id||'')+'">移除 / Remove</button>') : '') + '</li>';
-        }).join('')+'</ul>';
-        if (res.canManage){
-          html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">新增組員 / Add member</button></div>';
+        var query = '';
+
+        function memberText_(m){
+          var label = String((m && m.label) || '').trim();
+          var id = String((m && m.id) || '').trim();
+          return (label + ' ' + id).toLowerCase();
         }
-        host.innerHTML = html;
-        Array.prototype.forEach.call(host.querySelectorAll('[data-rm-member]'), function(btn){
-          btn.onclick = function(){
-            var id = String(btn.getAttribute('data-rm-member')||'').trim();
-            if (!id) return;
-            if (!confirm('確認移除 ' + id + '?\nConfirm remove ' + id + '?')) return;
-            callApi('api_admin_serving_group_member_update', App.token, groupKey, id, 'REMOVE').then(function(r){
-              if (!r || !r.ok) return;
-              renderGroupMemberManage_(host, groupKey);
-            });
+
+        function bindSearch_(){
+          var searchInput = host.querySelector('#groupMemberSearch');
+          if (!searchInput) return;
+          searchInput.oninput = function(){
+            query = String(searchInput.value||'');
+            renderMembersList_();
           };
-        });
-        var addBtn = host.querySelector('#btnGroupAddMember');
-        if (addBtn){
+        }
+
+        function bindAddAction_(){
+          var addBtn = host.querySelector('#btnGroupAddMember');
+          if (!addBtn) return;
           addBtn.onclick = function(){
             var id = prompt('輸入 CCF ID\nEnter CCF ID');
             if (!id) return;
@@ -977,6 +975,53 @@
             });
           };
         }
+
+        function bindRemoveActions_(){
+          Array.prototype.forEach.call(host.querySelectorAll('[data-rm-member]'), function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-rm-member')||'').trim();
+              if (!id) return;
+              if (!confirm('確認移除 ' + id + '?\nConfirm remove ' + id + '?')) return;
+              callApi('api_admin_serving_group_member_update', App.token, groupKey, id, 'REMOVE').then(function(r){
+                if (!r || !r.ok) return;
+                renderGroupMemberManage_(host, groupKey);
+              });
+            };
+          });
+        }
+
+        function renderMembersList_(){
+          var normalizedQuery = String(query||'').trim().toLowerCase();
+          var filtered = !normalizedQuery
+            ? members.slice()
+            : members.filter(function(m){ return memberText_(m).indexOf(normalizedQuery) >= 0; });
+
+          var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
+          html += '<div class="small" style="margin:6px 0;">搜尋組員（姓名 / CCF ID）/ Search members (name / CCF ID)</div>';
+          html += '<input id="groupMemberSearch" class="input" type="text" placeholder="例如：CCF0001 / Alex" value="'+escapeHtml(query)+'" style="margin-bottom:8px;"/>';
+
+          if (!members.length){
+            html += '<div class="small">暫無組員 / No members found</div>';
+          } else if (!filtered.length){
+            html += '<div class="small">沒有符合搜尋結果 / No members match your search</div>';
+          } else {
+            html += '<ul class="groupDialogList">'+filtered.map(function(m){
+              var canRm = !!res.canManage;
+              return '<li>'+escapeHtml(m.label||m.id||'—') + (canRm ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(m.id||'')+'">移除 / Remove</button>') : '') + '</li>';
+            }).join('')+'</ul>';
+          }
+
+          if (res.canManage){
+            html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">新增組員 / Add member</button></div>';
+          }
+
+          host.innerHTML = html;
+          bindSearch_();
+          bindRemoveActions_();
+          bindAddAction_();
+        }
+
+        renderMembersList_();
       });
     }
     function buildServingGroupDialogHtml_(groupKey, servingInsights){
