@@ -2059,6 +2059,7 @@
     }
 
     function openServingEditModal(eventKey, groupKey){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var filterGroupKey = String(groupKey||'').trim();
       var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
@@ -2538,6 +2539,7 @@
     }
 
     function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var pos = String(position||'').trim();
       var idx = parseInt(String(entryIndex||'0'), 10);
@@ -3732,6 +3734,7 @@
       return true;
     }
     function openContactFlow_(memberId){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_CONTACT', memberId, 'contact');
 
       var m = openModal(
@@ -3755,6 +3758,7 @@
     }
 
     function openStatusFlow_(memberId, currentStatus){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_STATUS', memberId, 'status');
 
       var options = '';
