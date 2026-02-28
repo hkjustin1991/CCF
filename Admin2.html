@@ -766,6 +766,8 @@
         var sx = 0, sy = 0, sl = 0, st = 0;
         wrap.addEventListener('mousedown', function(e){
           if (!e || e.button !== 0) return;
+          var t = e.target;
+          if (t && t.closest && t.closest('input, select, textarea, button, a, .suggestBtn, .quickBubble')) return;
           down = true;
           sx = e.clientX; sy = e.clientY;
           sl = wrap.scrollLeft; st = wrap.scrollTop;
@@ -998,25 +1000,53 @@
       var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
       var themeCls = 'groupTheme-' + groupKey;
       var members = Array.isArray(bucket.currentMembers) ? bucket.currentMembers : [];
-      var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
       var membersHtml = members.length
         ? '<ul class="groupDialogList">'+members.map(function(m){ return '<li>'+escapeHtml(m.label || '—')+'</li>'; }).join('')+'</ul>'
         : '<div class="small">暫無組員 / No members found</div>';
-      var gapsHtml = gaps.length
-        ? '<ul class="groupDialogList">'+gaps.map(function(g){
-            var posText = (g.positions || []).map(function(p){ return (p.label || p.position || '—') + ' (x' + String(p.missing||0) + ')'; }).join(', ');
-            return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
-          }).join('')+'</ul>'
-        : '<div class="small">沒有空缺 / No gaps</div>';
       return ''+
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
           '<div class="groupDialogHeader">'+
             '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
             '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ Close</button>'+
           '</div>'+
-          '<div class="groupDialogSection"><div class="label">空缺（未來 12 週）</div>'+gapsHtml+'</div>'+
-          '<div class="groupDialogSection"><div class="label">當前組員 / Current members</div>'+membersHtml+'</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">空缺（未來 12 週） / Vacancies (next 12 weeks)</div>'+
+            '<div class="miniBtnRow">'+
+              '<button type="button" class="btnLookup btnMini" id="btnGroupGap6">空缺（&lt;6 週） / Vacancies (&lt;6 weeks)</button>'+
+              '<button type="button" class="btnLookup btnMini" id="btnGroupGap12">空缺（&lt;12 週） / Vacancies (&lt;12 weeks)</button>'+
+            '</div>'+
+            '<div id="groupGapResult" class="small" style="margin-top:8px;"></div>'+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<button type="button" class="btnBack sectionToggle" id="btnGroupMembersToggle">當前組員 / Current members（'+escapeHtml(String(members.length))+'）</button>'+
+            '<div id="groupMembersSection" class="hide" style="margin-top:6px;">'+membersHtml+'</div>'+
+          '</div>'+
         '</div>';
+    }
+
+    function renderGroupOverviewGaps_(hostEl, overview, groupKey, maxDays){
+      if (!hostEl) return;
+      var ov = overview || {};
+      var bucket = ((ov.byGroup||{})[groupKey] || {});
+      var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
+      var today = parseYmd(getTodayYmdUk());
+      var filtered = gaps.filter(function(g){
+        var ymd = eventDateYmdFromKey(g.eventKey || '');
+        var d = parseYmd(ymd);
+        if (!today || !d) return false;
+        var diff = daysBetween(today, d);
+        return diff >= 0 && diff < maxDays;
+      });
+      if (!filtered.length){
+        hostEl.innerHTML = '<div class="small">沒有空缺 / No vacancies</div>';
+        return;
+      }
+      hostEl.innerHTML = '<ul class="groupDialogList">'+filtered.map(function(g){
+        var posText = (g.positions || []).map(function(p){
+          return (p.label || p.position || '—') + ' (x' + String(p.missing||0) + ')';
+        }).join(', ');
+        return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
+      }).join('')+'</ul>';
     }
 
     function eventDateYmdFromKey(ev){
@@ -1905,11 +1935,9 @@
                       escapeHtml(label)+
                     '</button>';
                 }).filter(Boolean);
-                for (var slotIdx = entries.length; slotIdx < maxSlots; slotIdx++){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+slotIdx+'" data-raw="">空缺 / Vacant</button>');
-                }
-                if(!entries.length){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="0" data-raw="">空缺 / Vacant</button>');
+                var vacantCount = Math.max(0, maxSlots - entries.length);
+                if (vacantCount > 0){
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+entries.length+'" data-raw="">Vacant x'+vacantCount+'</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
@@ -1971,6 +1999,15 @@
               var sumModal = openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
               var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
               if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
+              var gapHost = sumModal.querySelector('#groupGapResult');
+              renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84);
+              var btn6 = sumModal.querySelector('#btnGroupGap6');
+              var btn12 = sumModal.querySelector('#btnGroupGap12');
+              if (btn6) btn6.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 42); };
+              if (btn12) btn12.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84); };
+              var membersToggle = sumModal.querySelector('#btnGroupMembersToggle');
+              var membersSec = sumModal.querySelector('#groupMembersSection');
+              if (membersToggle && membersSec) membersToggle.onclick = function(){ membersSec.classList.toggle('hide'); };
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
