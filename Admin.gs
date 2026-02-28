@@ -217,9 +217,11 @@ function doGetAdmin_(e){
   t.ADMIN_TITLE_ZH = '粵語基督徒團契 - ❤️爱使我们相聚在一起❤️';
   t.ADMIN_TITLE_EN = 'CCF - ❤️When Love Brings Us Together❤️';
 
-  return t.evaluate()
-    .setTitle('CCF Admin Portal')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.SAMEORIGIN);
+  var out = t.evaluate().setTitle('CCF Admin Portal');
+  var xfo = (HtmlService && HtmlService.XFrameOptionsMode) ? HtmlService.XFrameOptionsMode : null;
+  var mode = xfo ? (xfo.SAMEORIGIN || xfo.DEFAULT || xfo.ALLOWALL || null) : null;
+  if (mode) return out.setXFrameOptionsMode(mode);
+  return out;
 }
 
 /**
