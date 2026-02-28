@@ -1835,6 +1835,7 @@ function admin_getServingInsightsForMember_(memberId){
       const groupKey = admin_normalizeServingGroup_(pos.group);
       if (!groupKey || !out.byGroup[groupKey]) return;
       const raw = String(row[pos.colIndex - 1] || '').trim();
+      if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
 
       const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
@@ -1954,6 +1955,7 @@ function admin_buildServingGroupOverview_(fromYmd){
       const groupKey = admin_normalizeServingGroup_(pos.group);
       if (!groupKey || !out.byGroup[groupKey]) return;
       const raw = String(row[pos.colIndex - 1] || '').trim();
+      if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
       const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
       const missing = Math.max(0, minRequired - ids.length);

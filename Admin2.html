@@ -1924,7 +1924,8 @@
                 var isMediaPos = /^Media_/i.test(String(pos.position||''));
                 var urgentGap = (diff >= 0 && diff < 28 && currentCount < minReq);
                 if (isMediaPos && assignedMemberCount > 0) urgentGap = false;
-                var maxSlots = Number(pos.max || 1);
+                var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
+                if (!maxSlots || maxSlots < 1) maxSlots = 1;
                 var existingEntries = (cell && cell.length) ? cell : [];
                 var entries = existingEntries.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
