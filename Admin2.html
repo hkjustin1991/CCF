@@ -209,6 +209,7 @@
     }
     .groupSectionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
+     .servingEditBtn{width:auto;padding:6px 10px;border-radius:10px;font-size:12px}
     .servingPlanEntry{
       font-size:12px;
       margin-top:4px;
@@ -727,10 +728,14 @@
       if (!modal) return;
       modal.addEventListener('wheel', function(e){
         var target = e.target && e.target.closest ? e.target.closest('.tableWrap') : null;
-        var host = target || modal;
         var dy = Number(e.deltaY || 0);
         var dx = Number(e.deltaX || 0);
         if (!dy && !dx) return;
+        var targetCanV = !!(target && target.scrollHeight > target.clientHeight);
+        var targetCanH = !!(target && target.scrollWidth > target.clientWidth);
+        var modalCanV = modal.scrollHeight > modal.clientHeight;
+        var host = target || modal;
+        if (dy && !targetCanV && modalCanV) host = modal;
         var canV = host.scrollHeight > host.clientHeight;
         var canH = host.scrollWidth > host.clientWidth;
         if (!canV && !canH) return;
@@ -1901,10 +1906,10 @@
                     '</button>';
                 }).filter(Boolean);
                 for (var slotIdx = entries.length; slotIdx < maxSlots; slotIdx++){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+slotIdx+'" data-raw="">空缺 / Empty</button>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+slotIdx+'" data-raw="">空缺 / Vacant</button>');
                 }
                 if(!entries.length){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="0" data-raw="">空缺 / Empty</button>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="0" data-raw="">空缺 / Vacant</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
@@ -1940,6 +1945,7 @@
 
           listEl.innerHTML = monthNavHtml + groupSections;
           attachScrollControls_(listEl);
+          enableDragScroll_(listEl);
 
           Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
             btn.onclick = function(){
@@ -2087,7 +2093,7 @@
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
                      '<button type="button" class="btnNa assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
-                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">🔒 關閉 / Close</button>'+
+                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">🔒 關閉崗位 / Close position</button>'+
                    '</div>'+
                    '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
@@ -2615,7 +2621,7 @@
             : '')+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
             '<button id="btnQuickNa" class="btnNa">🟤 N/A</button>'+
-            '<button id="btnQuickClosePos" class="btnDanger">🔒 關閉 / Close</button>'+
+            '<button id="btnQuickClosePos" class="btnDanger">🔒 關閉崗位 / Close position</button>'+
             (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+

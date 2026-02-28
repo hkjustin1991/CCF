@@ -628,9 +628,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const updatedHeaderMap = admin_getServingMatrixHeaderMap_(sh);
   const lastCol = sh.getLastColumn();
   const rowValues = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
-  for (let i=1;i<lastCol;i++){
-    rowValues[i] = '';
-  }
   cleaned.forEach(function(r){
     const colIdx = updatedHeaderMap[r.position];
     if (colIdx) rowValues[colIdx-1] = r.value || '';
