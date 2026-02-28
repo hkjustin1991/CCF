@@ -2164,7 +2164,8 @@ function admin_isServingNaValue_(value){
 }
 function admin_isServingClosedValue_(value){
   const v = String(value || '').trim().toUpperCase();
-  return (v === 'CLOSED' || v === '__CLOSED__');
+  if (!v) return false;
+  return (v === 'CLOSED' || v === '__CLOSED__' || v.indexOf('CLOSED') === 0);
 }
 function admin_isServingNaRow_(row){
   return admin_isServingNaValue_(row.position) || admin_isServingNaValue_(row.slot) || admin_isServingNaValue_(row.memberId);
