@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-02-15.admin95
-  For Admin.gs: v2026-02-15.admin95
+  UI VERSION TAG: admin2-ui-2026-02-15.admin96
+  For Admin.gs: v2026-02-15.admin96
   ============================================================
   -->
 
@@ -71,6 +71,9 @@
     .btnNa{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
     .btnGhost{background:#fff;border-color:rgba(10,30,80,0.12)}             /* white */
     .btnPink{background:#fff1f4;border-color:rgba(217,60,94,0.25)}          /* pink */
+    .btnSub{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
+    .btnSmall{width:auto;padding:8px 12px;border-radius:10px;font-size:13px}
+    .alt{background:#fff;border:1px solid var(--border);padding:8px 12px;border-radius:10px;font-size:13px;cursor:pointer}
 
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
@@ -337,10 +340,11 @@
     </footer>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" integrity="sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 
   <script>
+    window.__ADMIN_SERVING_CONFIG__ = <?!= JSON.stringify(ADMIN_SERVING_CONFIG || {}) ?>;
     var App = {
       token:null,
       actor:null, // {id, role, nameZh, nameEn}
@@ -398,9 +402,11 @@
 
     function getApiEndpoint(){
       try{
-        if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
-        var qp = new URLSearchParams(window.location.search || '');
-        if (qp.get('api')) return String(qp.get('api'));
+        var endpoint = String(window.CCF_API_ENDPOINT || '').trim();
+        if(!endpoint) return '';
+        var u = new URL(endpoint, window.location.href);
+        var allowed = [window.location.origin];
+        return (allowed.indexOf(u.origin) >= 0) ? u.toString() : '';
       }catch(e){}
       return '';
     }
@@ -514,7 +520,7 @@
         if(!data || String(data.state || '') !== String(state)) return;
 
         var type = String(data.type || '');
-        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ clear('cancel'); return; }
+        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ if(typeof opts.onCancel==='function') opts.onCancel(data.detail || 'cancel'); clear('cancel'); return; }
         if(type === 'CCF_QR_ERROR'){
           if(typeof opts.onError === 'function') opts.onError(data.detail || 'scanner error');
           clear('error');
@@ -535,7 +541,7 @@
       if(flow) target.searchParams.set('flow', flow);
 
       popup = window.open(target.toString(), 'ccf_ext_scanner_admin', 'popup,width=460,height=760');
-      if(!popup){ clear('blocked'); return null; }
+      if(!popup){ if(typeof opts.onPopupBlocked==='function') opts.onPopupBlocked(); clear('blocked'); return null; }
 
       timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
       poll = setInterval(function(){
@@ -568,7 +574,8 @@
       var key = String(group || '').trim().toUpperCase();
       return SERVING_GROUP_LABELS[key] || key || '—';
     }
-    var SERVING_POSITION_LABELS = {
+    var ADMIN_SERVING_CONFIG = (typeof window !== 'undefined' && window.__ADMIN_SERVING_CONFIG__) ? window.__ADMIN_SERVING_CONFIG__ : {};
+    var SERVING_POSITION_LABELS = (ADMIN_SERVING_CONFIG.labels || {
       Worship_Lead:         { zh:'敬拜主領', en:'Worship Lead' },
       Worship_Singer:       { zh:'和唱', en:'Singer' },
       Worship_Pianist:      { zh:'司琴', en:'Pianist' },
@@ -587,8 +594,8 @@
       Logistic_Refreshment: { zh:'茶水', en:'Refreshments' },
       Finance_Offering:     { zh:'財務', en:'Offering / Finance' },
       Other:                { zh:'其他', en:'Other' }
-    };
-    var POSITION_GROUP = {
+    });
+    var POSITION_GROUP = (ADMIN_SERVING_CONFIG.groupMap || {
       Worship_Lead: 'worship',
       Worship_Singer: 'worship',
       Worship_Pianist: 'worship',
@@ -607,8 +614,8 @@
       Logistic_Refreshment: 'logistic',
       Finance_Offering: 'finance',
       Other: 'other'
-    };
-    var POSITION_MAX = {
+    });
+    var POSITION_MAX = (ADMIN_SERVING_CONFIG.maxMap || {
       Worship_Singer: 2,
       Worship_Instrument: 2,
       Media_AV: 2,
@@ -619,11 +626,11 @@
       Logistic_Venue: 2,
       Logistic_Refreshment: 2,
       Finance_Offering: 3
-    };
-    var POSITION_MIN = {
+    });
+    var POSITION_MIN = (ADMIN_SERVING_CONFIG.minMap || {
       Finance_Offering: 2,
       Other: 0
-    };
+    });
     function positionMinRequired_(position){
       var key = String(position||'').trim();
       if (Object.prototype.hasOwnProperty.call(POSITION_MIN, key)) return Number(POSITION_MIN[key] || 0);
@@ -672,26 +679,33 @@
       }
     }
 
-    function showBox(targetId, kind, titleZh, titleEn, detailHtml){
-      detailHtml = detailHtml || '';
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml, allowHtmlDetail){
       var el = $(targetId); if(!el) return;
+      var safeZh = escapeHtml(String(titleZh || ''));
+      var safeEn = escapeHtml(String(titleEn || ''));
+      var detail = String(detailHtml || '');
+      if (!allowHtmlDetail) detail = escapeHtml(detail);
       el.innerHTML =
         '<div class="msgBox '+kind+'">' +
-          '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'">'+titleZh+'</div>' +
-          '<div style="margin-top:4px;font-size:16px;">'+titleEn+'</div>' +
-          (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '') +
+          '<div class="big '+(kind==='ok'?'ok':(kind==='err'?'err':'warn'))+'>'+safeZh+'</div>' +
+          '<div style="margin-top:4px;font-size:16px;">'+safeEn+'</div>' +
+          (detail ? ('<div style="margin-top:10px;">'+detail+'</div>') : '') +
         '</div>';
     }
 
     function showErr(targetId, res){
       var code = res && res.code ? (' <span class="chip">'+escapeHtml(res.code)+'</span>') : '';
-      var detail = (res && res.detailHtml) ? res.detailHtml : (res && res.detail ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '');
+      var detail = '';
+      var allowHtmlDetail = false;
+      if (res && res.trustedDetailHtml && res.detailHtml){ detail = String(res.detailHtml||''); allowHtmlDetail = true; }
+      else if (res && res.detail){ detail = '<div class="small">'+escapeHtml(res.detail)+'</div>'; allowHtmlDetail = true; }
       showBox(
         targetId,
         'err',
         escapeHtml((res && res.zh) || '系統錯誤') + code,
         escapeHtml((res && res.en) || 'System error'),
-        detail
+        detail,
+        allowHtmlDetail
       );
     }
 
@@ -762,27 +776,30 @@
       wraps.forEach(function(wrap){
         if (!wrap || wrap.__dragBound) return;
         wrap.__dragBound = true;
-        var down = false;
-        var sx = 0, sy = 0, sl = 0, st = 0;
-        wrap.addEventListener('mousedown', function(e){
+        var active = null;
+        wrap.addEventListener('pointerdown', function(e){
           if (!e || e.button !== 0) return;
           var t = e.target;
           if (t && t.closest && t.closest('input, select, textarea, button, a, .suggestBtn, .quickBubble')) return;
-          down = true;
-          sx = e.clientX; sy = e.clientY;
-          sl = wrap.scrollLeft; st = wrap.scrollTop;
+          active = { id:e.pointerId, sx:e.clientX, sy:e.clientY, sl:wrap.scrollLeft, st:wrap.scrollTop };
+          try{ wrap.setPointerCapture(e.pointerId); }catch(err){}
           wrap.style.cursor = 'grabbing';
           e.preventDefault();
         });
-        window.addEventListener('mousemove', function(e){
-          if (!down) return;
-          wrap.scrollLeft = sl - (e.clientX - sx);
-          wrap.scrollTop = st - (e.clientY - sy);
+        wrap.addEventListener('pointermove', function(e){
+          if (!active || e.pointerId !== active.id) return;
+          wrap.scrollLeft = active.sl - (e.clientX - active.sx);
+          wrap.scrollTop = active.st - (e.clientY - active.sy);
         });
-        window.addEventListener('mouseup', function(){
-          down = false;
+        function endDrag(e){
+          if (!active) return;
+          if (e && e.pointerId !== undefined && e.pointerId !== active.id) return;
+          try{ if (e && e.pointerId !== undefined) wrap.releasePointerCapture(e.pointerId); }catch(err){}
+          active = null;
           wrap.style.cursor = '';
-        });
+        }
+        wrap.addEventListener('pointerup', endDrag);
+        wrap.addEventListener('pointercancel', endDrag);
       });
     }
     function clear(targetId){ var el=$(targetId); if(el) el.innerHTML=''; }
@@ -1193,7 +1210,6 @@
 
     var EXTERNAL_SCANNER_URL = String(<?!= JSON.stringify(EXTERNAL_SCANNER_URL || '') ?> || '').trim();
     var EXTERNAL_SCANNER_ORIGIN = String(<?!= JSON.stringify(EXTERNAL_SCANNER_ORIGIN || '') ?> || '').trim();
-    var pendingExternalScanner_ = null;
     var EXTERNAL_SCANNER_CONFIG_ERROR = '';
 
     function validateExternalScannerConfig_(){
@@ -1218,7 +1234,7 @@
 
     function scannerConfigWarningHtml_(){
       var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return showBox('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
+      return '<div class="msgBox warn"><div class="big warn">⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕</div><div style="margin-top:4px;font-size:16px;">⚠️ External scanner config is invalid. External scanner has been disabled.</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -1229,11 +1245,11 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = false;
+          btn.disabled = true;
           btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
-      var msgEl = $(msgId || 'msg');
+      var msgEl = $(msgId || 'loginMsg');
       if(msgEl && !String(msgEl.innerHTML || '').trim()) msgEl.innerHTML = scannerConfigWarningHtml_();
       return false;
     }
@@ -1245,83 +1261,33 @@
       }catch(e){}
       return true;
     }
+
+    function collectCameraDiagnostics_(extra){
+      var topSelf = true;
+      try{ topSelf = (window.top === window.self); }catch(e){ topSelf = false; }
+      return {
+        ua: getUA(),
+        deviceId: getDeviceId(),
+        topSelf: topSelf,
+        cameraPolicyAllowed: cameraPolicyAllowed_(),
+        extra: extra || {}
+      };
+    }
+    function reportScannerE420_(stage, diagnostics){
+      try{
+        callApi('api_admin_log_scanner_e420_public', {
+          stage: String(stage||''),
+          diagnostics: diagnostics || {},
+          deviceId: getDeviceId(),
+          ua: getUA()
+        }).catch(function(){});
+      }catch(e){}
+    }
     function shouldPreferExternalScanner_(){
       var topSelf = true;
       try{ topSelf = (window.top === window.self); }catch(e){ topSelf = false; }
       return !cameraPolicyAllowed_() || !topSelf;
     }
-    function randomStateToken_(){
-      var arr = new Uint8Array(16);
-      if(window.crypto && window.crypto.getRandomValues){ window.crypto.getRandomValues(arr); }
-      else { for(var i=0;i<arr.length;i++) arr[i]=Math.floor(Math.random()*256); }
-      var out='';
-      for(var j=0;j<arr.length;j++) out += arr[j].toString(16).padStart(2,'0');
-      return out;
-    }
-    function openExternalScanner_(arg1, arg2){
-      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
-      opts = opts || {};
-      var flow = String(opts.flow || 'admin');
-      if(!EXTERNAL_SCANNER_CONFIG.ok){
-        if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'External scanner configuration is invalid.');
-        if(typeof opts.onStatus === 'function') opts.onStatus('config_invalid');
-        return null;
-      }
-      var state = randomStateToken_();
-      pendingExternalScanner_ = {
-        state: state,
-        flow: flow,
-        onPayload: opts.onPayload,
-        onCancel: opts.onCancel,
-        onError: opts.onError,
-        onStatus: opts.onStatus
-      };
-
-      var target = new URL(EXTERNAL_SCANNER_URL);
-      var origin = '';
-      try{ origin = String(window.location.origin || ''); }catch(e){}
-      if(!origin && window.location){ origin = window.location.protocol + '//' + window.location.host; }
-      target.searchParams.set('origin', origin);
-      target.searchParams.set('state', state);
-      target.searchParams.set('flow', flow);
-
-      var w = null;
-      try{ w = window.open(target.toString(), '_blank', 'width=460,height=760'); }catch(e){}
-      if(!w){
-        pendingExternalScanner_ = null;
-        if(typeof opts.onPopupBlocked === 'function') opts.onPopupBlocked();
-        if(typeof opts.onStatus === 'function') opts.onStatus('blocked');
-        return null;
-      }
-      return state;
-    }
-
-    window.addEventListener('message', function(event){
-      if(!pendingExternalScanner_) return;
-      if(!EXTERNAL_SCANNER_ORIGIN || event.origin !== EXTERNAL_SCANNER_ORIGIN) return;
-      var data = event.data || {};
-      if(!data || String(data.state || '') !== String(pendingExternalScanner_.state || '')) return;
-      var type = String(data.type || '');
-      if(type !== 'CCF_QR_RESULT' && type !== 'CCF_QR_CANCEL' && type !== 'CCF_QR_ERROR') return;
-      var cbPayload = pendingExternalScanner_.onPayload;
-      var cbCancel = pendingExternalScanner_.onCancel;
-      var cbError = pendingExternalScanner_.onError;
-      var cbStatus = pendingExternalScanner_.onStatus;
-      pendingExternalScanner_ = null;
-      if(type === 'CCF_QR_RESULT'){
-        if(typeof cbPayload === 'function') cbPayload(data.payload);
-        if(typeof cbStatus === 'function') cbStatus('success');
-      }
-      if(type === 'CCF_QR_CANCEL'){
-        if(typeof cbCancel === 'function') cbCancel(data.detail);
-        if(typeof cbStatus === 'function') cbStatus('cancel');
-      }
-      if(type === 'CCF_QR_ERROR'){
-        if(typeof cbError === 'function') cbError(data.detail);
-        if(typeof cbStatus === 'function') cbStatus('error');
-      }
-    });
-
     function viewLogin(){
       return ''+
         '<div class="card">'+
@@ -2031,6 +1997,7 @@
     }
 
     function openServingEditModal(eventKey, groupKey){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var filterGroupKey = String(groupKey||'').trim();
       var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
@@ -2432,7 +2399,7 @@
                       return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                     }).join('<br/>');
                   }
-                showBox('servingEditMsg','warn', titleZh, titleEn, detail);
+                showBox('servingEditMsg','warn', titleZh, titleEn, detail, true);
                   var btnRow = document.createElement('div');
                   btnRow.className = 'miniBtnRow';
                   var btn = document.createElement('button');
@@ -2485,6 +2452,7 @@
     }
 
     function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var pos = String(position||'').trim();
       var idx = parseInt(String(entryIndex||'0'), 10);
@@ -2570,7 +2538,7 @@
                     return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                   }).join('<br/>');
                 }
-                showBox('quickMsg','warn', titleZh, titleEn, detail);
+                showBox('quickMsg','warn', titleZh, titleEn, detail, true);
                 var btnRow = document.createElement('div');
                 btnRow.className = 'miniBtnRow';
                 var btn = document.createElement('button');
@@ -3654,7 +3622,18 @@
       });
     }
 
+
+    function isEmbeddedBlocked_(){
+      try{ return window.top !== window.self; }catch(e){ return true; }
+    }
+    function ensureNotEmbeddedForSensitive_(){
+      if (!isEmbeddedBlocked_()) return true;
+      var modal = openModal('<div class="big err">安全限制 / Security restriction</div><div class="small">請在瀏覽器直接開啟此管理頁面。<br/>Please open this admin portal directly in your browser (not inside an iframe).</div><div class="miniBtnRow" style="margin-top:12px;"><button id="btnEmbClose" class="btnBack">✖ Close</button></div>');
+      var b = modal.querySelector('#btnEmbClose'); if (b) b.onclick = function(){ closeModal(modal); };
+      return false;
+    }
     function openContactFlow_(memberId){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_CONTACT', memberId, 'contact');
 
       var m = openModal(
@@ -3678,6 +3657,7 @@
     }
 
     function openStatusFlow_(memberId, currentStatus){
+      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_STATUS', memberId, 'status');
 
       var options = '';
@@ -3837,7 +3817,7 @@
         App.servingPlanTimer = null;
       }
 
-      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); applyExternalScannerGuard_('msg', []); attachScrollControls_(root); return; }
+      if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); applyExternalScannerGuard_('loginMsg', []); attachScrollControls_(root); return; }
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); attachScrollControls_(root); return; }
       if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); attachScrollControls_(root); return; }
       if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); attachScrollControls_(root); return; }

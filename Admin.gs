@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-02-15.admin95
+ * v2026-02-15.admin96
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-15.admin95';
+const ADMIN_VERSION = '2026-02-15.admin96';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -193,6 +193,10 @@ const ADMIN_CACHE_FIRSTSEEN_TTL = 10 * 60;
 
 const ADMIN_CACHE_LOWATT_KEY = 'admin_lowatt_v1';
 const ADMIN_CACHE_LOWATT_TTL = 10 * 60;
+const ADMIN_CACHE_CHECKINS_MANIFEST_KEY = 'admin_checkins_manifest_v1';
+const ADMIN_CACHE_CHECKINS_PART_PREFIX = 'admin_checkins_part_v1_';
+const ADMIN_CACHE_CHECKINS_TTL = 60;
+const ADMIN_CACHE_CHECKINS_PART_CHARS = 85000;
 
 // ---- Page ----
 function doGetAdmin_(e){
@@ -202,6 +206,12 @@ function doGetAdmin_(e){
   t.EXTERNAL_SCANNER_URL = scannerCfg.url;
   t.EXTERNAL_SCANNER_ORIGIN = scannerCfg.origin;
   t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
+  t.ADMIN_SERVING_CONFIG = {
+    labels: ADMIN_SERVING_POSITION_LABELS,
+    groupMap: ADMIN_SERVING_POSITION_GROUP,
+    maxMap: ADMIN_SERVING_POSITION_MAX,
+    minMap: ADMIN_SERVING_POSITION_MIN
+  };
 
   // Official portal naming
   t.ADMIN_TITLE_ZH = '粵語基督徒團契 - ❤️爱使我们相聚在一起❤️';
@@ -209,7 +219,7 @@ function doGetAdmin_(e){
 
   return t.evaluate()
     .setTitle('CCF Admin Portal')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.SAMEORIGIN);
 }
 
 /**
@@ -815,7 +825,7 @@ function api_admin_stats(token, fromDate, toDate){
   const firstSeenRes = admin_getFirstSeenIndexCached_();
   const firstSeen = firstSeenRes.map;
 
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   if (!check.ok) return check;
 
   // eventKey -> Set(memberId) (dedupe per service)
@@ -907,7 +917,7 @@ function api_admin_event_detail(token, eventKey){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
 
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   if (!check.ok) return check;
 
   const set = new Set();
@@ -973,7 +983,7 @@ function api_admin_period_stats(token, fromDate, toDate){
   const range = admin_validateRange_(s.actor, fromDate, toDate);
   if (!range.ok) return range;
 
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   if (!check.ok) return check;
 
   const evAttendees = new Map();
@@ -1105,7 +1115,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
   const qU = query.toUpperCase();
   const qL = query.toLowerCase();
 
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   if (!check.ok) return check;
 
   const evSet = new Set();
@@ -1209,31 +1219,47 @@ function api_admin_member_search(token, q){
 
   const mi = admin_getMembersIndex_();
   const flags = admin_getLowAttendanceFlagsCached_();
-  const out = [];
   const qU = query.toUpperCase();
   const qL = query.toLowerCase();
+  const scored = [];
 
   for (const id in mi.byId){
     const m = mi.byId[id];
+    const idU = String(m.id||'').toUpperCase();
+    const nameZh = String(m.nameZh||'');
+    const nameEn = String(m.nameEn||'');
+    const hay = (idU + ' | ' + nameZh + ' | ' + nameEn).toLowerCase();
+    if (!(idU.includes(qU) || hay.includes(qL))) continue;
 
-    const hay = (m.id + ' | ' + (m.nameZh||'') + ' | ' + (m.nameEn||'')).toLowerCase();
-    if (!(m.id.toUpperCase().includes(qU) || hay.includes(qL))) continue;
+    let score = 0;
+    if (idU === qU) score += 3000;
+    else if (idU.indexOf(qU) === 0) score += 2000;
+    else if (idU.includes(qU)) score += 1500;
+    if (nameZh.toLowerCase().indexOf(qL) === 0 || nameEn.toLowerCase().indexOf(qL) === 0) score += 900;
+    else if (hay.includes(qL)) score += 600;
 
     const st = admin_normStatus_(m.status);
-
-    out.push({
-      id: m.id,
-      nameZh: m.nameZh||'',
-      nameEn: m.nameEn||'',
-      status: st,
-      servingGroups: m.servingGroups || [],
-      servingGLGroups: m.servingGLGroups || [],
-      lowFlag: !!flags.flagById[m.id],
-      lowFlagZh: flags.flagById[m.id] ? '出席偏低：建議關顧跟進' : '',
-      lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : ''
+    scored.push({
+      score: score,
+      row: {
+        id: m.id,
+        nameZh: m.nameZh||'',
+        nameEn: m.nameEn||'',
+        status: st,
+        servingGroups: m.servingGroups || [],
+        servingGLGroups: m.servingGLGroups || [],
+        lowFlag: !!flags.flagById[m.id],
+        lowFlagZh: flags.flagById[m.id] ? '出席偏低：建議關顧跟進' : '',
+        lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : ''
+      }
     });
-    if (out.length >= 12) break;
   }
+
+  scored.sort(function(a,b){
+    if (b.score !== a.score) return b.score - a.score;
+    return String(a.row.id||'').localeCompare(String(b.row.id||''));
+  });
+  const out = scored.slice(0,12).map(function(x){ return x.row; });
 
   admin_audit_(s.actor, 'MEMBER_SEARCH', JSON.stringify({q:query, results:out.length}), 'member_search');
 
@@ -1269,7 +1295,7 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
     if (ms && ms.getTime() > denomFrom.getTime()) denomFrom = ms;
   }
 
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   if (!check.ok) return check;
 
   const allEvents = new Set();
@@ -1693,8 +1719,8 @@ function admin_appendAwayHistory_(memberId, periods, actor){
   const id = String(memberId||'').trim().toUpperCase();
   if (!id) return;
   const sh = admin_ensureAwaySheet_();
-  const now = nowUk_();
-  const role = (actor && actor.id === 'SUPERUSER') ? 'SUPERUSER' : String((actor && actor.status) || '').trim().toUpperCase();
+  const now = admin_nowIso_();
+  const role = (actor && actor.id === 'SUPERUSER') ? 'SUPERUSER' : String((actor && actor.role) || '').trim().toUpperCase();
   const by = String((actor && actor.id) || '').trim().toUpperCase();
   const list = Array.isArray(periods) ? periods : [];
   if (!list.length){
@@ -2642,6 +2668,44 @@ function admin_getCheckinsData_(){
   return { ok:true, rows: rows };
 }
 
+function admin_getCheckinsDataCached_(){
+  const cache = CacheService.getScriptCache();
+  try{
+    const manifestRaw = cache.get(ADMIN_CACHE_CHECKINS_MANIFEST_KEY);
+    if (manifestRaw){
+      const manifest = JSON.parse(manifestRaw);
+      const nParts = Number(manifest.nParts || 0);
+      if (nParts > 0){
+        const parts = [];
+        for (let i=0;i<nParts;i++){
+          const chunk = cache.get(ADMIN_CACHE_CHECKINS_PART_PREFIX + i);
+          if (!chunk){ parts.length = 0; break; }
+          parts.push(chunk);
+        }
+        if (parts.length === nParts){
+          const rows = JSON.parse(parts.join(''));
+          return { ok:true, rows: Array.isArray(rows)?rows:[], usedCache:true };
+        }
+      }
+    }
+  }catch(e){}
+
+  const fresh = admin_getCheckinsData_();
+  if (!fresh || !fresh.ok) return fresh;
+  try{
+    const payload = JSON.stringify(fresh.rows || []);
+    const nParts = Math.max(1, Math.ceil(payload.length / ADMIN_CACHE_CHECKINS_PART_CHARS));
+    const manifest = { count: (fresh.rows||[]).length, updatedAt: admin_nowIso_(), nParts: nParts };
+    for (let i=0;i<nParts;i++){
+      const st = i * ADMIN_CACHE_CHECKINS_PART_CHARS;
+      const en = st + ADMIN_CACHE_CHECKINS_PART_CHARS;
+      cache.put(ADMIN_CACHE_CHECKINS_PART_PREFIX + i, payload.slice(st,en), ADMIN_CACHE_CHECKINS_TTL);
+    }
+    cache.put(ADMIN_CACHE_CHECKINS_MANIFEST_KEY, JSON.stringify(manifest), ADMIN_CACHE_CHECKINS_TTL);
+  }catch(e){}
+  return { ok:true, rows:fresh.rows || [], usedCache:false };
+}
+
 // FirstSeen cache
 function admin_getFirstSeenIndexCached_(){
   const cache = CacheService.getScriptCache();
@@ -2654,7 +2718,7 @@ function admin_getFirstSeenIndexCached_(){
   return { map: built.map, usedCache:false };
 }
 function admin_buildFirstSeenIndex_(){
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   const map = {};
   const tsById = {};
   if (check.ok){
@@ -2708,7 +2772,7 @@ function admin_buildLowAttendanceFlags_(){
   const enabled = (today.getTime() >= ADMIN_FLAG_START_DATE_UTC.getTime());
 
   const mi = admin_getMembersIndex_();
-  const check = admin_getCheckinsData_();
+  const check = admin_getCheckinsDataCached_();
   const out = { enabled: enabled, flagById: {} };
   if (!enabled) return out;
 
