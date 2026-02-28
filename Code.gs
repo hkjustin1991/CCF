@@ -201,7 +201,7 @@ function invokeRpcFunction_(fn, args){
     throw new Error('Invalid function name.');
   }
 
-  const allowedPrefixes = ['api_', 'admin_', 'reg_'];
+  const allowedPrefixes = ['api_'];
   const isAllowed = allowedPrefixes.some(prefix => fn.indexOf(prefix) === 0);
   if (!isAllowed) {
     throw new Error('Function not exposed over RPC.');
@@ -262,7 +262,7 @@ function isOptedOut_(optOutRaw){
   const v = String(optOutRaw || '').trim().toUpperCase();
   if (!v) return false;
   if (v === '0' || v === 'N' || v === 'NO' || v === 'FALSE') return false;
-  return ['1','Y','YES','TRUE','OPTOUT'].includes(v) || v.length > 0;
+  return ['1','Y','YES','TRUE','OPTOUT'].includes(v);
 }
 
 function isPrivilegedStaff_(st){
@@ -375,13 +375,15 @@ function ensureMembersOptionalColumns_(){
   }
 }
 
-function getMembersIndex_() {
+function getMembersIndex_(opts) {
+  opts = opts || {};
+  var ensureOptional = (opts.ensureOptional !== false);
   const cache = CacheService.getScriptCache();
   const cacheKey = 'membersIndex_staff_v1';
   const cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  ensureMembersOptionalColumns_();
+  if (ensureOptional) ensureMembersOptionalColumns_();
 
   const sh = getMembersSheet_();
   const lastRow = sh.getLastRow();
@@ -2116,7 +2118,7 @@ function api_selfcheck_readonly(token){
 
   // Members index
   try{
-    const mi = getMembersIndex_();
+    const mi = getMembersIndex_({ ensureOptional:false });
     const n = mi && mi.byId ? Object.keys(mi.byId).length : 0;
     add(true, 'Members 索引正常', 'Members index OK', 'count=' + n);
   }catch(e){

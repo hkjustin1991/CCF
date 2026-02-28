@@ -174,7 +174,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · ui staff12-ui1-bluefix2</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff12-ui1-bluefix2</span></div>
     </header>
 
     <main id="app"></main>
@@ -400,7 +400,7 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = false;
+          btn.disabled = true;
           btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
@@ -953,12 +953,12 @@
       stopScan();
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         var d0 = collectCameraDiagnostics_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
-        var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
-        console.error('E420 camera unsupported', detail0.diagnostics);
+        var detail0Str = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
+        console.error('E420 camera unsupported', detail0Str);
         reportScannerE420_('unsupported', d0);
         showErr(msgTarget, {
-          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
-          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0Str,
+          detailHtml: '<div class="small">'+escapeHtml(detail0Str||'')+'</div>' +
             bindCameraRetryButton_(msgTarget, function(){
               openExternalScanner_({
                 flow: externalFlow,
@@ -2028,60 +2028,6 @@
           }
 
           var m = res.member || {};
-          var family = Array.isArray(res.relatedMembers) ? res.relatedMembers : [];
-          if(!family.length){
-            family = [{
-              id: m.id || '',
-              nameZh: m.nameZh || '',
-              nameEn: m.nameEn || '',
-              preferredName: m.preferredName || '',
-              isMinor: !!m.isMinor,
-              todayCheckedIn: !!res.today,
-              todayTimeUk: (res.today && res.today.timeUk) || '',
-              todayMethod: (res.today && res.today.method) || ''
-            }];
-          }
-
-          var selected = {};
-          family.forEach(function(f){ selected[String(f.id||'').toUpperCase()] = false; });
-          selected[String(m.id||'').toUpperCase()] = true;
-
-          function getSelectedIds(){
-            return family.filter(function(f){ return !!selected[String(f.id||'').toUpperCase()]; }).map(function(f){ return String(f.id||'').toUpperCase(); });
-          }
-
-          function buildFamilyListHtml(){
-            return family.map(function(f){
-              var fid = String(f.id||'').toUpperCase();
-              var line = formatMemberNameLine_(f.nameZh, f.nameEn, f.preferredName) || fid;
-              var checked = selected[fid] ? 'checked' : '';
-              var chips = '<span class="chip">'+escapeHtml(fid)+'</span>'+
-                (f.isMinor ? '<span class="chip warn">🧒 Minor</span>' : '')+
-                (f.todayCheckedIn ? '<span class="chip warn">✅ Today '+escapeHtml(f.todayTimeUk||'')+'</span>' : '');
-              return ''+
-                '<label class="nameItem" style="display:block;cursor:pointer;">'+
-                  '<div style="display:flex;gap:8px;align-items:flex-start;">'+
-                    '<input type="checkbox" class="famCk" data-mid="'+escapeHtml(fid)+'" '+checked+' style="margin-top:2px;" />'+
-                    '<div style="flex:1;">'+
-                      '<div class="zh">'+escapeHtml(line)+'</div>'+
-                      '<div class="chipRow">'+chips+'</div>'+
-                    '</div>'+
-                  '</div>'+
-                '</label>';
-            }).join('');
-          }
-
-          function bindFamilyChecks(){
-            Array.prototype.slice.call(confirmEl.querySelectorAll('.famCk')).forEach(function(el){
-              el.onchange = function(){
-                var mid = String(el.getAttribute('data-mid')||'').toUpperCase();
-                selected[mid] = !!el.checked;
-                var btn = $('btnManualConfirmFamily');
-                if(btn) btn.disabled = (getSelectedIds().length===0);
-              };
-            });
-          }
-
           var nameLine = formatMemberName_(m) || m.id || '';
           var pref = (m.preferredName||'').trim();
 
@@ -2137,8 +2083,6 @@
               '<button id="btnManualConfirmFamily" class="primary">✅ 確認簽到所選 / Confirm selected</button>'+
               '<button id="btnManualBackSearch" class="alt">⬅️ 返回搜尋 / Back to search</button>'+
             '</div>';
-
-          bindFamilyChecks();
 
           $('btnManualBackSearch').onclick = function(){
             unlockSearchUi();
