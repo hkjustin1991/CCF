@@ -1935,20 +1935,26 @@
               var rowCells = groupPositions.map(function(pos){
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
                 var minReq = positionMinRequired_(pos.position);
-                                var assignedMemberCount = (cell || []).filter(function(entry){
-                  var mid = String((entry && entry.memberId) || '').trim().toUpperCase();
-                  return !!mid && mid !== 'N/A';
+                var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
+                if (!maxSlots || maxSlots < 1) maxSlots = 1;
+                var existingEntries = (cell && cell.length) ? cell : [];
+                var hasClosed = existingEntries.some(function(entry){
+                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
+                  return isServingClosedToken_(raw);
+                });
+                var assignedMemberCount = hasClosed ? minReq : existingEntries.filter(function(entry){
+                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim().toUpperCase();
+                  if (!raw) return false;
+                  if (isServingClosedToken_(raw)) return false;
+                  return true;
                 }).length;
                 var ymd = eventDateYmdFromKey(ev.eventKey||'');
                 var evDate = parseYmd(ymd);
                 var today = parseYmd(getTodayYmdUk());
                 var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
                 var isMediaPos = /^Media_/i.test(String(pos.position||''));
-                var urgentGap = (diff >= 0 && diff < 28 && assignedMemberCount < minReq);
+                var urgentGap = (!hasClosed) && (diff >= 0 && diff < 42 && assignedMemberCount < minReq);
                 if (isMediaPos && assignedMemberCount > 0) urgentGap = false;
-                var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
-                if (!maxSlots || maxSlots < 1) maxSlots = 1;
-                var existingEntries = (cell && cell.length) ? cell : [];
                 var entries = existingEntries.map(function(entry, idx){
                   var label = formatServingEntry_(entry);
                   if (!label) return '';
@@ -1958,10 +1964,6 @@
                       escapeHtml(label)+
                     '</button>';
                 }).filter(Boolean);
-                var hasClosed = existingEntries.some(function(entry){
-                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
-                  return isServingClosedToken_(raw);
-                });
                 var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
                 if (vacantCount > 0){
                   entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+entries.length+'" data-raw="">空缺 x'+vacantCount+' / Vacant x'+vacantCount+'</button>');
@@ -2079,10 +2081,12 @@
           ? positions.filter(function(pos){ return (POSITION_GROUP[pos] || '') === filterGroupKey; })
           : positions.slice();
         var values = res.values || {};
+        var initialValues = {};
         var members = Array.isArray(res.members) ? res.members : [];
         var memberMap = {};
         var assignedMap = {};
         members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
+        displayPositions.forEach(function(p){ initialValues[p] = String(values[p] || '').trim(); });
 
         function isNaToken_(token){
           var up = String(token||'').trim().toUpperCase();
@@ -2108,7 +2112,13 @@
             var id = extractMemberId_(token);
             return id ? formatServingToken_(memberMap, id) : token;
           }).filter(Boolean);
-          selectedSlotMap[pos] = 0;
+          var defaultIdx = assignedMap[pos].findIndex(function(t){ return !String(t||'').trim(); });
+          if (defaultIdx < 0){
+            var maxSlots = Number(POSITION_MAX[pos] || 1);
+            if (maxSlots < 1) maxSlots = 1;
+            defaultIdx = assignedMap[pos].length < maxSlots ? assignedMap[pos].length : 0;
+          }
+          selectedSlotMap[pos] = defaultIdx < 0 ? 0 : defaultIdx;
         });
 
         function renderAssignedList_(pos){
@@ -2424,6 +2434,16 @@
             var payload = displayPositions.map(function(pos){
               return { position: pos, value: String(values[pos] || '').trim() };
             });
+            var hasChanges = payload.some(function(r){
+              var oldVal = String(initialValues[r.position] || '').trim();
+              var newVal = String(r.value || '').trim();
+              return oldVal !== newVal;
+            });
+            if (!hasChanges){
+              showBox('servingEditMsg','ok','沒有更改','No changes detected.');
+              return;
+            }
+            if (!confirm('確認儲存更改？\nConfirm save changes?')) return;
             callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
@@ -2541,6 +2561,7 @@
 
         var positions = Array.isArray(res.positions) ? res.positions : [];
         var values = res.values || {};
+        var initialValues = {};
         var members = Array.isArray(res.members) ? res.members : [];
         var memberMap = {};
         members.forEach(function(m){ memberMap[String(m.id||'').toUpperCase()] = m; });
@@ -2564,7 +2585,8 @@
         var draftClosed = !!isClosedNow;
         var draftSlots = [];
         for (var ds=0; ds<maxSlots; ds++) draftSlots.push(tokens[ds] || '');
-        var selectedSlotIdx = 0;
+        var selectedSlotIdx = draftSlots.findIndex(function(t){ return !String(t||'').trim(); });
+        if (selectedSlotIdx < 0) selectedSlotIdx = 0;
 
         function buildPayload_(){
           return [{ position: pos, value: String(values[pos] || '').trim() }];
@@ -2714,7 +2736,14 @@
         
         var btnQuickSave = modal.querySelector('#btnQuickSave');
         if (btnQuickSave) btnQuickSave.onclick = function(){
-          values[pos] = draftClosed ? SERVING_CLOSED_TOKEN : draftSlots.filter(Boolean).join(', ');
+          var newValue = draftClosed ? SERVING_CLOSED_TOKEN : draftSlots.filter(Boolean).join(', ');
+          var oldValue = String(rawPositionValue || '').trim();
+          if (String(newValue||'').trim() === oldValue){
+            showBox('quickMsg','ok','沒有更改','No changes detected.');
+            return;
+          }
+          if (!confirm('確認儲存更改？\nConfirm save changes?')) return;
+          values[pos] = newValue;
           saveWithOverride_(false);
         };
 

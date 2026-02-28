@@ -542,7 +542,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       );
     }
     const minAllowed = admin_servingMinRequired_(r.position);
-    if (minAllowed && ids.length > 0 && ids.length < minAllowed){
+    const filledSlots = admin_countServingFilledSlots_(r.value);
+    if (minAllowed && filledSlots > 0 && filledSlots < minAllowed){
       return admin_conflict_('崗位人數不足','Not enough people for this position.', '', 'POSITION_MIN_REQUIRED', 'SERVING_ASSIGNMENT');
     }
     ids.forEach(function(id){
@@ -1889,9 +1890,10 @@ function admin_getServingInsightsForMember_(memberId){
       const raw = String(row[pos.colIndex - 1] || '').trim();
       if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
+      const filledSlots = admin_countServingFilledSlots_(raw);
 
       const minRequired = admin_servingMinRequired_(pos.position);
-      const missing = Math.max(0, minRequired - ids.length);
+      const missing = Math.max(0, minRequired - filledSlots);
       if (missing > 0 && evDate && evDate.getTime() >= today.getTime() && evDate.getTime() <= soon12w.getTime()){
         const gk = groupKey + '::' + eventKey;
         if (!gapsByGroupEvent[gk]){
@@ -1908,7 +1910,7 @@ function admin_getServingInsightsForMember_(memberId){
           position: String(pos.position||''),
           label: admin_servingPositionZh_(String(pos.position||'')),
           missing: missing,
-          assigned: ids.length,
+          assigned: filledSlots,
           minRequired: minRequired
         });
       }
@@ -2011,15 +2013,16 @@ function admin_buildServingGroupOverview_(fromYmd){
       const raw = String(row[pos.colIndex - 1] || '').trim();
       if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
+      const filledSlots = admin_countServingFilledSlots_(raw);
       const minRequired = admin_servingMinRequired_(pos.position);
-      const missing = Math.max(0, minRequired - ids.length);
+      const missing = Math.max(0, minRequired - filledSlots);
       if (missing <= 0) return;
       const key = groupKey + '::' + eventKey;
       if (!gapMap[key]){
         gapMap[key] = { group: groupKey, eventKey:eventKey, dateYmd:dateYmd, totalMissing:0, positions:[] };
       }
       gapMap[key].totalMissing += missing;
-      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionZh_(String(pos.position||'')), missing:missing, assigned:ids.length, minRequired:minRequired });
+      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionZh_(String(pos.position||'')), missing:missing, assigned:filledSlots, minRequired:minRequired });
     });
   });
 
@@ -2077,6 +2080,17 @@ function admin_splitServingValues_(raw){
   if (!s) return [];
   return s.split(',').map(x => String(x||'').trim()).filter(Boolean);
 }
+
+function admin_countServingFilledSlots_(raw){
+  return admin_splitServingValues_(raw).filter(function(v){
+    const token = String(v||'').trim();
+    if (!token) return false;
+    if (admin_isServingClosedValue_(token)) return false;
+    if (admin_isServingNaValue_(token)) return false;
+    return true;
+  }).length;
+}
+
 function admin_extractMemberIdsFromServingValue_(raw){
   return admin_splitServingValues_(raw).map(function(v){
     const token = String(v||'').trim();
