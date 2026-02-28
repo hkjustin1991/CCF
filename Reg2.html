@@ -161,7 +161,6 @@
 
     <footer class="small" style="padding:8px 4px;">
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
-      <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec">按此進入聚會資訊平台 / Click here for service information portal</a></div>
       <div><a href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=reg">按此進入自助服務平台 / Click here for self-service portal</a></div>
     </footer>
   </div>
@@ -171,6 +170,8 @@
 
   <script>
     function $(id){ return document.getElementById(id); }
+
+    function setHtml_(id, html){ var el = $(id); if (el) el.innerHTML = html; }
 
     function showBootError_(details){
       var root = $('app') || document.body;
@@ -653,6 +654,7 @@
       snapshot: null,
       servingMonth: '',
       servingGroup: '',
+      servingRefreshTimer: null,
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -835,9 +837,9 @@
             bindCameraRetryButton_('scanMsg', function(){
               openExternalScanner_(onCaptured, function(status){
                 if(status === 'success') return;
-                if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
-                else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
-                else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
+                else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
+                else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
               });
             }) +
             bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
@@ -879,9 +881,9 @@
                 bindCameraRetryButton_('scanMsg', function(){
                   openExternalScanner_(onCaptured, function(status){
                     if(status === 'success') return;
-                    if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
-                    else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
-                    else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                    if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
+                    else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
+                    else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
                   });
                 }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
             });
@@ -893,9 +895,9 @@
               bindCameraRetryButton_('scanMsg', function(){
                 openExternalScanner_(onCaptured, function(status){
                   if(status === 'success') return;
-                  if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
-                  else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
-                  else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                  if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
+                  else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
+                  else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
                 });
               }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
           });
@@ -1003,7 +1005,6 @@
       if (away.from2 && away.to2) awayHtml += '<div>假期 2 / Holiday 2: '+escapeHtml(away.from2)+' ~ '+escapeHtml(away.to2)+'</div>';
       if (!awayHtml) awayHtml = '<div>未設定 / Not set</div>';
       var memberSince = (snap.memberSinceEarliest || (snap.member && snap.member.memberSinceEarliest) || '');
-      var servingDisabled = groups.length ? '' : 'disabled';
 
       return ''+
         '<div class="card">'+
@@ -1033,7 +1034,7 @@
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
-            '<button id="btnSelfServing" class="alt" '+servingDisabled+'>🧩 事奉報名/更改 / Serving</button>'+
+            '<button id="btnSelfServing" class="alt">🧩 事奉報名/更改 / Serving</button>'+
             '<button id="btnSelfLive" class="alt">📡 聚會資訊 / Service information</button>'+
             '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
@@ -1115,17 +1116,19 @@
         tail = tail.replace(/([a-z])([A-Z])/g, '$1 $2');
         return tail;
       }
-      function isVacancyHighlightMonth_(eventKey){
+      function isVacancyHighlightMonth_(eventKey, position){
         var ymd = String(eventKey||'').replace('SundayService_','');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
         var evDate = parseYmd(ymd);
         if (!evDate) return false;
         var today = parseYmd(getTodayYmdUk());
         if (!today) return false;
-        var cur = new Date(today.getFullYear(), today.getMonth(), 1);
-        var next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-        var evMonth = new Date(evDate.getFullYear(), evDate.getMonth(), 1);
-        return evMonth.getTime() === cur.getTime() || evMonth.getTime() === next.getTime();
+        var dayMs = 24 * 60 * 60 * 1000;
+        var diffDays = Math.floor((new Date(evDate.getFullYear(), evDate.getMonth(), evDate.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / dayMs);
+        if (diffDays < 0 || diffDays >= 42) return false;
+
+        var pos = String(position||'').trim();
+        return /^Worship_/i.test(pos) || /^Logistic_/i.test(pos);
       }
 
       function isMediaPosition_(position){
@@ -1199,15 +1202,18 @@
             var vacancy = 0;
             var firstVacancyIdx = -1;
 
-            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey);
+            var highlightVacancy = isVacancyHighlightMonth_(ev.eventKey, p.position);
+            var canSignup = (cell.canSignup !== false);
             var slotLines = slots.map(function(id, idx){
               var v = String(id||'').trim().toUpperCase();
-              if (!v){
-                vacancy += 1;
-                if (firstVacancyIdx < 0) firstVacancyIdx = idx;
-                return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+              if (!v || v === 'N/A'){
+                if (canSignup){
+                  vacancy += 1;
+                  if (firstVacancyIdx < 0) firstVacancyIdx = idx;
+                  return '<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>';
+                }
+                return '';
               }
-              if (v === 'N/A'){ return '<span class="chip">N/A</span>'; }
               var isSelf = (v === mineId);
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){
@@ -1216,14 +1222,15 @@
               }
               return '<span class="chip">'+escapeHtml(txt)+'</span>';
             });
-            if (!slotLines.length){
+            slotLines = slotLines.filter(Boolean);
+            if (!slotLines.length && canSignup){
               vacancy = 1;
               firstVacancyIdx = 0;
               slotLines = ['<span class="chip'+(highlightVacancy ? ' vacancyFocus' : '')+'">空缺 / Vacant</span>'];
             }
 
             var action = '';
-            if (!mineInPosition && vacancy > 0){
+            if (canSignup && !mineInPosition && vacancy > 0){
               var slotToUse = (firstVacancyIdx >= 0) ? firstVacancyIdx : 0;
               action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+slotToUse+'">報名 / Sign up</button>';
             }
@@ -1520,6 +1527,10 @@
 
     function render(){
       stopScan();
+      if (State.view !== 'selfServing' && State.servingRefreshTimer){
+        clearInterval(State.servingRefreshTimer);
+        State.servingRefreshTimer = null;
+      }
 
       if(State.view === 'home'){
         $('app').innerHTML = viewHome();
@@ -1547,12 +1558,12 @@
             onError:function(detail){
               State.view = 'scan';
               render();
-              $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>');
+              setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>'));
             },
             onPopupBlocked:function(){
               State.view = 'scan';
               render();
-              $('scanMsg').innerHTML = showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>');
+              setHtml_('scanMsg', showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>'));
             }
           });
           if(opened){ $('msg').innerHTML = showBox('warn','請在彈出視窗完成掃描','Complete scanning in the popup.'); }
@@ -1569,9 +1580,7 @@
             if(!f) return;
             $('msg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
             decodeQrImageFile_(f).then(function(payload){
-              State.view = 'scan';
-              render();
-              handleScanPayload_(payload);
+              handleScanPayload_(payload, 'msg');
             }).catch(function(err){
               $('msg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
             }).finally(function(){
@@ -1641,12 +1650,14 @@
     }
 
     /******** Bindings ********/
-    function handleScanPayload_(text){
-      $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+    function handleScanPayload_(text, msgElId){
+      var targetId = msgElId || 'scanMsg';
+      var target = $(targetId);
+      if (target) target.innerHTML = showBox('warn','讀取中…','Loading…');
 
       callApi('api_reg_self_lookup_public', text).then(function(res){
         if(!res || !res.ok){
-          $('scanMsg').innerHTML = showServerErr(res);
+          if (target) target.innerHTML = showServerErr(res);
           return;
         }
 
@@ -1666,18 +1677,18 @@
 
       }).catch(function(err){
         var msg = (err && err.message) ? err.message : String(err||'');
-        $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        if (target) target.innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
       });
     }
 
     function bindScan(){
       var v = $('video');
       function restartScan(){
-        $('scanMsg').innerHTML = '';
+        setHtml_('scanMsg', '');
         startScan(v, onCaptured, function(e){
           var detail = (e && e.detailHtml) ? e.detailHtml : '';
           if(!detail && e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
-          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
+          setHtml_('scanMsg', showBox('err','相機無法啟動','Camera cannot start', detail));
         });
       }
 
@@ -1696,11 +1707,11 @@
         $('scanQrImageInput').onchange = function(ev){
           var f = ev && ev.target && ev.target.files && ev.target.files[0];
           if(!f) return;
-          $('scanMsg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
+          setHtml_('scanMsg', showBox('warn','讀取圖片中…','Reading image…'));
           decodeQrImageFile_(f).then(function(payload){
             onCaptured(payload, 'UPLOAD_QR');
           }).catch(function(err){
-            $('scanMsg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
+            setHtml_('scanMsg', showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'}));
           }).finally(function(){
             ev.target.value = '';
           });
@@ -1717,11 +1728,11 @@
       });
 
       function onCaptured(text, source){
-        $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+        setHtml_('scanMsg', showBox('warn','讀取中…','Loading…'));
 
         callApi('api_reg_self_lookup_public', text).then(function(res){
           if(!res || !res.ok){
-            $('scanMsg').innerHTML = showServerErr(res);
+            setHtml_('scanMsg', showServerErr(res));
             return;
           }
 
@@ -1741,7 +1752,7 @@
 
         }).catch(function(err){
           var msg = (err && err.message) ? err.message : String(err||'');
-          $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+          setHtml_('scanMsg', showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : ''));
         });
       }
 
@@ -1753,15 +1764,15 @@
         openExternalScanner_(onCaptured, function(status){
           if(status === 'success') return;
           if(status === 'timeout'){
-            $('scanMsg').innerHTML = showBox('warn','外置掃描器逾時','External scanner timed out.');
+            setHtml_('scanMsg', showBox('warn','外置掃描器逾時','External scanner timed out.'));
             return;
           }
           if(status === 'cancel' || status === 'popup_closed'){
-            $('scanMsg').innerHTML = showBox('warn','外置掃描已取消','External scanner cancelled.');
+            setHtml_('scanMsg', showBox('warn','外置掃描已取消','External scanner cancelled.'));
             return;
           }
           if(status === 'blocked'){
-            $('scanMsg').innerHTML = showBox('err','彈出視窗被封鎖','Popup was blocked.');
+            setHtml_('scanMsg', showBox('err','彈出視窗被封鎖','Popup was blocked.'));
             return;
           }
           if(status === 'config_invalid'){
@@ -1770,23 +1781,23 @@
         });
       };
 
-      $('scanMsg').innerHTML = showBox('warn','優先使用外置掃描器…','Starting external scanner…');
+      setHtml_('scanMsg', showBox('warn','優先使用外置掃描器…','Starting external scanner…'));
       openExternalScanner_(onCaptured, function(status){
         if(status === 'success') return;
         if(status === 'timeout'){
-          $('scanMsg').innerHTML = showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.'));
           return;
         }
         if(status === 'cancel' || status === 'popup_closed'){
-          $('scanMsg').innerHTML = showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.'));
           return;
         }
         if(status === 'blocked'){
-          $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.'));
           return;
         }
         if(status === 'config_invalid'){
-          $('scanMsg').innerHTML = showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
         }
       });
     }
@@ -1801,6 +1812,11 @@
       };
 
       $('btnSelfServing').onclick = function(){
+        var groups = (((State.snapshot||{}).member||{}).servingGroups) || [];
+        if (!groups.length){
+          $('selfMsg').innerHTML = showBox('warn','你尚未加入任何事奉組別。請聯絡相關組長開始事奉（詳見 CCF WhatsApp Community）。','You are not in any serving group yet. Please speak to the relevant group leader to start serving (details in CCF WhatsApp Community).');
+          return;
+        }
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
         callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
@@ -1909,6 +1925,20 @@
       }
 
       $('btnServingBack').onclick = function(){ State.view='selfHome'; render(); };
+      if (State.servingRefreshTimer) clearInterval(State.servingRefreshTimer);
+      State.servingRefreshTimer = setInterval(function(){
+        if (State.view !== 'selfServing') return;
+        callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){
+          if(!res || !res.ok){
+            if ($('servingMsg')) $('servingMsg').innerHTML = showServerErr(res);
+            return;
+          }
+          State.lastResult = res;
+          render();
+        }).catch(function(){
+          if ($('servingMsg')) $('servingMsg').innerHTML = showBox('err','系統錯誤','System error');
+        });
+      }, 180000);
       Array.prototype.slice.call(document.querySelectorAll('button[data-serving-month]')).forEach(function(b){
         b.onclick = function(){
           State.servingMonth = String(b.getAttribute('data-serving-month')||'').trim();
