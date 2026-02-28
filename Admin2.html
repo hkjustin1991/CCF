@@ -934,6 +934,25 @@
       return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
     }
 
+    var GL_MODE_TEXT = {
+      roleLabelZh: '組長'
+    };
+    function getGlModeBannerHtml_(){
+      if (!roleIsGl()) return '';
+      var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
+      var groupKey = '';
+      for (var i=0; i<gl.length; i++){
+        groupKey = normalizeServingGroupKey_(gl[i]);
+        if (groupKey) break;
+      }
+      var badge = SERVING_GROUP_BADGES[groupKey] || null;
+      var groupLabel = badge ? (badge.zh + ' / ' + badge.en) : '—';
+      var badgeHtml = badge
+        ? '<span class="'+badge.cls+'" style="margin-right:8px;">'+escapeHtml(groupLabel)+'</span>'
+        : '<span class="groupBadge" style="margin-right:8px;">'+escapeHtml(groupLabel)+'</span>';
+      return badgeHtml + '<b>'+escapeHtml(GL_MODE_TEXT.roleLabelZh)+'</b>';
+    }
+
     function canManageServingGroup_(groupKey){
       var role = String((App.actor && App.actor.role) || '').toUpperCase();
       if (role === 'ADMIN' || role === 'SUPERUSER') return true;
@@ -1765,8 +1784,7 @@
             '<div class="small">'+
               'CCF ID：<b>'+escapeHtml(id)+'</b><br/>' +
               (nameLine ? ('姓名 / Name：<b>'+escapeHtml(nameLine)+'</b><br/>') : '')+
-              '群組長模式：只限事奉相關功能。<br/>' +
-              'GL mode: serving-only access.'+
+              getGlModeBannerHtml_()+
             '</div>'+
             '<div class="msgBox warn" style="margin-top:10px;">'+
               '<div class="big warn">🕒 英國時間 / UK time</div>'+
