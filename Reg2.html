@@ -442,8 +442,10 @@
       var zh = (res && res.zh) ? res.zh : '系統錯誤';
       var en = (res && res.en) ? res.en : 'System error';
       var code = (res && res.code) ? ('<div class="small">Code: '+escapeHtml(res.code)+'</div>') : '';
+      var subCode = (res && res.subCode) ? ('<div class="small">Sub-code: '+escapeHtml(res.subCode)+'</div>') : '';
+      var subGroup = (res && res.subGroup) ? ('<div class="small">Sub-group: '+escapeHtml(res.subGroup)+'</div>') : '';
       var detail = (res && res.detail) ? ('<div class="small">'+escapeHtml(res.detail)+'</div>') : '';
-      return showBox('err', escapeHtml(zh), escapeHtml(en), code + detail);
+      return showBox('err', escapeHtml(zh), escapeHtml(en), code + subCode + subGroup + detail);
     }
 
 
@@ -1269,6 +1271,8 @@
         return String(g||'').trim().toLowerCase();
       }
       (res.servingThisWeek||[]).forEach(function(r){
+        var displayName = String((r && r.displayName) || '').trim();
+        if (!displayName) return;
         var g = normalizedGroupKey(r.group) || 'other';
         if (!groups[g]) groups[g] = [];
         groups[g].push(r);
