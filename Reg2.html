@@ -154,7 +154,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">v<?= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-02-15.reg95</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-02-15.reg95</span></div>
     </header>
 
     <main id="app"></main>
@@ -211,8 +211,6 @@
     function getApiEndpoint(){
       try{
         if (window.CCF_API_ENDPOINT) return String(window.CCF_API_ENDPOINT);
-        var qp = new URLSearchParams(window.location.search || '');
-        if (qp.get('api')) return String(qp.get('api'));
       }catch(e){}
       return '';
     }
@@ -226,13 +224,17 @@
       }).then(function(resp){
         return resp.text().then(function(txt){
           var data;
-          try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
+          try{ data = JSON.parse(txt); }catch(e){ throw { rpcType:'parse', message:'Invalid API response' }; }
           if(!resp.ok || !data || !data.ok){
             var err = (data && data.error) ? data.error : { message:'API call failed' };
+            err.rpcType = 'api';
             throw err;
           }
           return data.result;
         });
+      }).catch(function(err){
+        if(err && err.rpcType) throw err;
+        throw { rpcType:'network', message:(err && err.message) ? err.message : 'Network error' };
       });
     }
 
@@ -271,7 +273,8 @@
 
       if(useRpcFirst){
         return done(
-          callApiViaRpc(endpoint, fn, args).catch(function(){
+          callApiViaRpc(endpoint, fn, args).catch(function(err){
+            if(!err || err.rpcType !== 'network') throw err;
             return callApiViaGas(fn, args);
           })
         );
@@ -358,74 +361,6 @@
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
 
     const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>) || 120000;
-
-    function makeExternalScannerState_(){
-      try{
-        if(window.crypto && window.crypto.getRandomValues){
-          var arr = new Uint32Array(4);
-          window.crypto.getRandomValues(arr);
-          return Array.prototype.map.call(arr, function(n){ return n.toString(16); }).join('');
-        }
-      }catch(e){}
-      return String(Date.now()) + '_' + String(Math.random()).slice(2);
-    }
-
-    function openExternalScanner_(arg1, arg2){
-      var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
-      var onPayload = opts.onPayload;
-      var onStatus = opts.onStatus;
-      var state = makeExternalScannerState_();
-      var flow = String(opts.flow || '');
-      var done = false;
-      var timer = null;
-      var poll = null;
-      var popup = null;
-
-      function clear(reason){
-        if(done) return;
-        done = true;
-        if(timer){ clearTimeout(timer); timer = null; }
-        if(poll){ clearInterval(poll); poll = null; }
-        window.removeEventListener('message', onMessage);
-        if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
-        if(typeof onStatus === 'function') onStatus(reason || 'closed');
-      }
-
-      function onMessage(ev){
-        if(!ev || ev.origin !== EXTERNAL_SCANNER_ORIGIN) return;
-        var data = ev.data || {};
-        if(!data || String(data.state || '') !== String(state)) return;
-
-        var type = String(data.type || '');
-        if(type === 'scanner:cancel' || type === 'CCF_QR_CANCEL'){ clear('cancel'); return; }
-        if(type === 'CCF_QR_ERROR'){
-          if(typeof opts.onError === 'function') opts.onError(data.detail || 'scanner error');
-          clear('error');
-          return;
-        }
-        if((type === 'scanner:result' || type === 'CCF_QR_RESULT') && data.payload){
-          clear('success');
-          if(typeof onPayload === 'function') onPayload(String(data.payload), 'EXT_SCANNER');
-          return;
-        }
-      }
-
-      window.addEventListener('message', onMessage);
-      if(!EXTERNAL_SCANNER_CONFIG.ok){ clear('config_invalid'); return null; }
-
-      var target = new URL(EXTERNAL_SCANNER_URL, window.location.href);
-      target.searchParams.set('state', state);
-      if(flow) target.searchParams.set('flow', flow);
-
-      popup = window.open(target.toString(), 'ccf_ext_scanner', 'popup,width=460,height=760');
-      if(!popup){ clear('blocked'); return null; }
-
-      timer = setTimeout(function(){ clear('timeout'); }, EXTERNAL_SCANNER_TIMEOUT_MS);
-      poll = setInterval(function(){
-        if(popup && popup.closed){ clear('popup_closed'); }
-      }, 400);
-      return state;
-    }
 
     function showBox(kind, zh, en, detail){
       detail = detail || '';
@@ -522,7 +457,7 @@
       (buttonIds || []).forEach(function(id){
         var btn = $(id);
         if(btn){
-          btn.disabled = false;
+          btn.disabled = true;
           btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
@@ -566,7 +501,10 @@
         onPayload: opts.onPayload,
         onCancel: opts.onCancel,
         onError: opts.onError,
-        onStatus: opts.onStatus
+        onStatus: opts.onStatus,
+        popup: null,
+        timer: null,
+        poll: null
       };
 
       var target = new URL(EXTERNAL_SCANNER_URL);
@@ -585,6 +523,30 @@
         if(typeof opts.onStatus === 'function') opts.onStatus('blocked');
         return null;
       }
+      pendingExternalScanner_.popup = w;
+      pendingExternalScanner_.timer = setTimeout(function(){
+        if(!pendingExternalScanner_ || pendingExternalScanner_.state !== state) return;
+        var cb = pendingExternalScanner_.onStatus;
+        var popup = pendingExternalScanner_.popup;
+        var poll = pendingExternalScanner_.poll;
+        pendingExternalScanner_ = null;
+        if(poll) clearInterval(poll);
+        if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
+        if(typeof cb === 'function') cb('timeout');
+      }, EXTERNAL_SCANNER_TIMEOUT_MS);
+      pendingExternalScanner_.poll = setInterval(function(){
+        if(!pendingExternalScanner_ || pendingExternalScanner_.state !== state) return;
+        var popup = pendingExternalScanner_.popup;
+        if(popup && popup.closed){
+          var cb = pendingExternalScanner_.onStatus;
+          var timer = pendingExternalScanner_.timer;
+          var poll = pendingExternalScanner_.poll;
+          pendingExternalScanner_ = null;
+          if(timer) clearTimeout(timer);
+          if(poll) clearInterval(poll);
+          if(typeof cb === 'function') cb('popup_closed');
+        }
+      }, 400);
       return state;
     }
 
@@ -599,7 +561,13 @@
       var cbCancel = pendingExternalScanner_.onCancel;
       var cbError = pendingExternalScanner_.onError;
       var cbStatus = pendingExternalScanner_.onStatus;
+      var timer = pendingExternalScanner_.timer;
+      var poll = pendingExternalScanner_.poll;
+      var popup = pendingExternalScanner_.popup;
       pendingExternalScanner_ = null;
+      if(timer) clearTimeout(timer);
+      if(poll) clearInterval(poll);
+      if(popup && !popup.closed){ try{ popup.close(); }catch(e){} }
       if(type === 'CCF_QR_RESULT'){
         if(typeof cbPayload === 'function') cbPayload(data.payload);
         if(typeof cbStatus === 'function') cbStatus('success');
@@ -760,6 +728,12 @@
       return tips.join(' ');
     }
 
+    function collectCameraDiagnostics_(meta){
+      return { meta: meta||{}, ua:getUA(), deviceId:getDeviceId(), top:(window.top===window.self) };
+    }
+    function reportScannerE420_(stage, diagnostics){
+      try{ callApi('api_reg_log_scanner_e420_public', { stage:stage, diagnostics:diagnostics, deviceId:getDeviceId(), ua:getUA() }); }catch(e){}
+    }
 
 
     function bindCameraRetryButton_(msgTarget, retryFn){
@@ -829,11 +803,11 @@
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         var d0 = collectCameraDiagnostics_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
-        console.error('E420 camera unsupported', detail0.diagnostics);
+        console.error('E420 camera unsupported', detail0);
         reportScannerE420_('unsupported', d0);
         onError({
-          zh:'此裝置不支援相機', en:'Camera not supported', err: { name: detail0.detail },
-          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+          zh:'此裝置不支援相機', en:'Camera not supported', err: { name: detail0 },
+          detailHtml: '<div class="small">'+escapeHtml(detail0||'')+'</div>' +
             bindCameraRetryButton_('scanMsg', function(){
               openExternalScanner_(onCaptured, function(status){
                 if(status === 'success') return;
