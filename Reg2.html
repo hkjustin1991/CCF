@@ -171,6 +171,8 @@
   <script>
     function $(id){ return document.getElementById(id); }
 
+    function setHtml_(id, html){ var el = $(id); if (el) el.innerHTML = html; }
+
     function showBootError_(details){
       var root = $('app') || document.body;
       var msg = '';
@@ -835,9 +837,9 @@
             bindCameraRetryButton_('scanMsg', function(){
               openExternalScanner_(onCaptured, function(status){
                 if(status === 'success') return;
-                if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
-                else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
-                else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
+                else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
+                else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
               });
             }) +
             bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
@@ -879,9 +881,9 @@
                 bindCameraRetryButton_('scanMsg', function(){
                   openExternalScanner_(onCaptured, function(status){
                     if(status === 'success') return;
-                    if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
-                    else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
-                    else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                    if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
+                    else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
+                    else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
                   });
                 }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
             });
@@ -893,9 +895,9 @@
               bindCameraRetryButton_('scanMsg', function(){
                 openExternalScanner_(onCaptured, function(status){
                   if(status === 'success') return;
-                  if(status === 'blocked') $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖','Popup blocked');
-                  else if(status === 'config_invalid') $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>');
-                  else $('scanMsg').innerHTML = showBox('warn','外置掃描未完成','External scanner did not complete');
+                  if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
+                  else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
+                  else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
                 });
               }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
           });
@@ -1556,12 +1558,12 @@
             onError:function(detail){
               State.view = 'scan';
               render();
-              $('scanMsg').innerHTML = showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>');
+              setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>'));
             },
             onPopupBlocked:function(){
               State.view = 'scan';
               render();
-              $('scanMsg').innerHTML = showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>');
+              setHtml_('scanMsg', showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>'));
             }
           });
           if(opened){ $('msg').innerHTML = showBox('warn','請在彈出視窗完成掃描','Complete scanning in the popup.'); }
@@ -1682,11 +1684,11 @@
     function bindScan(){
       var v = $('video');
       function restartScan(){
-        $('scanMsg').innerHTML = '';
+        setHtml_('scanMsg', '');
         startScan(v, onCaptured, function(e){
           var detail = (e && e.detailHtml) ? e.detailHtml : '';
           if(!detail && e && e.err && e.err.name) detail = '<div class="small">'+escapeHtml(e.err.name)+'</div>';
-          $('scanMsg').innerHTML = showBox('err','相機無法啟動','Camera cannot start', detail);
+          setHtml_('scanMsg', showBox('err','相機無法啟動','Camera cannot start', detail));
         });
       }
 
@@ -1705,11 +1707,11 @@
         $('scanQrImageInput').onchange = function(ev){
           var f = ev && ev.target && ev.target.files && ev.target.files[0];
           if(!f) return;
-          $('scanMsg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
+          setHtml_('scanMsg', showBox('warn','讀取圖片中…','Reading image…'));
           decodeQrImageFile_(f).then(function(payload){
             onCaptured(payload, 'UPLOAD_QR');
           }).catch(function(err){
-            $('scanMsg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
+            setHtml_('scanMsg', showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'}));
           }).finally(function(){
             ev.target.value = '';
           });
@@ -1726,11 +1728,11 @@
       });
 
       function onCaptured(text, source){
-        $('scanMsg').innerHTML = showBox('warn','讀取中…','Loading…');
+        setHtml_('scanMsg', showBox('warn','讀取中…','Loading…'));
 
         callApi('api_reg_self_lookup_public', text).then(function(res){
           if(!res || !res.ok){
-            $('scanMsg').innerHTML = showServerErr(res);
+            setHtml_('scanMsg', showServerErr(res));
             return;
           }
 
@@ -1750,7 +1752,7 @@
 
         }).catch(function(err){
           var msg = (err && err.message) ? err.message : String(err||'');
-          $('scanMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+          setHtml_('scanMsg', showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : ''));
         });
       }
 
@@ -1762,15 +1764,15 @@
         openExternalScanner_(onCaptured, function(status){
           if(status === 'success') return;
           if(status === 'timeout'){
-            $('scanMsg').innerHTML = showBox('warn','外置掃描器逾時','External scanner timed out.');
+            setHtml_('scanMsg', showBox('warn','外置掃描器逾時','External scanner timed out.'));
             return;
           }
           if(status === 'cancel' || status === 'popup_closed'){
-            $('scanMsg').innerHTML = showBox('warn','外置掃描已取消','External scanner cancelled.');
+            setHtml_('scanMsg', showBox('warn','外置掃描已取消','External scanner cancelled.'));
             return;
           }
           if(status === 'blocked'){
-            $('scanMsg').innerHTML = showBox('err','彈出視窗被封鎖','Popup was blocked.');
+            setHtml_('scanMsg', showBox('err','彈出視窗被封鎖','Popup was blocked.'));
             return;
           }
           if(status === 'config_invalid'){
@@ -1779,23 +1781,23 @@
         });
       };
 
-      $('scanMsg').innerHTML = showBox('warn','優先使用外置掃描器…','Starting external scanner…');
+      setHtml_('scanMsg', showBox('warn','優先使用外置掃描器…','Starting external scanner…'));
       openExternalScanner_(onCaptured, function(status){
         if(status === 'success') return;
         if(status === 'timeout'){
-          $('scanMsg').innerHTML = showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.'));
           return;
         }
         if(status === 'cancel' || status === 'popup_closed'){
-          $('scanMsg').innerHTML = showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.'));
           return;
         }
         if(status === 'blocked'){
-          $('scanMsg').innerHTML = showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.'));
           return;
         }
         if(status === 'config_invalid'){
-          $('scanMsg').innerHTML = showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.');
+          setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
         }
       });
     }
