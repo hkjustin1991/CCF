@@ -392,6 +392,14 @@ function api_admin_serving_group_members(token, groupKey){
   const key = admin_normalizeServingGroup_(groupKey);
   if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
 
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
+  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
+  if (!isAdminLike && !isGlAllowed){
+    return admin_err_('E403','沒有權限查看此組別','No permission to view this group.');
+  }
+
   const mi = admin_getMembersIndex_();
   const all = (mi && mi.all) ? mi.all : [];
   const members = all
@@ -399,9 +407,7 @@ function api_admin_serving_group_members(token, groupKey){
     .map(admin_memberLabelCompact_)
     .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
 
-  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
-  const canManage = (role === 'ADMIN' || role === 'SUPERUSER' || (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; })));
+  const canManage = !!(isAdminLike || isGlAllowed);
 
   return { ok:true, group:key, count:members.length, members:members, canManage:canManage };
 }
