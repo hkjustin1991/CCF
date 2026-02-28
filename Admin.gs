@@ -458,6 +458,67 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
 }
 
 /**
+ * Remove a member from serving group with reauth (must scan current authenticated account QR).
+ */
+function api_admin_member_remove_from_group(token, memberId, groupKey, reauthQrPayload){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+
+  const auth = admin_verifyReauth_(s.actor, reauthQrPayload);
+  if (!auth.ok) return auth;
+
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
+  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
+  if (!isAdminLike && !isGlAllowed){
+    return admin_err_('E403','沒有權限修改此組別','No permission to modify this group.');
+  }
+
+  const mi = admin_getMembersIndex_();
+  const target = (mi && mi.byId) ? mi.byId[id] : null;
+  if (!target) return admin_err_('E412','找不到此會員','Member not found.');
+
+  const targetStatus = admin_normStatus_(target.status || '');
+  if (!isAdminLike && (targetStatus === 'STAFF' || targetStatus === 'ADMIN')){
+    return admin_err_('E403','GL 不可修改 STAFF/ADMIN 的組別','GL cannot modify STAFF/ADMIN serving groups.');
+  }
+
+  const sh = admin_findMembersSheet_();
+  if (!sh) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+  const col = admin_getMembersColMap_(sh);
+  if (col.ServingGroups === undefined) return admin_err_('E500','缺少 ServingGroups 欄位','ServingGroups column missing.');
+  const rowNumber = target.rowNumber || admin_findMemberRowById_(sh, col, id);
+  if (!rowNumber) return admin_err_('E500','找不到會員列','Member row not found.');
+
+  const nowGroups = admin_parseGroupsCsv_(sh.getRange(rowNumber, col.ServingGroups+1).getValue());
+  const keyUpper = key.toUpperCase();
+  const next = nowGroups.filter(function(g){ return g !== keyUpper; });
+  const removed = (next.length !== nowGroups.length);
+
+  if (removed){
+    sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
+    admin_clearMembersCache_();
+  }
+
+  const effectiveFrom = admin_todayUkYmd_();
+  admin_audit_(
+    s.actor,
+    'SERVING_GROUP_MEMBER_REMOVE_REAUTH',
+    JSON.stringify({ memberId:id, group:key, removed:removed, confirmedBy:auth.confirmedBy, effectiveFrom:effectiveFrom }),
+    'serving_group'
+  );
+
+  return { ok:true, memberId:id, group:key, removed:removed, servingGroups:next, effectiveFrom:effectiveFrom, confirmedBy:auth.confirmedBy };
+}
+
+/**
  * Serving event rows (for per-event edit UI).
  */
 function api_admin_serving_event_rows(token, eventKey){
