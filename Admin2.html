@@ -326,7 +326,7 @@
           ⚠️ 請避免用手機使用此管理平台，建議使用電腦或平板。<br/>
           ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/><br/>
           管理平台（只限已授權同工）。請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
-          Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
+          此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
       <div><span class="pill">v<?= ADMIN_VERSION ?></span></div>
@@ -693,8 +693,19 @@
         '</div>';
     }
 
+    function formatErrorCodeTag_(res){
+      if (!res || !res.code) return '';
+      var parts = [String(res.code||'').trim()];
+      if (res.subGroup) parts.push(String(res.subGroup||'').trim());
+      if (res.subCode) parts.push(String(res.subCode||'').trim());
+      parts = parts.filter(Boolean);
+      return parts.length ? (' [' + parts.join('/') + ']') : '';
+    }
+    function withErrorCodeTag_(title, res){
+      return String(title || '') + formatErrorCodeTag_(res);
+    }
+
     function showErr(targetId, res){
-      var code = res && res.code ? (' <span class="chip">'+escapeHtml(res.code)+'</span>') : '';
       var detail = '';
       var allowHtmlDetail = false;
       if (res && res.trustedDetailHtml && res.detailHtml){ detail = String(res.detailHtml||''); allowHtmlDetail = true; }
@@ -702,7 +713,7 @@
       showBox(
         targetId,
         'err',
-        escapeHtml((res && res.zh) || '系統錯誤') + code,
+        withErrorCodeTag_(escapeHtml((res && res.zh) || '系統錯誤'), res),
         escapeHtml((res && res.en) || 'System error'),
         detail,
         allowHtmlDetail
@@ -982,7 +993,7 @@
         '<div class="groupDialog '+themeCls+'">'+
           '<div class="groupDialogHeader">'+
             '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
-            '<button type="button" class="btnMini btnBack" id="btnGroupDialogClose">✖ Close</button>'+
+            '<button type="button" class="btnMini btnBack" id="btnGroupDialogClose">✖ 關閉 / Close</button>'+
           '</div>'+
           '<div class="groupDialogSection">'+
             '<div class="label">次數統計（按崗位） / Summary by position（只計以往事奉 / previous only）</div>'+
@@ -1024,7 +1035,7 @@
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
           '<div class="groupDialogHeader">'+
             '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
-            '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ Close</button>'+
+            '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ 關閉 / Close</button>'+
           '</div>'+
           '<div class="groupDialogSection">'+
             '<div class="label">空缺（未來 12 週） / Vacancies (next 12 weeks)</div>'+
@@ -1103,7 +1114,7 @@
       if (!raw) return '';
       var upper = raw.toUpperCase();
       if (upper === 'N/A' || upper === 'NA') return 'N/A';
-      if (isServingClosedToken_(upper)) return '🔒 Closed';
+      if (isServingClosedToken_(upper)) return '🔒 崗位關閉 / Closed';
       var isCcf = /^CCF\d{4}$/.test(upper);
       if (!isCcf) return raw;
       var hasName = entry.nameZh || entry.nameEn;
@@ -1166,6 +1177,22 @@
       if (!m) return String(memberId||'');
       var name = preferredNameForSheet_(m);
       return m.id + (name ? (' ('+name+')') : '');
+    }
+    function memberDisplayWithName_(memberMap, memberId){
+      var id = String(memberId||'').trim().toUpperCase();
+      var m = memberMap[id];
+      if (!m) return id || String(memberId||'');
+      var names = [String(m.nameZh||'').trim(), String(m.nameEn||'').trim()].filter(Boolean).join(' / ');
+      return m.id + (names ? (' ('+names+')') : '');
+    }
+    function buildHolidayConflictDetailHtml_(conflicts, memberMap){
+      var list = Array.isArray(conflicts) ? conflicts : [];
+      return list.map(function(c){
+        var who = memberDisplayWithName_(memberMap || {}, c.memberId || '');
+        var from = String(c.from || '');
+        var to = String(c.to || '');
+        return escapeHtml(who + '（假期: ' + from + ' - ' + to + '） / ' + who + ' on holiday from ' + from + ' to ' + to);
+      }).join('<br/>');
     }
     function memberMatchesGroup_(member, groupKey){
       if (!groupKey || groupKey === 'other') return true;
@@ -1908,7 +1935,7 @@
                 });
                 var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
                 if (vacantCount > 0){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+entries.length+'" data-raw="">Vacant x'+vacantCount+'</button>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+entries.length+'" data-raw="">空缺 x'+vacantCount+'</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
@@ -1930,7 +1957,7 @@
                 '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
                   '<div class="groupSectionHead" style="margin:8px 0 4px;">'+
                     '<div></div>'+
-                    '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 Summary</button>'+
+                    '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 摘要 / Summary</button>'+
                   '</div>'+
                   '<div class="tableWrap">'+
                     '<table class="servingPlanTable">'+
@@ -2058,7 +2085,7 @@
         function renderAssignedList_(pos){
           var list = assignedMap[pos] || [];
           if (closedMap[pos]){
-            return '<div class="quickBubbleWrap"><span class="quickBubble quickBubbleVacancy slotSelected" data-pos="'+escapeHtml(pos)+'" data-slot="0">🔒 Closed / 已關閉</span></div>';
+            return '<div class="quickBubbleWrap"><span class="quickBubble quickBubble空缺 slotSelected" data-pos="'+escapeHtml(pos)+'" data-slot="0">🔒 崗位關閉 / Closed</span></div>';
           }
           var maxSlots = Number(POSITION_MAX[pos] || 1);
           if (maxSlots < 1) maxSlots = 1;
@@ -2068,7 +2095,7 @@
             var token = String(list[slotIdx] || '').trim();
             var selectedCls = (slotIdx === selected) ? ' slotSelected' : '';
             if (!token){
-              chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">Vacancy '+(slotIdx+1)+'</span>');
+              chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">空缺 '+(slotIdx+1)+'</span>');
             } else {
               chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span>'+escapeHtml(token)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
             }
@@ -2371,13 +2398,23 @@
             callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
-                  showBox('servingEditMsg','err','成員不屬於該事奉組別 E409','Member is not in the required serving group.');
+                  showBox('servingEditMsg','err',withErrorCodeTag_('成員不屬於該事奉組別', res2),'Member is not in the required serving group.', res2 && res2.detail ? ('<div class="small">'+escapeHtml(String(res2.detail||''))+'</div>') : '', true);
                   return;
                 }
                 if (res2 && res2.code === 'E409' && res2.canOverride){
                   var detail = '';
-                  var titleZh = '事奉安排需要確認';
-                  var titleEn = 'Serving assignment needs confirmation.';
+                  var titleZh = '事奉安排衝突，請確認';
+                  var titleEn = 'Serving assignment conflict. Please review.';
+                  if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
+                    titleZh = '同一會員重覆崗位';
+                    titleEn = 'Duplicate serving assignments.';
+                  } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
+                    titleZh = '事奉安排與離開期重疊';
+                    titleEn = 'Serving assignment overlaps holiday period.';
+                  } else if (res2.subCode === 'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED'){
+                    titleZh = 'ADMIN 可覆蓋規則（請確認）';
+                    titleEn = 'ADMIN can override rules (please confirm).';
+                  }
                   if (res2.adminWarnings){
                     titleZh = 'ADMIN 可覆蓋規則（請確認）';
                     titleEn = 'ADMIN can override rules (please confirm).';
@@ -2385,11 +2422,8 @@
                   }
                   if (res2.conflicts && res2.conflicts.length){
                     titleZh = '事奉安排與離開期重疊';
-                    titleEn = 'Serving assignment overlaps away period.';
-                    detail = res2.conflicts.map(function(c){
-                      var dateLabel = formatYmdZhEn_(String(c.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((c.memberId||'') + '（離開期重疊: ' + (c.from||'') + ' - ' + (c.to||'') + '）' + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                    }).join('<br/>');
+                    titleEn = 'Serving assignment overlaps holiday period.';
+                    detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                   }
                   if (res2.duplicates && res2.duplicates.length){
                     titleZh = '同一會員重覆崗位';
@@ -2403,7 +2437,7 @@
                       return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                     }).join('<br/>');
                   }
-                showBox('servingEditMsg','warn', titleZh, titleEn, detail, true);
+                showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                   var btnRow = document.createElement('div');
                   btnRow.className = 'miniBtnRow';
                   var btn = document.createElement('button');
@@ -2510,13 +2544,23 @@
           callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override, groupKeyNorm).then(function(res2){
             if (!res2 || !res2.ok){
               if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
-                showBox('quickMsg','err','成員不屬於該事奉組別 E409','Member is not in the required serving group.');
+                showBox('quickMsg','err',withErrorCodeTag_('成員不屬於該事奉組別', res2),'Member is not in the required serving group.', res2 && res2.detail ? ('<div class="small">'+escapeHtml(String(res2.detail||''))+'</div>') : '', true);
                 return;
               }
               if (res2 && res2.code === 'E409' && res2.canOverride){
                 var detail = '';
-                var titleZh = '事奉安排需要確認';
-                var titleEn = 'Serving assignment needs confirmation.';
+                var titleZh = '事奉安排衝突，請確認';
+                var titleEn = 'Serving assignment conflict. Please review.';
+                if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
+                  titleZh = '同一會員重覆崗位';
+                  titleEn = 'Duplicate serving assignments.';
+                } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
+                  titleZh = '事奉安排與離開期重疊';
+                  titleEn = 'Serving assignment overlaps holiday period.';
+                } else if (res2.subCode === 'ADMIN_OVERRIDE_CONFIRMATION_REQUIRED'){
+                  titleZh = 'ADMIN 可覆蓋規則（請確認）';
+                  titleEn = 'ADMIN can override rules (please confirm).';
+                }
                 if (res2.adminWarnings){
                   titleZh = 'ADMIN 可覆蓋規則（請確認）';
                   titleEn = 'ADMIN can override rules (please confirm).';
@@ -2524,11 +2568,8 @@
                 }
                 if (res2.conflicts && res2.conflicts.length){
                   titleZh = '事奉安排與離開期重疊';
-                  titleEn = 'Serving assignment overlaps away period.';
-                  detail = res2.conflicts.map(function(c){
-                    var dateLabel = formatYmdZhEn_(String(c.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((c.memberId||'') + '（離開期重疊: ' + (c.from||'') + ' - ' + (c.to||'') + '）' + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                  }).join('<br/>');
+                  titleEn = 'Serving assignment overlaps holiday period.';
+                  detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                 }
                 if (res2.duplicates && res2.duplicates.length){
                   titleZh = '同一會員重覆崗位';
@@ -2542,7 +2583,7 @@
                     return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                   }).join('<br/>');
                 }
-                showBox('quickMsg','warn', titleZh, titleEn, detail, true);
+                showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                 var btnRow = document.createElement('div');
                 btnRow.className = 'miniBtnRow';
                 var btn = document.createElement('button');
@@ -2590,12 +2631,12 @@
           var wrap = modal.querySelector('#quickPendingBubbles');
           if (!wrap) return;
           if (draftClosed){
-            wrap.innerHTML = '<button type="button" class="quickBubble quickBubbleVacancy slotSelected" data-slot="0">🔒 Closed / 已關閉</button>';
+            wrap.innerHTML = '<button type="button" class="quickBubble quickBubble空缺 slotSelected" data-slot="0">🔒 崗位關閉 / Closed</button>';
           } else {
             var chips = draftSlots.map(function(token, slotIdx){
               var selectedCls = (slotIdx === selectedSlotIdx) ? ' slotSelected' : '';
               var isVac = !String(token||'').trim();
-              var label = isVac ? ('Vacancy ' + (slotIdx + 1)) : token;
+              var label = isVac ? ('空缺 ' + (slotIdx + 1)) : token;
               var bubbleCls = 'quickBubble' + (isVac ? ' quickBubbleVacancy' : '') + selectedCls;
               var rm = isVac ? '' : '<button type="button" data-rm="'+slotIdx+'">×</button>' ;
               return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+escapeHtml(label)+rm+'</span>';
@@ -2753,7 +2794,7 @@
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showBox('matrixMsg','warn','載入中…','Loading…');
+        showBox('matrixMsg','warn','載入中…','載入中… / Loading…');
         logAction('MATRIX_LOAD', JSON.stringify({from:from,to:to}), 'matrix');
 
         callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
@@ -2986,7 +3027,7 @@
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('statsMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showBox('statsMsg','warn','載入中…','Loading…');
+        showBox('statsMsg','warn','載入中…','載入中… / Loading…');
         logAction('STATS_LOAD', JSON.stringify({from:from,to:to,rebuild:!!rebuildFirst}), 'stats');
 
         var p = Promise.resolve();
@@ -3129,7 +3170,7 @@
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('periodMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showBox('periodMsg','warn','載入中…','Loading…');
+        showBox('periodMsg','warn','載入中…','載入中… / Loading…');
         logAction('PERIOD_LOAD', JSON.stringify({from:from,to:to}), 'period');
 
         callApi('api_admin_period_stats', App.token, from, to).then(function(res){
@@ -3512,7 +3553,7 @@
                 away.to1 = res.to1 || '';
                 away.from2 = res.from2 || '';
                 away.to2 = res.to2 || '';
-                showBox('awayMsg','ok','已更新','Saved.');
+                showBox('awayMsg','ok','已更新','已更新 / Saved.');
               }).catch(function(){
                 showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
               });
@@ -3529,7 +3570,7 @@
                 away.to1 = '';
                 away.from2 = '';
                 away.to2 = '';
-                showBox('awayMsg','ok','已清除','Cleared.');
+                showBox('awayMsg','ok','已清除','已清除 / Cleared.');
               }).catch(function(){
                 showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
               });
@@ -3752,10 +3793,10 @@
             flow:'admin',
             onPayload:handleReauthPayload_,
             onCancel:function(){
-              showBox('msg','warn','已取消掃描','Scan cancelled.');
+              showBox('msg','warn','已取消掃描','已取消掃描 / Scan cancelled.');
             },
             onPopupBlocked:function(){
-              showBox('msg','warn','未能打開彈出視窗，請使用下方內置掃描器','Popup blocked; please use built-in scanner below.');
+              showBox('msg','warn','未能打開彈出視窗，請使用下方內置掃描器','彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.');
             },
             onError:function(msg){
               showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
@@ -3767,7 +3808,7 @@
       if(shouldPreferExternalScanner_() && btnOpenExternal){
         btnOpenExternal.classList.remove('btnBack');
         btnOpenExternal.classList.add('btnMain');
-        showBox('msg','warn','建議使用外部掃描器','Open external scanner is recommended in this browser.');
+        showBox('msg','warn','建議使用外部掃描器','建議使用外部掃描器 / Open external scanner is recommended in this browser.');
       }
     }
 

@@ -589,7 +589,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   };
   const hasAdminWarnings = (adminWarnings.conflicts.length || adminWarnings.duplicates.length);
   if (invalidGroupAssignments.length){
-    return admin_conflict_('成員不屬於該事奉組別','Member is not in the required serving group.', '', 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_ASSIGNMENT');
+    const detail = invalidGroupAssignments.map(function(x){
+      return [String(x.memberId||''), String(x.position||''), String(x.group||'')].filter(Boolean).join(' → ');
+    }).join(' | ');
+    return admin_conflict_('成員不屬於該事奉組別','Member is not in the required serving group.', detail, 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_ASSIGNMENT');
   }
   if (duplicateDetails.length){
     if (!canOverride){
