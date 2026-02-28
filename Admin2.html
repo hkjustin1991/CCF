@@ -68,6 +68,7 @@
     .btnPeriod{background:#f3f0ff;border-color:rgba(110,80,200,0.18)}       /* light purple */
     .btnBack{background:#eef4ff;border-color:rgba(40,90,200,0.18)}          /* blue-ish */
     .btnDanger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}        /* red-ish */
+    .btnNa{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
     .btnGhost{background:#fff;border-color:rgba(10,30,80,0.12)}             /* white */
     .btnPink{background:#fff1f4;border-color:rgba(217,60,94,0.25)}          /* pink */
 
@@ -183,6 +184,11 @@
       font-size:12px;
       cursor:pointer;
     }
+    .quickBubbleWrap{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+    .quickBubble{border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;background:#fff;display:inline-flex;align-items:center;gap:6px}
+    .quickBubbleVacancy{background:#fff6e6;border-color:rgba(200,132,0,0.45);color:#8a5a00}
+    .quickBubble button{border:none;background:transparent;color:#d93c5e;cursor:pointer;font-weight:900;padding:0;line-height:1}
+    .quickBubble.slotSelected{box-shadow:inset 0 0 0 2px #285ac8}
 
     .servingPlanTable th,
     .servingPlanTable td{
@@ -196,6 +202,13 @@
       min-width:180px;
       font-weight:900;
     }
+    .servingGroupToggle{
+      min-height:64px;
+      font-size:16px;
+      font-weight:950;
+    }
+    .groupSectionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+    .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
     .servingPlanEntry{
       font-size:12px;
       margin-top:4px;
@@ -737,6 +750,34 @@
       return o;
     }
     function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
+
+    function enableDragScroll_(scope){
+      var root = scope || document;
+      var wraps = Array.prototype.slice.call(root.querySelectorAll('.tableWrap'));
+      wraps.forEach(function(wrap){
+        if (!wrap || wrap.__dragBound) return;
+        wrap.__dragBound = true;
+        var down = false;
+        var sx = 0, sy = 0, sl = 0, st = 0;
+        wrap.addEventListener('mousedown', function(e){
+          if (!e || e.button !== 0) return;
+          down = true;
+          sx = e.clientX; sy = e.clientY;
+          sl = wrap.scrollLeft; st = wrap.scrollTop;
+          wrap.style.cursor = 'grabbing';
+          e.preventDefault();
+        });
+        window.addEventListener('mousemove', function(e){
+          if (!down) return;
+          wrap.scrollLeft = sl - (e.clientX - sx);
+          wrap.scrollTop = st - (e.clientY - sy);
+        });
+        window.addEventListener('mouseup', function(){
+          down = false;
+          wrap.style.cursor = '';
+        });
+      });
+    }
     function clear(targetId){ var el=$(targetId); if(el) el.innerHTML=''; }
 
     function roleIsAdmin(){
@@ -958,13 +999,16 @@
         : '<div class="small">暫無組員 / No members found</div>';
       var gapsHtml = gaps.length
         ? '<ul class="groupDialogList">'+gaps.map(function(g){
-            var posText = (g.positions || []).map(function(p){ return (p.label || p.position || '—') + ' (+' + String(p.missing||0) + ')'; }).join(', ');
-            return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · +'+escapeHtml(String(g.totalMissing||0))+' · '+escapeHtml(posText)+'</li>';
+            var posText = (g.positions || []).map(function(p){ return (p.label || p.position || '—') + ' (x' + String(p.missing||0) + ')'; }).join(', ');
+            return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
           }).join('')+'</ul>'
         : '<div class="small">沒有空缺 / No gaps</div>';
       return ''+
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
-          '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+          '<div class="groupDialogHeader">'+
+            '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+            '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ Close</button>'+
+          '</div>'+
           '<div class="groupDialogSection"><div class="label">空缺（未來 12 週）</div>'+gapsHtml+'</div>'+
           '<div class="groupDialogSection"><div class="label">當前組員 / Current members</div>'+membersHtml+'</div>'+
         '</div>';
@@ -1086,7 +1130,7 @@
       list.forEach(function(m){
         if (out.length >= max) return;
         if (!memberMatchesGroup_(m, groupKey)) return;
-        if (!query){ out.push(m); return; }
+        if (!query) return;
         var hay = [
           String(m.id||''),
           String(m.nameZh||''),
@@ -1874,16 +1918,16 @@
                 '</tr>';
             }).join('');
             var isOpen = !!App.servingPlanOpenGroups[groupKey];
-            var infoOpen = !!App.servingPlanInfoOpenGroups[groupKey];
-            var infoHtml = infoOpen ? buildServingGroupOverviewPopupHtml_(groupKey, App.servingGroupOverview || {}) : '';
             return ''+
               '<div class="monthSection" data-group="'+groupKey+'">'+
                 '<button class="btnPeriod servingGroupToggle '+badge.cls+'" data-group="'+groupKey+'">'+
                   badge.zh + ' / ' + badge.en + (isOpen ? ' ▲' : ' ▼')+
                 '</button>'+
                 '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
-                  '<div style="margin:8px 0;"><button class="btnBack btnMini servingGroupInfoToggle '+badge.cls+'" data-group="'+groupKey+'">📌 快速摘要 / Quick summary '+(infoOpen ? '▲' : '▼')+'</button></div>'+
-                  infoHtml+
+                  '<div class="groupSectionHead" style="margin:8px 0 4px;">'+
+                    '<div></div>'+
+                    '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 Summary</button>'+
+                  '</div>'+
                   '<div class="tableWrap">'+
                     '<table class="servingPlanTable">'+
                       '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
@@ -1917,8 +1961,10 @@
           Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupInfoToggle')).forEach(function(btn){
             btn.onclick = function(){
               var key = String(btn.getAttribute('data-group')||'');
-              App.servingPlanInfoOpenGroups[key] = !App.servingPlanInfoOpenGroups[key];
-              loadServingPlan();
+              if (!key) return;
+              var sumModal = openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
+              var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
+              if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
@@ -1975,12 +2021,14 @@
           return isServingClosedToken_(token);
         }
         var closedMap = {};
+        var selectedSlotMap = {};
 
         displayPositions.forEach(function(pos){
           var initialRaw = String(values[pos] || '').trim();
           if (isClosedToken_(initialRaw)){
             closedMap[pos] = true;
             assignedMap[pos] = [];
+            selectedSlotMap[pos] = 0;
             return;
           }
           var initial = splitServingValues_(initialRaw);
@@ -1989,22 +2037,28 @@
             var id = extractMemberId_(token);
             return id ? formatServingToken_(memberMap, id) : token;
           }).filter(Boolean);
+          selectedSlotMap[pos] = 0;
         });
 
         function renderAssignedList_(pos){
           var list = assignedMap[pos] || [];
           if (closedMap[pos]){
-            return '<div class="small">🔒 Closed / 已關閉</div>';
+            return '<div class="quickBubbleWrap"><span class="quickBubble quickBubbleVacancy slotSelected" data-pos="'+escapeHtml(pos)+'" data-slot="0">🔒 Closed / 已關閉</span></div>';
           }
-          if (!list.length){
-            return '<div class="small">—</div>';
+          var maxSlots = Number(POSITION_MAX[pos] || 1);
+          if (maxSlots < 1) maxSlots = 1;
+          var selected = Number(selectedSlotMap[pos] || 0);
+          var chips = [];
+          for (var slotIdx=0; slotIdx<maxSlots; slotIdx++) {
+            var token = String(list[slotIdx] || '').trim();
+            var selectedCls = (slotIdx === selected) ? ' slotSelected' : '';
+            if (!token){
+              chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">Vacancy '+(slotIdx+1)+'</span>');
+            } else {
+              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span>'+escapeHtml(token)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
+            }
           }
-          return list.map(function(token, idx){
-            return '<span class="assignChip" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">'+
-              '<span>'+escapeHtml(token)+'</span>'+
-              '<button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">×</button>'+
-            '</span>';
-          }).join('');
+          return '<div class="quickBubbleWrap">'+chips.join('')+'</div>';
         }
 
         function renderRows_(){
@@ -2032,8 +2086,8 @@
               h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
-                     '<button type="button" class="btnBack assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
-                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">'+(closedMap[pos] ? '🔓 重開 / Reopen' : '🔒 關閉 / Close')+'</button>'+
+                     '<button type="button" class="btnNa assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
+                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">🔒 關閉 / Close</button>'+
                    '</div>'+
                    '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
@@ -2060,24 +2114,34 @@
         function addAssigned_(pos, memberId){
           var token = String(memberId||'').trim();
           if (!token) return;
+          var current = (assignedMap[pos] || []).slice();
+          var maxSlots = Number(POSITION_MAX[pos] || 1);
+          if (maxSlots < 1) maxSlots = 1;
+          var target = Number(selectedSlotMap[pos] || 0);
+          if (target < 0 || target >= maxSlots) target = 0;
           if (isNaToken_(token)){
             closedMap[pos] = false;
-            assignedMap[pos] = ['N/A'];
+            while (current.length < maxSlots) current.push('');
+            current[target] = 'N/A';
+            assignedMap[pos] = current.slice(0, maxSlots);
             refreshAssigned_(pos);
             return;
           }
           var id = extractMemberId_(token) || token.toUpperCase();
           if (!id) return;
-          var current = assignedMap[pos] || [];
+          var formatted = formatServingToken_(memberMap, id);
           if (current.some(function(t){ return extractMemberId_(t) === id; })) return;
           closedMap[pos] = false;
-          assignedMap[pos] = current.filter(function(t){ return !isNaToken_(t); });
-          assignedMap[pos].push(formatServingToken_(memberMap, id));
+          while (current.length < maxSlots) current.push('');
+          current[target] = formatted;
+          assignedMap[pos] = current.slice(0, maxSlots);
           refreshAssigned_(pos);
         }
         function removeAssigned_(pos, idx){
-          var current = assignedMap[pos] || [];
-          current.splice(idx, 1);
+          var current = (assignedMap[pos] || []).slice();
+          if (idx < 0) return;
+          while (current.length <= idx) current.push('');
+          current[idx] = '';
           assignedMap[pos] = current;
           refreshAssigned_(pos);
         }
@@ -2163,11 +2227,10 @@
           Array.prototype.slice.call(modal.querySelectorAll('.assignClose')).forEach(function(btn){
             btn.onclick = function(){
               var pos = String(btn.getAttribute('data-pos')||'');
-              closedMap[pos] = !closedMap[pos];
-              if (closedMap[pos]) assignedMap[pos] = [];
+              closedMap[pos] = true;
+              assignedMap[pos] = [];
+              selectedSlotMap[pos] = 0;
               refreshAssigned_(pos);
-              var rowBtn = modal.querySelector('.assignClose[data-pos="'+pos+'"]');
-              if (rowBtn) rowBtn.textContent = closedMap[pos] ? '🔓 重開 / Reopen' : '🔒 關閉 / Close';
             };
           });
           Array.prototype.slice.call(modal.querySelectorAll('.assignSelect')).forEach(function(sel){
@@ -2182,9 +2245,17 @@
           Array.prototype.slice.call(modal.querySelectorAll('.assignList')).forEach(function(box){
             box.onclick = function(e){
               var target = e && e.target ? e.target : null;
-              if (!target || target.tagName !== 'BUTTON') return;
-              var pos = String(target.getAttribute('data-pos')||'');
-              var idx = parseInt(String(target.getAttribute('data-idx')||'0'), 10);
+              if (!target) return;
+              var btn = target.tagName === 'BUTTON' ? target : null;
+              var bubble = target.closest ? target.closest('[data-slot]') : null;
+              if (bubble){
+                var bpos = String(bubble.getAttribute('data-pos')||'');
+                var bidx = parseInt(String(bubble.getAttribute('data-slot')||'0'), 10);
+                if (bpos && !isNaN(bidx)){ selectedSlotMap[bpos] = bidx; refreshAssigned_(bpos); }
+              }
+              if (!btn) return;
+              var pos = String(btn.getAttribute('data-pos')||'');
+              var idx = parseInt(String(btn.getAttribute('data-idx')||'0'), 10);
               if (!isNaN(idx)) removeAssigned_(pos, idx);
             };
           });
@@ -2279,11 +2350,15 @@
           modal.querySelector('#btnCloseServing').onclick = function(){ closeModal(modal); };
           modal.querySelector('#btnSaveServing').onclick = function(){
             clear('servingEditMsg');
-            var payload = positions.map(function(pos){
+            var payload = displayPositions.map(function(pos){
               return { position: pos, value: String(values[pos] || '').trim() };
             });
             callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
               if (!res2 || !res2.ok){
+                if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
+                  showBox('servingEditMsg','err','成員不屬於該事奉組別 E409','Member is not in the required serving group.');
+                  return;
+                }
                 if (res2 && res2.code === 'E409' && res2.canOverride){
                   var detail = '';
                   var titleZh = '事奉安排需要確認';
@@ -2350,6 +2425,7 @@
             });
           };
           attachScrollControls_(modal);
+          enableDragScroll_(modal);
         }
 
         render();
@@ -2403,20 +2479,24 @@
         var rawPositionValue = String(values[pos] || '').trim();
         var isClosedNow = isServingClosedToken_(rawPositionValue);
         var tokens = isClosedNow ? [] : splitServingValues_(rawPositionValue);
-        var addMode = (!isNaN(idx) && idx >= tokens.length);
-        var useIdx = (!isNaN(idx) && idx >= 0 && idx < tokens.length) ? idx : tokens.indexOf(rawValue);
-        if (useIdx < 0) useIdx = addMode ? tokens.length : 0;
-        var currentToken = addMode ? '空缺 / Empty' : (tokens[useIdx] || rawValue || '—');
-        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), pos !== 'Other');
+        var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), false);
+        var maxSlots = Number(POSITION_MAX[pos] || 1);
+        if (maxSlots < 1) maxSlots = 1;
+        var draftClosed = !!isClosedNow;
+        var draftSlots = [];
+        for (var ds=0; ds<maxSlots; ds++) draftSlots.push(tokens[ds] || '');
+        var selectedSlotIdx = 0;
 
         function buildPayload_(){
-          return positions.map(function(p){
-            return { position: p, value: String(values[p] || '').trim() };
-          });
+          return [{ position: pos, value: String(values[pos] || '').trim() }];
         }
         function saveWithOverride_(override){
           callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override, groupKeyNorm).then(function(res2){
             if (!res2 || !res2.ok){
+              if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
+                showBox('quickMsg','err','成員不屬於該事奉組別 E409','Member is not in the required serving group.');
+                return;
+              }
               if (res2 && res2.code === 'E409' && res2.canOverride){
                 var detail = '';
                 var titleZh = '事奉安排需要確認';
@@ -2477,65 +2557,95 @@
           });
         }
 
-        function swapToken_(nextToken){
-          if (!nextToken) return;
-          if (useIdx >= tokens.length) tokens.push(nextToken);
-          else tokens[useIdx] = nextToken;
-          values[pos] = tokens.filter(Boolean).join(', ');
-          saveWithOverride_(false);
+        function addTokenToSelected_(nextToken){
+          var token = String(nextToken||'').trim();
+          if (!token) return;
+          if (selectedSlotIdx < 0 || selectedSlotIdx >= maxSlots) selectedSlotIdx = 0;
+          draftClosed = false;
+          draftSlots[selectedSlotIdx] = token;
+          renderDraftBubbles_();
         }
-        function closePosition_(){
-          values[pos] = SERVING_CLOSED_TOKEN;
-          saveWithOverride_(false);
+        function setClosedDraft_(){
+          draftClosed = true;
+          for (var i=0;i<maxSlots;i++) draftSlots[i] = '';
+          renderDraftBubbles_();
         }
-        function reopenPosition_(){
-          values[pos] = '';
-          saveWithOverride_(false);
-        }
-        function deleteToken_(){
-          if (useIdx >= 0 && useIdx < tokens.length){
-            tokens.splice(useIdx, 1);
+        function renderDraftBubbles_(){
+          var wrap = modal.querySelector('#quickPendingBubbles');
+          if (!wrap) return;
+          if (draftClosed){
+            wrap.innerHTML = '<button type="button" class="quickBubble quickBubbleVacancy slotSelected" data-slot="0">🔒 Closed / 已關閉</button>';
           } else {
-            return;
+            var chips = draftSlots.map(function(token, slotIdx){
+              var selectedCls = (slotIdx === selectedSlotIdx) ? ' slotSelected' : '';
+              var isVac = !String(token||'').trim();
+              var label = isVac ? ('Vacancy ' + (slotIdx + 1)) : token;
+              var bubbleCls = 'quickBubble' + (isVac ? ' quickBubbleVacancy' : '') + selectedCls;
+              var rm = isVac ? '' : '<button type="button" data-rm="'+slotIdx+'">×</button>' ;
+              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+escapeHtml(label)+rm+'</span>';
+            });
+            wrap.innerHTML = chips.join('');
           }
-          values[pos] = tokens.filter(Boolean).join(', ');
-          saveWithOverride_(false);
+          Array.prototype.slice.call(wrap.querySelectorAll('[data-slot]')).forEach(function(el){
+            el.onclick = function(e){
+              var target = e && e.target ? e.target : null;
+              var slot = parseInt(String(el.getAttribute('data-slot')||'0'), 10);
+              if (!isNaN(slot)) selectedSlotIdx = slot;
+              if (target && target.getAttribute && target.getAttribute('data-rm') !== null){
+                var rm = parseInt(String(target.getAttribute('data-rm')||''), 10);
+                if (!isNaN(rm)) draftSlots[rm] = '';
+              }
+              renderDraftBubbles_();
+            };
+          });
         }
-
+        function closePosition_(){ setClosedDraft_(); }
+        function reopenPosition_(){ draftClosed = false; renderDraftBubbles_(); }
         modal.querySelector('.modal').innerHTML =
           '<div class="big">🧩 快速編輯 / Quick edit</div>'+
           '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(servingPositionLabel_({ position: pos }))+'</div>'+
-          '<div class="small" style="margin-top:6px;">'+(addMode ? '新增空缺 / Add to vacant slot' : '目前 / Current: <span class="pill">'+escapeHtml(currentToken)+'</span>')+'</div>'+
-          '<div class="label" style="margin-top:10px;">'+(addMode ? '加入 / Add' : '交換 / Swap')+'</div>'+
+          '<div class="label" style="margin-top:8px;">待儲存 / Pending</div>'+
+          '<div id="quickPendingBubbles" class="quickBubbleWrap"></div>'+
+          '<div class="label" style="margin-top:10px;">加入 / Add</div>'+
           '<select id="quickSwapSelect" class="inputMini">'+options+'</select>'+
-          '<input id="quickMemberSearch" class="inputMini" style="margin-top:8px;" placeholder="輸入 CCF ID / 姓名搜尋 / Type CCF ID or name" />'+
+          '<input id="quickMemberSearch" class="inputMini" style="margin-top:8px;" placeholder="輸入關鍵字後顯示候選 / Type keywords to search" />'+
           '<div id="quickSuggest" class="suggestList"></div>'+
           (pos === 'Other'
             ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
             : '')+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
-            '<button id="btnQuickSwap" class="btnMain">✅ '+(addMode ? '加入 / Add' : '交換 / Swap')+'</button>'+
-            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '<button id="btnQuickNa" class="btnBack">N/A</button>')+
-            (addMode ? '' : '<button id="btnQuickDelete" class="btnDanger">🧹 刪除 / Delete</button>')+
+            '<button id="btnQuickNa" class="btnNa">🟤 N/A</button>'+
             '<button id="btnQuickClosePos" class="btnDanger">🔒 關閉 / Close</button>'+
-            '<button id="btnQuickReopenPos" class="btnBack">🔓 重開 / Reopen</button>'+
-            '<button id="btnQuickClose" class="btnBack">⬅️ 返回 / Back</button>'+
+            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
+          '</div>'+
+          '<div class="miniBtnRow" style="margin-top:8px;">'+
+            '<button id="btnQuickSave" class="btnMain">💾 儲存 / Save</button>'+
+            '<button id="btnQuickClose" class="btnBack">⬅️ 取消 / Cancel</button>'+
           '</div>'+
           '<div id="quickMsg"></div>';
 
         modal.querySelector('#btnQuickClose').onclick = function(){ closeModal(modal); };
-        modal.querySelector('#btnQuickSwap').onclick = function(){
-          var sel = modal.querySelector('#quickSwapSelect');
-          var val = sel ? String(sel.value||'').trim() : '';
-          if (!val) return;
-          swapToken_(val === 'N/A' ? 'N/A' : formatServingToken_(memberMap, val));
+        
+        var btnQuickSave = modal.querySelector('#btnQuickSave');
+        if (btnQuickSave) btnQuickSave.onclick = function(){
+          values[pos] = draftClosed ? SERVING_CLOSED_TOKEN : draftSlots.filter(Boolean).join(', ');
+          saveWithOverride_(false);
         };
 
         function renderQuickSuggest_(){
           var input = modal.querySelector('#quickMemberSearch');
           var wrap = modal.querySelector('#quickSuggest');
           if (!input || !wrap) return;
-          var picks = searchMembersForQuickEdit_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), input.value, 10);
+          var query = String(input.value||'').trim();
+          if (!query){
+            wrap.innerHTML = '<div class="small">請先輸入關鍵字 / Type keywords to search</div>';
+            return;
+          }
+          var picks = searchMembersForQuickEdit_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), query, 10);
+          if (!picks.length){
+            wrap.innerHTML = '<div class="small">沒有符合結果 / No matches</div>';
+            return;
+          }
           wrap.innerHTML = picks.map(function(m){
             return '<button type="button" class="suggestBtn" data-id="'+escapeHtml(m.id)+'">'+escapeHtml(memberLabel_(m))+'</button>';
           }).join('');
@@ -2543,7 +2653,7 @@
             btn.onclick = function(){
               var id = String(btn.getAttribute('data-id') || '').trim();
               if (!id) return;
-              swapToken_(formatServingToken_(memberMap, id));
+              addTokenToSelected_(formatServingToken_(memberMap, id));
             };
           });
         }
@@ -2552,29 +2662,29 @@
           quickSearch.oninput = renderQuickSuggest_;
           renderQuickSuggest_();
         }
-        var btnQuickNa = modal.querySelector('#btnQuickNa');
-        if (btnQuickNa) btnQuickNa.onclick = function(){ swapToken_('N/A'); };
+        var quickSelect = modal.querySelector('#quickSwapSelect');
+        if (quickSelect) quickSelect.onchange = function(){
+          var val = String(quickSelect.value||'').trim();
+          if (!val) return;
+          addTokenToSelected_(formatServingToken_(memberMap, val));
+          quickSelect.value = '';
+        };
         if (pos === 'Other'){
           modal.querySelector('#btnQuickUseText').onclick = function(){
             var input = modal.querySelector('#quickOtherText');
             var val = input ? String(input.value||'').trim() : '';
             if (!val) return;
-            swapToken_(val);
+            addTokenToSelected_(val);
           };
         }
+        var naBtn = modal.querySelector('#btnQuickNa');
+        if (naBtn) naBtn.onclick = function(){ addTokenToSelected_('N/A'); };
         var closePosBtn = modal.querySelector('#btnQuickClosePos');
         if (closePosBtn) closePosBtn.onclick = function(){ closePosition_(); };
-        var reopenPosBtn = modal.querySelector('#btnQuickReopenPos');
-        if (reopenPosBtn) reopenPosBtn.onclick = function(){ reopenPosition_(); };
-        if (closePosBtn) closePosBtn.style.display = isClosedNow ? 'none' : '';
-        if (reopenPosBtn) reopenPosBtn.style.display = isClosedNow ? '' : 'none';
 
-        var delBtn = modal.querySelector('#btnQuickDelete');
-        if (delBtn) delBtn.onclick = function(){
-          if (!confirm('確認刪除此安排？ / Confirm delete assignment?')) return;
-          deleteToken_();
-        };
+        renderDraftBubbles_();
         attachScrollControls_(modal);
+        enableDragScroll_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
           '<div class="big err">系統錯誤 / Error</div>'+
@@ -3474,9 +3584,9 @@
             }
             gapResult.innerHTML = '<ul class="groupDialogList">'+filtered.map(function(g){
               var posText = (g.positions || []).map(function(p){
-                return (p.label || p.position || '—') + ' (+' + String(p.missing||0) + ')';
+                return (p.label || p.position || '—') + ' (x' + String(p.missing||0) + ')';
               }).join(', ');
-              return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · +'+escapeHtml(String(g.totalMissing||0))+' · '+escapeHtml(posText)+'</li>';
+              return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
             }).join('')+'</ul>';
           }
           if (gap6Btn) gap6Btn.onclick = function(){ renderGapByWeeks_(42); };
