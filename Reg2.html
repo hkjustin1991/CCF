@@ -1269,6 +1269,8 @@
         return String(g||'').trim().toLowerCase();
       }
       (res.servingThisWeek||[]).forEach(function(r){
+        var displayName = String((r && r.displayName) || '').trim();
+        if (!displayName) return;
         var g = normalizedGroupKey(r.group) || 'other';
         if (!groups[g]) groups[g] = [];
         groups[g].push(r);
