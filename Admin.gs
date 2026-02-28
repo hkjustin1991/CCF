@@ -628,9 +628,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const updatedHeaderMap = admin_getServingMatrixHeaderMap_(sh);
   const lastCol = sh.getLastColumn();
   const rowValues = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
-  for (let i=1;i<lastCol;i++){
-    rowValues[i] = '';
-  }
   cleaned.forEach(function(r){
     const colIdx = updatedHeaderMap[r.position];
     if (colIdx) rowValues[colIdx-1] = r.value || '';
@@ -1838,6 +1835,7 @@ function admin_getServingInsightsForMember_(memberId){
       const groupKey = admin_normalizeServingGroup_(pos.group);
       if (!groupKey || !out.byGroup[groupKey]) return;
       const raw = String(row[pos.colIndex - 1] || '').trim();
+      if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
 
       const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
@@ -1957,6 +1955,7 @@ function admin_buildServingGroupOverview_(fromYmd){
       const groupKey = admin_normalizeServingGroup_(pos.group);
       if (!groupKey || !out.byGroup[groupKey]) return;
       const raw = String(row[pos.colIndex - 1] || '').trim();
+      if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
       const minRequired = (ADMIN_SERVING_POSITION_MIN[pos.position] || (pos.position === 'Other' ? 0 : 1));
       const missing = Math.max(0, minRequired - ids.length);
