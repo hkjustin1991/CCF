@@ -68,6 +68,7 @@
     .btnPeriod{background:#f3f0ff;border-color:rgba(110,80,200,0.18)}       /* light purple */
     .btnBack{background:#eef4ff;border-color:rgba(40,90,200,0.18)}          /* blue-ish */
     .btnDanger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}        /* red-ish */
+    .btnNa{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
     .btnGhost{background:#fff;border-color:rgba(10,30,80,0.12)}             /* white */
     .btnPink{background:#fff1f4;border-color:rgba(217,60,94,0.25)}          /* pink */
 
@@ -187,6 +188,7 @@
     .quickBubble{border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;background:#fff;display:inline-flex;align-items:center;gap:6px}
     .quickBubbleVacancy{background:#fff6e6;border-color:rgba(200,132,0,0.45);color:#8a5a00}
     .quickBubble button{border:none;background:transparent;color:#d93c5e;cursor:pointer;font-weight:900;padding:0;line-height:1}
+    .quickBubble.slotSelected{box-shadow:inset 0 0 0 2px #285ac8}
 
     .servingPlanTable th,
     .servingPlanTable td{
@@ -748,6 +750,34 @@
       return o;
     }
     function closeModal(o){ try{ document.body.removeChild(o); }catch(e){} }
+
+    function enableDragScroll_(scope){
+      var root = scope || document;
+      var wraps = Array.prototype.slice.call(root.querySelectorAll('.tableWrap'));
+      wraps.forEach(function(wrap){
+        if (!wrap || wrap.__dragBound) return;
+        wrap.__dragBound = true;
+        var down = false;
+        var sx = 0, sy = 0, sl = 0, st = 0;
+        wrap.addEventListener('mousedown', function(e){
+          if (!e || e.button !== 0) return;
+          down = true;
+          sx = e.clientX; sy = e.clientY;
+          sl = wrap.scrollLeft; st = wrap.scrollTop;
+          wrap.style.cursor = 'grabbing';
+          e.preventDefault();
+        });
+        window.addEventListener('mousemove', function(e){
+          if (!down) return;
+          wrap.scrollLeft = sl - (e.clientX - sx);
+          wrap.scrollTop = st - (e.clientY - sy);
+        });
+        window.addEventListener('mouseup', function(){
+          down = false;
+          wrap.style.cursor = '';
+        });
+      });
+    }
     function clear(targetId){ var el=$(targetId); if(el) el.innerHTML=''; }
 
     function roleIsAdmin(){
@@ -975,7 +1005,10 @@
         : '<div class="small">沒有空缺 / No gaps</div>';
       return ''+
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
-          '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+          '<div class="groupDialogHeader">'+
+            '<div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div>'+
+            '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ Close</button>'+
+          '</div>'+
           '<div class="groupDialogSection"><div class="label">空缺（未來 12 週）</div>'+gapsHtml+'</div>'+
           '<div class="groupDialogSection"><div class="label">當前組員 / Current members</div>'+membersHtml+'</div>'+
         '</div>';
@@ -1929,7 +1962,9 @@
             btn.onclick = function(){
               var key = String(btn.getAttribute('data-group')||'');
               if (!key) return;
-              openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
+              var sumModal = openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
+              var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
+              if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
@@ -1986,12 +2021,14 @@
           return isServingClosedToken_(token);
         }
         var closedMap = {};
+        var selectedSlotMap = {};
 
         displayPositions.forEach(function(pos){
           var initialRaw = String(values[pos] || '').trim();
           if (isClosedToken_(initialRaw)){
             closedMap[pos] = true;
             assignedMap[pos] = [];
+            selectedSlotMap[pos] = 0;
             return;
           }
           var initial = splitServingValues_(initialRaw);
@@ -2000,22 +2037,28 @@
             var id = extractMemberId_(token);
             return id ? formatServingToken_(memberMap, id) : token;
           }).filter(Boolean);
+          selectedSlotMap[pos] = 0;
         });
 
         function renderAssignedList_(pos){
           var list = assignedMap[pos] || [];
           if (closedMap[pos]){
-            return '<div class="small">🔒 Closed / 已關閉</div>';
+            return '<div class="quickBubbleWrap"><span class="quickBubble quickBubbleVacancy slotSelected" data-pos="'+escapeHtml(pos)+'" data-slot="0">🔒 Closed / 已關閉</span></div>';
           }
-          if (!list.length){
-            return '<div class="small">—</div>';
+          var maxSlots = Number(POSITION_MAX[pos] || 1);
+          if (maxSlots < 1) maxSlots = 1;
+          var selected = Number(selectedSlotMap[pos] || 0);
+          var chips = [];
+          for (var slotIdx=0; slotIdx<maxSlots; slotIdx++) {
+            var token = String(list[slotIdx] || '').trim();
+            var selectedCls = (slotIdx === selected) ? ' slotSelected' : '';
+            if (!token){
+              chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">Vacancy '+(slotIdx+1)+'</span>');
+            } else {
+              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span>'+escapeHtml(token)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
+            }
           }
-          return list.map(function(token, idx){
-            return '<span class="assignChip" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">'+
-              '<span>'+escapeHtml(token)+'</span>'+
-              '<button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+idx+'">×</button>'+
-            '</span>';
-          }).join('');
+          return '<div class="quickBubbleWrap">'+chips.join('')+'</div>';
         }
 
         function renderRows_(){
@@ -2043,8 +2086,8 @@
               h += '<div class="assignList" data-pos="'+escapeHtml(pos)+'">'+renderAssignedList_(pos)+'</div>'+
                    '<div class="miniBtnRow" style="margin-top:8px;">'+
                      '<input class="inputMini assignInput" data-pos="'+escapeHtml(pos)+'" placeholder="輸入 CCF ID / 姓名" />'+
-                     '<button type="button" class="btnBack assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
-                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">'+(closedMap[pos] ? '🔓 重開 / Reopen' : '🔒 關閉 / Close')+'</button>'+
+                     '<button type="button" class="btnNa assignNa btnSmall" data-pos="'+escapeHtml(pos)+'">N/A</button>'+
+                     '<button type="button" class="btnDanger assignClose btnSmall" data-pos="'+escapeHtml(pos)+'">🔒 關閉 / Close</button>'+
                    '</div>'+
                    '<select class="inputMini assignSelect" data-pos="'+escapeHtml(pos)+'">'+buildMemberOptions_(members, groupKey)+'</select>'+
                    '<div class="suggestList" data-pos="'+escapeHtml(pos)+'"></div>';
@@ -2071,24 +2114,34 @@
         function addAssigned_(pos, memberId){
           var token = String(memberId||'').trim();
           if (!token) return;
+          var current = (assignedMap[pos] || []).slice();
+          var maxSlots = Number(POSITION_MAX[pos] || 1);
+          if (maxSlots < 1) maxSlots = 1;
+          var target = Number(selectedSlotMap[pos] || 0);
+          if (target < 0 || target >= maxSlots) target = 0;
           if (isNaToken_(token)){
             closedMap[pos] = false;
-            assignedMap[pos] = ['N/A'];
+            while (current.length < maxSlots) current.push('');
+            current[target] = 'N/A';
+            assignedMap[pos] = current.slice(0, maxSlots);
             refreshAssigned_(pos);
             return;
           }
           var id = extractMemberId_(token) || token.toUpperCase();
           if (!id) return;
-          var current = assignedMap[pos] || [];
+          var formatted = formatServingToken_(memberMap, id);
           if (current.some(function(t){ return extractMemberId_(t) === id; })) return;
           closedMap[pos] = false;
-          assignedMap[pos] = current.filter(function(t){ return !isNaToken_(t); });
-          assignedMap[pos].push(formatServingToken_(memberMap, id));
+          while (current.length < maxSlots) current.push('');
+          current[target] = formatted;
+          assignedMap[pos] = current.slice(0, maxSlots);
           refreshAssigned_(pos);
         }
         function removeAssigned_(pos, idx){
-          var current = assignedMap[pos] || [];
-          current.splice(idx, 1);
+          var current = (assignedMap[pos] || []).slice();
+          if (idx < 0) return;
+          while (current.length <= idx) current.push('');
+          current[idx] = '';
           assignedMap[pos] = current;
           refreshAssigned_(pos);
         }
@@ -2174,11 +2227,10 @@
           Array.prototype.slice.call(modal.querySelectorAll('.assignClose')).forEach(function(btn){
             btn.onclick = function(){
               var pos = String(btn.getAttribute('data-pos')||'');
-              closedMap[pos] = !closedMap[pos];
-              if (closedMap[pos]) assignedMap[pos] = [];
+              closedMap[pos] = true;
+              assignedMap[pos] = [];
+              selectedSlotMap[pos] = 0;
               refreshAssigned_(pos);
-              var rowBtn = modal.querySelector('.assignClose[data-pos="'+pos+'"]');
-              if (rowBtn) rowBtn.textContent = closedMap[pos] ? '🔓 重開 / Reopen' : '🔒 關閉 / Close';
             };
           });
           Array.prototype.slice.call(modal.querySelectorAll('.assignSelect')).forEach(function(sel){
@@ -2193,9 +2245,17 @@
           Array.prototype.slice.call(modal.querySelectorAll('.assignList')).forEach(function(box){
             box.onclick = function(e){
               var target = e && e.target ? e.target : null;
-              if (!target || target.tagName !== 'BUTTON') return;
-              var pos = String(target.getAttribute('data-pos')||'');
-              var idx = parseInt(String(target.getAttribute('data-idx')||'0'), 10);
+              if (!target) return;
+              var btn = target.tagName === 'BUTTON' ? target : null;
+              var bubble = target.closest ? target.closest('[data-slot]') : null;
+              if (bubble){
+                var bpos = String(bubble.getAttribute('data-pos')||'');
+                var bidx = parseInt(String(bubble.getAttribute('data-slot')||'0'), 10);
+                if (bpos && !isNaN(bidx)){ selectedSlotMap[bpos] = bidx; refreshAssigned_(bpos); }
+              }
+              if (!btn) return;
+              var pos = String(btn.getAttribute('data-pos')||'');
+              var idx = parseInt(String(btn.getAttribute('data-idx')||'0'), 10);
               if (!isNaN(idx)) removeAssigned_(pos, idx);
             };
           });
@@ -2290,7 +2350,7 @@
           modal.querySelector('#btnCloseServing').onclick = function(){ closeModal(modal); };
           modal.querySelector('#btnSaveServing').onclick = function(){
             clear('servingEditMsg');
-            var payload = positions.map(function(pos){
+            var payload = displayPositions.map(function(pos){
               return { position: pos, value: String(values[pos] || '').trim() };
             });
             callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
@@ -2365,6 +2425,7 @@
             });
           };
           attachScrollControls_(modal);
+          enableDragScroll_(modal);
         }
 
         render();
@@ -2421,12 +2482,13 @@
         var options = buildMemberOptions_(members, groupKeyNorm || (POSITION_GROUP[pos] || ''), false);
         var maxSlots = Number(POSITION_MAX[pos] || 1);
         if (maxSlots < 1) maxSlots = 1;
-        var draftTokens = tokens.slice();
+        var draftClosed = !!isClosedNow;
+        var draftSlots = [];
+        for (var ds=0; ds<maxSlots; ds++) draftSlots.push(tokens[ds] || '');
+        var selectedSlotIdx = 0;
 
         function buildPayload_(){
-          return positions.map(function(p){
-            return { position: p, value: String(values[p] || '').trim() };
-          });
+          return [{ position: pos, value: String(values[pos] || '').trim() }];
         }
         function saveWithOverride_(override){
           callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override, groupKeyNorm).then(function(res2){
@@ -2495,46 +2557,50 @@
           });
         }
 
-        function addToken_(nextToken){
+        function addTokenToSelected_(nextToken){
           var token = String(nextToken||'').trim();
           if (!token) return;
-          if (draftTokens.length >= maxSlots) return;
-          draftTokens.push(token);
+          if (selectedSlotIdx < 0 || selectedSlotIdx >= maxSlots) selectedSlotIdx = 0;
+          draftClosed = false;
+          draftSlots[selectedSlotIdx] = token;
           renderDraftBubbles_();
         }
-        function closePosition_(){
-          values[pos] = SERVING_CLOSED_TOKEN;
-          saveWithOverride_(false);
-        }
-        function reopenPosition_(){
-          values[pos] = '';
-          saveWithOverride_(false);
-        }
-        function removeDraftToken_(removeIdx){
-          if (removeIdx < 0 || removeIdx >= draftTokens.length) return;
-          draftTokens.splice(removeIdx, 1);
+        function setClosedDraft_(){
+          draftClosed = true;
+          for (var i=0;i<maxSlots;i++) draftSlots[i] = '';
           renderDraftBubbles_();
         }
-
         function renderDraftBubbles_(){
           var wrap = modal.querySelector('#quickPendingBubbles');
           if (!wrap) return;
-          var chips = draftTokens.map(function(token, tokenIdx){
-            return '<span class="quickBubble">'+escapeHtml(token)+'<button type="button" data-rm="'+tokenIdx+'">×</button></span>';
-          });
-          for (var slotIdx = chips.length; slotIdx < maxSlots; slotIdx++){
-            chips.push('<span class="quickBubble quickBubbleVacancy">空缺 / Vacancy</span>');
+          if (draftClosed){
+            wrap.innerHTML = '<button type="button" class="quickBubble quickBubbleVacancy slotSelected" data-slot="0">🔒 Closed / 已關閉</button>';
+          } else {
+            var chips = draftSlots.map(function(token, slotIdx){
+              var selectedCls = (slotIdx === selectedSlotIdx) ? ' slotSelected' : '';
+              var isVac = !String(token||'').trim();
+              var label = isVac ? ('Vacancy ' + (slotIdx + 1)) : token;
+              var bubbleCls = 'quickBubble' + (isVac ? ' quickBubbleVacancy' : '') + selectedCls;
+              var rm = isVac ? '' : '<button type="button" data-rm="'+slotIdx+'">×</button>' ;
+              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+escapeHtml(label)+rm+'</span>';
+            });
+            wrap.innerHTML = chips.join('');
           }
-          wrap.innerHTML = chips.join('');
-          Array.prototype.slice.call(wrap.querySelectorAll('button[data-rm]')).forEach(function(btn){
-            btn.onclick = function(){
-              var rm = parseInt(String(btn.getAttribute('data-rm')||''), 10);
-              if (!isNaN(rm)) removeDraftToken_(rm);
+          Array.prototype.slice.call(wrap.querySelectorAll('[data-slot]')).forEach(function(el){
+            el.onclick = function(e){
+              var target = e && e.target ? e.target : null;
+              var slot = parseInt(String(el.getAttribute('data-slot')||'0'), 10);
+              if (!isNaN(slot)) selectedSlotIdx = slot;
+              if (target && target.getAttribute && target.getAttribute('data-rm') !== null){
+                var rm = parseInt(String(target.getAttribute('data-rm')||''), 10);
+                if (!isNaN(rm)) draftSlots[rm] = '';
+              }
+              renderDraftBubbles_();
             };
           });
         }
-
-
+        function closePosition_(){ setClosedDraft_(); }
+        function reopenPosition_(){ draftClosed = false; renderDraftBubbles_(); }
         modal.querySelector('.modal').innerHTML =
           '<div class="big">🧩 快速編輯 / Quick edit</div>'+
           '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(servingPositionLabel_({ position: pos }))+'</div>'+
@@ -2548,26 +2614,21 @@
             ? '<input id="quickOtherText" class="inputMini" style="margin-top:8px;" placeholder="自訂內容 / Custom text" />'
             : '')+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
-            '<button id="btnQuickAdd" class="btnMain">➕ 加入 / Add</button>'+
-            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
+            '<button id="btnQuickNa" class="btnNa">🟤 N/A</button>'+
             '<button id="btnQuickClosePos" class="btnDanger">🔒 關閉 / Close</button>'+
-            '<button id="btnQuickReopenPos" class="btnBack">🔓 重開 / Reopen</button>'+
+            (pos === 'Other' ? '<button id="btnQuickUseText" class="btnBack">✍️ 使用文字 / Use text</button>' : '')+
+          '</div>'+
+          '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnQuickSave" class="btnMain">💾 儲存 / Save</button>'+
-            '<button id="btnQuickClose" class="btnBack">取消 / Cancel</button>'+
+            '<button id="btnQuickClose" class="btnBack">⬅️ 取消 / Cancel</button>'+
           '</div>'+
           '<div id="quickMsg"></div>';
 
         modal.querySelector('#btnQuickClose').onclick = function(){ closeModal(modal); };
-        modal.querySelector('#btnQuickAdd').onclick = function(){
-          var sel = modal.querySelector('#quickSwapSelect');
-          var val = sel ? String(sel.value||'').trim() : '';
-          if (!val) return;
-          addToken_(formatServingToken_(memberMap, val));
-          if (sel) sel.value = '';
-        };
+        
         var btnQuickSave = modal.querySelector('#btnQuickSave');
         if (btnQuickSave) btnQuickSave.onclick = function(){
-          values[pos] = draftTokens.filter(Boolean).join(', ');
+          values[pos] = draftClosed ? SERVING_CLOSED_TOKEN : draftSlots.filter(Boolean).join(', ');
           saveWithOverride_(false);
         };
 
@@ -2592,7 +2653,7 @@
             btn.onclick = function(){
               var id = String(btn.getAttribute('data-id') || '').trim();
               if (!id) return;
-              addToken_(formatServingToken_(memberMap, id));
+              addTokenToSelected_(formatServingToken_(memberMap, id));
             };
           });
         }
@@ -2601,23 +2662,29 @@
           quickSearch.oninput = renderQuickSuggest_;
           renderQuickSuggest_();
         }
+        var quickSelect = modal.querySelector('#quickSwapSelect');
+        if (quickSelect) quickSelect.onchange = function(){
+          var val = String(quickSelect.value||'').trim();
+          if (!val) return;
+          addTokenToSelected_(formatServingToken_(memberMap, val));
+          quickSelect.value = '';
+        };
         if (pos === 'Other'){
           modal.querySelector('#btnQuickUseText').onclick = function(){
             var input = modal.querySelector('#quickOtherText');
             var val = input ? String(input.value||'').trim() : '';
             if (!val) return;
-            addToken_(val);
+            addTokenToSelected_(val);
           };
         }
+        var naBtn = modal.querySelector('#btnQuickNa');
+        if (naBtn) naBtn.onclick = function(){ addTokenToSelected_('N/A'); };
         var closePosBtn = modal.querySelector('#btnQuickClosePos');
         if (closePosBtn) closePosBtn.onclick = function(){ closePosition_(); };
-        var reopenPosBtn = modal.querySelector('#btnQuickReopenPos');
-        if (reopenPosBtn) reopenPosBtn.onclick = function(){ reopenPosition_(); };
-        if (closePosBtn) closePosBtn.style.display = isClosedNow ? 'none' : '';
-        if (reopenPosBtn) reopenPosBtn.style.display = isClosedNow ? '' : 'none';
 
         renderDraftBubbles_();
         attachScrollControls_(modal);
+        enableDragScroll_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
           '<div class="big err">系統錯誤 / Error</div>'+
