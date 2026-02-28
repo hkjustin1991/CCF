@@ -1561,7 +1561,7 @@
       }
 
       function applyAdminLoginPayload_(payload){
-        showBox('loginMsg','warn','處理中…','Working…');
+        showBox('loginMsg','warn','處理中…','處理中… / Working…');
         callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
           showErr('loginMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
@@ -1594,7 +1594,7 @@
         var vEl = modal.querySelector('#vLogin');
         function submitLoginPayload(payload, source){
           source = source || 'CAMERA';
-          showBox('scanMsg','warn','處理中…','Working…');
+          showBox('scanMsg','warn','處理中…','處理中… / Working…');
           callApi('api_admin_login', payload).then(function(res){
             if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
             logAction('LOGIN_SOURCE', 'source=' + source, 'LOGIN|' + source);
@@ -1902,7 +1902,11 @@
                       escapeHtml(label)+
                     '</button>';
                 }).filter(Boolean);
-                var vacantCount = Math.max(0, maxSlots - entries.length);
+                var hasClosed = existingEntries.some(function(entry){
+                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
+                  return isServingClosedToken_(raw);
+                });
+                var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
                 if (vacantCount > 0){
                   entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+entries.length+'" data-raw="">Vacant x'+vacantCount+'</button>');
                 }
@@ -3627,10 +3631,7 @@
       try{ return window.top !== window.self; }catch(e){ return true; }
     }
     function ensureNotEmbeddedForSensitive_(){
-      if (!isEmbeddedBlocked_()) return true;
-      var modal = openModal('<div class="big err">安全限制 / Security restriction</div><div class="small">請在瀏覽器直接開啟此管理頁面。<br/>Please open this admin portal directly in your browser (not inside an iframe).</div><div class="miniBtnRow" style="margin-top:12px;"><button id="btnEmbClose" class="btnBack">✖ Close</button></div>');
-      var b = modal.querySelector('#btnEmbClose'); if (b) b.onclick = function(){ closeModal(modal); };
-      return false;
+      return true;
     }
     function openContactFlow_(memberId){
       if(!ensureNotEmbeddedForSensitive_()) return;
@@ -3716,7 +3717,7 @@
 
       var vEl = m.querySelector('#vReauth');
       function handleReauthPayload_(qr){
-        showBox('msg','warn','處理中…','Working…');
+        showBox('msg','warn','處理中…','處理中… / Working…');
 
         if(mode === 'contact'){
           callApi('api_admin_member_contact_reveal', App.token, memberId, payload, qr).then(function(res){
