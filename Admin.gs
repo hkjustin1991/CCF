@@ -2618,12 +2618,16 @@ function admin_getActorNames_(actor){
 
   const mi = admin_getMembersIndex_();
   const m = mi.byId[String(a.id||'').toUpperCase()];
-  return {
+  const out = {
     id: a.id,
     role: a.role,
     nameZh: m ? (m.nameZh||'') : '',
     nameEn: m ? (m.nameEn||'') : ''
   };
+  if (String(a.role||'').toUpperCase() === 'GL'){
+    out.glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
+  }
+  return out;
 }
 
 // Checkins access
