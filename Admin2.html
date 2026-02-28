@@ -985,43 +985,14 @@
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       return gl.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
     }
-    function servingGroupPaletteClass_(groupKey){
-      var key = normalizeServingGroupKey_(groupKey);
-      if (key === 'worship') return 'btnPink';
-      if (key === 'media') return 'btnSub';
-      if (key === 'logistic') return 'btnNa';
-      if (key === 'support') return 'btnMain';
-      if (key === 'finance') return 'btnLookup';
-      return 'btnGhost';
-    }
-    function actorServingGroupKeys_(){
-      if (!roleIsGl()) return ['worship','media','logistic','support','finance'];
-      var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
-      var seen = {};
-      return gl.map(function(g){ return normalizeServingGroupKey_(g); }).filter(function(k){
-        if (!k || seen[k]) return false;
-        seen[k] = true;
-        return true;
-      });
-    }
-    function canOpenServingGroup_(groupKey){
+    function canEditServingPlanGroup_(groupKey, map){
       var key = normalizeServingGroupKey_(groupKey);
       if (!key) return false;
-      if (!roleIsGl()) return true;
-      return actorServingGroupKeys_().indexOf(key) >= 0;
+      var m = map || {};
+      if (Object.prototype.hasOwnProperty.call(m, key)) return !!m[key];
+      return canManageServingGroup_(key);
     }
-    function buildGroupMemberListHtml_(res, canEdit){
-      var members = Array.isArray(res.members) ? res.members : [];
-      var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
-      html += '<ul class="groupDialogList">'+members.map(function(m){
-        return '<li>'+escapeHtml(m.label||m.id||'—') + (canEdit ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(m.id||'')+'">移除 / Remove</button>') : '') + '</li>';
-      }).join('')+'</ul>';
-      if (canEdit){
-        html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" data-add-member="1">新增組員 / Add member</button></div>';
-      }
-      return html;
-    }
-    function loadServingGroupMembers_(host, groupKey, options){
+    function renderGroupMemberManage_(host, groupKey){
       if (!host || !groupKey) return;
       var opts = options || {};
       host.innerHTML = '<div class="small">載入中… / Loading…</div>';
@@ -2107,6 +2078,7 @@
           App.servingGroupOverview = (overviewRes && overviewRes.ok) ? (overviewRes.overview || {}) : {};
           var events = res.events || [];
           var positions = res.positions || [];
+          var canEditByGroup = (res && res.canEditByGroup) ? res.canEditByGroup : {};
           if(!events.length){
             listEl.innerHTML =
               '<div class="msgBox warn">'+
@@ -2153,6 +2125,7 @@
             var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
             var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
             if (!groupPositions.length) return '';
+            var canEdit = canEditServingPlanGroup_(groupKey, canEditByGroup);
             var headerHtml = groupPositions.map(function(pos){
               return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
             }).join('');
@@ -2185,13 +2158,13 @@
                   if (!label) return '';
                   var rawValue = String(entry.rawValue || entry.memberId || '').trim();
                   return ''+
-                    '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
+                    '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
                       escapeHtml(label)+
                     '</button>';
                 }).filter(Boolean);
                 var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
                 if (vacantCount > 0){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-idx="'+entries.length+'" data-raw="">空缺 x'+vacantCount+' / Vacant x'+vacantCount+'</button>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 x'+vacantCount+' / Vacant x'+vacantCount+'</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
@@ -2199,7 +2172,7 @@
                 '<tr>'+
                   '<td class="servingPlanEvent">'+
                     '<div>'+escapeHtml(eventLabel_(ev))+'</div>'+
-                    '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(groupKey)+'">✏️ 編輯 / Edit</button></div>'+
+                    (canEdit ? '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(groupKey)+'">✏️ 編輯 / Edit</button></div>' : '')+
                   '</td>'+
                   rowCells +
                 '</tr>';
@@ -2236,6 +2209,7 @@
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.servingPlanEntry')).forEach(function(btn){
             btn.onclick = function(){
+              if (String(btn.getAttribute('data-can-edit')||'0') !== '1') return;
               openServingQuickEdit_(btn.getAttribute('data-event'), btn.getAttribute('data-position'), btn.getAttribute('data-idx'), btn.getAttribute('data-raw'), btn.getAttribute('data-group'));
             };
           });
@@ -2287,6 +2261,7 @@
       if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var filterGroupKey = String(groupKey||'').trim();
+      if (filterGroupKey && !canManageServingGroup_(filterGroupKey)) return;
       var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
@@ -2772,6 +2747,7 @@
       var idx = parseInt(String(entryIndex||'0'), 10);
       var rawValue = String(entryRaw||'').trim();
       var groupKeyNorm = String(groupKey||'').trim();
+      if (groupKeyNorm && !canManageServingGroup_(groupKeyNorm)) return;
       var modal = openModal('<div class="big">🧩 快速編輯 / Quick edit</div><div class="small">載入中… / Loading…</div>');
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
