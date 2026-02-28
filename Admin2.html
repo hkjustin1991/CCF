@@ -1026,12 +1026,37 @@
       var opts = options || {};
       host.innerHTML = '<div class="small">載入中… / Loading…</div>';
       callApi('api_admin_serving_group_members', App.token, groupKey).then(function(res){
-        if (!res || !res.ok){
-          host.innerHTML = '<div class="msgBox err"><div class="big err">載入失敗 / Failed to load</div></div>';
-          return;
+        if (!res || !res.ok) return;
+        var members = Array.isArray(res.members) ? res.members : [];
+        function buildMemberDisplay_(m){
+          var id = String((m && m.id) || '').trim().toUpperCase();
+          var nameZh = String((m && m.nameZh) || '').trim();
+          var nameEn = String((m && m.nameEn) || '').trim();
+          var names = [nameZh, nameEn].filter(Boolean).join(' / ');
+          if (names) return { text:id ? (id + ' ' + names) : names, aria:names };
+          return { text:id || String((m && m.label) || '—').trim() || '—', aria:id || 'member' };
         }
-        var canEdit = !!res.canManage && !!opts.allowEdit;
-        host.innerHTML = buildGroupMemberListHtml_(res, canEdit);
+        var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
+        html += '<ul class="groupDialogList">'+members.map(function(m){
+          var canRm = !!res.canManage;
+          var mid = String((m && m.id) || '').trim().toUpperCase();
+          var disp = buildMemberDisplay_(m);
+          return '<li>'+
+            '<button type="button" class="btnLookup btnMini" data-open-mid="'+escapeHtml(mid)+'" aria-label="查看會員：'+escapeHtml(disp.aria)+' / View member: '+escapeHtml(disp.aria)+'">'+escapeHtml(disp.text)+'</button>'+
+            (canRm ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(mid)+'">移除 / Remove</button>') : '') +
+          '</li>';
+        }).join('')+'</ul>';
+        if (res.canManage){
+          html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">新增組員 / Add member</button></div>';
+        }
+        host.innerHTML = html;
+        Array.prototype.forEach.call(host.querySelectorAll('[data-open-mid]'), function(btn){
+          btn.onclick = function(){
+            var id = String(btn.getAttribute('data-open-mid')||'').trim();
+            if (!id) return;
+            openMemberDetail(id, '', '', { mode:'groupManagement' });
+          };
+        });
         Array.prototype.forEach.call(host.querySelectorAll('[data-rm-member]'), function(btn){
           btn.onclick = function(){
             var id = String(btn.getAttribute('data-rm-member')||'').trim();
@@ -3610,7 +3635,9 @@
     }
 
     /* ---------- Member detail (collapsed attendance) + gated actions ---------- */
-    function openMemberDetail(memberId, fromYmd, toYmd){
+    function openMemberDetail(memberId, fromYmd, toYmd, opts){
+      var options = opts || {};
+      var isGroupManagementMode = String(options.mode||'').trim() === 'groupManagement';
       var modal = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
       logAction('OPEN_MEMBER_DETAIL', memberId, 'member_detail');
 
@@ -3645,8 +3672,12 @@
 
         var topBtns = '<div class="modalTopBtns">'+
           (canContact ? '<button id="btnContact" class="btnPink">📇 查看聯絡/車牌 / View contact/VRM</button>' : '')+
-          '<button id="btnRemoveGroup" class="btnDanger">🗑️ 移出組別 / Remove member from group</button>'+
+          (isGroupManagementMode ? '' : '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>')+
         '</div>';
+
+        var statusRowHtml = isGroupManagementMode
+          ? ''
+          : ('<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>');
 
         var statsCard = canStats
           ? '<div class="msgBox ok" style="margin-top:10px;">'+
@@ -3705,7 +3736,7 @@
             '<div>English</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
             '<div>Preferred</div><div>'+escapeHtml(m.preferredName||'')+'</div>'+
             '<div>Member since</div><div>'+escapeHtml(m.memberSince||'')+'</div>'+
-            '<div>狀態 / Status</div><div><span class="chip">'+escapeHtml(statusDisplay)+'</span></div>'+
+            statusRowHtml+
           '</div>'+
           (groupsHtml || '')+
           '<div id="groupDialogHost"></div>'+
@@ -3742,26 +3773,10 @@
             openContactFlow_(m.id);
           };
         }
-        var btnRemoveGroup = modal.querySelector('#btnRemoveGroup');
-        if (btnRemoveGroup){
-          var allMemberGroups = (m.servingGroups || []).map(function(g){ return normalizeServingGroupKey_(g); }).filter(Boolean);
-          var removableGroups = allMemberGroups.slice();
-          if (roleIsGl()){
-            var actorGlGroups = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
-            var actorSet = {};
-            actorGlGroups.forEach(function(g){ var key = normalizeServingGroupKey_(g); if (key) actorSet[key] = true; });
-            removableGroups = removableGroups.filter(function(g){ return !!actorSet[g]; });
-          }
-          btnRemoveGroup.disabled = !removableGroups.length;
-          btnRemoveGroup.onclick = function(){
-            if (!removableGroups.length){
-              showBox('detailMsg','warn','此會員沒有可移除的組別','No removable serving group for this member.');
-              return;
-            }
-            openRemoveFromGroupFlow_(m.id, removableGroups, function(){
-              closeModal(modal);
-              openMemberDetail(memberId, fromYmd, toYmd);
-            });
+        var btnStatus = modal.querySelector('#btnStatus');
+        if (btnStatus){
+          btnStatus.onclick = function(){
+            openStatusFlow_(m.id, m.status||'');
           };
         }
 
