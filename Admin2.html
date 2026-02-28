@@ -210,6 +210,16 @@
       font-size:16px;
       font-weight:950;
     }
+    .groupContextRow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+    .groupContextBtn{
+      flex:1 1 150px;
+      min-height:52px;
+      font-size:14px;
+      font-weight:900;
+      border-width:2px;
+    }
+    .groupContextBtn.isSelected{box-shadow:inset 0 0 0 2px #0d1b3d}
+    .groupContextBtn:disabled{opacity:.45;cursor:not-allowed}
     .groupSectionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
      .servingEditBtn{width:auto;padding:6px 10px;border-radius:10px;font-size:12px}
@@ -348,7 +358,7 @@
     var App = {
       token:null,
       actor:null, // {id, role, nameZh, nameEn}
-      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan
+      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan | glGroupMembers | adminGroupMembers
       debounceT:null,
       clockTimer:null,
 
@@ -360,7 +370,9 @@
       servingPlanOpenGroups:{},
       servingPlanInfoOpenGroups:{},
       servingGroupOverview:null,
-      servingPlanTimer:null
+      servingPlanTimer:null,
+      selectedServingGroup:null,
+      glBackGuardArmed:false
     };
 
     function $(id){ return document.getElementById(id); }
@@ -398,6 +410,13 @@
     });
     window.addEventListener('unhandledrejection', function(evt){
       showBootError_(evt && evt.reason ? evt.reason : evt);
+    });
+    window.addEventListener('popstate', function(){
+      if (App.view === 'glGroupMembers'){
+        App.view = 'menu';
+        App.glBackGuardArmed = false;
+        render();
+      }
     });
 
     function getApiEndpoint(){
@@ -934,6 +953,25 @@
       return html ? ('<div style="margin-top:6px;">'+html+'</div>') : '';
     }
 
+    var GL_MODE_TEXT = {
+      roleLabelZh: '組長'
+    };
+    function getGlModeBannerHtml_(){
+      if (!roleIsGl()) return '';
+      var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
+      var groupKey = '';
+      for (var i=0; i<gl.length; i++){
+        groupKey = normalizeServingGroupKey_(gl[i]);
+        if (groupKey) break;
+      }
+      var badge = SERVING_GROUP_BADGES[groupKey] || null;
+      var groupLabel = badge ? (badge.zh + ' / ' + badge.en) : '—';
+      var badgeHtml = badge
+        ? '<span class="'+badge.cls+'" style="margin-right:8px;">'+escapeHtml(groupLabel)+'</span>'
+        : '<span class="groupBadge" style="margin-right:8px;">'+escapeHtml(groupLabel)+'</span>';
+      return badgeHtml + '<b>'+escapeHtml(GL_MODE_TEXT.roleLabelZh)+'</b>';
+    }
+
     function canManageServingGroup_(groupKey){
       var role = String((App.actor && App.actor.role) || '').toUpperCase();
       if (role === 'ADMIN' || role === 'SUPERUSER') return true;
@@ -941,8 +979,46 @@
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       return gl.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
     }
-    function renderGroupMemberManage_(host, groupKey){
+    function servingGroupPaletteClass_(groupKey){
+      var key = normalizeServingGroupKey_(groupKey);
+      if (key === 'worship') return 'btnPink';
+      if (key === 'media') return 'btnSub';
+      if (key === 'logistic') return 'btnNa';
+      if (key === 'support') return 'btnMain';
+      if (key === 'finance') return 'btnLookup';
+      return 'btnGhost';
+    }
+    function actorServingGroupKeys_(){
+      if (!roleIsGl()) return ['worship','media','logistic','support','finance'];
+      var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
+      var seen = {};
+      return gl.map(function(g){ return normalizeServingGroupKey_(g); }).filter(function(k){
+        if (!k || seen[k]) return false;
+        seen[k] = true;
+        return true;
+      });
+    }
+    function canOpenServingGroup_(groupKey){
+      var key = normalizeServingGroupKey_(groupKey);
+      if (!key) return false;
+      if (!roleIsGl()) return true;
+      return actorServingGroupKeys_().indexOf(key) >= 0;
+    }
+    function buildGroupMemberListHtml_(res, canEdit){
+      var members = Array.isArray(res.members) ? res.members : [];
+      var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
+      html += '<ul class="groupDialogList">'+members.map(function(m){
+        return '<li>'+escapeHtml(m.label||m.id||'—') + (canEdit ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(m.id||'')+'">移除 / Remove</button>') : '') + '</li>';
+      }).join('')+'</ul>';
+      if (canEdit){
+        html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" data-add-member="1">新增組員 / Add member</button></div>';
+      }
+      return html;
+    }
+    function loadServingGroupMembers_(host, groupKey, options){
       if (!host || !groupKey) return;
+      var opts = options || {};
+      host.innerHTML = '<div class="small">載入中… / Loading…</div>';
       callApi('api_admin_serving_group_members', App.token, groupKey).then(function(res){
         if (!res || !res.ok) return;
         var members = Array.isArray(res.members) ? res.members : [];
@@ -982,22 +1058,26 @@
             if (!confirm('確認移除 ' + id + '?\nConfirm remove ' + id + '?')) return;
             callApi('api_admin_serving_group_member_update', App.token, groupKey, id, 'REMOVE').then(function(r){
               if (!r || !r.ok) return;
-              renderGroupMemberManage_(host, groupKey);
+              loadServingGroupMembers_(host, groupKey, opts);
             });
           };
         });
-        var addBtn = host.querySelector('#btnGroupAddMember');
+        var addBtn = host.querySelector('[data-add-member]');
         if (addBtn){
           addBtn.onclick = function(){
             var id = prompt('輸入 CCF ID\nEnter CCF ID');
             if (!id) return;
             callApi('api_admin_serving_group_member_update', App.token, groupKey, String(id).trim().toUpperCase(), 'ADD').then(function(r){
               if (!r || !r.ok) return;
-              renderGroupMemberManage_(host, groupKey);
+              loadServingGroupMembers_(host, groupKey, opts);
             });
           };
         }
       });
+    }
+    function renderGroupMemberManage_(host, groupKey){
+      if (!host || !groupKey) return;
+      loadServingGroupMembers_(host, groupKey, { allowEdit:true });
     }
     function buildServingGroupDialogHtml_(groupKey, servingInsights){
       var insights = servingInsights || {};
@@ -1785,8 +1865,7 @@
             '<div class="small">'+
               'CCF ID：<b>'+escapeHtml(id)+'</b><br/>' +
               (nameLine ? ('姓名 / Name：<b>'+escapeHtml(nameLine)+'</b><br/>') : '')+
-              '群組長模式：只限事奉相關功能。<br/>' +
-              'GL mode: serving-only access.'+
+              getGlModeBannerHtml_()+
             '</div>'+
             '<div class="msgBox warn" style="margin-top:10px;">'+
               '<div class="big warn">🕒 英國時間 / UK time</div>'+
@@ -1796,7 +1875,7 @@
           '<div class="card">'+
             '<div class="big">📌 主選單 / Main menu</div>'+
             '<div class="menuGrid">'+
-              '<button id="goLookupGl" class="btnMain">🔎 成員查詢（HELPER 授權）/ Member lookup (HELPER)</button>'+
+              '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
             '</div>'+
             '<div class="divider"></div>'+
@@ -1829,6 +1908,7 @@
           '<div class="big">📌 主選單 / Main menu</div>'+
           '<div class="menuGrid">'+
             '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
+            '<button id="goGroupMembersAdmin" class="btnLookup">👥 管理事奉組員 / Manage serving group members</button>'+
             '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
@@ -1839,9 +1919,23 @@
     }
 
     function bindMenu(){
-      var glLookup = $('goLookupGl');
-      if (glLookup){
-        glLookup.onclick = function(){ logAction('OPEN_LOOKUP_GL','', 'nav'); App.view='memberLookup'; render(); };
+      var glManage = $('goGroupMembersGl');
+      if (glManage){
+        glManage.onclick = function(){
+          logAction('OPEN_GROUP_MEMBERS_GL','', 'nav');
+          App.view='glGroupMembers';
+          App.selectedServingGroup = null;
+          if (!App.glBackGuardArmed){
+            try{ history.pushState({ view:'menu' }, '', window.location.href); }catch(e){}
+            App.glBackGuardArmed = true;
+          }
+          render();
+        };
+      }
+
+      var goGroupMembersAdmin = $('goGroupMembersAdmin');
+      if (goGroupMembersAdmin){
+        goGroupMembersAdmin.onclick = function(){ logAction('OPEN_GROUP_MEMBERS_ADMIN','', 'nav'); App.view='adminGroupMembers'; App.selectedServingGroup = null; render(); };
       }
 
       var goServingPlan = $('goServingPlan');
@@ -1868,6 +1962,7 @@
           '<div class="menuGrid" style="margin-top:12px;">'+
             '<button id="goMatrix" class="btnMatrix">✅ 出席矩陣 / Attendance matrix</button>'+
             '<button id="goLookup" class="btnLookup">🔎 個人查詢 / Member lookup</button>'+
+            '<button id="goGroupMembersFromAttendance" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
             '<button id="goStats" class="btnStats">📈 聚會統計 / Service stats</button>'+
             '<button id="goPeriod" class="btnPeriod">📅 月度/季度統計 / Period stats</button>'+
           '</div>'+
@@ -1880,9 +1975,71 @@
     function bindAttendanceHome(){
       $('goMatrix').onclick = function(){ logAction('OPEN_MATRIX','', 'nav'); App.view='matrix'; render(); };
       $('goLookup').onclick = function(){ logAction('OPEN_LOOKUP','', 'nav'); App.view='memberLookup'; render(); };
+      $('goGroupMembersFromAttendance').onclick = function(){ logAction('OPEN_GROUP_MEMBERS_ATT','', 'nav'); App.view='adminGroupMembers'; App.selectedServingGroup = null; render(); };
       $('goStats').onclick = function(){ logAction('OPEN_STATS','', 'nav'); App.view='stats'; render(); };
       $('goPeriod').onclick = function(){ logAction('OPEN_PERIOD','', 'nav'); App.view='period'; render(); };
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
+    }
+
+    function viewServingGroupMembersPage_(isGl){
+      var title = isGl
+        ? '👥 管理事奉組員 / Manage serving group members'
+        : '👥 事奉組員管理 / Manage serving group members';
+      var backId = isGl ? 'backGlMembers' : 'backAdminMembers';
+      return ''+
+        '<div class="card" style="border-color:rgba(26,168,108,0.28);background:#f6fffb;">'+
+          '<div class="big">'+title+'</div>'+
+          '<div class="small">切換事奉組別以刷新名單。<br/>Toggle serving groups to refresh member list.</div>'+
+          '<div id="groupContextButtons" class="groupContextRow"></div>'+
+          '<div id="groupMembersMsg"></div>'+
+          '<div id="groupMembersHost" style="margin-top:10px;"></div>'+
+          '<div class="miniBtnRow">'+
+            '<button id="'+backId+'" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>'+
+        '</div>';
+    }
+
+    function bindServingGroupMembersPage_(isGl){
+      var backId = isGl ? 'backGlMembers' : 'backAdminMembers';
+      var host = $('groupMembersHost');
+      var btnWrap = $('groupContextButtons');
+      var allowedKeys = actorServingGroupKeys_();
+      if (!allowedKeys.length){
+        btnWrap.innerHTML = '';
+        host.innerHTML = '<div class="msgBox warn"><div class="big warn">沒有可管理組別 / No available serving group</div></div>';
+      }
+
+      function renderButtons_(){
+        btnWrap.innerHTML = allowedKeys.map(function(key){
+          var badge = SERVING_GROUP_BADGES[key] || { zh:key, en:key };
+          var selected = (App.selectedServingGroup === key);
+          var cls = 'groupContextBtn ' + servingGroupPaletteClass_(key) + (selected ? ' isSelected' : '');
+          return '<button type="button" class="'+cls+'" data-group-context="'+escapeHtml(key)+'">'+escapeHtml(badge.zh)+' / '+escapeHtml(badge.en)+'</button>';
+        }).join('');
+        Array.prototype.forEach.call(btnWrap.querySelectorAll('[data-group-context]'), function(btn){
+          btn.onclick = function(){
+            var key = String(btn.getAttribute('data-group-context')||'').trim();
+            if (!key || !canOpenServingGroup_(key)) return;
+            App.selectedServingGroup = key;
+            renderButtons_();
+            loadServingGroupMembers_(host, key, { allowEdit: !isGl });
+          };
+        });
+      }
+
+      if (!App.selectedServingGroup || allowedKeys.indexOf(App.selectedServingGroup) < 0){
+        App.selectedServingGroup = allowedKeys[0] || null;
+      }
+      renderButtons_();
+      if (App.selectedServingGroup){
+        loadServingGroupMembers_(host, App.selectedServingGroup, { allowEdit: !isGl });
+      }
+
+      $(backId).onclick = function(){
+        App.view='menu';
+        App.glBackGuardArmed = false;
+        render();
+      };
     }
 
     function viewServingPlan(){
@@ -3972,6 +4129,8 @@
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); attachScrollControls_(root); return; }
       if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); attachScrollControls_(root); return; }
       if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); attachScrollControls_(root); return; }
+      if(App.view==='glGroupMembers'){ root.innerHTML = viewServingGroupMembersPage_(true); bindServingGroupMembersPage_(true); attachScrollControls_(root); return; }
+      if(App.view==='adminGroupMembers'){ root.innerHTML = viewServingGroupMembersPage_(false); bindServingGroupMembersPage_(false); attachScrollControls_(root); return; }
       if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); attachScrollControls_(root); return; }
       if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); attachScrollControls_(root); return; }
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
