@@ -699,6 +699,31 @@
       }
     }
 
+    var ADMIN_MSG = {
+      EXT_SCANNER_CANCELLED: { code:'W410', zh:'外置掃描已取消', en:'External scanner cancelled.' },
+      EXT_SCANNER_TIMEOUT: { code:'W411', zh:'外置掃描器逾時', en:'External scanner timed out.' },
+      EXT_SCANNER_BLOCKED: { code:'E412', zh:'彈出視窗被封鎖', en:'Popup was blocked.' },
+      EXT_SCANNER_CONFIG_INVALID: { code:'E413', zh:'外置掃描器設定錯誤，已停用外置掃描按鈕', en:'External scanner config is invalid. External scanner has been disabled.' },
+      CAMERA_CANNOT_START: { code:'E420', zh:'相機無法啟動', en:'Camera cannot start' },
+      TAP_START_CAMERA: { code:'W421', zh:'請按「啟動相機」以開始掃描', en:'Tap "Start camera" to begin scanning.' },
+      NO_QR_IN_IMAGE: { code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.' },
+      ADMIN_ONLY_DENIED: { code:'E403', zh:'只有管理員可以重建', en:'Only admin can rebuild.' },
+      WORKING: { code:'W100', zh:'處理中…', en:'處理中… / Working…' }
+    };
+
+    function getAdminMsg_(key){
+      var msg = ADMIN_MSG[key];
+      if(!msg || !msg.zh || !msg.en) throw new Error('Unknown ADMIN_MSG key: ' + key);
+      return msg;
+    }
+
+    function showMsgByKey_(targetId, kind, key, detailHtml, allowHtmlDetail){
+      var msg = getAdminMsg_(key);
+      if((kind === 'warn' || kind === 'err') && !msg.code) throw new Error('ADMIN_MSG code is required for warn/err: ' + key);
+      var zh = (kind === 'warn' || kind === 'err') ? withErrorCodeTag_(msg.zh, { code:msg.code }) : msg.zh;
+      showBox(targetId, kind, zh, msg.en, detailHtml, allowHtmlDetail);
+    }
+
     function showBox(targetId, kind, titleZh, titleEn, detailHtml, allowHtmlDetail){
       var el = $(targetId); if(!el) return;
       var safeZh = escapeHtml(String(titleZh || ''));
@@ -1472,7 +1497,8 @@
 
     function scannerConfigWarningHtml_(){
       var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return '<div class="msgBox warn"><div class="big warn">⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕</div><div style="margin-top:4px;font-size:16px;">⚠️ External scanner config is invalid. External scanner has been disabled.</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
+      var msg = getAdminMsg_('EXT_SCANNER_CONFIG_INVALID');
+      return '<div class="msgBox warn"><div class="big warn">⚠️ '+escapeHtml(withErrorCodeTag_(msg.zh, { code:msg.code }))+'</div><div style="margin-top:4px;font-size:16px;">⚠️ '+escapeHtml(msg.en)+'</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -1688,9 +1714,9 @@
           var detail = buildCameraStartDetail_(err);
           if(err && err.name === 'NotAllowedError'){
             onCaptured(null, {
-              code:'E420',
-              zh:'相機無法啟動',
-              en:'Camera cannot start',
+              code:getAdminMsg_('CAMERA_CANNOT_START').code,
+              zh:getAdminMsg_('CAMERA_CANNOT_START').zh,
+              en:getAdminMsg_('CAMERA_CANNOT_START').en,
               detail: detail,
               detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
                 bindCameraRetryButton_('scanMsg', function(){
@@ -1704,7 +1730,7 @@
             return;
           }
           onCaptured(null, {
-            code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail,
+            code:getAdminMsg_('CAMERA_CANNOT_START').code, zh:getAdminMsg_('CAMERA_CANNOT_START').zh, en:getAdminMsg_('CAMERA_CANNOT_START').en, detail: detail,
             detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
               bindCameraRetryButton_('scanMsg', function(){
                 openExternalScanner_({
@@ -1786,7 +1812,8 @@
                   var d = ctx.getImageData(0,0,c.width,c.height);
                   var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
                   if(qr && qr.data){ resolve(String(qr.data||'')); return; }
-                  reject({code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+                  var noQrMsg = getAdminMsg_('NO_QR_IN_IMAGE');
+                  reject({code:noQrMsg.code, zh:noQrMsg.zh, en:noQrMsg.en});
                 }catch(e){ reject({code:'E500', zh:'圖片解碼失敗', en:'Image decode failed'}); }
               };
               img.onerror = function(){ reject({code:'E415', zh:'無法載入圖片', en:'Unable to read image.'}); };
@@ -1799,7 +1826,7 @@
       }
 
       function applyAdminLoginPayload_(payload){
-        showBox('loginMsg','warn','處理中…','處理中… / Working…');
+        showMsgByKey_('loginMsg','warn','WORKING');
         callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
           showErr('loginMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
@@ -1832,7 +1859,7 @@
         var vEl = modal.querySelector('#vLogin');
         function submitLoginPayload(payload, source){
           source = source || 'CAMERA';
-          showBox('scanMsg','warn','處理中…','處理中… / Working…');
+          showMsgByKey_('scanMsg','warn','WORKING');
           callApi('api_admin_login', payload).then(function(res){
             if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
             logAction('LOGIN_SOURCE', 'source=' + source, 'LOGIN|' + source);
@@ -1858,13 +1885,13 @@
             submitLoginPayload(payload, source || 'EXT_SCANNER');
           }, function(status){
             if(status === 'success') return;
-            if(status === 'timeout'){ showBox('scanMsg','warn','外置掃描器逾時','External scanner timed out.'); return; }
-            if(status === 'cancel' || status === 'popup_closed'){ showBox('scanMsg','warn','外置掃描已取消','External scanner cancelled.'); return; }
-            if(status === 'blocked'){ showBox('scanMsg','err','彈出視窗被封鎖','Popup was blocked.'); return; }
+            if(status === 'timeout'){ showMsgByKey_('scanMsg','warn','EXT_SCANNER_TIMEOUT'); return; }
+            if(status === 'cancel' || status === 'popup_closed'){ showMsgByKey_('scanMsg','warn','EXT_SCANNER_CANCELLED'); return; }
+            if(status === 'blocked'){ showMsgByKey_('scanMsg','err','EXT_SCANNER_BLOCKED'); return; }
             if(status === 'config_invalid'){ applyExternalScannerGuard_('scanMsg', ['btnExtScan']); }
           });
         };
-        showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
+        showMsgByKey_('scanMsg','warn','TAP_START_CAMERA');
       };
 
       if($('btnUploadLoginQr') && $('loginQrImageInput')){
@@ -3375,7 +3402,7 @@
         var p = Promise.resolve();
         if (rebuildFirst){
           if (!roleIsAdmin()){
-            showBox('statsMsg','err','只有管理員可以重建','Only admin can rebuild.');
+            showMsgByKey_('statsMsg','err','ADMIN_ONLY_DENIED');
             return;
           }
           p = callApi('api_admin_stats_rebuild', App.token);
@@ -4256,10 +4283,10 @@
             flow:'admin',
             onPayload:handleReauthPayload_,
             onCancel:function(){
-              showBox('msg','warn','已取消掃描','已取消掃描 / Scan cancelled.');
+              showMsgByKey_('msg','warn','EXT_SCANNER_CANCELLED');
             },
             onPopupBlocked:function(){
-              showBox('msg','warn','未能打開彈出視窗，請使用下方內置掃描器','彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.');
+              showMsgByKey_('msg','err','EXT_SCANNER_BLOCKED','<div class="small">彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.</div>', true);
             },
             onError:function(msg){
               showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
