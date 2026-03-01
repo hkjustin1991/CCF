@@ -966,13 +966,16 @@
       var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
       var rawStatus = String((snap.member && snap.member.status) || (m && m.status) || '').trim().toUpperCase();
       var statusMap = {
-        ACTIVE:{ zh:'正式會員', en:'Full member' },
+        ACTIVE:{ zh:'正式會員', en:'Full Member' },
         STAFF:{ zh:'同工', en:'STAFF' },
-        ADMIN:{ zh:'同工', en:'staff' },
-        PROVISIONAL:{ zh:'暫準會員', en:'Provisional member' },
-        PENDING:{ zh:'已登記', en:'Registered' }
+        ADMIN:{ zh:'同工', en:'ADMIN' },
+        PROVISIONAL:{ zh:'暫準會員', en:'PROVISIONAL MEMBER' },
+        PENDING:{ zh:'已登記', en:'REGISTERED' },
+        HELPER:{ zh:'會員', en:'MEMBER' },
+        TEMP:{ zh:'會員', en:'MEMBER' },
+        DISABLED:{ zh:'已停用', en:'DISABLED' }
       };
-      var statusUi = statusMap[rawStatus] || { zh: rawStatus || '—', en: rawStatus || '—' };
+      var statusUi = statusMap[rawStatus] || { zh:'會員', en:'MEMBER' };
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
       var groupHtml = groups.map(function(g){
         var canonicalGroup = normalizeServingGroupKey(g);
@@ -1009,7 +1012,7 @@
             '<div><b>出席率 / Attendance:</b> '+escapeHtml(String(attPercent))+'%</div>'+
           '</div>'+
           '<div class="msgBox" style="margin-top:10px;">'+
-            '<div><b>會員狀態 / Membership status:</b> '+escapeHtml(statusUi.zh)+' = '+escapeHtml(statusUi.en)+'</div>'+
+            '<div><b>會員狀態 / Membership status:</b> '+escapeHtml(statusUi.zh)+' / '+escapeHtml(statusUi.en)+'</div>'+
             (glHtml ? ('<div style="margin-top:8px;"><b>組長身份 / Group leader:</b> Group Leader of '+glHtml+'</div>') : '')+
           '</div>'+
           (isPrivileged

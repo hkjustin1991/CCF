@@ -783,7 +783,9 @@ function api_reg_self_portal_snapshot_public(qrPayload){
         preferredName: profile.preferredName || fallbackProfile.preferredName,
         displayName: regDisplayNameForPortal_(profile.id ? profile : fallbackProfile),
         servingGroups: groups,
-        servingGLGroups: reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups),
+        servingGLGroups: member
+          ? reg_mergeServingGroups_(member.servingGLGroups, reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups))
+          : reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups),
         away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
         memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw)
       },
