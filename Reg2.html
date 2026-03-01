@@ -1323,6 +1323,7 @@
       var hasCar = (prefill.hasCar === true);
       var hasCarFalse = (prefill.hasCar === false);
       var isMinor = (prefill.isMinor === true);
+      var gender = String(prefill.gender||'').trim().toUpperCase();
 
       // defaults
       var cc = '44';
@@ -1350,6 +1351,15 @@
 
           '<div class="label" style="margin-top:10px;">介紹人 / Referred by（可選）</div>'+
           '<input id="referredBy" autocomplete="off" value="'+escapeHtml(prefill.referredBy||'')+'" />'+
+
+          '<div class="label" style="margin-top:10px;">性別 / Gender（必填 Required）</div>'+
+          '<select id="gender" style="width:100%;border-radius:var(--radius);border:1px solid var(--border);background:#fff;color:var(--text);padding:calc(var(--pad) + 2px);font-size:var(--fs-input)">'+
+            '<option value="">請選擇 / Please choose</option>'+
+            '<option value="MALE" '+(gender==='MALE'?'selected':'')+'>男 / Male</option>'+
+            '<option value="FEMALE" '+(gender==='FEMALE'?'selected':'')+'>女 / Female</option>'+
+            '<option value="OTHER" '+(gender==='OTHER'?'selected':'')+'>其他 / Other</option>'+
+            '<option value="PREFER_NOT" '+(gender==='PREFER_NOT'?'selected':'')+'>不便透露 / Prefer not to say</option>'+
+          '</select>'+
 
           '<div class="divider"></div>'+
 
@@ -2258,6 +2268,7 @@
         nameEn: $('nameEn').value.trim(),
         preferredName: $('preferredName').value.trim(),
         referredBy: $('referredBy') ? $('referredBy').value.trim() : '',
+        gender: $('gender') ? String($('gender').value||'').trim().toUpperCase() : '',
 
         email: $('email').value.trim(),
         optInEmail: $('optInEmail').checked,
@@ -2309,6 +2320,8 @@
         if(parts.length < 2) return { ok:false, zh:'只填英文名時，請同時填寫名及姓', en:'If only English name, include first and last name.' };
       }
 
+      if (!d.gender) return { ok:false, zh:'請選擇性別', en:'Please select gender.' };
+      if(['MALE','FEMALE','OTHER','PREFER_NOT'].indexOf(d.gender) < 0) return { ok:false, zh:'性別選項不正確', en:'Invalid gender option.' };
       if(d.hasCar !== 'YES' && d.hasCar !== 'NO') return { ok:false, zh:'請選擇是否有車', en:'Please choose whether you have a car.' };
       if(d.hasCar === 'YES' && !d.vrm && !d.vrm2) return { ok:false, zh:'如有車，請填寫至少一個車牌', en:'If you have a car, provide at least one VRM.' };
 
