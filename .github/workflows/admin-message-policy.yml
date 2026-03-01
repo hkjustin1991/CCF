@@ -1,0 +1,31 @@
+name: Admin Message Policy
+
+on:
+  pull_request:
+    paths:
+      - 'Admin2.html'
+      - 'scripts/check_admin_bilingual_messages.py'
+      - '.github/workflows/admin-message-policy.yml'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'Admin2.html'
+      - 'scripts/check_admin_bilingual_messages.py'
+      - '.github/workflows/admin-message-policy.yml'
+
+jobs:
+  validate-admin-messages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate Admin warn/err bilingual catalog policy
+        run: python3 scripts/check_admin_bilingual_messages.py --file Admin2.html
