@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-01.admin103
+ * v2026-03-01.admin105
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-01.admin103';
+const ADMIN_VERSION = '2026-03-01.admin105';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -1401,6 +1401,7 @@ function api_admin_member_search(token, q){
         id: m.id,
         nameZh: m.nameZh||'',
         nameEn: m.nameEn||'',
+        preferredName: m.preferredName||'',
         status: st,
         servingGroups: m.servingGroups || [],
         servingGLGroups: m.servingGLGroups || [],
@@ -1499,7 +1500,9 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       status: admin_normStatus_(m.status||''),
       memberSince: memberSinceYmd || '',
       servingGroups: m.servingGroups || [],
-      servingGLGroups: m.servingGLGroups || []
+      servingGLGroups: m.servingGLGroups || [],
+      email: m.email||'',
+      mobile: m.mobile||''
     },
     attendance:{ attendedEventKeys: attendedSorted },
     stats:{
