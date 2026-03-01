@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-01.admin103
-  For Admin.gs: v2026-03-01.admin103
+  UI VERSION TAG: admin2-ui-2026-03-01.admin105
+  For Admin.gs: v2026-03-01.admin105
   ============================================================
   -->
 
@@ -1133,6 +1133,24 @@
                 loadServingGroupMembers_(host, groupKey, opts);
               });
             }
+            function confirmAdd_(memberInfo, onConfirm){
+              var info = memberInfo || {};
+              var modalC = openModal(''+
+                '<div class="big">確認新增組員 / Confirm add member</div>'+
+                '<div class="small">請確認以下資料後繼續。<br/>Please confirm details before continuing.</div>'+
+                '<div class="kv" style="margin-top:10px;">'+
+                  '<div>CCF ID</div><div><b>'+escapeHtml(info.id||'')+'</b></div>'+
+                  '<div>中文名 / English name</div><div>'+escapeHtml(info.nameZh||'')+' / '+escapeHtml(info.nameEn||'')+'</div>'+
+                  '<div>Preferred Name</div><div>'+escapeHtml(info.preferredName||'')+'</div>'+
+                '</div>'+
+                '<div class="miniBtnRow">'+
+                  '<button id="btnConfirmAddMember" class="btnMain">✅ 確認新增 / Confirm add</button>'+
+                  '<button id="btnCancelAddMember" class="btnBack">取消 / Cancel</button>'+
+                '</div>'
+              );
+              modalC.querySelector('#btnCancelAddMember').onclick = function(){ closeModal(modalC); };
+              modalC.querySelector('#btnConfirmAddMember').onclick = function(){ closeModal(modalC); onConfirm(); };
+            }
 
             if (isStaffAdmin){
               var modal = openModal(''+
@@ -1167,8 +1185,8 @@
                     btn.onclick = function(){
                       var id = String(btn.getAttribute('data-add-id')||'').trim();
                       if (!id) return;
-                      addById_(id, '');
-                      closeModal(modal);
+                      var info = rows.filter(function(x){ return String(x.id||'') === id; })[0] || { id:id };
+                      confirmAdd_(info, function(){ addById_(id, ''); closeModal(modal); });
                     };
                   });
                 });
@@ -1188,11 +1206,18 @@
             scanModal.querySelector('#btnCloseTargetQr').onclick = function(){ stopScan(); closeModal(scanModal); };
             var vEl = scanModal.querySelector('#vTargetQr');
             function handleTargetQr_(payload){
-              callApi('api_admin_serving_group_member_update', App.token, groupKey, '', 'ADD', payload).then(function(r){
-                if (!r || !r.ok){ showErr('targetQrMsg', r || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
-                stopScan();
-                closeModal(scanModal);
-                loadServingGroupMembers_(host, groupKey, opts);
+              var idFromQr = extractMemberId_(payload);
+              if (!idFromQr){ showErr('targetQrMsg', {code:'E416', zh:'無法從 QR 讀取 CCF ID', en:'Unable to read CCF ID from QR.'}); return; }
+              callApi('api_admin_member_detail', App.token, idFromQr, App.from || getTodayYmdUk(), App.to || getTodayYmdUk()).then(function(detailRes){
+                var info = (detailRes && detailRes.ok && detailRes.member) ? detailRes.member : { id:idFromQr };
+                confirmAdd_(info, function(){
+                  callApi('api_admin_serving_group_member_update', App.token, groupKey, '', 'ADD', payload).then(function(r){
+                    if (!r || !r.ok){ showErr('targetQrMsg', r || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                    stopScan();
+                    closeModal(scanModal);
+                    loadServingGroupMembers_(host, groupKey, opts);
+                  });
+                });
               });
             }
             startScan(vEl, function(qr, err){
@@ -1314,8 +1339,6 @@
         var prevSummary = summarizeByPosition_(historical);
         var upSummary = summarizeByPosition_(upcoming);
         var totalSoFar = historical.length;
-        var namesLine = [member.preferredName, member.nameZh, member.nameEn].filter(Boolean).join(' / ');
-
         var allGroupKeys = [];
         var ownGroups = (member.servingGroups||[]).concat(member.servingGLGroups||[]);
         ownGroups.forEach(function(g){
@@ -1346,10 +1369,16 @@
 
         m.querySelector('.modal').innerHTML = ''+
           '<div class="groupDialogHeader">'+
-            '<div class="big">👤 '+escapeHtml(member.id||memberId||'')+'</div>'+
-            '<button id="btnRemoveThisGroup" class="btnDanger btnMini">🗑️ 從本組移除 / Remove from this group</button>'+
+            '<div class="big">👤 會員摘要 / Member summary</div>'+
+            '<button id="btnRemoveThisGroup" class="btnDanger btnSmall" style="margin-left:auto;">🗑️ 移除</button>'+
           '</div>'+
-          '<div class="small">'+escapeHtml(namesLine || '—')+'</div>'+
+          '<div class="kv" style="margin-top:8px;">'+
+            '<div>CCF ID</div><div><b>'+escapeHtml(member.id||memberId||'')+'</b></div>'+
+            '<div>中文名 / English name</div><div>'+escapeHtml(member.nameZh||'')+' / '+escapeHtml(member.nameEn||'')+'</div>'+
+            '<div>Preferred Name</div><div>'+escapeHtml(member.preferredName||'')+'</div>'+
+            '<div>Email</div><div>'+escapeHtml(member.email||'')+'</div>'+
+            '<div>Mobile</div><div>'+escapeHtml(member.mobile||'')+'</div>'+
+          '</div>'+
           '<div style="margin-top:8px;">'+renderServingGroupBubble_(groupKey)+'</div>'+
           '<div class="small" style="margin-top:8px;">總事奉次數（截至目前） / Total serving so far: <b>'+escapeHtml(String(totalSoFar))+'</b></div>'+
           '<div class="groupDialogSection">'+
