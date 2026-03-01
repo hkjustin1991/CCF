@@ -757,6 +757,7 @@
     }
 
     function showErr(targetId, res){
+      res = normalizeErrResForRender_(res);
       var detail = '';
       var allowHtmlDetail = false;
       if (res && res.trustedDetailHtml && res.detailHtml){
