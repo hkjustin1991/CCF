@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-02-15.admin96
+ * v2026-03-01.admin100
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-02-15.admin96';
+const ADMIN_VERSION = '2026-03-01.admin100';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -170,6 +170,15 @@ const ADMIN_SERVING_POSITION_MIN = {
 };
 const ADMIN_SERVING_DUPLICATE_EXEMPT_POSITIONS = {
   Media_PPTBuild: true
+};
+
+const ADMIN_SERVING_GROUP_LABELS = {
+  worship: { zh:'敬拜聯盟', en:'Worship Alliance' },
+  media: { zh:'影像大師', en:'Media Master' },
+  logistic: { zh:'後勤特工', en:'Logistic Specialist' },
+  support: { zh:'聖工支援隊', en:'Divine Supporter' },
+  finance: { zh:'財務公司', en:'Finance Dept' },
+  other: { zh:'其他', en:'Other' }
 };
 
 function admin_filterDuplicateConflictPositions_(positions){
@@ -712,9 +721,11 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
   if (invalidGroupAssignments.length){
     const detail = invalidGroupAssignments.map(function(x){
-      return [String(x.memberId||''), String(x.position||''), String(x.group||'')].filter(Boolean).join(' → ');
+      const m = membersById[String(x.memberId||'').toUpperCase()] || null;
+      const compact = admin_memberLabelCompact_(m || { id:String(x.memberId||'') });
+      return [compact.label, String(x.position||''), String(x.group||'')].filter(Boolean).join(' → ');
     }).join(' | ');
-    return admin_conflict_('成員不屬於該事奉組別','Member is not in the required serving group.', detail, 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_ASSIGNMENT');
+    return admin_conflict_('成員不屬於該事奉組別','Member is NOT a member of this serving group.', detail, 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_ASSIGNMENT');
   }
   if (duplicateDetails.length){
     if (!canOverride){
@@ -722,10 +733,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         const labels = (d.positions || []).map(admin_servingPositionLabel_);
         return d.memberId + ': ' + labels.join(', ');
       }).join(' | ');
-      return admin_conflict_('同一會員不可同時擔任多個崗位','Duplicate serving assignments for the same member.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
+      return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'同一會員不可同時擔任多個崗位', en:'Duplicate serving assignments for the same member.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
+      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
@@ -913,6 +924,20 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
   return { ok:true, memberId: id, from1: p1.from||'', to1: p1.to||'', from2: p2.from||'', to2: p2.to||'' };
 }
 
+
+function admin_isInAwayOnDate_(awayPeriods, dateObj){
+  const periods = (awayPeriods && Array.isArray(awayPeriods.periods)) ? awayPeriods.periods : [];
+  if (!dateObj || !periods.length) return false;
+  for (let i=0;i<periods.length;i++){
+    const p = periods[i] || {};
+    const from = admin_parseYmd_(p.fromYmd || p.from || '');
+    const to = admin_parseYmd_(p.toYmd || p.to || '');
+    if (!from || !to) continue;
+    if (dateObj.getTime() >= from.getTime() && dateObj.getTime() <= to.getTime()) return true;
+  }
+  return false;
+}
+
 /**
  * Service stats series within date range (SundayService only).
  * Contract:
@@ -962,20 +987,30 @@ function api_admin_stats(token, fromDate, toDate){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
+  const allMemberIds = new Set();
+  for (const ev of events){
+    const set = evAttendees.get(ev) || new Set();
+    set.forEach(function(mid){ allMemberIds.add(mid); });
+  }
+  const awayMap = admin_getAwayPeriodsMap_(Array.from(allMemberIds));
+
   const out = [];
   for (const ev of events){
     const set = evAttendees.get(ev);
     const total = set ? set.size : 0;
     let newCount = 0;
+    let holidayCount = 0;
+    const d = admin_eventDateFromKey_(ev);
 
     if (set){
       for (const mid of set){
         const fev = firstSeen[mid];
         if (fev && fev === ev) newCount++;
+        if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
       }
     }
     const existing = Math.max(0, total - newCount);
-    out.push({ eventKey: ev, total: total, new: newCount, existing: existing });
+    out.push({ eventKey: ev, total: total, new: newCount, existing: existing, holiday: holidayCount });
   }
 
   admin_audit_(s.actor, 'STATS_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), events: out.length}), 'stats');
@@ -1150,7 +1185,8 @@ function api_admin_period_stats(token, fromDate, toDate){
       services: o.services,
       totalAttendance: o.total,
       uniqueAttendance: o.uniqueSet.size,
-      newUnique: newSet.size
+      newUnique: newSet.size,
+      meanAttendance: o.services ? Number((o.total / o.services).toFixed(2)) : 0
     };
   });
 
@@ -1192,7 +1228,8 @@ function api_admin_period_stats(token, fromDate, toDate){
       services: o.services,
       totalAttendance: o.total,
       uniqueAttendance: o.uniqueSet.size,
-      newUnique: o.newSet.size
+      newUnique: o.newSet.size,
+      meanAttendance: o.services ? Number((o.total / o.services).toFixed(2)) : 0
     };
   });
 
@@ -1880,6 +1917,12 @@ function admin_memberLabelCompact_(m){
     label: id ? (id + ' · ' + display) : display
   };
 }
+function admin_servingGroupLabelText_(groupKey){
+  const key = admin_normalizeServingGroup_(groupKey);
+  const label = ADMIN_SERVING_GROUP_LABELS[key] || { zh:key||'', en:key||'' };
+  return (label.zh && label.en) ? (label.zh + ' / ' + label.en) : (label.zh || label.en || key || '');
+}
+
 function admin_memberHasAdminStatus_(memberId, membersById){
   const map = membersById || {};
   const id = String(memberId||'').trim().toUpperCase();
