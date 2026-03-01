@@ -815,7 +815,7 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
           .map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean)
       : rowGroups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
     if (selfGroups.indexOf(key) < 0){
-      return { ok:false, code:'E403', zh:'你沒有權限查看此資料', en:'You do not have permission to view this data.' };
+      return { ok:false, code:'E403', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
     }
 
     const all = Object.keys(byId).map(function(id){ return byId[id]; });
