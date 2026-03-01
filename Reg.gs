@@ -44,7 +44,7 @@ const REG_WA_LINK = 'https://chat.whatsapp.com/G08XRgAsM520nexCGHW9q4';
 const REG_QR_BASE = 'https://quickchart.io/qr';
 
 const REG_EXTRA_HEADERS = [
-  'Member_Since','PreferredName','HasCar','VRM','VRM2','IsMinor','ParentEmail',
+  'Member_Since','PreferredName','Gender','HasCar','VRM','VRM2','IsMinor','ParentEmail',
   /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_BEGIN */
   'ReferredBy'
   /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_END */
@@ -269,7 +269,7 @@ function api_reg_create_member_public(input){
         ...v.data,
         id: alloc.id,
         key: alloc.key,
-        status: 'ACTIVE',
+        status: 'PENDING',
         memberSince: ts
       });
 
@@ -497,6 +497,7 @@ function api_reg_self_lookup_public(qrPayload){
         vrm2: regNormalizeVrm_(r.VRM2||''),
         isMinor: String(r.IsMinor||'').trim().toUpperCase() === 'YES',
         parentEmail: String(r.ParentEmail||'').trim(),
+        gender: String(r.Gender||'').trim().toUpperCase(),
         /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_BEGIN */
         referredBy: String(r.ReferredBy||'').trim(),
         /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_END */
@@ -777,11 +778,15 @@ function api_reg_self_portal_snapshot_public(qrPayload){
       ok:true,
       member:{
         id: id,
+        status: regStatus_((auth.row && auth.row.Status) || (profile.status || '')),
         nameZh: profile.nameZh || fallbackProfile.nameZh,
         nameEn: profile.nameEn || fallbackProfile.nameEn,
         preferredName: profile.preferredName || fallbackProfile.preferredName,
         displayName: regDisplayNameForPortal_(profile.id ? profile : fallbackProfile),
         servingGroups: groups,
+        servingGLGroups: member
+          ? reg_mergeServingGroups_(member.servingGLGroups, reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups))
+          : reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups),
         away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
         memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw)
       },
@@ -1272,6 +1277,7 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
 
   regWriteCell_(ms, rowNumber, 'IsMinor', data.isMinor ? 'YES' : 'NO');
   regWriteCell_(ms, rowNumber, 'ParentEmail', data.parentEmail || '');
+  regWriteCell_(ms, rowNumber, 'Gender', data.gender || '');
 
   /* PATCH_BOUNDARY: REG2_REFERREDBY_WRITE_BEGIN */
   regWriteCell_(ms, rowNumber, 'ReferredBy', data.referredBy || '');
@@ -1396,6 +1402,10 @@ function regComputeChangedFields_(oldRow, data){
   const newParent = normStr(data.parentEmail || '');
   if (!eqCI(oldParent, newParent)) add('家長電郵/Parent email');
 
+  const oldGender = normStr(oldRow.Gender).toUpperCase();
+  const newGender = normStr(data.gender || '').toUpperCase();
+  if (oldGender !== newGender) add('性別/Gender');
+
   /* PATCH_BOUNDARY: REG2_REFERREDBY_CHANGEDFIELDS_BEGIN */
   const oldRef = normStr(oldRow.ReferredBy);
   const newRef = normStr(data.referredBy || '');
@@ -1430,6 +1440,8 @@ function regValidateInput_(inObj){
 
   const isMinor = !!inObj.isMinor;
   const parentEmail = String(inObj.parentEmail||'').trim();
+  const genderRaw = String(inObj.gender||'').trim().toUpperCase();
+  const genderAllowed = { MALE:true, FEMALE:true, OTHER:true, PREFER_NOT:true };
 
   /* PATCH_BOUNDARY: REG2_REFERREDBY_VALIDATE_BEGIN */
   const referredBy = String(inObj.referredBy||'').trim();
@@ -1446,6 +1458,9 @@ function regValidateInput_(inObj){
   }
   if (optInEmail && !email){
     return { ok:false, code:'E424', zh:'如選擇接收電郵，請填寫電郵；或取消勾選後再繼續', en:'Email is required if email opt-in is checked.' };
+  }
+  if (!genderAllowed[genderRaw]){
+    return { ok:false, code:'E427', zh:'請選擇性別 / Please select gender', en:'Please select gender.' };
   }
   if (hasCarRaw !== 'YES' && hasCarRaw !== 'NO'){
     return { ok:false, code:'E425', zh:'請選擇是否有車', en:'Please choose whether you have a car.' };
@@ -1467,6 +1482,7 @@ function regValidateInput_(inObj){
       vrm2: hasCar ? vrm2 : '',
       isMinor: !!isMinor,
       parentEmail: parentEmail,
+      gender: genderRaw,
       /* PATCH_BOUNDARY: REG2_REFERREDBY_DATA_BEGIN */
       referredBy: referredBy
       /* PATCH_BOUNDARY: REG2_REFERREDBY_DATA_END */
@@ -1641,6 +1657,7 @@ function regRowObj_(col, row, rowNumber){
     VRM2: String(g('VRM2')||'').trim(),
     IsMinor: String(g('IsMinor')||'').trim(),
     ParentEmail: String(g('ParentEmail')||'').trim(),
+    Gender: String(g('Gender')||'').trim().toUpperCase(),
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_BEGIN */
     ReferredBy: String(g('ReferredBy')||'').trim(),
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_END */
@@ -1760,6 +1777,7 @@ function regBuildAppendRow_(ms, obj){
 
   set('IsMinor', obj.isMinor ? 'YES' : 'NO');
   set('ParentEmail', obj.parentEmail || '');
+  set('Gender', obj.gender || '');
 
   /* PATCH_BOUNDARY: REG2_REFERREDBY_APPEND_BEGIN */
   set('ReferredBy', obj.referredBy || '');
