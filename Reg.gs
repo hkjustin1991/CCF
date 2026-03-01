@@ -1525,8 +1525,55 @@ function regSanitizeMobile_(s){
 function regSafeToDate_(v){
   if (!v && v !== 0) return null;
   if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? null : v;
+  const s = String(v||'').trim();
+  if (!s) return null;
+
+  // UK format: DD/MM/YYYY[ HH:mm[:ss]]
+  const uk = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (uk){
+    const day = parseInt(uk[1], 10);
+    const month = parseInt(uk[2], 10);
+    const year = parseInt(uk[3], 10);
+    const hh = parseInt(uk[4] || '0', 10);
+    const mm = parseInt(uk[5] || '0', 10);
+    const ss = parseInt(uk[6] || '0', 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59){
+      const dt = new Date(year, month - 1, day, hh, mm, ss, 0);
+      if (
+        dt &&
+        dt.getFullYear() === year &&
+        dt.getMonth() === (month - 1) &&
+        dt.getDate() === day &&
+        dt.getHours() === hh &&
+        dt.getMinutes() === mm &&
+        dt.getSeconds() === ss
+      ){
+        return dt;
+      }
+    }
+  }
+
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
+}
+
+// Debug helper for Member_Since parsing scenarios.
+function reg_debugMemberSinceParsing_(){
+  const cases = [
+    { input: new Date('2026-01-18T12:46:18Z'), expect: '2026-01-18' },
+    { input: '2026-01-18', expect: '2026-01-18' },
+    { input: '2026-01-18T12:46:18Z', expect: '2026-01-18' },
+    { input: '18/01/2026', expect: '2026-01-18' },
+    { input: '18/01/2026 12:46:18', expect: '2026-01-18' },
+    { input: '31/02/2026 12:00:00', expect: '' }
+  ];
+  const out = cases.map(function(c){
+    const dt = regSafeToDate_(c.input);
+    const actual = dt ? Utilities.formatDate(dt, 'Europe/London', 'yyyy-MM-dd') : '';
+    return { input: String(c.input), expect: c.expect, actual: actual, pass: actual === c.expect };
+  });
+  Logger.log(JSON.stringify(out));
+  return out;
 }
 
 /******** Hard-stops ********/
