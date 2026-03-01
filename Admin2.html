@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-01.admin102
-  For Admin.gs: v2026-03-01.admin102
+  UI VERSION TAG: admin2-ui-2026-03-01.admin103
+  For Admin.gs: v2026-03-01.admin103
   ============================================================
   -->
 
@@ -229,7 +229,7 @@
     .memberBubbleWrap{max-height:48vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
     .memberBubbleList{display:flex;flex-wrap:wrap;gap:8px}
     .memberBubble{width:auto;border-radius:999px;padding:8px 12px;font-size:13px;font-weight:800}
-    .monthPick{min-width:132px}
+    .monthPick{min-width:132px;flex:1 1 0;max-width:220px}
     .groupSectionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
      .servingEditBtn{width:auto;padding:6px 10px;border-radius:10px;font-size:12px}
@@ -787,6 +787,12 @@
         var bubble = renderServingGroupBubble_(it.group || '');
         return '<div class="small"><b>'+escapeHtml(it.memberLabel||'')+'</b> is NOT a member of '+bubble+'</div>';
       }).join('');
+    }
+
+    function normalizeErrResForRender_(res){
+      if (!res) return { code:'E500', zh:'系統錯誤', en:'System error' };
+      if (typeof res === 'string') return { code:'E500', zh:'系統錯誤', en:String(res) };
+      return res;
     }
 
     function showErr(targetId, res){
@@ -2492,7 +2498,7 @@ function eventDateYmdFromKey(ev){
                 }).filter(Boolean);
                 var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
                 if (vacantCount > 0){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 x'+vacantCount+' / Vacant x'+vacantCount+'</button>');
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 / Vacant x'+vacantCount+'</button>');
                 }
                 return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
               }).join('');
