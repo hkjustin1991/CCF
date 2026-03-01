@@ -217,6 +217,8 @@ const ADMIN_CACHE_CHECKINS_MANIFEST_KEY = 'admin_checkins_manifest_v1';
 const ADMIN_CACHE_CHECKINS_PART_PREFIX = 'admin_checkins_part_v1_';
 const ADMIN_CACHE_CHECKINS_TTL = 60;
 const ADMIN_CACHE_CHECKINS_PART_CHARS = 85000;
+const ADMIN_CACHE_CHECKINS_MAX_PARTS = 12;
+const ADMIN_CACHE_CHECKINS_TELEMETRY_THROTTLE = 60;
 
 // ---- Page ----
 function doGetAdmin_(e){
@@ -2841,6 +2843,16 @@ function admin_getCheckinsData_(){
   return { ok:true, rows: rows };
 }
 
+function admin_logCheckinsCacheTelemetry_(action, details){
+  try{
+    const cache = CacheService.getScriptCache();
+    const throttleKey = 'admin_checkins_telemetry_' + String(action||'').toLowerCase();
+    if (cache.get(throttleKey)) return;
+    cache.put(throttleKey, '1', ADMIN_CACHE_CHECKINS_TELEMETRY_THROTTLE);
+  }catch(e){}
+  admin_audit_({id:'SYSTEM', role:'SYSTEM'}, String(action||''), JSON.stringify(details||{}), 'checkins_cache');
+}
+
 function admin_getCheckinsDataCached_(){
   const cache = CacheService.getScriptCache();
   try{
@@ -2857,7 +2869,8 @@ function admin_getCheckinsDataCached_(){
         }
         if (parts.length === nParts){
           const rows = JSON.parse(parts.join(''));
-          return { ok:true, rows: Array.isArray(rows)?rows:[], usedCache:true };
+          admin_logCheckinsCacheTelemetry_('CHECKINS_CACHE_HIT', { count: Array.isArray(rows) ? rows.length : 0, nParts: nParts });
+          return { ok:true, rows: Array.isArray(rows)?rows:[], usedCache:true, cacheMode:'hit' };
         }
       }
     }
@@ -2865,18 +2878,31 @@ function admin_getCheckinsDataCached_(){
 
   const fresh = admin_getCheckinsData_();
   if (!fresh || !fresh.ok) return fresh;
+  let cacheMode = 'miss';
   try{
     const payload = JSON.stringify(fresh.rows || []);
     const nParts = Math.max(1, Math.ceil(payload.length / ADMIN_CACHE_CHECKINS_PART_CHARS));
-    const manifest = { count: (fresh.rows||[]).length, updatedAt: admin_nowIso_(), nParts: nParts };
-    for (let i=0;i<nParts;i++){
-      const st = i * ADMIN_CACHE_CHECKINS_PART_CHARS;
-      const en = st + ADMIN_CACHE_CHECKINS_PART_CHARS;
-      cache.put(ADMIN_CACHE_CHECKINS_PART_PREFIX + i, payload.slice(st,en), ADMIN_CACHE_CHECKINS_TTL);
+    const maxParts = ADMIN_CACHE_CHECKINS_MAX_PARTS;
+    const maxPayloadChars = ADMIN_CACHE_CHECKINS_PART_CHARS * maxParts;
+    if (payload.length > maxPayloadChars || nParts > maxParts){
+      cacheMode = 'skip_oversize';
+      try{ cache.remove(ADMIN_CACHE_CHECKINS_MANIFEST_KEY); }catch(e){}
+      admin_logCheckinsCacheTelemetry_('CHECKINS_CACHE_SKIP_OVERSIZE', { count: (fresh.rows||[]).length, payloadChars: payload.length, nParts: nParts, maxParts: maxParts });
+    }else{
+      const manifest = { count: (fresh.rows||[]).length, updatedAt: admin_nowIso_(), nParts: nParts };
+      for (let i=0;i<nParts;i++){
+        const st = i * ADMIN_CACHE_CHECKINS_PART_CHARS;
+        const en = st + ADMIN_CACHE_CHECKINS_PART_CHARS;
+        cache.put(ADMIN_CACHE_CHECKINS_PART_PREFIX + i, payload.slice(st,en), ADMIN_CACHE_CHECKINS_TTL);
+      }
+      cache.put(ADMIN_CACHE_CHECKINS_MANIFEST_KEY, JSON.stringify(manifest), ADMIN_CACHE_CHECKINS_TTL);
+      admin_logCheckinsCacheTelemetry_('CHECKINS_CACHE_WRITE', { count: (fresh.rows||[]).length, nParts: nParts });
     }
-    cache.put(ADMIN_CACHE_CHECKINS_MANIFEST_KEY, JSON.stringify(manifest), ADMIN_CACHE_CHECKINS_TTL);
-  }catch(e){}
-  return { ok:true, rows:fresh.rows || [], usedCache:false };
+  }catch(e){
+    cacheMode = 'bypass_error';
+    admin_logCheckinsCacheTelemetry_('CHECKINS_CACHE_BYPASS', { message: String(e && e.message || e) });
+  }
+  return { ok:true, rows:fresh.rows || [], usedCache:false, cacheMode: cacheMode };
 }
 
 // FirstSeen cache
@@ -2917,15 +2943,120 @@ function admin_memberSinceAsYmd_(raw){
     return Utilities.formatDate(raw, ADMIN_TZ, 'yyyy-MM-dd');
   }
   const s = String(raw).trim();
+  if (!s) return '';
+
   // already y-m-d
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return m[1]+'-'+m[2]+'-'+m[3];
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymd) return ymd[1]+'-'+ymd[2]+'-'+ymd[3];
+
+  // UK format: DD/MM/YYYY[ HH:mm[:ss]]
+  const uk = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (uk){
+    const day = parseInt(uk[1], 10);
+    const month = parseInt(uk[2], 10);
+    const year = parseInt(uk[3], 10);
+    const hh = parseInt(uk[4] || '0', 10);
+    const mm = parseInt(uk[5] || '0', 10);
+    const ss = parseInt(uk[6] || '0', 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59){
+      const dt = new Date(year, month - 1, day, hh, mm, ss, 0);
+      if (
+        dt &&
+        dt.getFullYear() === year &&
+        dt.getMonth() === (month - 1) &&
+        dt.getDate() === day &&
+        dt.getHours() === hh &&
+        dt.getMinutes() === mm &&
+        dt.getSeconds() === ss
+      ){
+        return Utilities.formatDate(dt, ADMIN_TZ, 'yyyy-MM-dd');
+      }
+    }
+    return '';
+  }
 
   const d = new Date(s);
   if (!isNaN(d.getTime())){
     return Utilities.formatDate(d, ADMIN_TZ, 'yyyy-MM-dd');
   }
   return '';
+}
+
+function admin_debugMemberSinceParsing_(){
+  const cases = [
+    { input: new Date('2026-01-18T12:46:18Z'), expect: '2026-01-18' },
+    { input: '2026-01-18', expect: '2026-01-18' },
+    { input: '2026-01-18T12:46:18Z', expect: '2026-01-18' },
+    { input: '18/01/2026', expect: '2026-01-18' },
+    { input: '18/01/2026 12:46:18', expect: '2026-01-18' },
+    { input: '31/02/2026 12:00:00', expect: '' }
+  ];
+  const out = cases.map(function(c){
+    const actual = admin_memberSinceAsYmd_(c.input);
+    return { input: String(c.input), expect: c.expect, actual: actual, pass: actual === c.expect };
+  });
+  Logger.log(JSON.stringify(out));
+  return out;
+}
+
+function admin_migrateMemberSinceUkStrings_(){
+  const sh = admin_findMembersSheet_();
+  if (!sh) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+
+  const col = admin_getMembersColMap_(sh);
+  if (col.Member_Since === undefined){
+    return admin_err_('E500','找不到 Member_Since 欄位','Member_Since column not found.');
+  }
+
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { ok:true, scanned:0, converted:0 };
+
+  const idx = col.Member_Since;
+  const rng = sh.getRange(2, idx+1, lastRow-1, 1);
+  const vals = rng.getValues();
+  let converted = 0;
+
+  for (let i=0; i<vals.length; i++){
+    const raw = vals[i][0];
+    if (raw instanceof Date) continue;
+    const s = String(raw||'').trim();
+    if (!s) continue;
+    const uk = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (!uk) continue;
+
+    const day = parseInt(uk[1], 10);
+    const month = parseInt(uk[2], 10);
+    const year = parseInt(uk[3], 10);
+    const hh = parseInt(uk[4] || '0', 10);
+    const mm = parseInt(uk[5] || '0', 10);
+    const ss = parseInt(uk[6] || '0', 10);
+    if (!(month >= 1 && month <= 12 && day >= 1 && day <= 31 && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59 && ss >= 0 && ss <= 59)) continue;
+
+    const dt = new Date(year, month - 1, day, hh, mm, ss, 0);
+    if (
+      !dt ||
+      dt.getFullYear() !== year ||
+      dt.getMonth() !== (month - 1) ||
+      dt.getDate() !== day ||
+      dt.getHours() !== hh ||
+      dt.getMinutes() !== mm ||
+      dt.getSeconds() !== ss
+    ){
+      continue;
+    }
+
+    vals[i][0] = dt;
+    converted++;
+  }
+
+  if (converted > 0){
+    rng.setValues(vals);
+    admin_clearMembersCache_();
+  }
+
+  const result = { ok:true, scanned: vals.length, converted: converted };
+  Logger.log('admin_migrateMemberSinceUkStrings_ ' + JSON.stringify(result));
+  return result;
 }
 
 // Low attendance flags cache (today-based, join-aware)
