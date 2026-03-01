@@ -973,7 +973,8 @@
         PENDING:{ zh:'已登記', en:'REGISTERED' },
         HELPER:{ zh:'會員', en:'MEMBER' },
         TEMP:{ zh:'會員', en:'MEMBER' },
-        DISABLED:{ zh:'已停用', en:'DISABLED' }
+        DISABLED:{ zh:'已停用', en:'DISABLED' },
+        GL:{ zh:'組長', en:'GROUP LEADER' }
       };
       var statusUi = statusMap[rawStatus] || { zh:'會員', en:'MEMBER' };
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
@@ -984,7 +985,8 @@
         return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
       }).join('');
       var glGroups = (snap.member && Array.isArray(snap.member.servingGLGroups)) ? snap.member.servingGLGroups : [];
-      var isPrivileged = (rawStatus === 'STAFF' || rawStatus === 'ADMIN' || glGroups.length > 0);
+      var isGl = !!((snap.member && snap.member.isGl) || glGroups.length > 0 || rawStatus === 'GL');
+      var isPrivileged = (rawStatus === 'STAFF' || rawStatus === 'ADMIN' || isGl);
       var glHtml = glGroups.map(function(g){
         var canonicalGroup = normalizeServingGroupKey(g);
         var cls = servingGroupCss(canonicalGroup);
@@ -1013,7 +1015,7 @@
           '</div>'+
           '<div class="msgBox" style="margin-top:10px;">'+
             '<div><b>會員狀態 / Membership status:</b> '+escapeHtml(statusUi.zh)+' / '+escapeHtml(statusUi.en)+'</div>'+
-            (glHtml ? ('<div style="margin-top:8px;"><b>組長身份 / Group leader:</b> Group Leader of '+glHtml+'</div>') : '')+
+            (isGl ? ('<div style="margin-top:8px;"><b>組長身份 / Group leader:</b> '+(glHtml ? ('Group Leader of '+glHtml) : 'Group Leader')+'</div>') : '')+
           '</div>'+
           (isPrivileged
             ? ('<div class="msgBox" style="margin-top:10px;background:#fff1f1;border-color:rgba(217,60,94,0.35);color:#0d1b3d;">'+
