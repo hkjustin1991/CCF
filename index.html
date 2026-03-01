@@ -2068,6 +2068,17 @@
             todayBox+
             (function(){
               var fam = Array.isArray(res.familyMembers) ? res.familyMembers : [];
+              if (!fam.length){
+                var related = Array.isArray(res.relatedMembers) ? res.relatedMembers : [];
+                fam = related.map(function(r){
+                  return {
+                    id: r.id,
+                    nameZh: r.nameZh || '',
+                    nameEn: r.nameEn || '',
+                    preferredName: r.preferredName || ''
+                  };
+                });
+              }
               if (!fam.length) return '';
               return '<div class="familyList"><div class="small"><b>同家庭成員 / Same family</b></div>'+
                 fam.map(function(f){
@@ -2158,11 +2169,12 @@ if (btnC) {
           var receipt = (rr.result === 'ALREADY') ? ((rr.already||{}).receiptId||'') : (rr.receiptId||'');
           var stamp   = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'')    : (rr.timeUk||'');
           var method  = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'')    : (rr.method||'manual');
+          var handledBy = (rr.result === 'ALREADY') ? formatHandledBy_((rr.already||{}).handledBy) : formatHandledBy_(rr.handledBy);
           var statusTxt = (!rr.ok) ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
 
           return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+
                  '<details class="receiptDetails"><summary>Receipt</summary>'+
-                 kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt}])+
+                 kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt},{k:'By',v:handledBy}])+
                  '</details></li>';
         }).join('');
 
