@@ -269,7 +269,7 @@ function api_reg_create_member_public(input){
         ...v.data,
         id: alloc.id,
         key: alloc.key,
-        status: 'ACTIVE',
+        status: 'PENDING',
         memberSince: ts
       });
 
