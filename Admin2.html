@@ -944,7 +944,10 @@
     function renderGroupMemberManage_(host, groupKey){
       if (!host || !groupKey) return;
       callApi('api_admin_serving_group_members', App.token, groupKey).then(function(res){
-        if (!res || !res.ok) return;
+        if (!res || !res.ok){
+          if (host) host.innerHTML = '<div class="small">'+escapeHtml((res && res.code === 'E403') ? '你沒有權限查看此組別名單 / You do not have permission to view this group members list.' : '無法載入組員名單 / Unable to load members list.')+'</div>';
+          return;
+        }
         var members = Array.isArray(res.members) ? res.members : [];
         var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
         html += '<ul class="groupDialogList">'+members.map(function(m){
