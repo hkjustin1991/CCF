@@ -2068,6 +2068,17 @@
             todayBox+
             (function(){
               var fam = Array.isArray(res.familyMembers) ? res.familyMembers : [];
+              if (!fam.length){
+                var related = Array.isArray(res.relatedMembers) ? res.relatedMembers : [];
+                fam = related.map(function(r){
+                  return {
+                    id: r.id,
+                    nameZh: r.nameZh || '',
+                    nameEn: r.nameEn || '',
+                    preferredName: r.preferredName || ''
+                  };
+                });
+              }
               if (!fam.length) return '';
               return '<div class="familyList"><div class="small"><b>同家庭成員 / Same family</b></div>'+
                 fam.map(function(f){
@@ -2092,9 +2103,16 @@
 
 var btnC = $('btnManualConfirmFamily');
 if (btnC) {
+  function getSelectedIds_(){
+    var checked = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked'))
+      .map(function(x){ return String(x.value || '').trim(); })
+      .filter(Boolean);
+    if (checked.length) return checked;
+    return (m && m.id) ? [String(m.id)] : [];
+  }
+
   function updateConfirmEnabled_(){
-    var any = confirmEl.querySelectorAll('.famTick:checked').length > 0;
-    btnC.disabled = !any;
+    btnC.disabled = (getSelectedIds_().length === 0);
   }
   Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick')).forEach(function(ck){
     ck.onchange = updateConfirmEnabled_;
@@ -2104,9 +2122,7 @@ if (btnC) {
   btnC.onclick = function(){
     clear('manualMsg');
 
-    var selectedIds = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked'))
-      .map(function(x){ return String(x.value || '').trim(); })
-      .filter(Boolean);
+    var selectedIds = getSelectedIds_();
 
     if(!selectedIds.length){
       showErr('manualMsg', { code:'E400', zh:'請至少選擇一位', en:'Please select at least one person.' });
@@ -2153,11 +2169,12 @@ if (btnC) {
           var receipt = (rr.result === 'ALREADY') ? ((rr.already||{}).receiptId||'') : (rr.receiptId||'');
           var stamp   = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'')    : (rr.timeUk||'');
           var method  = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'')    : (rr.method||'manual');
+          var handledBy = (rr.result === 'ALREADY') ? formatHandledBy_((rr.already||{}).handledBy) : formatHandledBy_(rr.handledBy);
           var statusTxt = (!rr.ok) ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
 
           return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+
                  '<details class="receiptDetails"><summary>Receipt</summary>'+
-                 kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt}])+
+                 kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt},{k:'By',v:handledBy}])+
                  '</details></li>';
         }).join('');
 
