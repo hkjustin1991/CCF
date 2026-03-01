@@ -733,6 +733,39 @@
       EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN: { code:'E426', zh:'未能打開彈出視窗，請使用下方內置掃描器', en:'彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.' }
     });
 
+    var ADMIN_ERROR_ALIAS_MAP = [
+      {
+        matchEn: /^Admin portal for authorised staff only\.?$/i,
+        code:'E403',
+        zh:'此管理平台只限已授權同工使用',
+        en:'Admin portal for authorised staff only.'
+      },
+      {
+        matchEn: /^Tap "Start camera" to begin scanning\.?$/i,
+        code:'S101',
+        zh:'請按「啟動相機」以開始掃描',
+        en:'Tap "Start camera" to begin scanning.'
+      },
+      {
+        matchEn: /^Camera cannot start\.?$/i,
+        code:'E420',
+        zh:'相機無法啟動',
+        en:'Camera cannot start.'
+      },
+      {
+        matchEn: /^External scanner cancelled\.?$/i,
+        code:'S422',
+        zh:'外置掃描已取消',
+        en:'External scanner cancelled.'
+      },
+      {
+        matchEn: /^No QR code found in the image\.?$/i,
+        code:'E416',
+        zh:'圖片中找不到 QR code',
+        en:'No QR code found in the image.'
+      }
+    ];
+
     function showStatus(targetId, kind, msgKey, detail){
       var msg = ADMIN_MSG[msgKey];
       if (!msg || !msg.zh || !msg.en){
@@ -790,9 +823,30 @@
     }
 
     function normalizeErrResForRender_(res){
-      if (!res) return { code:'E500', zh:'系統錯誤', en:'System error' };
-      if (typeof res === 'string') return { code:'E500', zh:'系統錯誤', en:String(res) };
-      return res;
+      var out = {};
+      if (!res){
+        out = { code:'E500', zh:'系統錯誤', en:'System error' };
+      } else if (typeof res === 'string'){
+        out = { code:'E500', zh:'系統錯誤', en:String(res) };
+      } else {
+        out = Object.assign({}, res);
+      }
+
+      var enText = String(out.en || '').trim();
+      for (var i=0; i<ADMIN_ERROR_ALIAS_MAP.length; i++){
+        var alias = ADMIN_ERROR_ALIAS_MAP[i];
+        if (enText && alias.matchEn && alias.matchEn.test(enText)){
+          out.code = out.code || alias.code;
+          out.zh = out.zh || alias.zh;
+          out.en = out.en || alias.en;
+          break;
+        }
+      }
+
+      if (!out.code) out.code = 'E500';
+      if (!out.zh) out.zh = '系統錯誤';
+      if (!out.en) out.en = 'System error';
+      return out;
     }
 
     function showErr(targetId, res){
