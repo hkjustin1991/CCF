@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-01.admin97
+ * v2026-03-01.admin99
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-01.admin97';
+const ADMIN_VERSION = '2026-03-01.admin99';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -926,6 +926,20 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
   return { ok:true, memberId: id, from1: p1.from||'', to1: p1.to||'', from2: p2.from||'', to2: p2.to||'' };
 }
 
+
+function admin_isInAwayOnDate_(awayPeriods, dateObj){
+  const periods = (awayPeriods && Array.isArray(awayPeriods.periods)) ? awayPeriods.periods : [];
+  if (!dateObj || !periods.length) return false;
+  for (let i=0;i<periods.length;i++){
+    const p = periods[i] || {};
+    const from = admin_parseYmd_(p.fromYmd || p.from || '');
+    const to = admin_parseYmd_(p.toYmd || p.to || '');
+    if (!from || !to) continue;
+    if (dateObj.getTime() >= from.getTime() && dateObj.getTime() <= to.getTime()) return true;
+  }
+  return false;
+}
+
 /**
  * Service stats series within date range (SundayService only).
  * Contract:
@@ -975,20 +989,30 @@ function api_admin_stats(token, fromDate, toDate){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
+  const allMemberIds = new Set();
+  for (const ev of events){
+    const set = evAttendees.get(ev) || new Set();
+    set.forEach(function(mid){ allMemberIds.add(mid); });
+  }
+  const awayMap = admin_getAwayPeriodsMap_(Array.from(allMemberIds));
+
   const out = [];
   for (const ev of events){
     const set = evAttendees.get(ev);
     const total = set ? set.size : 0;
     let newCount = 0;
+    let holidayCount = 0;
+    const d = admin_eventDateFromKey_(ev);
 
     if (set){
       for (const mid of set){
         const fev = firstSeen[mid];
         if (fev && fev === ev) newCount++;
+        if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
       }
     }
     const existing = Math.max(0, total - newCount);
-    out.push({ eventKey: ev, total: total, new: newCount, existing: existing });
+    out.push({ eventKey: ev, total: total, new: newCount, existing: existing, holiday: holidayCount });
   }
 
   admin_audit_(s.actor, 'STATS_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), events: out.length}), 'stats');
@@ -1163,7 +1187,8 @@ function api_admin_period_stats(token, fromDate, toDate){
       services: o.services,
       totalAttendance: o.total,
       uniqueAttendance: o.uniqueSet.size,
-      newUnique: newSet.size
+      newUnique: newSet.size,
+      meanAttendance: o.services ? Number((o.total / o.services).toFixed(2)) : 0
     };
   });
 
@@ -1205,7 +1230,8 @@ function api_admin_period_stats(token, fromDate, toDate){
       services: o.services,
       totalAttendance: o.total,
       uniqueAttendance: o.uniqueSet.size,
-      newUnique: o.newSet.size
+      newUnique: o.newSet.size,
+      meanAttendance: o.services ? Number((o.total / o.services).toFixed(2)) : 0
     };
   });
 

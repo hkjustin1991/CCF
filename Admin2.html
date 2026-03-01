@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-01.admin97
-  For Admin.gs: v2026-03-01.admin97
+  UI VERSION TAG: admin2-ui-2026-03-01.admin99
+  For Admin.gs: v2026-03-01.admin99
   ============================================================
   -->
 
@@ -982,6 +982,16 @@
       return '<span class="'+label.cls+'">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</span>';
     }
 
+    function servingGroupPaletteClass_(groupKey){
+      var key = normalizeServingGroupKey_(groupKey);
+      if (key === 'worship') return 'btnPink';
+      if (key === 'media') return 'btnMatrix';
+      if (key === 'logistic') return 'btnLookup';
+      if (key === 'support') return 'btnMain';
+      if (key === 'finance') return 'btnPeriod';
+      return 'btnBack';
+    }
+
     var GL_MODE_TEXT = {
       roleLabelZh: '組長'
     };
@@ -1040,7 +1050,7 @@
       if (Object.prototype.hasOwnProperty.call(m, key)) return !!m[key];
       return canManageServingGroup_(key);
     }
-    function renderGroupMemberManage_(host, groupKey){
+    function renderGroupMemberManage_(host, groupKey, options){
       if (!host || !groupKey) return;
       var opts = options || {};
       host.innerHTML = '<div class="small">載入中… / Loading…</div>';
@@ -1128,10 +1138,10 @@
         renderMembersList_();
       });
     }
-    function renderGroupMemberManage_(host, groupKey){
-      if (!host || !groupKey) return;
-      loadServingGroupMembers_(host, groupKey, { allowEdit:true });
+    function loadServingGroupMembers_(host, groupKey, options){
+      renderGroupMemberManage_(host, groupKey, options || {});
     }
+
     function buildServingGroupDialogHtml_(groupKey, servingInsights){
       var insights = servingInsights || {};
       var byGroup = insights.byGroup || {};
@@ -3318,6 +3328,7 @@
           '</div>'+
           '<div id="statsMsg"></div>'+
           '<div class="chartCard"><canvas id="statsChart"></canvas></div>'+
+          '<div id="statsOut" style="margin-top:10px;"></div>'+
         '</div>';
     }
 
@@ -3333,6 +3344,7 @@
 
       function loadStats(rebuildFirst){
         clear('statsMsg');
+        $('statsOut').innerHTML = '';
 
         var from = $('from3').value;
         var to = $('to3').value;
@@ -3358,9 +3370,11 @@
           if(!res.events || !res.events.length){
             showBox('statsMsg','warn','此範圍沒有數據','No data in this range.');
             drawEmptyChart_();
+            $('statsOut').innerHTML = '';
             return;
           }
           drawStatsChart_(res.events);
+          $('statsOut').innerHTML = renderStatsTable_(res.events);
 
           if (res.cache){
             $('statsMsg').innerHTML =
@@ -3370,6 +3384,33 @@
         }).catch(function(){
           showErr('statsMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
         });
+      }
+
+      function renderStatsTable_(rows){
+        var events = Array.isArray(rows) ? rows : [];
+        if (!events.length) return '';
+        var html = ''+
+          '<div class="msgBox ok" style="margin-top:10px;">'+
+            '<div class="big ok">每場聚會摘要 / Per service summary</div>'+
+            '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr>'+
+              '<th>日期 / Date</th>'+
+              '<th>總出席 / Total</th>'+
+              '<th>新朋友 / New</th>'+
+              '<th>舊朋友 / Existing</th>'+
+              '<th>假期中人數 / On holiday</th>'+
+            '</tr></thead><tbody>';
+        events.forEach(function(r){
+          var ymd = eventDateYmdFromKey(r.eventKey) || String(r.eventKey||'');
+          html += '<tr>'+
+            '<td><span class="chip">'+escapeHtml(String(ymd))+'</span></td>'+
+            '<td>'+escapeHtml(String(r.total||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.new||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.existing||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.holiday||0))+'</td>'+
+          '</tr>';
+        });
+        html += '</tbody></table></div></div>';
+        return html;
       }
 
       function drawEmptyChart_(){
@@ -3511,6 +3552,7 @@
             '<th>總人次 / Total</th>'+
             '<th>獨立人數 / Unique</th>'+
             '<th>新朋友 / New（unique）</th>'+
+            '<th>平均出席 / Mean attendance</th>'+
           '</tr></thead><tbody>';
 
         for(var i=0;i<rows.length;i++){
@@ -3521,6 +3563,7 @@
             '<td>'+escapeHtml(String(r.totalAttendance||0))+'</td>'+
             '<td>'+escapeHtml(String(r.uniqueAttendance||0))+'</td>'+
             '<td>'+escapeHtml(String(r.newUnique||0))+'</td>'+
+            '<td>'+escapeHtml(String(r.meanAttendance||0))+'</td>'+
           '</tr>';
         }
 
