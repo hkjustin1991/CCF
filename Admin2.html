@@ -734,6 +734,45 @@
       return String(title || '') + formatErrorCodeTag_(res);
     }
 
+    var UI_STATUS_CATALOG = {
+      S420: { kind:'err', zh:'相機無法啟動', en:'Camera cannot start' },
+      S421: { kind:'warn', zh:'外置掃描已取消', en:'External scanner cancelled' },
+      S422: { kind:'warn', zh:'外置掃描器逾時', en:'External scanner timed out' },
+      S423: { kind:'warn', zh:'彈出視窗被封鎖', en:'Popup blocked' },
+      S424: { kind:'warn', zh:'圖片中找不到 QR code', en:'No QR code found in the image' },
+      S425: { kind:'err', zh:'外置掃描器設定無效或不可用', en:'External scanner config is invalid or scanner unavailable' },
+      S426: { kind:'warn', zh:'請按「啟動相機」以開始掃描', en:'Tap "Start camera" to begin scanning.' }
+    };
+    function uiStatusByCode_(code, overrides){
+      var base = UI_STATUS_CATALOG[String(code||'').trim()] || null;
+      var out = {
+        code: String(code||'').trim(),
+        kind: (base && base.kind) || 'warn',
+        zh: (base && base.zh) || '狀態更新',
+        en: (base && base.en) || 'Status update'
+      };
+      if(overrides){
+        if(Object.prototype.hasOwnProperty.call(overrides, 'kind')) out.kind = overrides.kind;
+        if(Object.prototype.hasOwnProperty.call(overrides, 'zh')) out.zh = overrides.zh;
+        if(Object.prototype.hasOwnProperty.call(overrides, 'en')) out.en = overrides.en;
+        if(Object.prototype.hasOwnProperty.call(overrides, 'detail')) out.detail = overrides.detail;
+        if(Object.prototype.hasOwnProperty.call(overrides, 'detailHtml')) out.detailHtml = overrides.detailHtml;
+      }
+      return out;
+    }
+    function showUiStatus_(targetId, code, overrides){
+      var status = uiStatusByCode_(code, overrides);
+      var detail = status.detailHtml || status.detail || '';
+      showBox(
+        targetId,
+        status.kind,
+        withErrorCodeTag_(status.zh, status),
+        status.en,
+        detail,
+        !!status.detailHtml
+      );
+    }
+
 
     function parseHolidayDetailLines_(detailText){
       var raw = String(detailText||'').trim();
@@ -1679,7 +1718,10 @@
                   if(status) status.innerHTML = '已讀取 QR，處理中… / QR decoded, processing…';
                   if(typeof onDecoded === 'function') onDecoded(String(qr.data||''));
                 }else{
-                  if(status) status.innerHTML = '無法從此圖片辨識 QR。請嘗試更清晰圖片。 / Cannot decode QR from this image. Try a clearer image.';
+                  if(status){
+                    var noQr = uiStatusByCode_('S424', { detail:'請嘗試更清晰圖片。 / Try a clearer image.' });
+                    status.innerHTML = withErrorCodeTag_(noQr.zh, noQr) + ' / ' + noQr.en + '<br/>' + escapeHtml(String(noQr.detail || ''));
+                  }
                 }
               }catch(e){
                 if(status) status.innerHTML = '讀取圖片失敗 / Failed to read image';
@@ -1709,13 +1751,13 @@
         console.error('E420 camera unsupported', detail0.diagnostics);
         reportScannerE420_('unsupported', d0);
         onCaptured(null, {
-          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
+          code:'S420', zh:uiStatusByCode_('S420').zh, en:uiStatusByCode_('S420').en, detail: detail0.detail,
           detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
             bindCameraRetryButton_('scanMsg', function(){
               openExternalScanner_({
                 flow:'admin',
                 onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
-                onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                onError:function(msg){ showErr('scanMsg', uiStatusByCode_('S425', { detail:String(msg||'') })); }
               });
             }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
         });
@@ -1737,34 +1779,34 @@
             loop();
           });
         }).catch(function(err){
-          if(allowFallback){ tryStart(constraintsFallback, false); return; }
-          stopScan();
-          var detail = buildCameraStartDetail_(err);
-          if(err && err.name === 'NotAllowedError'){
-            onCaptured(null, {
-              code:'E420',
-              zh:'相機無法啟動',
-              en:'Camera cannot start',
+        if(allowFallback){ tryStart(constraintsFallback, false); return; }
+        stopScan();
+        var detail = buildCameraStartDetail_(err);
+        if(err && err.name === 'NotAllowedError'){
+          onCaptured(null, {
+              code:'S420',
+              zh: uiStatusByCode_('S420').zh,
+              en: uiStatusByCode_('S420').en,
               detail: detail,
               detailHtml: '<div class="small">'+escapeHtml(detail)+'</div>' +
                 bindCameraRetryButton_('scanMsg', function(){
                   openExternalScanner_({
                     flow:'admin',
                     onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
-                    onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                    onError:function(msg){ showErr('scanMsg', uiStatusByCode_('S425', { detail:String(msg||'') })); }
                   });
                 }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
             });
             return;
           }
           onCaptured(null, {
-            code:'E420', zh:'相機無法啟動', en:'Camera cannot start', detail: detail,
+            code:'S420', zh:uiStatusByCode_('S420').zh, en:uiStatusByCode_('S420').en, detail: detail,
             detailHtml: '<div class="small">'+escapeHtml(detail||'')+'</div>' +
               bindCameraRetryButton_('scanMsg', function(){
                 openExternalScanner_({
                   flow:'admin',
                   onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
-                  onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                  onError:function(msg){ showErr('scanMsg', uiStatusByCode_('S425', { detail:String(msg||'') })); }
                 });
               }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
           });
@@ -1840,7 +1882,7 @@
                   var d = ctx.getImageData(0,0,c.width,c.height);
                   var qr = window.jsQR ? window.jsQR(d.data, c.width, c.height) : null;
                   if(qr && qr.data){ resolve(String(qr.data||'')); return; }
-                  reject({code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+                  reject(uiStatusByCode_('S424'));
                 }catch(e){ reject({code:'E500', zh:'圖片解碼失敗', en:'Image decode failed'}); }
               };
               img.onerror = function(){ reject({code:'E415', zh:'無法載入圖片', en:'Unable to read image.'}); };
@@ -1912,13 +1954,13 @@
             submitLoginPayload(payload, source || 'EXT_SCANNER');
           }, function(status){
             if(status === 'success') return;
-            if(status === 'timeout'){ showBox('scanMsg','warn','外置掃描器逾時','External scanner timed out.'); return; }
-            if(status === 'cancel' || status === 'popup_closed'){ showBox('scanMsg','warn','外置掃描已取消','External scanner cancelled.'); return; }
-            if(status === 'blocked'){ showBox('scanMsg','err','彈出視窗被封鎖','Popup was blocked.'); return; }
-            if(status === 'config_invalid'){ applyExternalScannerGuard_('scanMsg', ['btnExtScan']); }
+            if(status === 'timeout'){ showUiStatus_('scanMsg', 'S422'); return; }
+            if(status === 'cancel' || status === 'popup_closed'){ showUiStatus_('scanMsg', 'S421'); return; }
+            if(status === 'blocked'){ showUiStatus_('scanMsg', 'S423'); return; }
+            if(status === 'config_invalid'){ showUiStatus_('scanMsg', 'S425', { detail: EXTERNAL_SCANNER_CONFIG.message || '' }); applyExternalScannerGuard_('scanMsg', ['btnExtScan']); }
           });
         };
-        showBox('scanMsg','warn','請按「啟動相機」以開始掃描','Tap "Start camera" to begin scanning.');
+        showUiStatus_('scanMsg', 'S426');
       };
 
       if($('btnUploadLoginQr') && $('loginQrImageInput')){
@@ -4308,13 +4350,13 @@
             flow:'admin',
             onPayload:handleReauthPayload_,
             onCancel:function(){
-              showBox('msg','warn','已取消掃描','已取消掃描 / Scan cancelled.');
+              showUiStatus_('msg', 'S421');
             },
             onPopupBlocked:function(){
-              showBox('msg','warn','未能打開彈出視窗，請使用下方內置掃描器','彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.');
+              showUiStatus_('msg', 'S423', { detail:'請使用下方內置掃描器 / Please use built-in scanner below.' });
             },
             onError:function(msg){
-              showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
+              showErr('msg', uiStatusByCode_('S425', { detail: String(msg||'') }));
             }
           });
         };
