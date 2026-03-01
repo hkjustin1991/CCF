@@ -964,6 +964,15 @@
       var greetZh = (hh < 12) ? '早晨' : ((hh < 18) ? '午安' : '晚上好');
       var serviceAttended = (snap.attendance && typeof snap.attendance.attended !== 'undefined') ? snap.attendance.attended : 0;
       var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
+      var rawStatus = String((snap.member && snap.member.status) || (m && m.status) || '').trim().toUpperCase();
+      var statusMap = {
+        ACTIVE:{ zh:'正式會員', en:'Full member' },
+        STAFF:{ zh:'同工', en:'STAFF' },
+        ADMIN:{ zh:'同工', en:'staff' },
+        PROVISIONAL:{ zh:'暫準會員', en:'Provisional member' },
+        PENDING:{ zh:'已登記', en:'Registered' }
+      };
+      var statusUi = statusMap[rawStatus] || { zh: rawStatus || '—', en: rawStatus || '—' };
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
       var groupHtml = groups.map(function(g){
         var canonicalGroup = normalizeServingGroupKey(g);
@@ -971,6 +980,15 @@
         if (cls) return '<span class="groupBadge '+cls+'">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
         return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
       }).join('');
+      var glGroups = (snap.member && Array.isArray(snap.member.servingGLGroups)) ? snap.member.servingGLGroups : [];
+      var isPrivileged = (rawStatus === 'STAFF' || rawStatus === 'ADMIN' || glGroups.length > 0);
+      var glHtml = glGroups.map(function(g){
+        var canonicalGroup = normalizeServingGroupKey(g);
+        var cls = servingGroupCss(canonicalGroup);
+        if (cls) return '<span class="groupBadge '+cls+'">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
+        return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
+      }).join('');
+      var isPending = (rawStatus === 'PENDING');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
       var away = (snap.member && snap.member.away) ? snap.member.away : {};
@@ -990,6 +1008,16 @@
             '<div><b>出席服務次數 / Service attended:</b> '+escapeHtml(String(serviceAttended))+'</div>'+
             '<div><b>出席率 / Attendance:</b> '+escapeHtml(String(attPercent))+'%</div>'+
           '</div>'+
+          '<div class="msgBox" style="margin-top:10px;">'+
+            '<div><b>會員狀態 / Membership status:</b> '+escapeHtml(statusUi.zh)+' = '+escapeHtml(statusUi.en)+'</div>'+
+            (glHtml ? ('<div style="margin-top:8px;"><b>組長身份 / Group leader:</b> Group Leader of '+glHtml+'</div>') : '')+
+          '</div>'+
+          (isPrivileged
+            ? ('<div class="msgBox ok" style="margin-top:10px;">'+
+                '<div><b>管理頁面 / Management page</b></div>'+
+                '<div style="margin-top:8px;"><a target="_blank" rel="noopener" href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=admin">Click here to enter management page</a></div>'+
+              '</div>')
+            : '')+
           '<div class="msgBox" style="margin-top:10px;">'+
             '<div><b>所屬事奉組別 / Member of:</b></div>'+
             '<div style="margin-top:6px;">'+(groupHtml || '—')+'</div>'+
@@ -1780,6 +1808,16 @@
 
     function bindSelfHome(){
       var selfMsgEl = $('selfMsg');
+      var rawStatus = String(((((State.snapshot||{}).member)||{}).status) || '').trim().toUpperCase();
+      var isPending = (rawStatus === 'PENDING');
+      function showPendingActivationMessage(){
+        if (!selfMsgEl) return;
+        selfMsgEl.innerHTML = showBox(
+          'warn',
+          '功能將於你首次出席聚會後啟用，請先加入我們的 WhatsApp 社群，我們期待很快見到你！',
+          'Function activated upon attending our first service, please join our WhatsApp community, and we look forward to seeing you very soon!'
+        );
+      }
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;
@@ -1788,6 +1826,7 @@
       };
 
       $('btnSelfServing').onclick = function(){
+        if (isPending){ showPendingActivationMessage(); return; }
         var groups = (((State.snapshot||{}).member||{}).servingGroups) || [];
         if (!groups.length){
           $('selfMsg').innerHTML = showBox('warn','你尚未加入任何事奉組別。請聯絡相關組長開始事奉（詳見 CCF WhatsApp Community）。','You are not in any serving group yet. Please speak to the relevant group leader to start serving (details in CCF WhatsApp Community).');
@@ -1847,6 +1886,7 @@
       };
 
       if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){
+        if (isPending){ showPendingActivationMessage(); return; }
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
         callApi('api_reg_self_live_service_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
@@ -1862,6 +1902,7 @@
         if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','請假按鈕未載入，請重新整理頁面。','Absence button failed to load. Please refresh the page.');
       } else {
         holidayBtn.onclick = function(){
+          if (isPending){ showPendingActivationMessage(); return; }
           try{
             State.view = 'selfHoliday';
             render();

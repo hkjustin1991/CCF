@@ -777,11 +777,13 @@ function api_reg_self_portal_snapshot_public(qrPayload){
       ok:true,
       member:{
         id: id,
+        status: regStatus_((auth.row && auth.row.Status) || (profile.status || '')),
         nameZh: profile.nameZh || fallbackProfile.nameZh,
         nameEn: profile.nameEn || fallbackProfile.nameEn,
         preferredName: profile.preferredName || fallbackProfile.preferredName,
         displayName: regDisplayNameForPortal_(profile.id ? profile : fallbackProfile),
         servingGroups: groups,
+        servingGLGroups: reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups),
         away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
         memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw)
       },
