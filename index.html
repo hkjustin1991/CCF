@@ -2092,9 +2092,16 @@
 
 var btnC = $('btnManualConfirmFamily');
 if (btnC) {
+  function getSelectedIds_(){
+    var checked = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked'))
+      .map(function(x){ return String(x.value || '').trim(); })
+      .filter(Boolean);
+    if (checked.length) return checked;
+    return (m && m.id) ? [String(m.id)] : [];
+  }
+
   function updateConfirmEnabled_(){
-    var any = confirmEl.querySelectorAll('.famTick:checked').length > 0;
-    btnC.disabled = !any;
+    btnC.disabled = (getSelectedIds_().length === 0);
   }
   Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick')).forEach(function(ck){
     ck.onchange = updateConfirmEnabled_;
@@ -2104,9 +2111,7 @@ if (btnC) {
   btnC.onclick = function(){
     clear('manualMsg');
 
-    var selectedIds = Array.prototype.slice.call(confirmEl.querySelectorAll('.famTick:checked'))
-      .map(function(x){ return String(x.value || '').trim(); })
-      .filter(Boolean);
+    var selectedIds = getSelectedIds_();
 
     if(!selectedIds.length){
       showErr('manualMsg', { code:'E400', zh:'請至少選擇一位', en:'Please select at least one person.' });
@@ -2740,14 +2745,33 @@ if (btnC) {
         var actionBox = document.createElement('div');
         actionBox.className = 'miniBtnRow';
         actionBox.innerHTML =
+          ((!today && canTapLiveNames()) ? '<button id="btnMdCheckinOne" class="primary">✅ 單人簽到 / Check-in this person</button>' : '')+
           (canDestructive && m.isNewFriend ? '<button id="btnMdRemoveNew" class="orange">🧹 移除新朋友 / Remove new friend</button>' : '')+
           (canDestructive ? '<button id="btnMdUndo" class="danger">🧹 刪除簽到 / Undo check-in</button>' : '');
         o.querySelector('#mdBox').appendChild(actionBox);
         attachScrollControls_(o);
 
+        var btnCheckinOne = o.querySelector('#btnMdCheckinOne');
         var btnRemoveNew = o.querySelector('#btnMdRemoveNew');
         var btnUndo = o.querySelector('#btnMdUndo');
         if (!today && btnUndo) btnUndo.disabled = true;
+        if (btnCheckinOne){
+          btnCheckinOne.onclick = function(){
+            btnCheckinOne.disabled = true;
+            callApi('api_checkin_manual_bulk', App.token, [memberId], null, getDeviceId(), getUA()).then(function(r2){
+              if(!r2 || !r2.ok){
+                btnCheckinOne.disabled = false;
+                showErrInto(o.querySelector('#mdBox'), r2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+                return;
+              }
+              if (App.refreshLive) App.refreshLive();
+              closeModal(o);
+            }).catch(function(){
+              btnCheckinOne.disabled = false;
+              showErrInto(o.querySelector('#mdBox'), {code:'E500', zh:'系統錯誤', en:'System error'});
+            });
+          };
+        }
         if (btnRemoveNew){
           btnRemoveNew.onclick = function(){
             if (!confirm('確認移除新朋友標記？ / Confirm remove new friend flag?')) return;
