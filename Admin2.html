@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-02-15.admin96
-  For Admin.gs: v2026-02-15.admin96
+  UI VERSION TAG: admin2-ui-2026-03-01.admin97
+  For Admin.gs: v2026-03-01.admin97
   ============================================================
   -->
 
@@ -220,6 +220,7 @@
     }
     .groupContextBtn.isSelected{box-shadow:inset 0 0 0 2px #0d1b3d}
     .groupContextBtn:disabled{opacity:.45;cursor:not-allowed}
+    .monthPick{min-width:132px}
     .groupSectionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
      .servingEditBtn{width:auto;padding:6px 10px;border-radius:10px;font-size:12px}
@@ -736,11 +737,33 @@
       }).filter(Boolean);
     }
 
+
+    function parseServingGroupMismatchDetailLines_(detailText){
+      var raw = String(detailText||'').trim();
+      if (!raw) return [];
+      return raw.split('|').map(function(line){
+        var parts = String(line||'').split('→').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+        if (!parts.length) return null;
+        return { memberLabel: parts[0] || '', position: parts[1] || '', group: normalizeServingGroupKey_(parts[2] || '') };
+      }).filter(Boolean);
+    }
+    function formatServingGroupMismatchDetailHtml_(detailText){
+      var lines = parseServingGroupMismatchDetailLines_(detailText);
+      if (!lines.length) return '';
+      return lines.map(function(it){
+        var bubble = renderServingGroupBubble_(it.group || '');
+        return '<div class="small"><b>'+escapeHtml(it.memberLabel||'')+'</b> is NOT a member of '+bubble+'</div>';
+      }).join('');
+    }
+
     function showErr(targetId, res){
       var detail = '';
       var allowHtmlDetail = false;
       if (res && res.trustedDetailHtml && res.detailHtml){
         detail = String(res.detailHtml||'');
+        allowHtmlDetail = true;
+      } else if (res && res.subCode === 'MEMBER_NOT_IN_SERVING_GROUP' && res.detail){
+        detail = formatServingGroupMismatchDetailHtml_(res.detail);
         allowHtmlDetail = true;
       } else if (res && res.subCode === 'HOLIDAY_OVERLAP' && res.detail){
         var holidayLines = parseHolidayDetailLines_(res.detail);
@@ -984,6 +1007,31 @@
       if (role !== 'GL') return false;
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       return gl.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
+    }
+    function actorServingGroupKeys_(){
+      var role = String((App.actor && App.actor.role) || '').toUpperCase();
+      if (role === 'ADMIN' || role === 'SUPERUSER') return ['worship','media','logistic','support','finance'];
+      var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
+      var seen = {};
+      var out = [];
+      gl.forEach(function(g){
+        var key = normalizeServingGroupKey_(g);
+        if (!key || key === 'other' || seen[key]) return;
+        seen[key] = true;
+        out.push(key);
+      });
+      return out;
+    }
+    function canOpenServingGroup_(groupKey){
+      return actorServingGroupKeys_().indexOf(normalizeServingGroupKey_(groupKey)) >= 0;
+    }
+    function servingPlanGroupOrder_(){
+      var base = ['worship','media','logistic','support','finance','other'];
+      if (!roleIsGl()) return base;
+      var glKeys = actorServingGroupKeys_();
+      if (!glKeys.length) return base;
+      var top = glKeys[0];
+      return [top].concat(base.filter(function(k){ return k !== top; }));
     }
     function canEditServingPlanGroup_(groupKey, map){
       var key = normalizeServingGroupKey_(groupKey);
@@ -1967,7 +2015,6 @@
           '<div class="menuGrid" style="margin-top:12px;">'+
             '<button id="goMatrix" class="btnMatrix">✅ 出席矩陣 / Attendance matrix</button>'+
             '<button id="goLookup" class="btnLookup">🔎 個人查詢 / Member lookup</button>'+
-            '<button id="goGroupMembersFromAttendance" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
             '<button id="goStats" class="btnStats">📈 聚會統計 / Service stats</button>'+
             '<button id="goPeriod" class="btnPeriod">📅 月度/季度統計 / Period stats</button>'+
           '</div>'+
@@ -1980,7 +2027,6 @@
     function bindAttendanceHome(){
       $('goMatrix').onclick = function(){ logAction('OPEN_MATRIX','', 'nav'); App.view='matrix'; render(); };
       $('goLookup').onclick = function(){ logAction('OPEN_LOOKUP','', 'nav'); App.view='memberLookup'; render(); };
-      $('goGroupMembersFromAttendance').onclick = function(){ logAction('OPEN_GROUP_MEMBERS_ATT','', 'nav'); App.view='adminGroupMembers'; App.selectedServingGroup = null; render(); };
       $('goStats').onclick = function(){ logAction('OPEN_STATS','', 'nav'); App.view='stats'; render(); };
       $('goPeriod').onclick = function(){ logAction('OPEN_PERIOD','', 'nav'); App.view='period'; render(); };
       $('backMenu').onclick = function(){ App.view='menu'; render(); };
@@ -2097,7 +2143,7 @@
             return;
           }
 
-          var groupOrder = ['worship','media','logistic','support','finance','other'];
+          var groupOrder = servingPlanGroupOrder_();
           var monthMap = {};
           var monthKeys = [];
           events.forEach(function(ev){
@@ -2189,7 +2235,7 @@
                 '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
                   '<div class="groupSectionHead" style="margin:8px 0 4px;">'+
                     '<div></div>'+
-                    '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 摘要 / Summary</button>'+
+                    (groupKey === 'other' ? '' : '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 摘要 / Summary</button>')+
                   '</div>'+
                   '<div class="tableWrap">'+
                     '<table class="servingPlanTable">'+
@@ -2650,7 +2696,7 @@
             callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
-                  showBox('servingEditMsg','err',withErrorCodeTag_('成員不屬於該事奉組別', res2),'Member is not in the required serving group.', res2 && res2.detail ? ('<div class="small">'+escapeHtml(String(res2.detail||''))+'</div>') : '', true);
+                  showBox('servingEditMsg','err',withErrorCodeTag_('成員不屬於該事奉組別', res2),'Member is NOT a member of this serving group.', res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
                   return;
                 }
                 if (res2 && res2.code === 'E409' && res2.canOverride){
@@ -2659,7 +2705,7 @@
                   var titleEn = 'Serving assignment conflict. Please review.';
                   if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
                     titleZh = '同一會員重覆崗位';
-                    titleEn = 'Duplicate serving assignments.';
+                    titleEn = 'They are already serving this position.';
                   } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
                     titleZh = '事奉安排與離開期重疊';
                     titleEn = 'Serving assignment overlaps holiday period.';
@@ -2681,7 +2727,7 @@
                   }
                   if (res2.duplicates && res2.duplicates.length){
                     titleZh = '同一會員重覆崗位';
-                    titleEn = 'Duplicate serving assignments.';
+                    titleEn = 'They are already serving this position.';
                     detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
                       var posLabelsZh = (d.positions||[]).map(function(p){
                         var label = SERVING_POSITION_LABELS[p] || {};
@@ -2801,7 +2847,7 @@
           callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override, groupKeyNorm).then(function(res2){
             if (!res2 || !res2.ok){
               if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
-                showBox('quickMsg','err',withErrorCodeTag_('成員不屬於該事奉組別', res2),'Member is not in the required serving group.', res2 && res2.detail ? ('<div class="small">'+escapeHtml(String(res2.detail||''))+'</div>') : '', true);
+                showBox('quickMsg','err',withErrorCodeTag_('成員不屬於該事奉組別', res2),'Member is NOT a member of this serving group.', res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
                 return;
               }
               if (res2 && res2.code === 'E409' && res2.canOverride){
@@ -2810,7 +2856,7 @@
                 var titleEn = 'Serving assignment conflict. Please review.';
                 if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
                   titleZh = '同一會員重覆崗位';
-                  titleEn = 'Duplicate serving assignments.';
+                  titleEn = 'They are already serving this position.';
                 } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
                   titleZh = '事奉安排與離開期重疊';
                   titleEn = 'Serving assignment overlaps holiday period.';
@@ -2832,7 +2878,7 @@
                 }
                 if (res2.duplicates && res2.duplicates.length){
                   titleZh = '同一會員重覆崗位';
-                  titleEn = 'Duplicate serving assignments.';
+                  titleEn = 'They are already serving this position.';
                   detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
                     var posLabelsZh = (d.positions||[]).map(function(p){
                       var label = SERVING_POSITION_LABELS[p] || {};
@@ -3676,7 +3722,7 @@
 
         var topBtns = '<div class="modalTopBtns">'+
           (canContact ? '<button id="btnContact" class="btnPink">📇 查看聯絡/車牌 / View contact/VRM</button>' : '')+
-          (isGroupManagementMode ? '' : '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>')+
+          ((isGroupManagementMode || roleIsGl()) ? '' : '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>')+
         '</div>';
 
         var statusRowHtml = isGroupManagementMode
@@ -3988,7 +4034,7 @@
 
       var m = openModal(
         '<div class="big">🗑️ 移出組別 / Remove member from group</div>'+
-        '<div class="small">請確認以下操作（生效日為今天）。<br/>Please confirm this action (effective from today).</div>'+
+        '<div class="small">你確定要由今天起將此會員移出以下事奉組別？<br/>Are you sure you want to remove this person from this serving group from today?</div>'+
         '<div class="kv" style="margin-top:10px;">'+
           '<div>Member</div><div><b>'+escapeHtml(memberId||'')+'</b></div>'+
           '<div>Group</div><div id="rmGroupBubble">'+renderServingGroupBubble_(defaultGroup)+'</div>'+
