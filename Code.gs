@@ -943,6 +943,27 @@ Receipt ID：${receiptId}
   }
 }
 
+
+function promotePendingMemberToActive_(member){
+  try{
+    const stNorm = normalizeStatus_(member && member.status);
+    if (stNorm !== STATUS_PENDING) return false;
+
+    const sh = getMembersSheet_();
+    const cols = getMembersColMap_(sh);
+    const memberId = String((member && member.id) || '').trim().toUpperCase();
+    if (!memberId) return false;
+    const rowNumber = (member && member.rowNumber) || findMemberRowById_(sh, cols, memberId);
+    if (!rowNumber) return false;
+
+    setMemberCell_(sh, cols, rowNumber, 'Status', STATUS_ACTIVE);
+    clearMembersIndexCache_();
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
 /******** Check-in APIs ********/
 function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
   const auth = requireSession_(token);
@@ -1009,12 +1030,15 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
+    const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+    const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
+
     return {
       ok:true,
       result:'OK',
       eventKey,
       timeUk: fmtUk_(ts, 'HH:mm:ss'),
-      status: v.status,
+      status: effectiveStatus,
       member:{
         id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
         preferredName: m.preferredName || '',
@@ -1096,12 +1120,15 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
+    const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+    const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
+
     return {
       ok:true,
       result:'OK',
       eventKey,
       timeUk: fmtUk_(ts, 'HH:mm:ss'),
-      status: v.status,
+      status: effectiveStatus,
       member:{
         id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
         preferredName: m.preferredName || '',
