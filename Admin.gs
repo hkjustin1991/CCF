@@ -415,11 +415,11 @@ function api_admin_serving_group_members(token, groupKey){
   if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
 
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
-  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
-  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
-  if (!isAdminLike && !isGlAllowed){
-    return admin_err_('E403','沒有權限查看此組別','No permission to view this group.');
+  if (role === 'GL'){
+    const allowed = admin_actorCanAccessServingGroup_(s.actor, key);
+    if (!allowed){
+      return admin_err_('E403','沒有權限查看此組別','No permission to view this group.');
+    }
   }
 
   const mi = admin_getMembersIndex_();
@@ -429,9 +429,29 @@ function api_admin_serving_group_members(token, groupKey){
     .map(admin_memberLabelCompact_)
     .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
 
-  const canManage = !!(isAdminLike || isGlAllowed);
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const canManage = (role === 'ADMIN' || role === 'SUPERUSER' || (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; })));
 
   return { ok:true, group:key, count:members.length, members:members, canManage:canManage };
+}
+
+function admin_actorCanAccessServingGroup_(actor, groupKey){
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return false;
+  const role = String((actor && actor.role) || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'STAFF' || role === 'SUPERUSER') return true;
+  if (role !== 'GL') return false;
+
+  const glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
+  const isGlOfGroup = glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
+  if (isGlOfGroup) return true;
+
+  const actorId = String((actor && actor.id) || '').trim().toUpperCase();
+  if (!actorId) return false;
+  const mi = admin_getMembersIndex_();
+  const member = (mi && mi.byId) ? mi.byId[actorId] : null;
+  if (!member) return false;
+  return admin_memberHasServingGroup_(member, key);
 }
 
 function api_admin_serving_group_member_update(token, groupKey, memberId, action){
