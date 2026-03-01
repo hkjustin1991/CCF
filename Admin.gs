@@ -376,8 +376,30 @@ function api_admin_serving_plan_matrix(token, fromDate){
     events: matrix.events,
     positions: matrix.positions,
     cells: matrix.cells,
+    canEditByGroup: admin_getServingPlanEditMap_(s.actor, matrix.positions),
     maxMonths: ADMIN_SERVING_MONTHS_AHEAD
   };
+}
+
+function admin_canEditServingGroup_(actor, groupKey){
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return false;
+  const role = String((actor && actor.role) || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
+  if (role !== 'GL') return false;
+  const glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
+  return glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
+}
+
+function admin_getServingPlanEditMap_(actor, positions){
+  const out = {};
+  const list = Array.isArray(positions) ? positions : [];
+  list.forEach(function(pos){
+    const groupKey = admin_normalizeServingGroup_((pos && pos.group) || '');
+    if (!groupKey || Object.prototype.hasOwnProperty.call(out, groupKey)) return;
+    out[groupKey] = admin_canEditServingGroup_(actor, groupKey);
+  });
+  return out;
 }
 function api_admin_serving_group_overview(token, fromDate){
   const s = admin_requireSession_(token);
@@ -484,6 +506,67 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
 }
 
 /**
+ * Remove a member from serving group with reauth (must scan current authenticated account QR).
+ */
+function api_admin_member_remove_from_group(token, memberId, groupKey, reauthQrPayload){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+
+  const auth = admin_verifyReauth_(s.actor, reauthQrPayload);
+  if (!auth.ok) return auth;
+
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
+  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
+  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
+  if (!isAdminLike && !isGlAllowed){
+    return admin_err_('E403','沒有權限修改此組別','No permission to modify this group.');
+  }
+
+  const mi = admin_getMembersIndex_();
+  const target = (mi && mi.byId) ? mi.byId[id] : null;
+  if (!target) return admin_err_('E412','找不到此會員','Member not found.');
+
+  const targetStatus = admin_normStatus_(target.status || '');
+  if (!isAdminLike && (targetStatus === 'STAFF' || targetStatus === 'ADMIN')){
+    return admin_err_('E403','GL 不可修改 STAFF/ADMIN 的組別','GL cannot modify STAFF/ADMIN serving groups.');
+  }
+
+  const sh = admin_findMembersSheet_();
+  if (!sh) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+  const col = admin_getMembersColMap_(sh);
+  if (col.ServingGroups === undefined) return admin_err_('E500','缺少 ServingGroups 欄位','ServingGroups column missing.');
+  const rowNumber = target.rowNumber || admin_findMemberRowById_(sh, col, id);
+  if (!rowNumber) return admin_err_('E500','找不到會員列','Member row not found.');
+
+  const nowGroups = admin_parseGroupsCsv_(sh.getRange(rowNumber, col.ServingGroups+1).getValue());
+  const keyUpper = key.toUpperCase();
+  const next = nowGroups.filter(function(g){ return g !== keyUpper; });
+  const removed = (next.length !== nowGroups.length);
+
+  if (removed){
+    sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
+    admin_clearMembersCache_();
+  }
+
+  const effectiveFrom = admin_todayUkYmd_();
+  admin_audit_(
+    s.actor,
+    'SERVING_GROUP_MEMBER_REMOVE_REAUTH',
+    JSON.stringify({ memberId:id, group:key, removed:removed, confirmedBy:auth.confirmedBy, effectiveFrom:effectiveFrom }),
+    'serving_group'
+  );
+
+  return { ok:true, memberId:id, group:key, removed:removed, servingGroups:next, effectiveFrom:effectiveFrom, confirmedBy:auth.confirmedBy };
+}
+
+/**
  * Serving event rows (for per-event edit UI).
  */
 function api_admin_serving_event_rows(token, eventKey){
@@ -523,6 +606,9 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
   const scopeGroup = admin_normalizeServingGroup_(scopeGroupKey || '');
+  if (scopeGroup && !admin_canEditServingGroup_(s.actor, scopeGroup)){
+    return admin_err_('E403','你沒有權限編輯此組別','No permission to edit this serving group.');
+  }
   const eventDateYmd = ev.replace('SundayService_', '');
 
   const list = Array.isArray(rows) ? rows : [];
@@ -553,6 +639,12 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const oldValue = String(existingValues[r.position] || '').trim();
     const newValue = String(r.value || '').trim();
     const isChanged = (oldValue !== newValue);
+    if (isChanged){
+      const positionGroup = admin_normalizeServingGroup_(ADMIN_SERVING_POSITION_GROUP[r.position] || '');
+      if (!admin_canEditServingGroup_(s.actor, positionGroup)){
+        return admin_err_('E403','你沒有權限編輯此組別','No permission to edit this serving group.');
+      }
+    }
     if (isChanged) changedPositions.add(r.position);
     mergedValues[r.position] = newValue;
 
@@ -2644,12 +2736,16 @@ function admin_getActorNames_(actor){
 
   const mi = admin_getMembersIndex_();
   const m = mi.byId[String(a.id||'').toUpperCase()];
-  return {
+  const out = {
     id: a.id,
     role: a.role,
     nameZh: m ? (m.nameZh||'') : '',
     nameEn: m ? (m.nameEn||'') : ''
   };
+  if (String(a.role||'').toUpperCase() === 'GL'){
+    out.glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
+  }
+  return out;
 }
 
 // Checkins access
