@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-01.admin100
-  For Admin.gs: v2026-03-01.admin100
+  UI VERSION TAG: admin2-ui-2026-03-01.admin102
+  For Admin.gs: v2026-03-01.admin102
   ============================================================
   -->
 
@@ -345,7 +345,6 @@
         <div class="hint">
           ⚠️ 請避免用手機使用此管理平台，建議使用電腦或平板。<br/>
           ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/><br/>
-          管理平台（只限已授權同工）。請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
@@ -1116,12 +1115,91 @@
           var addBtn = host.querySelector('#btnGroupAddMember');
           if (!addBtn) return;
           addBtn.onclick = function(){
-            var id = prompt('輸入 CCF ID\nEnter CCF ID');
-            if (!id) return;
-            callApi('api_admin_serving_group_member_update', App.token, groupKey, String(id).trim().toUpperCase(), 'ADD').then(function(r){
-              if (!r || !r.ok) return;
-              loadServingGroupMembers_(host, groupKey, opts);
+            var role = String((App.actor && App.actor.role) || '').toUpperCase();
+            var isStaffAdmin = (role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER');
+
+            function addById_(id, qrPayload){
+              callApi('api_admin_serving_group_member_update', App.token, groupKey, String(id||'').trim().toUpperCase(), 'ADD', qrPayload || '').then(function(r){
+                if (!r || !r.ok){
+                  showErr('app', r || {code:'E500', zh:'系統錯誤', en:'System error'});
+                  return;
+                }
+                loadServingGroupMembers_(host, groupKey, opts);
+              });
+            }
+
+            if (isStaffAdmin){
+              var modal = openModal(''+
+                '<div class="big">➕ 新增組員 / Add member</div>'+
+                '<div class="small">可搜尋 CCF ID / 姓名 / Email。<br/>Search by CCF ID / name / email.</div>'+
+                '<input id="addMemberQuery" class="input" placeholder="例如 CCF0001 / Alex / abc@x.com" />'+
+                '<div class="miniBtnRow">'+
+                  '<button id="btnFindAddMember" class="btnMain">🔎 搜尋 / Search</button>'+
+                  '<button id="btnCloseAddMember" class="btnBack">取消 / Cancel</button>'+
+                '</div>'+
+                '<div id="addMemberResults" class="memberBubbleWrap" style="margin-top:8px;max-height:42vh;"></div>'
+              );
+              modal.querySelector('#btnCloseAddMember').onclick = function(){ closeModal(modal); };
+              modal.querySelector('#btnFindAddMember').onclick = function(){
+                var q = String(modal.querySelector('#addMemberQuery').value||'').trim();
+                if (!q) return;
+                callApi('api_admin_member_search', App.token, q).then(function(res2){
+                  if (!res2 || !res2.ok){
+                    var hostR = modal.querySelector('#addMemberResults');
+                    if (hostR) hostR.innerHTML = '<div class="small">搜尋失敗 / Search failed</div>';
+                    return;
+                  }
+                  var rows = Array.isArray(res2.results) ? res2.results : [];
+                  var hostR = modal.querySelector('#addMemberResults');
+                  if (!hostR) return;
+                  if (!rows.length){ hostR.innerHTML = '<div class="small">找不到結果 / No results</div>'; return; }
+                  hostR.innerHTML = '<div class="memberBubbleList">'+rows.map(function(r){
+                    var name = [r.nameZh, r.nameEn, r.email].filter(Boolean).join(' / ');
+                    return '<button type="button" class="memberBubble btnBack" data-add-id="'+escapeHtml(r.id||'')+'">'+escapeHtml((r.id||'') + ' · ' + name)+'</button>';
+                  }).join('')+'</div>';
+                  Array.prototype.forEach.call(hostR.querySelectorAll('[data-add-id]'), function(btn){
+                    btn.onclick = function(){
+                      var id = String(btn.getAttribute('data-add-id')||'').trim();
+                      if (!id) return;
+                      addById_(id, '');
+                      closeModal(modal);
+                    };
+                  });
+                });
+              };
+              return;
+            }
+
+            var scanModal = openModal(''+
+              '<div class="big">➕ 新增組員（掃描目標會員 QR） / Add member (scan target member QR)</div>'+
+              '<div class="small">群組長新增組員需掃描目標會員 QR。<br/>GL must scan target member QR to authorise adding member.</div>'+
+              '<div class="videoWrap" style="margin-top:10px;"><video id="vTargetQr" playsinline></video></div>'+
+              '<div class="miniBtnRow">'+
+                '<button id="btnCloseTargetQr" class="btnBack">取消 / Cancel</button>'+
+              '</div>'+
+              '<div id="targetQrMsg"></div>'
+            );
+            scanModal.querySelector('#btnCloseTargetQr').onclick = function(){ stopScan(); closeModal(scanModal); };
+            var vEl = scanModal.querySelector('#vTargetQr');
+            function handleTargetQr_(payload){
+              callApi('api_admin_serving_group_member_update', App.token, groupKey, '', 'ADD', payload).then(function(r){
+                if (!r || !r.ok){ showErr('targetQrMsg', r || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                stopScan();
+                closeModal(scanModal);
+                loadServingGroupMembers_(host, groupKey, opts);
+              });
+            }
+            startScan(vEl, function(qr, err){
+              if(err){ showErr('targetQrMsg', err); return; }
+              handleTargetQr_(qr);
             });
+            var msgEl = scanModal.querySelector('#targetQrMsg');
+            if (msgEl){
+              msgEl.innerHTML = bindImageQrFallback_('targetQrMsg', function(decoded){
+                stopScan();
+                handleTargetQr_(decoded);
+              });
+            }
           };
         }
 
@@ -1181,10 +1259,30 @@
         var historical = Array.isArray(bucket.historical) ? bucket.historical : [];
         var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
 
+        function normalizePosKey_(v){
+          var key = String(v||'').trim();
+          if (!key) return '';
+          if (SERVING_POSITION_LABELS[key]) return key;
+          var hit = '';
+          Object.keys(SERVING_POSITION_LABELS).some(function(k){
+            var zh = String((SERVING_POSITION_LABELS[k] && SERVING_POSITION_LABELS[k].zh) || '').trim();
+            var en = String((SERVING_POSITION_LABELS[k] && SERVING_POSITION_LABELS[k].en) || '').trim();
+            if (key === zh || key === en){ hit = k; return true; }
+            return false;
+          });
+          return hit || key;
+        }
+        function posBilingual_(positionOrLabel){
+          var key = normalizePosKey_(positionOrLabel);
+          var lbl = SERVING_POSITION_LABELS[key] || null;
+          if (lbl) return (lbl.zh || key) + ' _ ' + ((lbl.en || key).replace(/\bAV\b/g, 'Audio Visual'));
+          return String(positionOrLabel||'—').replace(/\bAV\b/g, 'Audio Visual');
+        }
         function summarizeByPosition_(arr){
           var map = {};
           (arr || []).forEach(function(it){
-            var pos = String((it && (it.position || it.label)) || '').trim() || '—';
+            var pos = normalizePosKey_((it && (it.position || it.label)) || '');
+            if (!pos) pos = String((it && (it.position || it.label)) || '—').trim() || '—';
             if (!map[pos]) map[pos] = [];
             map[pos].push(String(it.eventKey || it.dateYmd || '').trim());
           });
@@ -1192,45 +1290,105 @@
             return { position: pos, count: map[pos].length, events: map[pos].filter(Boolean) };
           });
         }
+        function renderEventBullets_(events){
+          if (!events || !events.length) return '<div class="small">沒有記錄 / No records</div>';
+          return '<ul class="groupDialogList">'+events.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('')+'</ul>';
+        }
+        function renderSummaryBlock_(rows, dataAttr){
+          if (!rows.length) return '<div class="small">沒有記錄 / No records</div>';
+          return '<div class="memberBubbleList">'+rows.map(function(r, idx){
+            var detailId = dataAttr + 'Detail' + idx;
+            return '<div style="width:100%;">'+
+              '<button type="button" class="memberBubble btnBack" data-other-detail="'+detailId+'">'+escapeHtml(posBilingual_(r.position))+' · '+escapeHtml(String(r.count))+'x</button>'+
+              '<div class="small hide" id="'+detailId+'" style="margin-top:6px;">'+renderEventBullets_(r.events)+'</div>'+
+            '</div>';
+          }).join('')+'</div>';
+        }
 
         var prevSummary = summarizeByPosition_(historical);
         var upSummary = summarizeByPosition_(upcoming);
+        var totalSoFar = historical.length;
+        var namesLine = [member.preferredName, member.nameZh, member.nameEn].filter(Boolean).join(' / ');
 
-        function renderSummaryBlock_(title, rows, dataAttr){
-          if (!rows.length) return '<div class="small">沒有記錄 / No records</div>';
-          return '<ul class="groupDialogList">'+rows.map(function(r, idx){
-            return '<li><button type="button" class="btnBack btnMini" data-'+dataAttr+'="'+idx+'">'+escapeHtml(r.position)+' · '+escapeHtml(String(r.count))+'x</button><div class="small hide" id="'+dataAttr+'Detail'+idx+'" style="margin-top:6px;">'+escapeHtml(r.events.join('、 '))+'</div></li>';
-          }).join('')+'</ul>';
+        var allGroupKeys = [];
+        var ownGroups = (member.servingGroups||[]).concat(member.servingGLGroups||[]);
+        ownGroups.forEach(function(g){
+          var k = normalizeServingGroupKey_(g);
+          if (!k || allGroupKeys.indexOf(k) >= 0) return;
+          allGroupKeys.push(k);
+        });
+        var otherGroupKeys = allGroupKeys.filter(function(k){ return k !== groupKey; });
+
+        function renderGroupMini_(k){
+          var b = insights[k] || {};
+          var h = Array.isArray(b.historical) ? b.historical : [];
+          var u = Array.isArray(b.upcoming) ? b.upcoming : [];
+          var hs = summarizeByPosition_(h);
+          var us = summarizeByPosition_(u);
+          return ''+
+            '<div class="groupDialogSection">'+
+              '<button type="button" class="btnBack btnMini" data-other-group="'+escapeHtml(k)+'">'+renderServingGroupBubble_(k)+'</button>'+
+              '<div class="hide" id="otherGroup'+escapeHtml(k)+'" style="margin-top:6px;">'+
+                '<div class="small">總事奉次數（截至目前） / Total serving so far: <b>'+escapeHtml(String(h.length))+'</b></div>'+
+                '<div class="small">以往報名（按崗位） _ Previous sign-ups by position</div>'+
+                renderSummaryBlock_(hs, 'otherPrev_'+k)+
+                '<div class="small" style="margin-top:8px;">未來報名（按崗位） _ Upcoming sign-ups by position</div>'+
+                renderSummaryBlock_(us, 'otherUp_'+k)+
+              '</div>'+
+            '</div>';
         }
 
         m.querySelector('.modal').innerHTML = ''+
-          '<div class="big">👤 '+escapeHtml(member.id||memberId||'')+'</div>'+
-          '<div class="small">'+escapeHtml(member.preferredName || member.nameZh || member.nameEn || '')+'</div>'+
+          '<div class="groupDialogHeader">'+
+            '<div class="big">👤 '+escapeHtml(member.id||memberId||'')+'</div>'+
+            '<button id="btnRemoveThisGroup" class="btnDanger btnMini">🗑️ 從本組移除 / Remove from this group</button>'+
+          '</div>'+
+          '<div class="small">'+escapeHtml(namesLine || '—')+'</div>'+
           '<div style="margin-top:8px;">'+renderServingGroupBubble_(groupKey)+'</div>'+
+          '<div class="small" style="margin-top:8px;">總事奉次數（截至目前） / Total serving so far: <b>'+escapeHtml(String(totalSoFar))+'</b></div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">以往報名（按崗位）/ Previous sign-ups by position</div>'+
-            renderSummaryBlock_('prev', prevSummary, 'prev')+
+            '<div class="label">以往報名（按崗位） _ Previous sign-ups by position</div>'+
+            renderSummaryBlock_(prevSummary, 'prev')+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">未來報名（按崗位）/ Upcoming sign-ups by position</div>'+
-            renderSummaryBlock_('up', upSummary, 'up')+
+            '<div class="label">未來報名（按崗位） _ Upcoming sign-ups by position</div>'+
+            renderSummaryBlock_(upSummary, 'up')+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<button type="button" class="btnPeriod btnMini" id="btnToggleOtherGroups">顯示其他所屬組別 / Show other serving groups</button>'+
+            '<div id="otherGroupsHost" class="hide" style="margin-top:8px;">'+
+              (otherGroupKeys.length ? otherGroupKeys.map(renderGroupMini_).join('') : '<div class="small">沒有其他組別 / No other serving groups</div>')+
+            '</div>'+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="btnCloseMemberServingSummary" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
 
         m.querySelector('#btnCloseMemberServingSummary').onclick = function(){ closeModal(m); };
-        Array.prototype.forEach.call(m.querySelectorAll('[data-prev]'), function(btn){
+        var btnRm = m.querySelector('#btnRemoveThisGroup');
+        if (btnRm){
+          btnRm.onclick = function(){
+            openRemoveFromGroupFlow_(member.id||memberId, [groupKey], function(){ closeModal(m); });
+          };
+        }
+        var tglOthers = m.querySelector('#btnToggleOtherGroups');
+        if (tglOthers){
+          tglOthers.onclick = function(){
+            var host = m.querySelector('#otherGroupsHost');
+            if (host) host.classList.toggle('hide');
+          };
+        }
+        Array.prototype.forEach.call(m.querySelectorAll('[data-other-group]'), function(btn){
           btn.onclick = function(){
-            var idx = String(btn.getAttribute('data-prev')||'');
-            var el = m.querySelector('#prevDetail'+idx);
+            var key = String(btn.getAttribute('data-other-group')||'');
+            var el = m.querySelector('#otherGroup'+key);
             if (el) el.classList.toggle('hide');
           };
         });
-        Array.prototype.forEach.call(m.querySelectorAll('[data-up]'), function(btn){
+        Array.prototype.forEach.call(m.querySelectorAll('[data-other-detail]'), function(btn){
           btn.onclick = function(){
-            var idx = String(btn.getAttribute('data-up')||'');
-            var el = m.querySelector('#upDetail'+idx);
+            var id = String(btn.getAttribute('data-other-detail')||'');
+            var el = m.querySelector('#'+id);
             if (el) el.classList.toggle('hide');
           };
         });
@@ -1321,21 +1479,6 @@
       var bucket = byGroup[groupKey] || {};
       var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
       var themeCls = 'groupTheme-' + groupKey;
-      var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
-      var map = {};
-      upcoming.forEach(function(it){
-        var pos = String((it && (it.label || it.position)) || '—').trim() || '—';
-        if (!map[pos]) map[pos] = [];
-        map[pos].push(String(it.eventKey || it.dateYmd || '').trim());
-      });
-      var rows = Object.keys(map).sort().map(function(pos){
-        return { position: pos, count: map[pos].length, events: map[pos].filter(Boolean) };
-      });
-      var summaryHtml = rows.length
-        ? '<ul class="groupDialogList">'+rows.map(function(r, i){
-            return '<li><button type="button" class="btnBack btnMini" data-up-pos="'+i+'">'+escapeHtml(r.position)+' · '+escapeHtml(String(r.count))+'x</button><div id="upPosDetail'+i+'" class="small hide" style="margin-top:6px;">'+escapeHtml(r.events.join('、 '))+'</div></li>';
-          }).join('')+'</ul>'
-        : '<div class="small">沒有未來報名記錄 / No upcoming sign-ups</div>';
       return ''+
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
           '<div class="groupDialogHeader">'+
@@ -1343,14 +1486,43 @@
             '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ 關閉 / Close</button>'+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">未來已報名崗位（按次數） / Upcoming signed-up positions (count)</div>'+
-            summaryHtml+
+            '<div class="label">空缺（未來 12 週） / Vacancies (next 12 weeks)</div>'+
+            '<div class="miniBtnRow">'+
+              '<button type="button" class="btnLookup btnMini" id="btnGroupGap6">空缺（&lt;6 週） / Vacancies (&lt;6 weeks)</button>'+
+              '<button type="button" class="btnLookup btnMini" id="btnGroupGap12">空缺（&lt;12 週） / Vacancies (&lt;12 weeks)</button>'+
+            '</div>'+
+            '<div id="groupGapResult" class="small" style="margin-top:8px;"></div>'+
           '</div>'+
         '</div>';
     }
 
+    function renderGroupOverviewGaps_(hostEl, overview, groupKey, maxDays){
+      if (!hostEl) return;
+      var ov = overview || {};
+      var bucket = ((ov.byGroup||{})[groupKey] || {});
+      var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
+      var today = parseYmd(getTodayYmdUk());
+      var filtered = gaps.filter(function(g){
+        var ymd = eventDateYmdFromKey(g.eventKey || '');
+        var d = parseYmd(ymd);
+        if (!today || !d) return false;
+        var diff = daysBetween(today, d);
+        return diff >= 0 && diff < maxDays && Number(g.totalMissing||0) > 0;
+      });
+      if (!filtered.length){
+        hostEl.innerHTML = '<div class="small">沒有空缺 / No vacancies</div>';
+        return;
+      }
+      hostEl.innerHTML = '<ul class="groupDialogList">'+filtered.map(function(g){
+        var posText = (g.positions || []).map(function(p){
+          var missing = Number(p.missing||0);
+          return (p.label || p.position || '—') + '（尚欠 ' + missing + '） / ' + (p.label || p.position || '—') + ' (left ' + missing + ' to minimum)';
+        }).join(', ');
+        return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
+      }).join('')+'</ul>';
+    }
 
-    function eventDateYmdFromKey(ev){
+function eventDateYmdFromKey(ev){
       var m = String(ev||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
       return m ? m[1] : '';
     }
@@ -2383,13 +2555,12 @@
               var sumModal = openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
               var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
               if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
-              Array.prototype.forEach.call(sumModal.querySelectorAll('[data-up-pos]'), function(btn){
-                btn.onclick = function(){
-                  var idx = String(btn.getAttribute('data-up-pos')||'');
-                  var el = sumModal.querySelector('#upPosDetail'+idx);
-                  if (el) el.classList.toggle('hide');
-                };
-              });
+              var gapHost = sumModal.querySelector('#groupGapResult');
+              renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84);
+              var btn6 = sumModal.querySelector('#btnGroupGap6');
+              var btn12 = sumModal.querySelector('#btnGroupGap12');
+              if (btn6) btn6.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 42); };
+              if (btn12) btn12.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84); };
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){

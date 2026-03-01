@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-01.admin100
+ * v2026-03-01.admin102
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-01.admin100';
+const ADMIN_VERSION = '2026-03-01.admin102';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -465,16 +465,25 @@ function admin_actorCanAccessServingGroup_(actor, groupKey){
   return admin_memberHasServingGroup_(member, key);
 }
 
-function api_admin_serving_group_member_update(token, groupKey, memberId, action){
+function api_admin_serving_group_member_update(token, groupKey, memberId, action, targetQrPayload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const key = admin_normalizeServingGroup_(groupKey);
   if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
 
-  const id = String(memberId||'').trim().toUpperCase();
-  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+  let id = String(memberId||'').trim().toUpperCase();
 
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  const up = String(action||'').trim().toUpperCase();
+  if (!(up === 'ADD' || up === 'REMOVE')) return admin_err_('E416','操作格式錯誤','Invalid action.');
+
+  if (up === 'ADD' && role === 'GL'){
+    const parsed = admin_parseQrStrict_(String(targetQrPayload||'').trim());
+    if (!parsed.ok) return parsed;
+    id = String(parsed.memberId||'').trim().toUpperCase();
+  }
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+
   const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
   const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
   const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
@@ -499,20 +508,17 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
   if (!rowNumber) return admin_err_('E500','找不到會員列','Member row not found.');
 
   const nowGroups = admin_parseGroupsCsv_(sh.getRange(rowNumber, col.ServingGroups+1).getValue());
-  const up = String(action||'').trim().toUpperCase();
   let next = nowGroups.slice();
   const keyUpper = key.toUpperCase();
   if (up === 'ADD'){
     if (next.indexOf(keyUpper) < 0) next.push(keyUpper);
   } else if (up === 'REMOVE'){
     next = next.filter(function(g){ return g !== keyUpper; });
-  } else {
-    return admin_err_('E416','操作格式錯誤','Invalid action.');
   }
 
   sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
   admin_clearMembersCache_();
-  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_UPDATE', JSON.stringify({ group:key, action:up, memberId:id }), 'serving_group');
+  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_UPDATE', JSON.stringify({ group:key, action:up, memberId:id, viaTargetQr:(up==='ADD' && role==='GL') }), 'serving_group');
   return { ok:true, group:key, action:up, memberId:id, servingGroups:next };
 }
 
@@ -1377,7 +1383,8 @@ function api_admin_member_search(token, q){
     const idU = String(m.id||'').toUpperCase();
     const nameZh = String(m.nameZh||'');
     const nameEn = String(m.nameEn||'');
-    const hay = (idU + ' | ' + nameZh + ' | ' + nameEn).toLowerCase();
+    const email = String(m.email||'');
+    const hay = (idU + ' | ' + nameZh + ' | ' + nameEn + ' | ' + email).toLowerCase();
     if (!(idU.includes(qU) || hay.includes(qL))) continue;
 
     let score = 0;
@@ -1399,7 +1406,8 @@ function api_admin_member_search(token, q){
         servingGLGroups: m.servingGLGroups || [],
         lowFlag: !!flags.flagById[m.id],
         lowFlagZh: flags.flagById[m.id] ? '出席偏低：建議關顧跟進' : '',
-        lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : ''
+        lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : '',
+        email: email || ''
       }
     });
   }
