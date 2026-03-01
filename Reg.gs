@@ -668,6 +668,16 @@ function reg_mergeServingGroups_(groupsA, groupsB){
   return Array.from(new Set([].concat(groupsA || [], groupsB || []).filter(Boolean)));
 }
 
+function regServingGroupsFromRow_(row){
+  const base = reg_parseServingGroupsCsvSafe_(row && row.ServingGroups);
+  const gl = reg_parseServingGroupsCsvSafe_(row && row.ServingGLGroups);
+  return {
+    serving: base,
+    gl: gl,
+    merged: reg_mergeServingGroups_(base, gl)
+  };
+}
+
 function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
   const id = String(memberId||'').trim().toUpperCase();
   let earliest = null;
@@ -736,13 +746,11 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     const id = auth.parsed.id;
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
-    const rowGroups = reg_mergeServingGroups_(
-      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGroups),
-      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups)
-    );
-    const groups = member
-      ? reg_mergeServingGroups_(reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups), rowGroups)
-      : rowGroups;
+    const rowServing = regServingGroupsFromRow_(auth.row);
+    const rowGroups = rowServing.merged;
+    const groups = rowGroups.length
+      ? rowGroups
+      : (member ? reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups) : []);
 
     const att = api_reg_self_attendance_public(qrPayload, null, null);
     if (!att || !att.ok) return att;
@@ -775,9 +783,9 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     const memberSinceRaw = profile.memberSinceRaw || (auth.row && auth.row.Member_Since);
 
     const statusNorm = regStatus_((auth.row && auth.row.Status) || (profile.status || ''));
-    const glGroupsMerged = member
-      ? reg_mergeServingGroups_(member.servingGLGroups, reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups))
-      : reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups);
+    const glGroupsMerged = rowServing.gl.length
+      ? rowServing.gl
+      : (member ? reg_mergeServingGroups_(member.servingGLGroups, []) : []);
 
     return {
       ok:true,
@@ -815,14 +823,10 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
     const mi = admin_getMembersIndex_();
     const byId = (mi && mi.byId) ? mi.byId : {};
     const selfMember = byId[auth.parsed.id] || null;
-    const rowGroups = reg_mergeServingGroups_(
-      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGroups),
-      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups)
-    );
-    const selfGroups = selfMember
-      ? reg_mergeServingGroups_(reg_mergeServingGroups_(selfMember.servingGroups, selfMember.servingGLGroups), rowGroups)
-          .map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean)
-      : rowGroups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
+    const rowServing = regServingGroupsFromRow_(auth.row);
+    const rowGroups = rowServing.merged;
+    const selfGroups = (rowGroups.length ? rowGroups : (selfMember ? reg_mergeServingGroups_(selfMember.servingGroups, selfMember.servingGLGroups) : []))
+      .map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
     if (selfGroups.indexOf(key) < 0){
       return { ok:false, code:'E403', zh:'你不屬於此事奉組別', en:'You are not in this serving group.' };
     }
@@ -868,13 +872,11 @@ function api_reg_self_serving_data_public(qrPayload){
     const id = auth.parsed.id;
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
-    const rowGroups = reg_mergeServingGroups_(
-      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGroups),
-      reg_parseServingGroupsCsvSafe_(auth.row && auth.row.ServingGLGroups)
-    );
-    const groups = member
-      ? reg_mergeServingGroups_(reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups), rowGroups)
-      : rowGroups;
+    const rowServing = regServingGroupsFromRow_(auth.row);
+    const rowGroups = rowServing.merged;
+    const groups = rowGroups.length
+      ? rowGroups
+      : (member ? reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups) : []);
     if (!member && !groups.length) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
     const groupNorm = groups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
     const insights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
@@ -1665,7 +1667,9 @@ function regRowObj_(col, row, rowNumber){
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_BEGIN */
     ReferredBy: String(g('ReferredBy')||'').trim(),
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_END */
-    Member_Since: g('Member_Since')
+    Member_Since: g('Member_Since'),
+    ServingGroups: String(g('ServingGroups')||'').trim(),
+    ServingGLGroups: String(g('ServingGLGroups')||'').trim()
   };
 }
 
