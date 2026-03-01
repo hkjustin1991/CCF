@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-01.admin99
-  For Admin.gs: v2026-03-01.admin99
+  UI VERSION TAG: admin2-ui-2026-03-01.admin100
+  For Admin.gs: v2026-03-01.admin100
   ============================================================
   -->
 
@@ -220,6 +220,15 @@
     }
     .groupContextBtn.isSelected{box-shadow:inset 0 0 0 2px #0d1b3d}
     .groupContextBtn:disabled{opacity:.45;cursor:not-allowed}
+
+    .sgColor-worship{background:#ffe3e8!important;border-color:rgba(217,60,94,0.35)!important;color:#8a1230!important}
+    .sgColor-media{background:#e7f0ff!important;border-color:rgba(40,90,200,0.35)!important;color:#1a3d9a!important}
+    .sgColor-logistic{background:#f5eadb!important;border-color:rgba(139,94,60,0.35)!important;color:#7a4a22!important}
+    .sgColor-support{background:#e7fff2!important;border-color:rgba(26,168,108,0.35)!important;color:#0b6b40!important}
+    .sgColor-finance{background:#fff2cc!important;border-color:rgba(202,155,0,0.45)!important;color:#7a5b00!important}
+    .memberBubbleWrap{max-height:48vh;overflow:auto;border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff}
+    .memberBubbleList{display:flex;flex-wrap:wrap;gap:8px}
+    .memberBubble{width:auto;border-radius:999px;padding:8px 12px;font-size:13px;font-weight:800}
     .monthPick{min-width:132px}
     .groupSectionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
@@ -985,11 +994,11 @@
 
     function servingGroupPaletteClass_(groupKey){
       var key = normalizeServingGroupKey_(groupKey);
-      if (key === 'worship') return 'btnPink';
-      if (key === 'media') return 'btnMatrix';
-      if (key === 'logistic') return 'btnLookup';
-      if (key === 'support') return 'btnMain';
-      if (key === 'finance') return 'btnPeriod';
+      if (key === 'worship') return 'sgColor-worship';
+      if (key === 'media') return 'sgColor-media';
+      if (key === 'logistic') return 'sgColor-logistic';
+      if (key === 'support') return 'sgColor-support';
+      if (key === 'finance') return 'sgColor-finance';
       return 'btnBack';
     }
 
@@ -1091,19 +1100,7 @@
           };
         }
 
-        function bindRemoveActions_(){
-          Array.prototype.forEach.call(host.querySelectorAll('[data-rm-member]'), function(btn){
-            btn.onclick = function(){
-              var id = String(btn.getAttribute('data-rm-member')||'').trim();
-              if (!id) return;
-              if (!confirm('確認移除 ' + id + '?\nConfirm remove ' + id + '?')) return;
-              callApi('api_admin_serving_group_member_update', App.token, groupKey, id, 'REMOVE').then(function(r){
-                if (!r || !r.ok) return;
-                renderGroupMemberManage_(host, groupKey);
-              });
-            };
-          });
-        }
+        function bindRemoveActions_(){}
 
         function renderMembersList_(){
           var normalizedQuery = String(query||'').trim().toLowerCase();
@@ -1111,7 +1108,12 @@
             ? members.slice()
             : members.filter(function(m){ return memberText_(m).indexOf(normalizedQuery) >= 0; });
 
-          var html = '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
+          var html = '<div class="miniBtnRow" style="margin-top:0;">';
+          if (res.canManage){
+            html += '<button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">➕ 新增組員 / Add member</button>';
+          }
+          html += '</div>';
+          html += '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
           html += '<div class="small" style="margin:6px 0;">搜尋組員（姓名 / CCF ID）/ Search members (name / CCF ID)</div>';
           html += '<input id="groupMemberSearch" class="input" type="text" placeholder="例如：CCF0001 / Alex" value="'+escapeHtml(query)+'" style="margin-bottom:8px;"/>';
 
@@ -1120,25 +1122,99 @@
           } else if (!filtered.length){
             html += '<div class="small">沒有符合搜尋結果 / No members match your search</div>';
           } else {
-            html += '<ul class="groupDialogList">'+filtered.map(function(m){
-              var canRm = !!res.canManage;
-              return '<li>'+escapeHtml(m.label||m.id||'—') + (canRm ? (' <button type="button" class="btnMini btnDanger" data-rm-member="'+escapeHtml(m.id||'')+'">移除 / Remove</button>') : '') + '</li>';
-            }).join('')+'</ul>';
-          }
-
-          if (res.canManage){
-            html += '<div class="miniBtnRow"><button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">新增組員 / Add member</button></div>';
+            html += '<div class="memberBubbleWrap"><div class="memberBubbleList">'+filtered.map(function(m){
+              return '<button type="button" class="memberBubble '+servingGroupPaletteClass_(groupKey)+'" data-open-member="'+escapeHtml(m.id||'')+'">'+escapeHtml(m.label||m.id||'—')+'</button>';
+            }).join('')+'</div></div>';
           }
 
           host.innerHTML = html;
           bindSearch_();
-          bindRemoveActions_();
           bindAddAction_();
+          Array.prototype.forEach.call(host.querySelectorAll('[data-open-member]'), function(btn){
+            btn.onclick = function(){
+              var id = String(btn.getAttribute('data-open-member')||'').trim();
+              if (!id) return;
+              openServingGroupMemberSummary_(id, groupKey);
+            };
+          });
         }
 
         renderMembersList_();
       });
     }
+    function openServingGroupMemberSummary_(memberId, groupKey){
+      var m = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
+      callApi('api_admin_member_detail', App.token, memberId, App.from || getTodayYmdUk(), App.to || getTodayYmdUk()).then(function(res){
+        if(!res || !res.ok){
+          closeModal(m);
+          showErr('app', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          return;
+        }
+        var member = res.member || {};
+        var insights = (res.servingInsights && res.servingInsights.byGroup) ? res.servingInsights.byGroup : {};
+        var bucket = insights[groupKey] || {};
+        var historical = Array.isArray(bucket.historical) ? bucket.historical : [];
+        var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
+
+        function summarizeByPosition_(arr){
+          var map = {};
+          (arr || []).forEach(function(it){
+            var pos = String((it && (it.position || it.label)) || '').trim() || '—';
+            if (!map[pos]) map[pos] = [];
+            map[pos].push(String(it.eventKey || it.dateYmd || '').trim());
+          });
+          return Object.keys(map).sort().map(function(pos){
+            return { position: pos, count: map[pos].length, events: map[pos].filter(Boolean) };
+          });
+        }
+
+        var prevSummary = summarizeByPosition_(historical);
+        var upSummary = summarizeByPosition_(upcoming);
+
+        function renderSummaryBlock_(title, rows, dataAttr){
+          if (!rows.length) return '<div class="small">沒有記錄 / No records</div>';
+          return '<ul class="groupDialogList">'+rows.map(function(r, idx){
+            return '<li><button type="button" class="btnBack btnMini" data-'+dataAttr+'="'+idx+'">'+escapeHtml(r.position)+' · '+escapeHtml(String(r.count))+'x</button><div class="small hide" id="'+dataAttr+'Detail'+idx+'" style="margin-top:6px;">'+escapeHtml(r.events.join('、 '))+'</div></li>';
+          }).join('')+'</ul>';
+        }
+
+        m.querySelector('.modal').innerHTML = ''+
+          '<div class="big">👤 '+escapeHtml(member.id||memberId||'')+'</div>'+
+          '<div class="small">'+escapeHtml(member.preferredName || member.nameZh || member.nameEn || '')+'</div>'+
+          '<div style="margin-top:8px;">'+renderServingGroupBubble_(groupKey)+'</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">以往報名（按崗位）/ Previous sign-ups by position</div>'+
+            renderSummaryBlock_('prev', prevSummary, 'prev')+
+          '</div>'+
+          '<div class="groupDialogSection">'+
+            '<div class="label">未來報名（按崗位）/ Upcoming sign-ups by position</div>'+
+            renderSummaryBlock_('up', upSummary, 'up')+
+          '</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="btnCloseMemberServingSummary" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+
+        m.querySelector('#btnCloseMemberServingSummary').onclick = function(){ closeModal(m); };
+        Array.prototype.forEach.call(m.querySelectorAll('[data-prev]'), function(btn){
+          btn.onclick = function(){
+            var idx = String(btn.getAttribute('data-prev')||'');
+            var el = m.querySelector('#prevDetail'+idx);
+            if (el) el.classList.toggle('hide');
+          };
+        });
+        Array.prototype.forEach.call(m.querySelectorAll('[data-up]'), function(btn){
+          btn.onclick = function(){
+            var idx = String(btn.getAttribute('data-up')||'');
+            var el = m.querySelector('#upDetail'+idx);
+            if (el) el.classList.toggle('hide');
+          };
+        });
+      }).catch(function(){
+        closeModal(m);
+        showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
+      });
+    }
+
     function loadServingGroupMembers_(host, groupKey, options){
       renderGroupMemberManage_(host, groupKey, options || {});
     }
@@ -1220,10 +1296,21 @@
       var bucket = byGroup[groupKey] || {};
       var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
       var themeCls = 'groupTheme-' + groupKey;
-      var members = Array.isArray(bucket.currentMembers) ? bucket.currentMembers : [];
-      var membersHtml = members.length
-        ? '<ul class="groupDialogList">'+members.map(function(m){ return '<li>'+escapeHtml(m.label || '—')+'</li>'; }).join('')+'</ul>'
-        : '<div class="small">暫無組員 / No members found</div>';
+      var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
+      var map = {};
+      upcoming.forEach(function(it){
+        var pos = String((it && (it.label || it.position)) || '—').trim() || '—';
+        if (!map[pos]) map[pos] = [];
+        map[pos].push(String(it.eventKey || it.dateYmd || '').trim());
+      });
+      var rows = Object.keys(map).sort().map(function(pos){
+        return { position: pos, count: map[pos].length, events: map[pos].filter(Boolean) };
+      });
+      var summaryHtml = rows.length
+        ? '<ul class="groupDialogList">'+rows.map(function(r, i){
+            return '<li><button type="button" class="btnBack btnMini" data-up-pos="'+i+'">'+escapeHtml(r.position)+' · '+escapeHtml(String(r.count))+'x</button><div id="upPosDetail'+i+'" class="small hide" style="margin-top:6px;">'+escapeHtml(r.events.join('、 '))+'</div></li>';
+          }).join('')+'</ul>'
+        : '<div class="small">沒有未來報名記錄 / No upcoming sign-ups</div>';
       return ''+
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
           '<div class="groupDialogHeader">'+
@@ -1231,45 +1318,12 @@
             '<button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ 關閉 / Close</button>'+
           '</div>'+
           '<div class="groupDialogSection">'+
-            '<div class="label">空缺（未來 12 週） / Vacancies (next 12 weeks)</div>'+
-            '<div class="miniBtnRow">'+
-              '<button type="button" class="btnLookup btnMini" id="btnGroupGap6">空缺（&lt;6 週） / Vacancies (&lt;6 weeks)</button>'+
-              '<button type="button" class="btnLookup btnMini" id="btnGroupGap12">空缺（&lt;12 週） / Vacancies (&lt;12 weeks)</button>'+
-            '</div>'+
-            '<div id="groupGapResult" class="small" style="margin-top:8px;"></div>'+
-          '</div>'+
-          '<div class="groupDialogSection">'+
-            '<button type="button" class="btnBack sectionToggle" id="btnGroupMembersToggle">當前組員 / Current members（'+escapeHtml(String(members.length))+'）</button>'+
-            '<div id="groupMembersSection" class="hide" style="margin-top:6px;">'+membersHtml+'</div>'+
+            '<div class="label">未來已報名崗位（按次數） / Upcoming signed-up positions (count)</div>'+
+            summaryHtml+
           '</div>'+
         '</div>';
     }
 
-    function renderGroupOverviewGaps_(hostEl, overview, groupKey, maxDays){
-      if (!hostEl) return;
-      var ov = overview || {};
-      var bucket = ((ov.byGroup||{})[groupKey] || {});
-      var gaps = Array.isArray(bucket.gaps) ? bucket.gaps : [];
-      var today = parseYmd(getTodayYmdUk());
-      var filtered = gaps.filter(function(g){
-        var ymd = eventDateYmdFromKey(g.eventKey || '');
-        var d = parseYmd(ymd);
-        if (!today || !d) return false;
-        var diff = daysBetween(today, d);
-        return diff >= 0 && diff < maxDays;
-      });
-      if (!filtered.length){
-        hostEl.innerHTML = '<div class="small">沒有空缺 / No vacancies</div>';
-        return;
-      }
-      hostEl.innerHTML = '<ul class="groupDialogList">'+filtered.map(function(g){
-        var posText = (g.positions || []).map(function(p){
-          var missing = Number(p.missing||0);
-          return (p.label || p.position || '—') + '（尚欠 ' + missing + '） / ' + (p.label || p.position || '—') + ' (left ' + missing + ' to minimum)';
-        }).join(', ');
-        return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
-      }).join('')+'</ul>';
-    }
 
     function eventDateYmdFromKey(ev){
       var m = String(ev||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
@@ -2076,11 +2130,11 @@
           ? servingGroupPaletteClass_
           : function(groupKey){
               var key = normalizeServingGroupKey_(groupKey);
-              if (key === 'worship') return 'btnPink';
-              if (key === 'media') return 'btnMatrix';
-              if (key === 'logistic') return 'btnLookup';
-              if (key === 'support') return 'btnMain';
-              if (key === 'finance') return 'btnPeriod';
+              if (key === 'worship') return 'sgColor-worship';
+              if (key === 'media') return 'sgColor-media';
+              if (key === 'logistic') return 'sgColor-logistic';
+              if (key === 'support') return 'sgColor-support';
+              if (key === 'finance') return 'sgColor-finance';
               return 'btnBack';
             };
         btnWrap.innerHTML = allowedKeys.map(function(key){
@@ -2304,15 +2358,13 @@
               var sumModal = openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
               var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
               if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
-              var gapHost = sumModal.querySelector('#groupGapResult');
-              renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84);
-              var btn6 = sumModal.querySelector('#btnGroupGap6');
-              var btn12 = sumModal.querySelector('#btnGroupGap12');
-              if (btn6) btn6.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 42); };
-              if (btn12) btn12.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84); };
-              var membersToggle = sumModal.querySelector('#btnGroupMembersToggle');
-              var membersSec = sumModal.querySelector('#groupMembersSection');
-              if (membersToggle && membersSec) membersToggle.onclick = function(){ membersSec.classList.toggle('hide'); };
+              Array.prototype.forEach.call(sumModal.querySelectorAll('[data-up-pos]'), function(btn){
+                btn.onclick = function(){
+                  var idx = String(btn.getAttribute('data-up-pos')||'');
+                  var el = sumModal.querySelector('#upPosDetail'+idx);
+                  if (el) el.classList.toggle('hide');
+                };
+              });
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
