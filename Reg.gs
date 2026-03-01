@@ -678,6 +678,11 @@ function regServingGroupsFromRow_(row){
   };
 }
 
+function regRefreshMembersCachesForSelfPortal_(){
+  try{ regClearMembersIndexCache_(); }catch(e){}
+  try{ if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_(); }catch(e){}
+}
+
 function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
   const id = String(memberId||'').trim().toUpperCase();
   let earliest = null;
@@ -744,6 +749,7 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     if (!auth.ok) return auth;
 
     const id = auth.parsed.id;
+    regRefreshMembersCachesForSelfPortal_();
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
     const rowServing = regServingGroupsFromRow_(auth.row);
@@ -820,6 +826,7 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
     const key = admin_normalizeServingGroup_(groupKey);
     if (!key) return { ok:false, code:'E416', zh:'組別格式錯誤', en:'Invalid group key.' };
 
+    regRefreshMembersCachesForSelfPortal_();
     const mi = admin_getMembersIndex_();
     const byId = (mi && mi.byId) ? mi.byId : {};
     const selfMember = byId[auth.parsed.id] || null;
@@ -870,6 +877,7 @@ function api_reg_self_serving_data_public(qrPayload){
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
     const id = auth.parsed.id;
+    regRefreshMembersCachesForSelfPortal_();
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
     const rowServing = regServingGroupsFromRow_(auth.row);
