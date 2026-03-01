@@ -756,18 +756,6 @@
       }).join('');
     }
 
-    function normalizeErrResForRender_(res){
-      if(!res || typeof res !== 'object') return res;
-      if(
-        res.code === 'E403' &&
-        String(res.en || '').indexOf('Admin portal for authorised staff only') >= 0 &&
-        !String(res.zh || '').trim()
-      ){
-        res.zh = '此管理平台只限已授權同工使用';
-      }
-      return res;
-    }
-
     function showErr(targetId, res){
       res = normalizeErrResForRender_(res);
       var detail = '';
@@ -1026,14 +1014,14 @@
 
     function canManageServingGroup_(groupKey){
       var role = String((App.actor && App.actor.role) || '').toUpperCase();
-      if (role === 'ADMIN' || role === 'SUPERUSER') return true;
+      if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
       if (role !== 'GL') return false;
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       return gl.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
     }
     function actorServingGroupKeys_(){
       var role = String((App.actor && App.actor.role) || '').toUpperCase();
-      if (role === 'ADMIN' || role === 'SUPERUSER') return ['worship','media','logistic','support','finance'];
+      if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return ['worship','media','logistic','support','finance'];
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       var seen = {};
       var out = [];
@@ -2084,10 +2072,21 @@
       }
 
       function renderButtons_(){
+        var paletteFn = (typeof servingGroupPaletteClass_ === 'function')
+          ? servingGroupPaletteClass_
+          : function(groupKey){
+              var key = normalizeServingGroupKey_(groupKey);
+              if (key === 'worship') return 'btnPink';
+              if (key === 'media') return 'btnMatrix';
+              if (key === 'logistic') return 'btnLookup';
+              if (key === 'support') return 'btnMain';
+              if (key === 'finance') return 'btnPeriod';
+              return 'btnBack';
+            };
         btnWrap.innerHTML = allowedKeys.map(function(key){
           var badge = SERVING_GROUP_BADGES[key] || { zh:key, en:key };
           var selected = (App.selectedServingGroup === key);
-          var cls = 'groupContextBtn ' + servingGroupPaletteClass_(key) + (selected ? ' isSelected' : '');
+          var cls = 'groupContextBtn ' + paletteFn(key) + (selected ? ' isSelected' : '');
           return '<button type="button" class="'+cls+'" data-group-context="'+escapeHtml(key)+'">'+escapeHtml(badge.zh)+' / '+escapeHtml(badge.en)+'</button>';
         }).join('');
         Array.prototype.forEach.call(btnWrap.querySelectorAll('[data-group-context]'), function(btn){
@@ -2151,6 +2150,12 @@
           var events = res.events || [];
           var positions = res.positions || [];
           var canEditByGroup = (res && res.canEditByGroup) ? res.canEditByGroup : {};
+          var normalizedCanEditByGroup = {};
+          Object.keys(canEditByGroup).forEach(function(k){
+            var nk = normalizeServingGroupKey_(k);
+            if (!nk) return;
+            normalizedCanEditByGroup[nk] = !!canEditByGroup[k];
+          });
           if(!events.length){
             listEl.innerHTML =
               '<div class="msgBox warn">'+
@@ -2197,7 +2202,7 @@
             var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
             var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
             if (!groupPositions.length) return '';
-            var canEdit = canEditServingPlanGroup_(groupKey, canEditByGroup);
+            var canEdit = canEditServingPlanGroup_(groupKey, normalizedCanEditByGroup);
             var headerHtml = groupPositions.map(function(pos){
               return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
             }).join('');
