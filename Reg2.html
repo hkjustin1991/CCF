@@ -964,6 +964,19 @@
       var greetZh = (hh < 12) ? '早晨' : ((hh < 18) ? '午安' : '晚上好');
       var serviceAttended = (snap.attendance && typeof snap.attendance.attended !== 'undefined') ? snap.attendance.attended : 0;
       var attPercent = (snap.attendance && typeof snap.attendance.percent !== 'undefined') ? snap.attendance.percent : 0;
+      var rawStatus = String((snap.member && snap.member.status) || (m && m.status) || '').trim().toUpperCase();
+      var statusMap = {
+        ACTIVE:{ zh:'正式會員', en:'Full Member' },
+        STAFF:{ zh:'同工', en:'STAFF' },
+        ADMIN:{ zh:'同工', en:'ADMIN' },
+        PROVISIONAL:{ zh:'暫準會員', en:'PROVISIONAL MEMBER' },
+        PENDING:{ zh:'已登記', en:'REGISTERED' },
+        HELPER:{ zh:'會員', en:'MEMBER' },
+        TEMP:{ zh:'會員', en:'MEMBER' },
+        DISABLED:{ zh:'已停用', en:'DISABLED' },
+        GL:{ zh:'組長', en:'GROUP LEADER' }
+      };
+      var statusUi = statusMap[rawStatus] || { zh:'會員', en:'MEMBER' };
       var groups = (snap.member && snap.member.servingGroups) ? snap.member.servingGroups : [];
       var groupHtml = groups.map(function(g){
         var canonicalGroup = normalizeServingGroupKey(g);
@@ -971,6 +984,16 @@
         if (cls) return '<span class="groupBadge '+cls+'">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
         return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
       }).join('');
+      var glGroups = (snap.member && Array.isArray(snap.member.servingGLGroups)) ? snap.member.servingGLGroups : [];
+      var isGl = !!((snap.member && snap.member.isGl) || glGroups.length > 0 || rawStatus === 'GL');
+      var isPrivileged = (rawStatus === 'STAFF' || rawStatus === 'ADMIN' || isGl);
+      var glHtml = glGroups.map(function(g){
+        var canonicalGroup = normalizeServingGroupKey(g);
+        var cls = servingGroupCss(canonicalGroup);
+        if (cls) return '<span class="groupBadge '+cls+'">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
+        return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
+      }).join('');
+      var isPending = (rawStatus === 'PENDING');
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
       var away = (snap.member && snap.member.away) ? snap.member.away : {};
@@ -990,6 +1013,16 @@
             '<div><b>出席服務次數 / Service attended:</b> '+escapeHtml(String(serviceAttended))+'</div>'+
             '<div><b>出席率 / Attendance:</b> '+escapeHtml(String(attPercent))+'%</div>'+
           '</div>'+
+          '<div class="msgBox" style="margin-top:10px;">'+
+            '<div><b>會員狀態 / Membership status:</b> '+escapeHtml(statusUi.zh)+' / '+escapeHtml(statusUi.en)+'</div>'+
+            (isGl ? ('<div style="margin-top:8px;"><b>組長身份 / Group leader:</b> '+(glHtml ? ('Group Leader of '+glHtml) : 'Group Leader')+'</div>') : '')+
+          '</div>'+
+          (isPrivileged
+            ? ('<div class="msgBox" style="margin-top:10px;background:#fff1f1;border-color:rgba(217,60,94,0.35);color:#0d1b3d;">'+
+                '<div><b>管理頁面 / Management page</b></div>'+
+                '<div style="margin-top:8px;"><a target="_blank" rel="noopener" style="display:inline-block;background:#fff1f1;color:#0d1b3d;text-decoration:none;padding:10px 14px;border-radius:12px;font-weight:900;border:1px solid rgba(217,60,94,0.35);" href="https://script.google.com/macros/s/AKfycbyPKy5i6270_Sk06xCudLqNt74a8rSkmG8tLdWk4FPHx_54q21cexfihCJLcxIHkQkL/exec?mode=admin">按此進入管理頁面 / Click here to enter management page</a></div>'+
+              '</div>')
+            : '')+
           '<div class="msgBox" style="margin-top:10px;">'+
             '<div><b>所屬事奉組別 / Member of:</b></div>'+
             '<div style="margin-top:6px;">'+(groupHtml || '—')+'</div>'+
@@ -1292,6 +1325,7 @@
       var hasCar = (prefill.hasCar === true);
       var hasCarFalse = (prefill.hasCar === false);
       var isMinor = (prefill.isMinor === true);
+      var gender = String(prefill.gender||'').trim().toUpperCase();
 
       // defaults
       var cc = '44';
@@ -1319,6 +1353,15 @@
 
           '<div class="label" style="margin-top:10px;">介紹人 / Referred by（可選）</div>'+
           '<input id="referredBy" autocomplete="off" value="'+escapeHtml(prefill.referredBy||'')+'" />'+
+
+          '<div class="label" style="margin-top:10px;">性別 / Gender（必填 Required）</div>'+
+          '<select id="gender" style="width:100%;border-radius:var(--radius);border:1px solid var(--border);background:#fff;color:var(--text);padding:calc(var(--pad) + 2px);font-size:var(--fs-input)">'+
+            '<option value="">請選擇 / Please choose</option>'+
+            '<option value="MALE" '+(gender==='MALE'?'selected':'')+'>男 / Male</option>'+
+            '<option value="FEMALE" '+(gender==='FEMALE'?'selected':'')+'>女 / Female</option>'+
+            '<option value="OTHER" '+(gender==='OTHER'?'selected':'')+'>其他 / Other</option>'+
+            '<option value="PREFER_NOT" '+(gender==='PREFER_NOT'?'selected':'')+'>不便透露 / Prefer not to say</option>'+
+          '</select>'+
 
           '<div class="divider"></div>'+
 
@@ -1780,6 +1823,16 @@
 
     function bindSelfHome(){
       var selfMsgEl = $('selfMsg');
+      var rawStatus = String(((((State.snapshot||{}).member)||{}).status) || '').trim().toUpperCase();
+      var isPending = (rawStatus === 'PENDING');
+      function showPendingActivationMessage(){
+        if (!selfMsgEl) return;
+        selfMsgEl.innerHTML = showBox(
+          'warn',
+          '功能將於你首次出席聚會後啟用，請先加入我們的 WhatsApp 社群，我們期待很快見到你！',
+          'Function activated upon attending our first service, please join our WhatsApp community, and we look forward to seeing you very soon!'
+        );
+      }
       $('btnSelfBack').onclick = function(){
         State.view = 'home';
         State.prefill = null;
@@ -1788,6 +1841,7 @@
       };
 
       $('btnSelfServing').onclick = function(){
+        if (isPending){ showPendingActivationMessage(); return; }
         var groups = (((State.snapshot||{}).member||{}).servingGroups) || [];
         if (!groups.length){
           $('selfMsg').innerHTML = showBox('warn','你尚未加入任何事奉組別。請聯絡相關組長開始事奉（詳見 CCF WhatsApp Community）。','You are not in any serving group yet. Please speak to the relevant group leader to start serving (details in CCF WhatsApp Community).');
@@ -1847,6 +1901,7 @@
       };
 
       if ($('btnSelfLive')) $('btnSelfLive').onclick = function(){
+        if (isPending){ showPendingActivationMessage(); return; }
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
         callApi('api_reg_self_live_service_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
@@ -1862,6 +1917,7 @@
         if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','請假按鈕未載入，請重新整理頁面。','Absence button failed to load. Please refresh the page.');
       } else {
         holidayBtn.onclick = function(){
+          if (isPending){ showPendingActivationMessage(); return; }
           try{
             State.view = 'selfHoliday';
             render();
@@ -2214,6 +2270,7 @@
         nameEn: $('nameEn').value.trim(),
         preferredName: $('preferredName').value.trim(),
         referredBy: $('referredBy') ? $('referredBy').value.trim() : '',
+        gender: $('gender') ? String($('gender').value||'').trim().toUpperCase() : '',
 
         email: $('email').value.trim(),
         optInEmail: $('optInEmail').checked,
@@ -2265,6 +2322,8 @@
         if(parts.length < 2) return { ok:false, zh:'只填英文名時，請同時填寫名及姓', en:'If only English name, include first and last name.' };
       }
 
+      if (!d.gender) return { ok:false, zh:'請選擇性別', en:'Please select gender.' };
+      if(['MALE','FEMALE','OTHER','PREFER_NOT'].indexOf(d.gender) < 0) return { ok:false, zh:'性別選項不正確', en:'Invalid gender option.' };
       if(d.hasCar !== 'YES' && d.hasCar !== 'NO') return { ok:false, zh:'請選擇是否有車', en:'Please choose whether you have a car.' };
       if(d.hasCar === 'YES' && !d.vrm && !d.vrm2) return { ok:false, zh:'如有車，請填寫至少一個車牌', en:'If you have a car, provide at least one VRM.' };
 
