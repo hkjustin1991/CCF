@@ -2831,7 +2831,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openServingEditModal(eventKey, groupKey){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var filterGroupKey = String(groupKey||'').trim();
       if (filterGroupKey && !canManageServingGroup_(filterGroupKey)) return;
@@ -3314,7 +3313,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var pos = String(position||'').trim();
       var idx = parseInt(String(entryIndex||'0'), 10);
@@ -4539,28 +4537,12 @@ function eventDateYmdFromKey(ev){
       });
     }
 
-
-    function isEmbeddedBlocked_(){
-      try{ return window.top !== window.self; }catch(e){ return true; }
-    }
-    function ensureNotEmbeddedForSensitive_(){
-      if (!isEmbeddedBlocked_()) return true;
-      showErr('app', { code:'E403', zh:'為保障私隱，內嵌瀏覽器已封鎖此敏感操作。請按下方按鈕在 Safari/Chrome 開啟。', en:'For privacy, this sensitive action is blocked in embedded browsers. Please open this page in Safari/Chrome.' });
-      var host = $('app');
-      if (host){
-        var ctaId = 'openSystemBrowserCta';
-        if (!$(ctaId)) host.insertAdjacentHTML('afterbegin', '<div class="card msgBox warn embedWarnCta" id="'+ctaId+'"><div class="small">請在 Safari/Chrome 開啟此頁面再重試。 / Open this page in Safari/Chrome and try again.</div><div style="margin-top:8px;"><button id="btnCopyUrlOpen" class="btnBack">📋 複製連結 / Copy link</button></div></div>');
-        var btn = $('btnCopyUrlOpen');
-        if (btn) btn.onclick = function(){
-          var url = String(window.location.href||'');
-          if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url); }
-          alert('已複製連結，請貼到 Safari/Chrome 開啟。\nLink copied. Open in Safari/Chrome.');
-        };
-      }
-      return false;
-    }
+    // Security control note:
+    // The embedded-browser block was intentionally removed to maximize access for operational use.
+    // Sensitive actions remain protected by existing controls: authenticated API token,
+    // role/group authorization checks (e.g. canManageServingGroup_), mandatory staff re-auth scan
+    // for privileged flows (openReauthScan_), and audit logging via logAction + backend logs.
     function openContactFlow_(memberId){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_CONTACT', memberId, 'contact');
 
       var m = openModal(
@@ -4584,7 +4566,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openRemoveFromGroupFlow_(memberId, removableGroups, onDone){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_REMOVE_GROUP', memberId, 'serving_group_remove');
 
       var groups = Array.isArray(removableGroups) ? removableGroups.filter(Boolean) : [];
@@ -4639,7 +4620,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openStatusFlow_(memberId, currentStatus){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_STATUS', memberId, 'status');
 
       var options = '';
