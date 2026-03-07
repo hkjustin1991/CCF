@@ -652,7 +652,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
 
   const duplicateMap = {};
   const duplicateDetails = [];
-  const targetPositionMap = {};
+  var targetPositionMap = {};
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
