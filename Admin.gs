@@ -66,7 +66,7 @@ const ADMIN_CHECKINS_SHEET_NAME_PRIMARY = (typeof CHECKINS_SHEET_NAME_PRIMARY !=
 const ADMIN_CHECKINS_SHEET_NAME_LEGACY  = (typeof CHECKINS_SHEET_NAME_LEGACY  !== 'undefined') ? CHECKINS_SHEET_NAME_LEGACY  : 'CHECKINS';
 const ADMIN_AUDIT_SHEET_NAME = 'Admin_Activity';
 
-// Members required headers (first 11 must match)
+// Members required headers (must all exist in header row)
 const ADMIN_MEMBERS_HEADERS_REQUIRED = [
   'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
 ];
@@ -2678,11 +2678,28 @@ function admin_findMembersSheet_(){
   for (const s of sheets){
     const lastCol = s.getLastColumn();
     if (lastCol < ADMIN_MEMBERS_HEADERS_REQUIRED.length) continue;
-    const header = s.getRange(1,1,1,ADMIN_MEMBERS_HEADERS_REQUIRED.length).getValues()[0].map(v => String(v||'').trim());
-    const matches = ADMIN_MEMBERS_HEADERS_REQUIRED.every((h,i)=> header[i] === h);
+    const headers = s.getRange(1,1,1,lastCol).getValues()[0].map(v => String(v||'').trim());
+    const headerSet = new Set(headers);
+    const matches = ADMIN_MEMBERS_HEADERS_REQUIRED.every(h => headerSet.has(h));
     if (matches) return s;
   }
   return null;
+}
+function admin_debug_members_sheet_pick_(){
+  const ss = admin_openSs_();
+  return ss.getSheets().map(function(s){
+    const lastCol = s.getLastColumn();
+    const headers = s.getRange(1,1,1,lastCol).getValues()[0].map(v => String(v||'').trim());
+    const headerSet = new Set(headers);
+    return {
+      sheet: s.getName(),
+      hasAllRequiredAnywhere: ADMIN_MEMBERS_HEADERS_REQUIRED.every(h => headerSet.has(h)),
+      colMap: ['ID','Status','ServingGroups','ServingGLGroups','Email','Mobile'].reduce(function(acc, h){
+        acc[h] = headers.indexOf(h);
+        return acc;
+      }, {})
+    };
+  });
 }
 function admin_getMembersColMap_(sh){
   const lastCol = sh.getLastColumn();
