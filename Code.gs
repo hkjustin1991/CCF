@@ -1028,6 +1028,8 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
       String(ua || '')
     ]);
 
+    try{ if (typeof admin_invalidateCheckinsCache_ === 'function') admin_invalidateCheckinsCache_(); }catch(e){}
+
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
     const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
@@ -1117,6 +1119,8 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
       String(deviceId || ''),
       String(ua || '')
     ]);
+
+    try{ if (typeof admin_invalidateCheckinsCache_ === 'function') admin_invalidateCheckinsCache_(); }catch(e){}
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
