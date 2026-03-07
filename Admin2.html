@@ -91,6 +91,16 @@
 
     .footer{margin-top:14px;padding:6px 4px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
+    /* Shell variants (driven by App.view) */
+    body.shell-serving .topbar,
+    body.shell-serving .footer{display:none}
+    body.shell-serving .wrap{max-width:1200px;padding:8px var(--pad) 12px}
+    body.shell-serving #backServingPlan,
+    body.shell-serving #btnExitMobileMode{
+      border-width:2px;
+      box-shadow:0 8px 18px rgba(40,90,200,0.22);
+    }
+
     .menuGrid{
       display:grid;
       grid-template-columns: 1fr 1fr;
@@ -262,6 +272,22 @@
     .mobileServingEventDate{font-weight:900}
     .mobileServingFilters{display:flex;flex-direction:column;gap:8px;margin-top:8px}
     .mobileServingFilters select{width:100%}
+    .mobileServingLayoutToggle{display:flex;gap:8px}
+    .mobileServingLayoutToggle button{flex:1 1 0;min-height:40px}
+    .mobileServingLayoutToggle .isActive{box-shadow:inset 0 0 0 2px #0d1b3d;background:#e7f0ff}
+    .mobileServingMatrixWrap{margin-top:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+    .mobileServingMatrix{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:11px;line-height:1.2}
+    .mobileServingMatrix th,.mobileServingMatrix td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;vertical-align:top;background:#fff}
+    .mobileServingMatrix th{font-size:10px;font-weight:900;padding:8px 6px;white-space:nowrap;text-align:left;background:#f5f8ff}
+    .mobileServingMatrix tr:last-child td,.mobileServingMatrix tr:last-child th{border-bottom:none}
+    .mobileServingMatrix th:last-child,.mobileServingMatrix td:last-child{border-right:none}
+    .mobileServingMatrixEvent{position:sticky;left:0;z-index:2;min-width:126px;max-width:126px;padding:8px 6px!important;background:#f8fbff!important}
+    .mobileServingMatrix td.mobileServingMatrixEvent{font-weight:800;font-size:11px}
+    .mobileServingMatrixCell{display:flex;flex-direction:column;gap:4px;min-width:110px;padding:6px}
+    .mobileServingMatrixCell .servingPlanEntry{margin-top:0;font-size:11px;padding:6px;min-height:36px;border-radius:8px}
+    .mobileServingMatrixCell .emptySlotOutline{margin-top:0}
+    .mobileServingMatrixEdit{margin-top:4px}
+    .mobileServingMatrixEdit .servingEditBtn{width:100%;font-size:11px;padding:6px;min-height:34px}
     .mobileExit{margin-top:10px}
     .embedWarnCta{margin-top:10px}
     .embedWarnCta button{width:auto}
@@ -368,7 +394,7 @@
 </head>
 
 <body>
-  <div class="wrap">
+  <div class="wrap" id="shellWrap">
     <header class="topbar">
       <div>
         <div class="title"><?= ADMIN_TITLE_ZH ?></div>
@@ -415,7 +441,8 @@
       selectedServingGroup:null,
       glBackGuardArmed:false,
       mobileServingGroup:'',
-      mobileServingMonth:''
+      mobileServingMonth:'',
+      mobileServingLayout:''
     };
 
     function $(id){ return document.getElementById(id); }
@@ -767,6 +794,45 @@
       EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN: { code:'E426', zh:'未能打開彈出視窗，請使用下方內置掃描器', en:'彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.' }
     });
 
+    var ADMIN_UI_TEXT = Object.freeze({
+      SYSTEM_ERROR: { zh:'系統錯誤', en:'System error' },
+      INTERNAL_ERROR: { zh:'內部錯誤', en:'Internal error' },
+      LOADING: { zh:'載入中…', en:'載入中… / Loading…' },
+      SEARCHING: { zh:'搜尋中…', en:'搜尋中… / Searching…' },
+      PLEASE_WAIT: { zh:'請稍候', en:'請稍候 / Please wait' },
+      CONFIRM_SAVE_CHANGES: { zh:'確認儲存更改？', en:'Confirm save changes?', bi:'確認儲存更改？\nConfirm save changes?' },
+      LINK_COPIED_OPEN_BROWSER: { zh:'已複製連結，請貼到 Safari/Chrome 開啟。', en:'Link copied. Open in Safari/Chrome.', bi:'已複製連結，請貼到 Safari/Chrome 開啟。\nLink copied. Open in Safari/Chrome.' },
+      PLACEHOLDER_ADD_MEMBER_QUERY: { zh:'例如 CCF0001 / Alex / abc@x.com', en:'e.g. CCF0001 / Alex / abc@x.com', bi:'例如 CCF0001 / Alex / abc@x.com' },
+      PLACEHOLDER_GROUP_MEMBER_SEARCH: { zh:'例如：CCF0001 / Alex', en:'e.g. CCF0001 / Alex', bi:'例如：CCF0001 / Alex' },
+      MODAL_ADD_MEMBER_TITLE: { zh:'➕ 新增組員', en:'Add member', bi:'➕ 新增組員 / Add member' },
+      MODAL_ADD_MEMBER_SUBTITLE: { zh:'可搜尋 CCF ID / 姓名 / Email。', en:'Search by CCF ID / name / email.', bi:'可搜尋 CCF ID / 姓名 / Email。<br/>Search by CCF ID / name / email.' },
+      SEARCH_FAILED: { zh:'搜尋失敗', en:'Search failed', bi:'搜尋失敗 / Search failed' },
+      NO_RESULTS: { zh:'找不到結果', en:'No results', bi:'找不到結果 / No results' },
+      SCANNER_ERROR: { zh:'掃描器出現問題', en:'Scanner error' },
+      SCANNER_CONFIG_MISSING: { zh:'外置掃描器設定遺失或無效。', en:'External scanner settings are missing or invalid.' },
+      SCANNER_CONFIG_WARNING_TITLE: { zh:'⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕', en:'⚠️ External scanner config is invalid. External scanner has been disabled.' },
+      SCANNER_CONFIG_ISSUE_PREFIX: { zh:'外置掃描器設定問題', en:'External scanner config issue' },
+      MODAL_SERVICE_STATS_TITLE: { zh:'📊 聚會統計', en:'Service stats', bi:'📊 聚會統計 / Service stats' }
+    });
+
+    function uiText_(key){
+      return ADMIN_UI_TEXT[key] || { zh:key || '', en:key || '', bi:key || '' };
+    }
+    function uiBi_(key){
+      var t = uiText_(key);
+      if (t.bi) return String(t.bi);
+      if (t.zh || t.en) return String(t.zh || '') + ' / ' + String(t.en || '');
+      return '';
+    }
+
+    function systemErrorRes_(extra){
+      var base = { code:'E500', zh:uiText_('SYSTEM_ERROR').zh, en:uiText_('SYSTEM_ERROR').en };
+      return extra ? Object.assign(base, extra) : base;
+    }
+    function scannerErrorRes_(detail){
+      return { code:'E500', zh:uiText_('SCANNER_ERROR').zh, en:uiText_('SCANNER_ERROR').en, detail:String(detail||'') };
+    }
+
     var ADMIN_ERROR_ALIAS_MAP = [
       {
         matchEn: /^Admin portal for authorised staff only\.?$/i,
@@ -804,7 +870,7 @@
       var msg = ADMIN_MSG[msgKey];
       if (!msg || !msg.zh || !msg.en){
         console.error('showStatus metadata missing', { targetId:targetId, kind:kind, msgKey:msgKey, detail:detail });
-        msg = { code:'E500', zh:'內部錯誤', en:'Internal error' };
+        msg = { code:'E500', zh:uiText_('INTERNAL_ERROR').zh, en:uiText_('INTERNAL_ERROR').en };
       }
       var titleZh = String(msg.zh || '');
       if (kind === 'warn' || kind === 'err'){
@@ -859,9 +925,9 @@
     function normalizeErrResForRender_(res){
       var out = {};
       if (!res){
-        out = { code:'E500', zh:'系統錯誤', en:'System error' };
+        out = { code:'E500', zh:uiText_('SYSTEM_ERROR').zh, en:uiText_('SYSTEM_ERROR').en };
       } else if (typeof res === 'string'){
-        out = { code:'E500', zh:'系統錯誤', en:String(res) };
+        out = { code:'E500', zh:uiText_('SYSTEM_ERROR').zh, en:String(res) };
       } else {
         out = Object.assign({}, res);
       }
@@ -878,8 +944,8 @@
       }
 
       if (!out.code) out.code = 'E500';
-      if (!out.zh) out.zh = '系統錯誤';
-      if (!out.en) out.en = 'System error';
+      if (!out.zh) out.zh = uiText_('SYSTEM_ERROR').zh;
+      if (!out.en) out.en = uiText_('SYSTEM_ERROR').en;
       return out;
     }
 
@@ -912,8 +978,8 @@
       showBox(
         targetId,
         'err',
-        withErrorCodeTag_(escapeHtml((res && res.zh) || '系統錯誤'), res),
-        escapeHtml((res && res.en) || 'System error'),
+        withErrorCodeTag_(escapeHtml((res && res.zh) || uiText_('SYSTEM_ERROR').zh), res),
+        escapeHtml((res && res.en) || uiText_('SYSTEM_ERROR').en),
         detail,
         allowHtmlDetail
       );
@@ -1181,7 +1247,7 @@
     function renderGroupMemberManage_(host, groupKey, options){
       if (!host || !groupKey) return;
       var opts = options || {};
-      host.innerHTML = '<div class="small">載入中… / Loading…</div>';
+      host.innerHTML = '<div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>';
       callApi('api_admin_serving_group_members', App.token, groupKey).then(function(res){
         if (!res || !res.ok){
           if (host) host.innerHTML = '<div class="small">'+escapeHtml((res && res.code === 'E403') ? '你沒有權限查看此組別名單 / You do not have permission to view this group members list.' : '無法載入組員名單 / Unable to load members list.')+'</div>';
@@ -1215,7 +1281,7 @@
             function addById_(id, qrPayload){
               callApi('api_admin_serving_group_member_update', App.token, groupKey, String(id||'').trim().toUpperCase(), 'ADD', qrPayload || '').then(function(r){
                 if (!r || !r.ok){
-                  showErr('app', r || {code:'E500', zh:'系統錯誤', en:'System error'});
+                  showErr('app', r || systemErrorRes_());
                   return;
                 }
                 loadServingGroupMembers_(host, groupKey, opts);
@@ -1242,9 +1308,9 @@
 
             if (isStaffAdmin){
               var modal = openModal(''+
-                '<div class="big">➕ 新增組員 / Add member</div>'+
-                '<div class="small">可搜尋 CCF ID / 姓名 / Email。<br/>Search by CCF ID / name / email.</div>'+
-                '<input id="addMemberQuery" class="input" placeholder="例如 CCF0001 / Alex / abc@x.com" />'+
+                '<div class="big">'+escapeHtml(uiBi_('MODAL_ADD_MEMBER_TITLE'))+'</div>'+
+                '<div class="small">'+uiBi_('MODAL_ADD_MEMBER_SUBTITLE')+'</div>'+
+                '<input id="addMemberQuery" class="input" placeholder="'+escapeHtml(uiBi_('PLACEHOLDER_ADD_MEMBER_QUERY'))+'" />'+
                 '<div class="miniBtnRow">'+
                   '<button id="btnFindAddMember" class="btnMain">🔎 搜尋 / Search</button>'+
                   '<button id="btnCloseAddMember" class="btnBack">取消 / Cancel</button>'+
@@ -1258,13 +1324,13 @@
                 callApi('api_admin_member_search', App.token, q).then(function(res2){
                   if (!res2 || !res2.ok){
                     var hostR = modal.querySelector('#addMemberResults');
-                    if (hostR) hostR.innerHTML = '<div class="small">搜尋失敗 / Search failed</div>';
+                    if (hostR) hostR.innerHTML = '<div class="small">'+escapeHtml(uiBi_('SEARCH_FAILED'))+'</div>';
                     return;
                   }
                   var rows = Array.isArray(res2.results) ? res2.results : [];
                   var hostR = modal.querySelector('#addMemberResults');
                   if (!hostR) return;
-                  if (!rows.length){ hostR.innerHTML = '<div class="small">找不到結果 / No results</div>'; return; }
+                  if (!rows.length){ hostR.innerHTML = '<div class="small">'+escapeHtml(uiBi_('NO_RESULTS'))+'</div>'; return; }
                   hostR.innerHTML = '<div class="memberBubbleList">'+rows.map(function(r){
                     var name = [r.nameZh, r.nameEn, r.email].filter(Boolean).join(' / ');
                     return '<button type="button" class="memberBubble btnBack" data-add-id="'+escapeHtml(r.id||'')+'">'+escapeHtml((r.id||'') + ' · ' + name)+'</button>';
@@ -1300,7 +1366,7 @@
                 var info = (detailRes && detailRes.ok && detailRes.member) ? detailRes.member : { id:idFromQr };
                 confirmAdd_(info, function(){
                   callApi('api_admin_serving_group_member_update', App.token, groupKey, '', 'ADD', payload).then(function(r){
-                    if (!r || !r.ok){ showErr('targetQrMsg', r || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                    if (!r || !r.ok){ showErr('targetQrMsg', r || systemErrorRes_()); return; }
                     stopScan();
                     closeModal(scanModal);
                     loadServingGroupMembers_(host, groupKey, opts);
@@ -1337,7 +1403,7 @@
           html += '</div>';
           html += '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
           html += '<div class="small" style="margin:6px 0;">搜尋組員（姓名 / CCF ID）/ Search members (name / CCF ID)</div>';
-          html += '<input id="groupMemberSearch" class="input" type="text" placeholder="例如：CCF0001 / Alex" value="'+escapeHtml(query)+'" style="margin-bottom:8px;"/>';
+          html += '<input id="groupMemberSearch" class="input" type="text" placeholder="'+escapeHtml(uiBi_('PLACEHOLDER_GROUP_MEMBER_SEARCH'))+'" value="'+escapeHtml(query)+'" style="margin-bottom:8px;"/>';
 
           if (!members.length){
             html += '<div class="small">暫無組員 / No members found</div>';
@@ -1365,11 +1431,11 @@
       });
     }
     function openServingGroupMemberSummary_(memberId, groupKey){
-      var m = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
+      var m = openModal('<div class="big">'+escapeHtml(uiBi_('LOADING'))+'</div><div class="small">'+escapeHtml(uiBi_('PLEASE_WAIT'))+'</div>');
       callApi('api_admin_member_detail', App.token, memberId, App.from || getTodayYmdUk(), App.to || getTodayYmdUk()).then(function(res){
         if(!res || !res.ok){
           closeModal(m);
-          showErr('app', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('app', res || systemErrorRes_());
           return;
         }
         var member = res.member || {};
@@ -1517,7 +1583,7 @@
         });
       }).catch(function(){
         closeModal(m);
-        showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
+        showErr('app', systemErrorRes_());
       });
     }
 
@@ -1908,8 +1974,8 @@ function eventDateYmdFromKey(ev){
     }
 
     function scannerConfigWarningHtml_(){
-      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return '<div class="msgBox warn"><div class="big warn">⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕</div><div style="margin-top:4px;font-size:16px;">⚠️ External scanner config is invalid. External scanner has been disabled.</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
+      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || uiText_('SCANNER_CONFIG_MISSING').en);
+      return '<div class="msgBox warn"><div class="big warn">'+escapeHtml(uiText_('SCANNER_CONFIG_WARNING_TITLE').zh)+'</div><div style="margin-top:4px;font-size:16px;">'+escapeHtml(uiText_('SCANNER_CONFIG_WARNING_TITLE').en)+'</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -1921,7 +1987,7 @@ function eventDateYmdFromKey(ev){
         var btn = $(id);
         if(btn){
           btn.disabled = true;
-          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.title = uiText_('SCANNER_CONFIG_ISSUE_PREFIX').en + ': ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
         }
       });
       var msgEl = $(msgId || 'loginMsg');
@@ -2098,7 +2164,7 @@ function eventDateYmdFromKey(ev){
               openExternalScanner_({
                 flow:'admin',
                 onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
-                onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                onError:function(msg){ showErr('scanMsg', scannerErrorRes_(msg)); }
               });
             }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
         });
@@ -2134,7 +2200,7 @@ function eventDateYmdFromKey(ev){
                   openExternalScanner_({
                     flow:'admin',
                     onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
-                    onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                    onError:function(msg){ showErr('scanMsg', scannerErrorRes_(msg)); }
                   });
                 }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
             });
@@ -2147,7 +2213,7 @@ function eventDateYmdFromKey(ev){
                 openExternalScanner_({
                   flow:'admin',
                   onPayload:function(payload){ stopScan(); onCaptured(payload, null); },
-                  onError:function(msg){ showErr('scanMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); }
+                  onError:function(msg){ showErr('scanMsg', scannerErrorRes_(msg)); }
                 });
               }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded, null); })
           });
@@ -2231,14 +2297,14 @@ function eventDateYmdFromKey(ev){
             };
             fr.onerror = function(){ reject({code:'E415', zh:'無法讀取檔案', en:'Unable to read file.'}); };
             fr.readAsDataURL(file);
-          }catch(e){ reject({code:'E500', zh:'系統錯誤', en:'System error'}); }
+          }catch(e){ reject(systemErrorRes_()); }
         });
       }
 
       function applyAdminLoginPayload_(payload){
         showStatus('loginMsg','warn','WORKING');
         callApi('api_admin_login', payload).then(onLoginRes).catch(function(){
-          showErr('loginMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('loginMsg', systemErrorRes_());
         });
       }
 
@@ -2246,7 +2312,7 @@ function eventDateYmdFromKey(ev){
         clear('loginMsg');
         var v = String($('internalField').value||'').trim();
         callApi('api_admin_login', v).then(onLoginRes).catch(function(){
-          showErr('loginMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('loginMsg', systemErrorRes_());
         });
       };
 
@@ -2271,12 +2337,12 @@ function eventDateYmdFromKey(ev){
           source = source || 'CAMERA';
           showStatus('scanMsg','warn','WORKING');
           callApi('api_admin_login', payload).then(function(res){
-            if(!res || !res.ok){ showErr('scanMsg', res||{code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            if(!res || !res.ok){ showErr('scanMsg', res||systemErrorRes_()); return; }
             logAction('LOGIN_SOURCE', 'source=' + source, 'LOGIN|' + source);
             closeModal(modal);
             onLoginRes(res);
           }).catch(function(){
-            showErr('scanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            showErr('scanMsg', systemErrorRes_());
           });
         }
 
@@ -2319,7 +2385,7 @@ function eventDateYmdFromKey(ev){
           decodeLoginQrImageFile_(f).then(function(payload){
             applyAdminLoginPayload_(payload);
           }).catch(function(err){
-            showErr('loginMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+            showErr('loginMsg', err || systemErrorRes_());
           }).finally(function(){
             ev.target.value = '';
           });
@@ -2339,7 +2405,7 @@ function eventDateYmdFromKey(ev){
       }catch(e){}
 
       function onLoginRes(res){
-        if(!res || !res.ok){ showErr('loginMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+        if(!res || !res.ok){ showErr('loginMsg', res || systemErrorRes_()); return; }
         App.token = res.token;
         callApi('api_admin_ping', App.token).then(function(p){
           App.actor = (p && p.ok && p.actor) ? p.actor : res.actor;
@@ -2593,7 +2659,7 @@ function eventDateYmdFromKey(ev){
         var overviewRes = cache.overviewRes;
         if(!res || !res.ok){
           listEl.innerHTML = '';
-          showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('servingPlanMsg', res || systemErrorRes_());
           return;
         }
         App.servingGroupOverview = (overviewRes && overviewRes.ok) ? (overviewRes.overview || {}) : {};
@@ -2737,10 +2803,10 @@ function eventDateYmdFromKey(ev){
       }
 
       function loadServingPlan(force){
-        listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
+        listEl.innerHTML = '<div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>';
         fetchServingPlan_(!!force).then(function(){ renderServingPlanFromCache_(); }).catch(function(){
           listEl.innerHTML = '';
-          showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('servingPlanMsg', systemErrorRes_());
         });
       }
 
@@ -2754,7 +2820,7 @@ function eventDateYmdFromKey(ev){
       return ''+
         '<div class="card" style="border-color:rgba(40,90,200,0.18);background:#f3f7ff;">'+
           '<div class="big">📱 手機模式 / Mobile mode</div>'+
-          '<div class="small">手機友善事奉排期，直向卡片，不需橫向捲動。<br/>Mobile-optimised serving view with vertical cards and no horizontal scrolling.</div>'+
+          '<div class="small">手機友善事奉排期，可切換卡片與矩陣檢視。<br/>Mobile-optimised serving view with card and matrix layouts.</div>'+
           '<div id="mobileServingHost" style="margin-top:10px;"></div>'+
           '<button id="btnExitMobileMode" class="btnBack mobileExit">⬅️ 退出手機模式 / Exit mobile mode</button>'+
         '</div>';
@@ -2763,7 +2829,7 @@ function eventDateYmdFromKey(ev){
     function bindMobileServing(){
       var host = $('mobileServingHost');
       $('btnExitMobileMode').onclick = function(){ App.view='menu'; render(); };
-      host.innerHTML = '<div class="small">載入中… / Loading…</div>';
+      host.innerHTML = '<div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>';
       var cacheReady = App.servingPlanCache && App.servingPlanCache.matrixRes && App.servingPlanCache.overviewRes;
       var loadPromise = cacheReady ? Promise.resolve(App.servingPlanCache) : Promise.all([
         callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()),
@@ -2774,7 +2840,7 @@ function eventDateYmdFromKey(ev){
       });
       loadPromise.then(function(cache){
         var res = cache.matrixRes;
-        if (!res || !res.ok){ showErr('mobileServingHost', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+        if (!res || !res.ok){ showErr('mobileServingHost', res || systemErrorRes_()); return; }
         var events = Array.isArray(res.events) ? res.events : [];
         var positions = Array.isArray(res.positions) ? res.positions : [];
         var memberDirectory = (res && res.memberDirectory) ? res.memberDirectory : {};
@@ -2796,7 +2862,20 @@ function eventDateYmdFromKey(ev){
         if (!groups.length) groups = servingPlanGroupOrder_();
         if (!App.mobileServingGroup || groups.indexOf(App.mobileServingGroup) < 0) App.mobileServingGroup = groups[0] || '';
 
-        function renderCards_(){
+        if (!App.mobileServingLayout){ App.mobileServingLayout = (window.innerWidth <= 700 ? 'card' : 'matrix'); }
+
+        function buildCellEntries_(ev, pos, gk, canEdit){
+          var cell = (res.cells && res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+          var entryBtns = cell.map(function(entry, idx){
+            var blockHtml = renderServingMemberBlockHtml_(entry);
+            if (!blockHtml) return '';
+            return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(String(entry.rawValue||entry.memberId||''))+'">'+blockHtml+'</button>';
+          }).join('');
+          if (!entryBtns) entryBtns = '<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="0" data-raw="">空缺 / Vacant</button>';
+          return entryBtns;
+        }
+
+        function renderView_(){
           var evs = monthMap[String(App.mobileServingMonth)] || [];
           var gk = String(App.mobileServingGroup||'');
           var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === gk; });
@@ -2822,15 +2901,43 @@ function eventDateYmdFromKey(ev){
             var badge = SERVING_GROUP_BADGES[g] || { zh:g, en:g };
             return '<option value="'+escapeHtml(g)+'"'+(String(g)===String(App.mobileServingGroup)?' selected':'')+'>'+escapeHtml(badge.zh+' / '+badge.en)+'</option>';
           }).join('');
-          host.innerHTML = '<div class="mobileServingFilters"><select id="mobileServingMonthSel">'+months+'</select><select id="mobileServingGroupSel">'+groupOpts+'</select><button id="mobileServingRefresh" class="btnBack">🔄 重新整理 / Refresh</button></div>' +
-            (cards || '<div class="msgBox warn" style="margin-top:10px;"><div class="small">此月份暫無資料 / No events in this month</div></div>');
+
+          var bodyHtml = '';
+          if (isCardMode){
+            bodyHtml = evs.map(function(ev){
+              var posHtml = groupPositions.map(function(pos){
+                return '<div class="mobileServingPos"><div class="mobileServingPosHead">'+escapeHtml(servingPositionLabel_(pos))+'</div><div class="mobileServingPosActions">'+buildCellEntries_(ev, pos, gk, canEdit)+'</div></div>';
+              }).join('');
+              return '<div class="mobileServingCard"><div class="mobileServingEventDate">'+escapeHtml(eventLabel_(ev))+'</div>'+
+                (canEdit ? '<div class="mobileServingActions"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '')+
+                posHtml + '</div>';
+            }).join('');
+          } else {
+            var headCells = groupPositions.map(function(pos){ return '<th>'+escapeHtml(servingPositionLabel_(pos))+'</th>'; }).join('');
+            var rowHtml = evs.map(function(ev){
+              var cellHtml = groupPositions.map(function(pos){
+                return '<td><div class="mobileServingMatrixCell">'+buildCellEntries_(ev, pos, gk, canEdit)+'</div></td>';
+              }).join('');
+              var editBtn = canEdit ? '<div class="mobileServingMatrixEdit"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '';
+              return '<tr><td class="mobileServingMatrixEvent">'+escapeHtml(eventLabel_(ev))+editBtn+'</td>'+cellHtml+'</tr>';
+            }).join('');
+            bodyHtml = '<div class="mobileServingMatrixWrap"><table class="mobileServingMatrix"><thead><tr><th class="mobileServingMatrixEvent">聚會 / 日期</th>'+headCells+'</tr></thead><tbody>'+rowHtml+'</tbody></table></div>';
+          }
+
+          host.innerHTML = '<div class="mobileServingFilters"><select id="mobileServingMonthSel">'+months+'</select><select id="mobileServingGroupSel">'+groupOpts+'</select><div class="mobileServingLayoutToggle"><button id="mobileServingLayoutCard" type="button" class="btnBack'+(isCardMode?' isActive':'')+'">🧾 Card mode</button><button id="mobileServingLayoutMatrix" type="button" class="btnBack'+(!isCardMode?' isActive':'')+'">🔢 Matrix mode</button></div><button id="mobileServingRefresh" class="btnBack">🔄 重新整理 / Refresh</button></div>' +
+            (bodyHtml || '<div class="msgBox warn" style="margin-top:10px;"><div class="small">此月份暫無資料 / No events in this month</div></div>');
+
           var mSel = $('mobileServingMonthSel');
           var gSel = $('mobileServingGroupSel');
-          if (mSel) mSel.onchange = function(){ App.mobileServingMonth = String(mSel.value||''); renderCards_(); };
-          if (gSel) gSel.onchange = function(){ App.mobileServingGroup = String(gSel.value||''); renderCards_(); };
+          if (mSel) mSel.onchange = function(){ App.mobileServingMonth = String(mSel.value||''); renderView_(); };
+          if (gSel) gSel.onchange = function(){ App.mobileServingGroup = String(gSel.value||''); renderView_(); };
+          var cardBtn = $('mobileServingLayoutCard');
+          var matrixBtn = $('mobileServingLayoutMatrix');
+          if (cardBtn) cardBtn.onclick = function(){ App.mobileServingLayout = 'card'; renderView_(); };
+          if (matrixBtn) matrixBtn.onclick = function(){ App.mobileServingLayout = 'matrix'; renderView_(); };
           var rf = $('mobileServingRefresh');
           if (rf) rf.onclick = function(){
-            host.innerHTML = '<div class="small">載入中… / Loading…</div>';
+            host.innerHTML = '<div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>';
             Promise.all([
               callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()),
               callApi('api_admin_serving_group_overview', App.token, getTodayYmdUk())
@@ -2847,20 +2954,19 @@ function eventDateYmdFromKey(ev){
           });
         }
         renderCards_();
-      }).catch(function(){ showErr('mobileServingHost', {code:'E500', zh:'系統錯誤', en:'System error'}); });
+      }).catch(function(){ showErr('mobileServingHost', systemErrorRes_()); });
     }
 
     function openServingEditModal(eventKey, groupKey){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var filterGroupKey = String(groupKey||'').trim();
       if (filterGroupKey && !canManageServingGroup_(filterGroupKey)) return;
-      var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">載入中… / Loading…</div>');
+      var modal = openModal('<div class="big">🧩 事奉排期 / Serving plan</div><div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>');
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
             '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -3236,7 +3342,7 @@ function eventDateYmdFromKey(ev){
               showBox('servingEditMsg','ok','沒有更改','No changes detected.');
               return;
             }
-            if (!confirm('確認儲存更改？\nConfirm save changes?')) return;
+            if (!confirm(uiText_('CONFIRM_SAVE_CHANGES').bi)) return;
             callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey).then(function(res2){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
@@ -3289,12 +3395,12 @@ function eventDateYmdFromKey(ev){
                   btn.textContent = '仍然儲存 / Override';
                   btn.onclick = function(){
                     callApi('api_admin_serving_event_save', App.token, ev, payload, true, filterGroupKey).then(function(res3){
-                      if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                      if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || systemErrorRes_()); return; }
                       var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {}, (res3 && res3.dateYmd) || ev.replace('SundayService_',''));
                       showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
                       closeModal(modal);
                       if (App.refreshServingPlan) App.refreshServingPlan();
-                    }).catch(function(){ showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'}); });
+                    }).catch(function(){ showErr('servingEditMsg', systemErrorRes_()); });
                   };
                   var btnCancel = document.createElement('button');
                   btnCancel.className = 'btnBack';
@@ -3306,7 +3412,7 @@ function eventDateYmdFromKey(ev){
                   if (msg) msg.appendChild(btnRow);
                   return;
                 }
-                showErr('servingEditMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+                showErr('servingEditMsg', res2 || systemErrorRes_());
                 return;
               }
               var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {}, (res2 && res2.dateYmd) || ev.replace('SundayService_',''));
@@ -3314,7 +3420,7 @@ function eventDateYmdFromKey(ev){
               closeModal(modal);
               if (App.refreshServingPlan) App.refreshServingPlan();
             }).catch(function(){
-              showErr('servingEditMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+              showErr('servingEditMsg', systemErrorRes_());
             });
           };
           attachScrollControls_(modal);
@@ -3324,8 +3430,8 @@ function eventDateYmdFromKey(ev){
         render();
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
+          '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
+          '<div class="small">'+escapeHtml(uiText_('SYSTEM_ERROR').en)+'</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -3334,19 +3440,18 @@ function eventDateYmdFromKey(ev){
     }
 
     function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var pos = String(position||'').trim();
       var idx = parseInt(String(entryIndex||'0'), 10);
       var rawValue = String(entryRaw||'').trim();
       var groupKeyNorm = String(groupKey||'').trim();
       if (groupKeyNorm && !canManageServingGroup_(groupKeyNorm)) return;
-      var modal = openModal('<div class="big">🧩 快速編輯 / Quick edit</div><div class="small">載入中… / Loading…</div>');
+      var modal = openModal('<div class="big">🧩 快速編輯 / Quick edit</div><div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>');
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
             '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -3451,7 +3556,7 @@ function eventDateYmdFromKey(ev){
                 if (msg) msg.appendChild(btnRow);
                 return;
               }
-              showErr('quickMsg', res2 || {code:'E500', zh:'系統錯誤', en:'System error'});
+              showErr('quickMsg', res2 || systemErrorRes_());
               return;
             }
             var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {}, (res2 && res2.dateYmd) || ev.replace('SundayService_',''));
@@ -3459,7 +3564,7 @@ function eventDateYmdFromKey(ev){
             closeModal(modal);
             if (App.refreshServingPlan) App.refreshServingPlan();
           }).catch(function(){
-            showErr('quickMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            showErr('quickMsg', systemErrorRes_());
           });
         }
 
@@ -3540,7 +3645,7 @@ function eventDateYmdFromKey(ev){
             showBox('quickMsg','ok','沒有更改','No changes detected.');
             return;
           }
-          if (!confirm('確認儲存更改？\nConfirm save changes?')) return;
+          if (!confirm(uiText_('CONFIRM_SAVE_CHANGES').bi)) return;
           values[pos] = newValue;
           saveWithOverride_(false);
         };
@@ -3600,8 +3705,8 @@ function eventDateYmdFromKey(ev){
         enableDragScroll_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
+          '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
+          '<div class="small">'+escapeHtml(uiText_('SYSTEM_ERROR').en)+'</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -3650,11 +3755,11 @@ function eventDateYmdFromKey(ev){
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showBox('matrixMsg','warn','載入中…','載入中… / Loading…');
+        showBox('matrixMsg','warn', uiText_('LOADING').zh, uiBi_('LOADING'));
         logAction('MATRIX_LOAD', JSON.stringify({from:from,to:to}), 'matrix');
 
         callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
-          if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if(!res || !res.ok){ showErr('matrixMsg', res || systemErrorRes_()); return; }
 
           clear('matrixMsg');
           if(!res.events || !res.events.length){
@@ -3669,7 +3774,7 @@ function eventDateYmdFromKey(ev){
           $('filterLive').value = '';
           $('filterLive').oninput = function(){ applyMatrixFilter(String($('filterLive').value||'').trim()); };
         }).catch(function(){
-          showErr('matrixMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('matrixMsg', systemErrorRes_());
         });
       }
 
@@ -3792,11 +3897,11 @@ function eventDateYmdFromKey(ev){
 
       function doSearch(q){
         clear('memberMsg');
-        $('mResults').innerHTML = '<div class="small">搜尋中… / Searching…</div>';
+        $('mResults').innerHTML = '<div class="small">'+escapeHtml(uiBi_('SEARCHING'))+'</div>';
         logAction('MEMBER_SEARCH', q, 'member_search');
 
         callApi('api_admin_member_search', App.token, q).then(function(res){
-          if(!res || !res.ok){ showErr('memberMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); $('mResults').innerHTML=''; return; }
+          if(!res || !res.ok){ showErr('memberMsg', res || systemErrorRes_()); $('mResults').innerHTML=''; return; }
           var list = res.results || [];
           if(!list.length){
             $('mResults').innerHTML = '<div class="msgBox warn"><div class="big warn">沒有結果 / No results</div></div>';
@@ -3842,7 +3947,7 @@ function eventDateYmdFromKey(ev){
           });
 
         }).catch(function(){
-          showErr('memberMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('memberMsg', systemErrorRes_());
         });
       }
     }
@@ -3885,7 +3990,7 @@ function eventDateYmdFromKey(ev){
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('statsMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showBox('statsMsg','warn','載入中…','載入中… / Loading…');
+        showBox('statsMsg','warn', uiText_('LOADING').zh, uiBi_('LOADING'));
         logAction('STATS_LOAD', JSON.stringify({from:from,to:to,rebuild:!!rebuildFirst}), 'stats');
 
         var p = Promise.resolve();
@@ -3899,7 +4004,7 @@ function eventDateYmdFromKey(ev){
 
         p.then(function(){ return callApi('api_admin_stats', App.token, from, to); })
         .then(function(res){
-          if(!res || !res.ok){ showErr('statsMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if(!res || !res.ok){ showErr('statsMsg', res || systemErrorRes_()); return; }
 
           if(!res.events || !res.events.length){
             showBox('statsMsg','warn','此範圍沒有數據','No data in this range.');
@@ -3916,7 +4021,7 @@ function eventDateYmdFromKey(ev){
               ' · Updated: '+escapeHtml(res.cache.updatedAt||'')+'</div>';
           }
         }).catch(function(){
-          showErr('statsMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('statsMsg', systemErrorRes_());
         });
       }
 
@@ -4057,11 +4162,11 @@ function eventDateYmdFromKey(ev){
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('periodMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showBox('periodMsg','warn','載入中…','載入中… / Loading…');
+        showBox('periodMsg','warn', uiText_('LOADING').zh, uiBi_('LOADING'));
         logAction('PERIOD_LOAD', JSON.stringify({from:from,to:to}), 'period');
 
         callApi('api_admin_period_stats', App.token, from, to).then(function(res){
-          if(!res || !res.ok){ showErr('periodMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if(!res || !res.ok){ showErr('periodMsg', res || systemErrorRes_()); return; }
           clear('periodMsg');
 
           var months = res.months || [];
@@ -4072,7 +4177,7 @@ function eventDateYmdFromKey(ev){
             '<div class="msgBox ok" style="margin-top:10px;"><div class="big ok">按季度 / By season</div>'+renderPeriodTable('season', seasons)+'</div>';
 
         }).catch(function(){
-          showErr('periodMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('periodMsg', systemErrorRes_());
         });
       }
 
@@ -4122,12 +4227,12 @@ function eventDateYmdFromKey(ev){
         return;
       }
 
-      var m = openModal('<div class="big">📊 聚會統計 / Service stats</div><div class="small">載入中… / Loading…</div>');
+      var m = openModal('<div class="big">'+escapeHtml(uiBi_('MODAL_SERVICE_STATS_TITLE'))+'</div><div class="small">'+escapeHtml(uiBi_('LOADING'))+'</div>');
 
       callApi('api_admin_event_detail', App.token, eventKey).then(function(res){
         if(!res || !res.ok){
           m.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
+            '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
             '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -4245,8 +4350,8 @@ function eventDateYmdFromKey(ev){
 
       }).catch(function(){
         m.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
+          '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
+          '<div class="small">'+escapeHtml(uiText_('SYSTEM_ERROR').en)+'</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -4258,13 +4363,13 @@ function eventDateYmdFromKey(ev){
     function openMemberDetail(memberId, fromYmd, toYmd, opts){
       var options = opts || {};
       var isGroupManagementMode = String(options.mode||'').trim() === 'groupManagement';
-      var modal = openModal('<div class="big">載入中… / Loading…</div><div class="small">請稍候 / Please wait</div>');
+      var modal = openModal('<div class="big">'+escapeHtml(uiBi_('LOADING'))+'</div><div class="small">'+escapeHtml(uiBi_('PLEASE_WAIT'))+'</div>');
       logAction('OPEN_MEMBER_DETAIL', memberId, 'member_detail');
 
       callApi('api_admin_member_detail', App.token, memberId, fromYmd, toYmd).then(function(res){
         if(!res || !res.ok){
           closeModal(modal);
-          showErr('app', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('app', res || systemErrorRes_());
           return;
         }
 
@@ -4439,14 +4544,14 @@ function eventDateYmdFromKey(ev){
               }
               clear('awayMsg');
               callApi('api_admin_set_away_period', App.token, m.id, fromDmy1, toDmy1, fromDmy2, toDmy2).then(function(res){
-                if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                if(!res || !res.ok){ showErr('awayMsg', res || systemErrorRes_()); return; }
                 away.from1 = res.from1 || '';
                 away.to1 = res.to1 || '';
                 away.from2 = res.from2 || '';
                 away.to2 = res.to2 || '';
                 showBox('awayMsg','ok','已更新','已更新 / Saved.');
               }).catch(function(){
-                showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+                showErr('awayMsg', systemErrorRes_());
               });
             };
             absModal.querySelector('#btnAwayClear').onclick = function(){
@@ -4456,14 +4561,14 @@ function eventDateYmdFromKey(ev){
               awayTo2.value = '';
               clear('awayMsg');
               callApi('api_admin_set_away_period', App.token, m.id, '', '', '', '').then(function(res){
-                if(!res || !res.ok){ showErr('awayMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+                if(!res || !res.ok){ showErr('awayMsg', res || systemErrorRes_()); return; }
                 away.from1 = '';
                 away.to1 = '';
                 away.from2 = '';
                 away.to2 = '';
                 showBox('awayMsg','ok','已清除','已清除 / Cleared.');
               }).catch(function(){
-                showErr('awayMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+                showErr('awayMsg', systemErrorRes_());
               });
             };
             attachScrollControls_(absModal);
@@ -4555,7 +4660,7 @@ function eventDateYmdFromKey(ev){
         });
       }).catch(function(){
         closeModal(modal);
-        showErr('app', {code:'E500', zh:'系統錯誤', en:'System error'});
+        showErr('app', systemErrorRes_());
       });
     }
 
@@ -4574,13 +4679,12 @@ function eventDateYmdFromKey(ev){
         if (btn) btn.onclick = function(){
           var url = String(window.location.href||'');
           if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url); }
-          alert('已複製連結，請貼到 Safari/Chrome 開啟。\nLink copied. Open in Safari/Chrome.');
+          alert(uiText_('LINK_COPIED_OPEN_BROWSER').bi);
         };
       }
       return false;
     }
     function openContactFlow_(memberId){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_CONTACT', memberId, 'contact');
 
       var m = openModal(
@@ -4604,7 +4708,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openRemoveFromGroupFlow_(memberId, removableGroups, onDone){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_REMOVE_GROUP', memberId, 'serving_group_remove');
 
       var groups = Array.isArray(removableGroups) ? removableGroups.filter(Boolean) : [];
@@ -4659,7 +4762,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openStatusFlow_(memberId, currentStatus){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_STATUS', memberId, 'status');
 
       var options = '';
@@ -4722,10 +4824,10 @@ function eventDateYmdFromKey(ev){
 
         if(mode === 'contact'){
           callApi('api_admin_member_contact_reveal', App.token, memberId, payload, qr).then(function(res){
-            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            if(!res || !res.ok){ showErr('msg', res || systemErrorRes_()); return; }
             renderContactResult_(m, res);
           }).catch(function(){
-            showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            showErr('msg', systemErrorRes_());
           });
           return;
         }
@@ -4733,7 +4835,7 @@ function eventDateYmdFromKey(ev){
         if(mode === 'remove_group'){
           var req = payload || {};
           callApi('api_admin_member_remove_from_group', App.token, memberId, req.groupKey, qr).then(function(res){
-            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            if(!res || !res.ok){ showErr('msg', res || systemErrorRes_()); return; }
             m.querySelector('.modal').innerHTML =
               '<div class="big ok">✅ 已移出組別 / Member removed from group</div>'+
               '<div class="small">此操作已被記錄。This action is logged.</div>'+
@@ -4750,16 +4852,16 @@ function eventDateYmdFromKey(ev){
               if (typeof onDone === 'function') onDone(res);
             };
           }).catch(function(){
-            showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
+            showErr('msg', systemErrorRes_());
           });
           return;
         }
 
         callApi('api_admin_member_status_change', App.token, memberId, payload, qr).then(function(res){
-          if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if(!res || !res.ok){ showErr('msg', res || systemErrorRes_()); return; }
           renderStatusResult_(m, res);
         }).catch(function(){
-          showErr('msg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('msg', systemErrorRes_());
         });
       }
 
@@ -4784,7 +4886,7 @@ function eventDateYmdFromKey(ev){
               showStatus('msg','warn','EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN');
             },
             onError:function(msg){
-              showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
+              showErr('msg', {code:'E500', zh:uiText_('SCANNER_ERROR').zh, en:uiText_('SCANNER_ERROR').en, detail: String(msg||'')});
             }
           });
         };
@@ -4839,6 +4941,7 @@ function eventDateYmdFromKey(ev){
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
+      syncShellClass_();
       if (App.view !== 'servingPlan' && App.servingPlanTimer){
         clearInterval(App.servingPlanTimer);
         App.servingPlanTimer = null;
@@ -4855,6 +4958,13 @@ function eventDateYmdFromKey(ev){
       if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); attachScrollControls_(root); return; }
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
       if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
+    }
+
+    function syncShellClass_(){
+      var body = document.body;
+      if (!body) return;
+      var isServingShell = (App.view === 'servingPlan' || App.view === 'mobileServing');
+      body.classList.toggle('shell-serving', isServingShell);
     }
 
     /* init */
