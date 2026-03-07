@@ -949,6 +949,52 @@
       return out;
     }
 
+    function normalizeBiText_(zh, en, fallbackZh, fallbackEn){
+      var zhText = String(zh || '').trim();
+      var enText = String(en || '').trim();
+      if (!zhText && fallbackZh) zhText = String(fallbackZh || '').trim();
+      if (!enText && fallbackEn) enText = String(fallbackEn || '').trim();
+      if (!zhText && enText) zhText = enText;
+      if (!enText && zhText) enText = zhText;
+      return { zh: zhText, en: enText };
+    }
+
+    function formatBiDetailHtml_(res){
+      if (!res) return '';
+      var detailZh = String((res.detailZh != null) ? res.detailZh : '').trim();
+      var detailEn = String((res.detailEn != null) ? res.detailEn : '').trim();
+      var detailRaw = String((res.detail != null) ? res.detail : '').trim();
+
+      if (!detailZh && !detailEn && detailRaw){
+        detailZh = detailRaw;
+        detailEn = detailRaw;
+      }
+
+      if (!detailZh && !detailEn) return '';
+      var detailBi = normalizeBiText_(detailZh, detailEn, '', '');
+      return '<div class="small">'+escapeHtml(detailBi.zh)+'</div>'+
+        '<div class="small">'+escapeHtml(detailBi.en)+'</div>';
+    }
+
+    function renderModalErrorHtml_(res){
+      var err = normalizeErrResForRender_(res);
+      var title = normalizeBiText_(withErrorCodeTag_(err.zh, err), err.en, uiText_('SYSTEM_ERROR').zh, uiText_('SYSTEM_ERROR').en);
+      var detailHtml = formatBiDetailHtml_(err);
+      return ''+
+        '<div class="big err">'+escapeHtml(title.zh)+'</div>'+
+        '<div class="small">'+escapeHtml(title.en)+'</div>'+
+        (detailHtml ? ('<div style="margin-top:10px;">'+detailHtml+'</div>') : '');
+    }
+
+    function showModalError_(modalEl, res){
+      if (!modalEl) return;
+      modalEl.innerHTML =
+        renderModalErrorHtml_(res) +
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+        '</div>';
+    }
+
     function showErr(targetId, res){
       res = normalizeErrResForRender_(res);
       var detail = '';
@@ -972,14 +1018,15 @@
           allowHtmlDetail = true;
         }
       } else if (res && res.detail){
-        detail = '<div class="small">'+escapeHtml(res.detail)+'</div>';
+        detail = formatBiDetailHtml_(res);
         allowHtmlDetail = true;
       }
+      var title = normalizeBiText_(withErrorCodeTag_(res.zh, res), res.en, uiText_('SYSTEM_ERROR').zh, uiText_('SYSTEM_ERROR').en);
       showBox(
         targetId,
         'err',
-        withErrorCodeTag_(escapeHtml((res && res.zh) || uiText_('SYSTEM_ERROR').zh), res),
-        escapeHtml((res && res.en) || uiText_('SYSTEM_ERROR').en),
+        title.zh,
+        title.en,
         detail,
         allowHtmlDetail
       );
@@ -2965,13 +3012,9 @@ function eventDateYmdFromKey(ev){
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
-          modal.querySelector('.modal').innerHTML =
-            '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
-            '<div class="miniBtnRow" style="margin-top:12px;">'+
-              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
-            '</div>';
-          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          var modalBody = modal.querySelector('.modal');
+          showModalError_(modalBody, res || systemErrorRes_());
+          modalBody.querySelector('#c').onclick = function(){ closeModal(modal); };
           return;
         }
 
@@ -3450,13 +3493,9 @@ function eventDateYmdFromKey(ev){
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
-          modal.querySelector('.modal').innerHTML =
-            '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
-            '<div class="miniBtnRow" style="margin-top:12px;">'+
-              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
-            '</div>';
-          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
+          var modalBody = modal.querySelector('.modal');
+          showModalError_(modalBody, res || systemErrorRes_());
+          modalBody.querySelector('#c').onclick = function(){ closeModal(modal); };
           return;
         }
 
@@ -4231,13 +4270,9 @@ function eventDateYmdFromKey(ev){
 
       callApi('api_admin_event_detail', App.token, eventKey).then(function(res){
         if(!res || !res.ok){
-          m.querySelector('.modal').innerHTML =
-            '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
-            '<div class="miniBtnRow" style="margin-top:12px;">'+
-              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
-            '</div>';
-          m.querySelector('#c').onclick = function(){ closeModal(m); };
+          var modalBody = m.querySelector('.modal');
+          showModalError_(modalBody, res || systemErrorRes_());
+          modalBody.querySelector('#c').onclick = function(){ closeModal(m); };
           return;
         }
 
