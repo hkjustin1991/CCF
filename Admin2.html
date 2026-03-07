@@ -1861,6 +1861,33 @@ function eventDateYmdFromKey(ev){
       if (!s) return [];
       return s.split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
     }
+    function servingPositionLabelBi_(positionKey){
+      var key = String(positionKey || '').trim();
+      var label = SERVING_POSITION_LABELS[key] || {};
+      var zh = String(label.zh || key).trim();
+      var en = String(label.en || key).trim();
+      return zh + ' (' + en + ')';
+    }
+
+    function buildDuplicateConflictLine_(d, fallbackDateYmd){
+      var target = String((d && d.targetPosition) || '').trim();
+      var existing = Array.isArray(d && d.existingPositions) ? d.existingPositions : [];
+      var legacyPositions = Array.isArray(d && d.positions) ? d.positions : [];
+      if (!target && legacyPositions.length){
+        target = String(legacyPositions[0] || '').trim();
+        existing = legacyPositions.slice(1);
+      }
+      if (!existing.length && legacyPositions.length > 1){
+        existing = legacyPositions.slice(1);
+      }
+      existing = existing.filter(function(p){ return String(p || '').trim() && String(p || '').trim() !== target; });
+      var targetLabel = target ? servingPositionLabelBi_(target) : '-';
+      var existingLabel = existing.length ? existing.map(servingPositionLabelBi_).join(', ') : '-';
+      var lineDate = String((d && d.dateYmd) || fallbackDateYmd || '').trim();
+      var dateLabel = lineDate ? (' ｜ 日期: ' + formatYmdZhEn_(lineDate)) : '';
+      return escapeHtml(String((d && d.memberId) || '') + ' → ' + targetLabel + ' (你在指派中 / target) vs ' + existingLabel + ' (已獲分配 / already assigned)' + dateLabel);
+    }
+
     function buildAdminOverrideWarningHtml_(warnings, dateYmd){
       var w = warnings || {};
       var lines = [];
@@ -1873,13 +1900,7 @@ function eventDateYmdFromKey(ev){
         lines.push(escapeHtml('成員: ' + (c.memberId||'') + '｜離開期重疊: ' + String(c.from||'') + ' - ' + String(c.to||'') + ' / Member: ' + (c.memberId||'') + '｜Holiday overlap: ' + String(c.from||'') + ' - ' + String(c.to||'') + dateLabel));
       });
       duplicates.forEach(function(d){
-        var posLabelsZh = (d.positions||[]).map(function(p){
-          var label = SERVING_POSITION_LABELS[p] || {};
-          return label.zh || servingPositionLabel_({ position: p });
-        });
-        var lineDate = String(d.dateYmd || effectiveDate || '').trim();
-        var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
-        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜重覆崗位: ' + posLabelsZh.join('、') + ' / Member: ' + (d.memberId||'') + '｜Duplicate positions: ' + posLabelsZh.join(', ') + dateLabel));
+        lines.push(buildDuplicateConflictLine_(d, effectiveDate));
       });
       if (!lines.length) return '';
       return lines.join('<br/>');
@@ -3422,12 +3443,7 @@ function eventDateYmdFromKey(ev){
                     titleZh = '同一會員重覆崗位';
                     titleEn = 'They are already serving this position.';
                     detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                      var posLabelsZh = (d.positions||[]).map(function(p){
-                        var label = SERVING_POSITION_LABELS[p] || {};
-                        return label.zh || p;
-                      });
-                      var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
+                      return buildDuplicateConflictLine_(d, String(res2.dateYmd || '').trim());
                     }).join('<br/>');
                   }
                 showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
@@ -3568,12 +3584,7 @@ function eventDateYmdFromKey(ev){
                   titleZh = '同一會員重覆崗位';
                   titleEn = 'They are already serving this position.';
                   detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                    var posLabelsZh = (d.positions||[]).map(function(p){
-                      var label = SERVING_POSITION_LABELS[p] || {};
-                      return label.zh || p;
-                    });
-                    var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
+                    return buildDuplicateConflictLine_(d, String(res2.dateYmd || '').trim());
                   }).join('<br/>');
                 }
                 showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
