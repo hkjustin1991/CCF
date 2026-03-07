@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-01.admin105
+ * v2026-03-01.admin103
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-01.admin105';
+const ADMIN_VERSION = '2026-03-01.admin103';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -256,7 +256,7 @@ function doGetAdmin_(e){
  */
 function api_admin_login(input){
   const raw = String(input || '').trim();
-  if (!raw) return admin_err_('E401','請掃描你自己的同工 QR 登入','請掃描你自己的同工 QR 登入 / Please scan your own staff QR to login.');
+  if (!raw) return admin_err_('E401','請掃描你自己的同工 QR 登入','Please scan your own staff QR to login.');
 
   // SUPERUSER via secret stored in Script Properties (NOT hard-coded)
   const bypass = admin_getBypassCode_();
@@ -268,7 +268,7 @@ function api_admin_login(input){
 
   // If it's not a QR payload, treat as invalid login (not QR format error)
   if (raw.indexOf('|') < 0){
-    return admin_err_('E401','請掃描你自己的同工 QR 登入','請掃描你自己的同工 QR 登入 / Please scan your own staff QR to login.');
+    return admin_err_('E401','請掃描你自己的同工 QR 登入','Please scan your own staff QR to login.');
   }
 
   const parsed = admin_parseQrStrict_(raw);
@@ -387,7 +387,6 @@ function api_admin_serving_plan_matrix(token, fromDate){
     events: matrix.events,
     positions: matrix.positions,
     cells: matrix.cells,
-    memberDirectory: matrix.memberDirectory,
     canEditByGroup: admin_getServingPlanEditMap_(s.actor, matrix.positions),
     maxMonths: ADMIN_SERVING_MONTHS_AHEAD
   };
@@ -600,23 +599,13 @@ function api_admin_serving_event_rows(token, eventKey){
   const positions = ADMIN_SERVING_POSITIONS.slice();
   const values = admin_getServingValuesForEvent_(ev);
   const mi = admin_getMembersIndex_();
-  const memberDirectory = admin_buildServingMemberDirectory_(mi.byId || {});
-  const cells = admin_buildServingEventCells_(values);
   const members = Object.keys(mi.byId).map(function(id){
     const m = mi.byId[id];
     const groups = (m.servingGroups || []).concat(m.servingGLGroups || []).filter(Boolean);
     return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', preferredName: m.preferredName||'', groups: groups };
   });
   members.sort(function(a,b){ return a.id.localeCompare(b.id); });
-  return {
-    ok:true,
-    eventKey: ev,
-    positions: positions,
-    values: values,
-    cells: cells,
-    memberDirectory: memberDirectory,
-    members: members
-  };
+  return { ok:true, eventKey: ev, positions: positions, values: values, members: members };
 }
 
 /**
@@ -652,26 +641,13 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
 
   const duplicateMap = {};
   const duplicateDetails = [];
-  const targetPosByMember = {};
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
   const membersById = mi.byId || {};
   const existingValues = admin_getServingValuesForEvent_(ev);
   const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
-  const existingMemberPositionMap = {};
   const mergedValues = Object.assign({}, existingValues);
-  const targetPositionMap = {};
-
-  ADMIN_SERVING_POSITIONS.forEach(function(pos){
-    const raw = String(existingValues[pos] || '').trim();
-    if (!raw) return;
-    const ids = admin_extractMemberIdsFromServingValue_(raw);
-    ids.forEach(function(id){
-      if (!existingMemberPositionMap[id]) existingMemberPositionMap[id] = [];
-      existingMemberPositionMap[id].push(pos);
-    });
-  });
 
   const changedPositions = new Set();
   const changedMembers = new Set();
@@ -712,8 +688,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       if (isChanged){
         memberIdsForAway.push(id);
         changedMembers.add(id);
-        if (!targetPosByMember[id]) targetPosByMember[id] = [];
-        if (targetPosByMember[id].indexOf(r.position) < 0) targetPosByMember[id].push(r.position);
       }
     });
   }
@@ -741,9 +715,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    const targetPosition = ((targetPosByMember[id] && targetPosByMember[id][0]) || effectivePositions[0] || '');
-    const existingPositions = effectivePositions.filter(function(p){ return p !== targetPosition; });
-    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), targetPosition: targetPosition, existingPositions: existingPositions, dateYmd: eventDateYmd, newlyIntroduced:true });
+    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -766,15 +738,13 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   if (duplicateDetails.length){
     if (!canOverride){
       const detail = duplicateDetails.map(function(d){
-        const target = String(d.targetPosition || ((d.positions||[])[0]||''));
-        const targetLabel = admin_servingPositionLabel_(target);
-        const assignedLabels = (Array.isArray(d.existingPositions) && d.existingPositions.length ? d.existingPositions : (d.positions||[]).filter(function(p){ return p !== target; })).map(admin_servingPositionLabel_);
-        return d.memberId + ' → ' + targetLabel + ' (target) vs ' + assignedLabels.join(', ') + ' (assigned)';
+        const labels = (d.positions || []).map(admin_servingPositionLabel_);
+        return d.memberId + ': ' + labels.join(', ');
       }).join(' | ');
-      return admin_conflict_('該會員已在此崗位事奉','該會員已在此崗位事奉 / They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
+      return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'該會員已在此崗位事奉 / They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
+      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
@@ -1431,7 +1401,6 @@ function api_admin_member_search(token, q){
         id: m.id,
         nameZh: m.nameZh||'',
         nameEn: m.nameEn||'',
-        preferredName: m.preferredName||'',
         status: st,
         servingGroups: m.servingGroups || [],
         servingGLGroups: m.servingGLGroups || [],
@@ -1530,9 +1499,7 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       status: admin_normStatus_(m.status||''),
       memberSince: memberSinceYmd || '',
       servingGroups: m.servingGroups || [],
-      servingGLGroups: m.servingGLGroups || [],
-      email: m.email||'',
-      mobile: m.mobile||''
+      servingGLGroups: m.servingGLGroups || []
     },
     attendance:{ attendedEventKeys: attendedSorted },
     stats:{
@@ -2492,17 +2459,17 @@ function admin_getServingPlanMatrix_(events){
 
   const sh = admin_getServingSheet_();
   if (!sh){
-    return { events: eventList, positions: [], cells: cells, memberDirectory: {} };
+    return { events: eventList, positions: [], cells: cells };
   }
   const lastRow = sh.getLastRow();
   if (lastRow < 2){
-    return { events: eventList, positions: [], cells: cells, memberDirectory: {} };
+    return { events: eventList, positions: [], cells: cells };
   }
 
   const matrix = admin_getServingMatrix_(sh);
   const lastCol = sh.getLastColumn();
   if (lastCol < 2){
-    return { events: eventList, positions: [], cells: cells, memberDirectory: {} };
+    return { events: eventList, positions: [], cells: cells };
   }
   const positions = matrix.positions.map(function(pos){
     return { key: pos.key, group: pos.group, position: pos.position };
@@ -2510,7 +2477,6 @@ function admin_getServingPlanMatrix_(events){
 
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
-  const memberDirectory = admin_buildServingMemberDirectory_(byId);
   const rowLookup = admin_getServingEventRowLookup_(sh);
 
   const targetRows = [];
@@ -2523,7 +2489,7 @@ function admin_getServingPlanMatrix_(events){
   });
 
   if (!targetRows.length){
-    return { events: eventList, positions: positions, cells: cells, memberDirectory: memberDirectory };
+    return { events: eventList, positions: positions, cells: cells };
   }
 
   const minRow = Math.min.apply(null, targetRows);
@@ -2544,54 +2510,25 @@ function admin_getServingPlanMatrix_(events){
       const raw = String(row[pos.colIndex-1] || '').trim();
       if (!raw) return;
       const values = admin_splitServingValues_(raw);
-      const memberIds = [];
-      const rawValues = [];
       values.forEach(function(val){
         const token = String(val||'').trim();
-        if (!token) return;
-        rawValues.push(token);
         const matched = token.match(/CCF\d{4}/i);
-        if (matched){
-          memberIds.push(matched[0].toUpperCase());
-        }
+        const memberId = matched ? matched[0].toUpperCase() : '';
+        const member = memberId ? (byId[memberId] || {}) : {};
+        const entry = {
+          memberId: memberId,
+          rawValue: val,
+          nameZh: String(member.nameZh || ''),
+          nameEn: String(member.nameEn || ''),
+          slot: ''
+        };
+        if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
+        cells[ev][pos.key].push(entry);
       });
-      cells[ev][pos.key] = { memberId: memberIds, rawValue: rawValues };
     });
   });
 
-  return { events: eventList, positions: positions, cells: cells, memberDirectory: memberDirectory };
-}
-
-function admin_buildServingMemberDirectory_(byId){
-  const src = byId || {};
-  const out = {};
-  Object.keys(src).sort().forEach(function(id){
-    const key = String(id||'').trim().toUpperCase();
-    if (!/^CCF\d{4}$/.test(key)) return;
-    const m = src[id] || {};
-    out[key] = {
-      nameEn: String(m.nameEn || ''),
-      nameZh: String(m.nameZh || '')
-    };
-  });
-  return out;
-}
-
-function admin_buildServingEventCells_(valuesByPosition){
-  const values = valuesByPosition || {};
-  const out = {};
-  ADMIN_SERVING_POSITIONS.forEach(function(position){
-    const raw = String(values[position] || '').trim();
-    const tokens = admin_splitServingValues_(raw);
-    const ids = [];
-    tokens.forEach(function(token){
-      const matched = String(token||'').match(/CCF\d{4}/i);
-      if (!matched) return;
-      ids.push(String(matched[0] || '').toUpperCase());
-    });
-    out[position] = { memberId: ids, rawValue: tokens };
-  });
-  return out;
+  return { events: eventList, positions: positions, cells: cells };
 }
 
 // Bypass code from Script Properties
@@ -2892,8 +2829,8 @@ function admin_getCheckinsData_(){
   if (lastRow < 2) return { ok:true, rows:[] };
 
   const col = admin_getCheckinsColMap_(sh);
-  const requiredLastCol = Math.max(Number(col.Timestamp||0), Number(col.EventKey||0), Number(col.MemberId||0)) + 1;
-  const data = sh.getRange(2,1,lastRow-1,requiredLastCol).getValues();
+  const lastCol = sh.getLastColumn();
+  const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
 
   const rows = [];
   for (let i=0;i<data.length;i++){
@@ -2922,14 +2859,6 @@ function admin_logCheckinsCacheTelemetry_(action, details){
     cache.put(throttleKey, '1', ADMIN_CACHE_CHECKINS_TELEMETRY_THROTTLE);
   }catch(e){}
   admin_audit_({id:'SYSTEM', role:'SYSTEM'}, String(action||''), JSON.stringify(details||{}), 'checkins_cache');
-}
-
-function admin_invalidateCheckinsCache_(){
-  const cache = CacheService.getScriptCache();
-  try{ cache.remove(ADMIN_CACHE_CHECKINS_MANIFEST_KEY); }catch(e){}
-  for (let i=0; i<ADMIN_CACHE_CHECKINS_MAX_PARTS; i++){
-    try{ cache.remove(ADMIN_CACHE_CHECKINS_PART_PREFIX + i); }catch(e){}
-  }
 }
 
 function admin_getCheckinsDataCached_(){
@@ -2965,7 +2894,7 @@ function admin_getCheckinsDataCached_(){
     const maxPayloadChars = ADMIN_CACHE_CHECKINS_PART_CHARS * maxParts;
     if (payload.length > maxPayloadChars || nParts > maxParts){
       cacheMode = 'skip_oversize';
-      admin_invalidateCheckinsCache_();
+      try{ cache.remove(ADMIN_CACHE_CHECKINS_MANIFEST_KEY); }catch(e){}
       admin_logCheckinsCacheTelemetry_('CHECKINS_CACHE_SKIP_OVERSIZE', { count: (fresh.rows||[]).length, payloadChars: payload.length, nParts: nParts, maxParts: maxParts });
     }else{
       const manifest = { count: (fresh.rows||[]).length, updatedAt: admin_nowIso_(), nParts: nParts };
@@ -3227,7 +3156,7 @@ function admin_buildLowAttendanceFlags_(){
 // Reauth verification (normal: scan own QR; SUPERUSER: must scan ADMIN QR)
 function admin_verifyReauth_(actor, reauthQrPayload){
   const raw = String(reauthQrPayload||'').trim();
-  if (!raw) return admin_err_('E401','請掃描你本人同工 QR 作確認','請掃描你本人同工 QR 作確認 / Please scan your own staff QR to confirm.');
+  if (!raw) return admin_err_('E401','請掃描你本人同工 QR 作確認','Please scan your own staff QR to confirm.');
 
   const bypass = (String(actor.id||'') === 'SUPERUSER');
 
@@ -3257,7 +3186,7 @@ function admin_verifyReauth_(actor, reauthQrPayload){
   // Normal actor: must match current session id
   const expected = String(actor.id||'').trim().toUpperCase();
   if (parsed.id !== expected){
-    return admin_err_('E431','請掃描你本人同工 QR 作確認（不可用其他同工）','請掃描你本人同工 QR 作確認（不可用其他同工） / Please scan your own staff QR to confirm (cannot use another staff).');
+    return admin_err_('E431','請掃描你本人同工 QR 作確認（不可用其他同工）','Please scan your own staff QR to confirm (cannot use another staff).');
   }
 
   const actorRole = String(actor.role||'').trim().toUpperCase();
