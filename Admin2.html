@@ -262,6 +262,22 @@
     .mobileServingEventDate{font-weight:900}
     .mobileServingFilters{display:flex;flex-direction:column;gap:8px;margin-top:8px}
     .mobileServingFilters select{width:100%}
+    .mobileServingLayoutToggle{display:flex;gap:8px}
+    .mobileServingLayoutToggle button{flex:1 1 0;min-height:40px}
+    .mobileServingLayoutToggle .isActive{box-shadow:inset 0 0 0 2px #0d1b3d;background:#e7f0ff}
+    .mobileServingMatrixWrap{margin-top:10px;border:1px solid var(--border);border-radius:12px;background:#fff;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+    .mobileServingMatrix{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0;font-size:11px;line-height:1.2}
+    .mobileServingMatrix th,.mobileServingMatrix td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:0;vertical-align:top;background:#fff}
+    .mobileServingMatrix th{font-size:10px;font-weight:900;padding:8px 6px;white-space:nowrap;text-align:left;background:#f5f8ff}
+    .mobileServingMatrix tr:last-child td,.mobileServingMatrix tr:last-child th{border-bottom:none}
+    .mobileServingMatrix th:last-child,.mobileServingMatrix td:last-child{border-right:none}
+    .mobileServingMatrixEvent{position:sticky;left:0;z-index:2;min-width:126px;max-width:126px;padding:8px 6px!important;background:#f8fbff!important}
+    .mobileServingMatrix td.mobileServingMatrixEvent{font-weight:800;font-size:11px}
+    .mobileServingMatrixCell{display:flex;flex-direction:column;gap:4px;min-width:110px;padding:6px}
+    .mobileServingMatrixCell .servingPlanEntry{margin-top:0;font-size:11px;padding:6px;min-height:36px;border-radius:8px}
+    .mobileServingMatrixCell .emptySlotOutline{margin-top:0}
+    .mobileServingMatrixEdit{margin-top:4px}
+    .mobileServingMatrixEdit .servingEditBtn{width:100%;font-size:11px;padding:6px;min-height:34px}
     .mobileExit{margin-top:10px}
     .embedWarnCta{margin-top:10px}
     .embedWarnCta button{width:auto}
@@ -415,7 +431,8 @@
       selectedServingGroup:null,
       glBackGuardArmed:false,
       mobileServingGroup:'',
-      mobileServingMonth:''
+      mobileServingMonth:'',
+      mobileServingLayout:''
     };
 
     function $(id){ return document.getElementById(id); }
@@ -2736,7 +2753,7 @@ function eventDateYmdFromKey(ev){
       return ''+
         '<div class="card" style="border-color:rgba(40,90,200,0.18);background:#f3f7ff;">'+
           '<div class="big">📱 手機模式 / Mobile mode</div>'+
-          '<div class="small">手機友善事奉排期，直向卡片，不需橫向捲動。<br/>Mobile-optimised serving view with vertical cards and no horizontal scrolling.</div>'+
+          '<div class="small">手機友善事奉排期，可切換卡片與矩陣檢視。<br/>Mobile-optimised serving view with card and matrix layouts.</div>'+
           '<div id="mobileServingHost" style="margin-top:10px;"></div>'+
           '<button id="btnExitMobileMode" class="btnBack mobileExit">⬅️ 退出手機模式 / Exit mobile mode</button>'+
         '</div>';
@@ -2777,37 +2794,64 @@ function eventDateYmdFromKey(ev){
         if (!groups.length) groups = servingPlanGroupOrder_();
         if (!App.mobileServingGroup || groups.indexOf(App.mobileServingGroup) < 0) App.mobileServingGroup = groups[0] || '';
 
-        function renderCards_(){
+        if (!App.mobileServingLayout){ App.mobileServingLayout = (window.innerWidth <= 700 ? 'card' : 'matrix'); }
+
+        function buildCellEntries_(ev, pos, gk, canEdit){
+          var cell = (res.cells && res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+          var entryBtns = cell.map(function(entry, idx){
+            var blockHtml = renderServingMemberBlockHtml_(entry);
+            if (!blockHtml) return '';
+            return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(String(entry.rawValue||entry.memberId||''))+'">'+blockHtml+'</button>';
+          }).join('');
+          if (!entryBtns) entryBtns = '<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="0" data-raw="">空缺 / Vacant</button>';
+          return entryBtns;
+        }
+
+        function renderView_(){
           var evs = monthMap[String(App.mobileServingMonth)] || [];
           var gk = String(App.mobileServingGroup||'');
           var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === gk; });
           var canEdit = canEditServingPlanGroup_(gk, normalizedCanEditByGroup);
-          var cards = evs.map(function(ev){
-            var posHtml = groupPositions.map(function(pos){
-              var cell = (res.cells && res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
-              var entryBtns = cell.map(function(entry, idx){
-                var blockHtml = renderServingMemberBlockHtml_(entry);
-                if (!blockHtml) return '';
-                return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(String(entry.rawValue||entry.memberId||''))+'">'+blockHtml+'</button>';
-              }).join('');
-              if (!entryBtns) entryBtns = '<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="0" data-raw="">空缺 / Vacant</button>';
-              return '<div class="mobileServingPos"><div class="mobileServingPosHead">'+escapeHtml(servingPositionLabel_(pos))+'</div><div class="mobileServingPosActions">'+entryBtns+'</div></div>';
-            }).join('');
-            return '<div class="mobileServingCard"><div class="mobileServingEventDate">'+escapeHtml(eventLabel_(ev))+'</div>'+
-              (canEdit ? '<div class="mobileServingActions"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '')+
-              posHtml + '</div>';
-          }).join('');
+          var isCardMode = String(App.mobileServingLayout||'card') !== 'matrix';
           var months = monthKeys.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(String(m)===String(App.mobileServingMonth)?' selected':'')+'>'+escapeHtml(monthLabel_(Number(m)))+'</option>'; }).join('');
           var groupOpts = groups.map(function(g){
             var badge = SERVING_GROUP_BADGES[g] || { zh:g, en:g };
             return '<option value="'+escapeHtml(g)+'"'+(String(g)===String(App.mobileServingGroup)?' selected':'')+'>'+escapeHtml(badge.zh+' / '+badge.en)+'</option>';
           }).join('');
-          host.innerHTML = '<div class="mobileServingFilters"><select id="mobileServingMonthSel">'+months+'</select><select id="mobileServingGroupSel">'+groupOpts+'</select><button id="mobileServingRefresh" class="btnBack">🔄 重新整理 / Refresh</button></div>' +
-            (cards || '<div class="msgBox warn" style="margin-top:10px;"><div class="small">此月份暫無資料 / No events in this month</div></div>');
+
+          var bodyHtml = '';
+          if (isCardMode){
+            bodyHtml = evs.map(function(ev){
+              var posHtml = groupPositions.map(function(pos){
+                return '<div class="mobileServingPos"><div class="mobileServingPosHead">'+escapeHtml(servingPositionLabel_(pos))+'</div><div class="mobileServingPosActions">'+buildCellEntries_(ev, pos, gk, canEdit)+'</div></div>';
+              }).join('');
+              return '<div class="mobileServingCard"><div class="mobileServingEventDate">'+escapeHtml(eventLabel_(ev))+'</div>'+
+                (canEdit ? '<div class="mobileServingActions"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '')+
+                posHtml + '</div>';
+            }).join('');
+          } else {
+            var headCells = groupPositions.map(function(pos){ return '<th>'+escapeHtml(servingPositionLabel_(pos))+'</th>'; }).join('');
+            var rowHtml = evs.map(function(ev){
+              var cellHtml = groupPositions.map(function(pos){
+                return '<td><div class="mobileServingMatrixCell">'+buildCellEntries_(ev, pos, gk, canEdit)+'</div></td>';
+              }).join('');
+              var editBtn = canEdit ? '<div class="mobileServingMatrixEdit"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '';
+              return '<tr><td class="mobileServingMatrixEvent">'+escapeHtml(eventLabel_(ev))+editBtn+'</td>'+cellHtml+'</tr>';
+            }).join('');
+            bodyHtml = '<div class="mobileServingMatrixWrap"><table class="mobileServingMatrix"><thead><tr><th class="mobileServingMatrixEvent">聚會 / 日期</th>'+headCells+'</tr></thead><tbody>'+rowHtml+'</tbody></table></div>';
+          }
+
+          host.innerHTML = '<div class="mobileServingFilters"><select id="mobileServingMonthSel">'+months+'</select><select id="mobileServingGroupSel">'+groupOpts+'</select><div class="mobileServingLayoutToggle"><button id="mobileServingLayoutCard" type="button" class="btnBack'+(isCardMode?' isActive':'')+'">🧾 Card mode</button><button id="mobileServingLayoutMatrix" type="button" class="btnBack'+(!isCardMode?' isActive':'')+'">🔢 Matrix mode</button></div><button id="mobileServingRefresh" class="btnBack">🔄 重新整理 / Refresh</button></div>' +
+            (bodyHtml || '<div class="msgBox warn" style="margin-top:10px;"><div class="small">此月份暫無資料 / No events in this month</div></div>');
+
           var mSel = $('mobileServingMonthSel');
           var gSel = $('mobileServingGroupSel');
-          if (mSel) mSel.onchange = function(){ App.mobileServingMonth = String(mSel.value||''); renderCards_(); };
-          if (gSel) gSel.onchange = function(){ App.mobileServingGroup = String(gSel.value||''); renderCards_(); };
+          if (mSel) mSel.onchange = function(){ App.mobileServingMonth = String(mSel.value||''); renderView_(); };
+          if (gSel) gSel.onchange = function(){ App.mobileServingGroup = String(gSel.value||''); renderView_(); };
+          var cardBtn = $('mobileServingLayoutCard');
+          var matrixBtn = $('mobileServingLayoutMatrix');
+          if (cardBtn) cardBtn.onclick = function(){ App.mobileServingLayout = 'card'; renderView_(); };
+          if (matrixBtn) matrixBtn.onclick = function(){ App.mobileServingLayout = 'matrix'; renderView_(); };
           var rf = $('mobileServingRefresh');
           if (rf) rf.onclick = function(){
             host.innerHTML = '<div class="small">載入中… / Loading…</div>';
@@ -2826,7 +2870,7 @@ function eventDateYmdFromKey(ev){
             };
           });
         }
-        renderCards_();
+        renderView_();
       }).catch(function(){ showErr('mobileServingHost', {code:'E500', zh:'系統錯誤', en:'System error'}); });
     }
 
