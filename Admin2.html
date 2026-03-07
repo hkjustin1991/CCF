@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-07.admin105
-  For Admin.gs: v2026-03-07.admin105
+  UI VERSION TAG: admin2-ui-2026-03-07.admin106
+  For Admin.gs: v2026-03-07.admin106
   ============================================================
   -->
 
@@ -336,6 +336,12 @@
       background:#fff;
       padding:10px;
     }
+    body.serving-rota-mode .wrap{max-width:none;padding:8px}
+    body.serving-rota-mode .topbar,
+    body.serving-rota-mode .footer{display:none}
+    body.serving-rota-mode .card{margin:4px 0;padding:10px;border-radius:12px}
+    body.serving-rota-mode .servingGroupToggle{min-height:56px;font-size:17px}
+    body.serving-rota-mode .servingPlanEntry{font-size:14px;padding:10px}
     @media (max-width: 520px){
       .chartCard{ height:440px; }
       body.serving-rota-mode .wrap{max-width:none;padding:8px}
@@ -451,6 +457,14 @@
       return '';
     }
 
+    function normalizeApiError_(err, fallbackEn){
+      var fb = String(fallbackEn || 'API call failed');
+      if (!err) return { code:'E500', zh:'系統錯誤', en:fb };
+      if (typeof err === 'string') return { code:'E500', zh:'系統錯誤', en:String(err) };
+      if (err && typeof err === 'object') return err;
+      return { code:'E500', zh:'系統錯誤', en:String(err) };
+    }
+
     function callApiViaRpc(endpoint, fn, args){
       return fetch(endpoint, {
         method:'POST',
@@ -462,8 +476,8 @@
           var data;
           try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
           if(!resp.ok || !data || !data.ok){
-            var err = (data && data.error) ? data.error : { message:'API call failed' };
-            throw err;
+            var err = (data && data.error) ? data.error : { en:'API call failed' };
+            throw normalizeApiError_(err, 'API call failed');
           }
           return data.result;
         });
@@ -473,10 +487,10 @@
     function callApiViaGas(fn, args){
       return new Promise(function(resolve, reject){
         try{
-          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function(err){ reject(normalizeApiError_(err, 'GAS call failed')); });
           runner[fn].apply(runner, args || []);
         }catch(err){
-          reject(err);
+          reject(normalizeApiError_(err, 'GAS call failed'));
         }
       });
     }
@@ -1606,10 +1620,10 @@ function eventDateYmdFromKey(ev){
       var upper = raw.toUpperCase();
       if (upper === 'N/A' || upper === 'NA') return 'N/A';
       if (isServingClosedToken_(upper)) return '🔒 崗位關閉 / Closed';
-      var isCcf = /^CCF\d{4}$/.test(upper);
-      if (!isCcf) return raw;
+      var id = extractMemberId_(raw);
+      if (!id) return escapeHtml(raw);
       return renderServingPersonLabelHtml_({
-        id: upper,
+        id: id,
         nameZh: entry.nameZh || '',
         nameEn: entry.nameEn || '',
         preferredName: entry.preferredName || ''
@@ -1675,7 +1689,7 @@ function eventDateYmdFromKey(ev){
     function formatCcfidLine_(memberId){
       var id = String(memberId||'').trim().toUpperCase();
       var m = id.match(/^CCF(\d{4})$/);
-      return m ? ('CCFID ' + m[1]) : (id || 'CCFID —');
+      return m ? ('CCF ID ' + m[1]) : (id || 'CCF ID —');
     }
     function servingPersonLines_(m){
       var o = m || {};
@@ -1702,11 +1716,19 @@ function eventDateYmdFromKey(ev){
       return [lines.id, lines.zh, lines.en].filter(Boolean).join(' · ');
     }
     function formatServingToken_(memberMap, memberId){
-      var id = String(memberId||'').trim().toUpperCase();
-      var m = memberMap[id];
-      if (!m) return id;
-      var lines = servingPersonLines_(m);
-      return [lines.id, lines.zh, lines.en].filter(Boolean).join(' | ');
+      var id = extractMemberId_(memberId) || String(memberId||'').trim().toUpperCase();
+      return id || String(memberId||'').trim();
+    }
+    function renderServingTokenDisplayHtml_(token, memberMap){
+      var raw = String(token||'').trim();
+      if (!raw) return '';
+      var upper = raw.toUpperCase();
+      if (upper === 'N/A' || upper === 'NA') return escapeHtml(raw);
+      if (isServingClosedToken_(upper)) return '🔒 崗位關閉 / Closed';
+      var id = extractMemberId_(raw);
+      if (!id) return escapeHtml(raw);
+      var m = (memberMap || {})[id] || { id:id };
+      return renderServingPersonLabelHtml_(m);
     }
     function memberDisplayWithName_(memberMap, memberId){
       var id = String(memberId||'').trim().toUpperCase();
@@ -2661,7 +2683,7 @@ function eventDateYmdFromKey(ev){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
             '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="small">'+escapeHtml(String((res && res.zh) || '系統錯誤'))+'<br/>'+escapeHtml(String((res && res.en) || 'System error'))+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -2729,7 +2751,7 @@ function eventDateYmdFromKey(ev){
             if (!token){
               chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">空缺 '+(slotIdx+1)+' / Vacant '+(slotIdx+1)+'</span>');
             } else {
-              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span style="white-space:normal">'+escapeHtml(token).replace(/\s*\|\s*/g,'<br/>')+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
+              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span style="white-space:normal">'+renderServingTokenDisplayHtml_(token, memberMap)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
             }
           }
           return '<div class="quickBubbleWrap">'+chips.join('')+'</div>';
@@ -3147,7 +3169,7 @@ function eventDateYmdFromKey(ev){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
             '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="small">'+escapeHtml(String((res && res.zh) || '系統錯誤'))+'<br/>'+escapeHtml(String((res && res.en) || 'System error'))+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -3288,7 +3310,7 @@ function eventDateYmdFromKey(ev){
               var label = isVac ? ('空缺 ' + (slotIdx + 1) + ' / Vacant ' + (slotIdx + 1)) : token;
               var bubbleCls = 'quickBubble' + (isVac ? ' quickBubbleVacancy' : '') + selectedCls;
               var rm = isVac ? '' : '<button type="button" data-rm="'+slotIdx+'">×</button>' ;
-              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+escapeHtml(label)+rm+'</span>';
+              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'"><span style="white-space:normal">'+(isVac ? escapeHtml(label) : renderServingTokenDisplayHtml_(label, memberMap))+'</span>'+rm+'</span>';
             });
             wrap.innerHTML = chips.join('');
           }
@@ -3928,7 +3950,7 @@ function eventDateYmdFromKey(ev){
         if(!res || !res.ok){
           m.querySelector('.modal').innerHTML =
             '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="small">'+escapeHtml(String((res && res.zh) || '系統錯誤'))+'<br/>'+escapeHtml(String((res && res.en) || 'System error'))+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
