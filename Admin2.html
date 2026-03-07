@@ -1870,6 +1870,23 @@ function eventDateYmdFromKey(ev){
           (lines.en ? ('<span class="en">'+escapeHtml(lines.en)+'</span>') : '')+
         '</span>';
     }
+    function normalizeServingCellEntries_(cell){
+      if (Array.isArray(cell)) return cell;
+      if (!cell) return [];
+      if (typeof cell === 'string'){
+        return splitServingValues_(cell).map(function(token){
+          var id = extractMemberId_(token);
+          return { rawValue: token, memberId: id || token };
+        });
+      }
+      if (typeof cell === 'object'){
+        if (Array.isArray(cell.entries)) return cell.entries;
+        if (Object.prototype.hasOwnProperty.call(cell, 'rawValue') || Object.prototype.hasOwnProperty.call(cell, 'memberId')) return [cell];
+        var vals = Object.keys(cell).sort(function(a,b){ return Number(a)-Number(b); }).map(function(k){ return cell[k]; });
+        return vals.filter(function(v){ return !!v; });
+      }
+      return [];
+    }
     function servingMemberLineHtmlFromMember_(m){
       if (!m) return '';
       return ''+
@@ -2814,7 +2831,8 @@ function eventDateYmdFromKey(ev){
         var viewEvents = monthMap[String(App.servingPlanMonth)] || [];
         var cards = viewEvents.map(function(ev){
           var posBlocks = groupPositions.map(function(pos){
-            var cell = (res.cells && res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+            var cellRaw = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+            var cell = normalizeServingCellEntries_(cellRaw);
             var entries = cell.map(function(entry, idx){
               var blockHtml = renderServingMemberBlockHtml_(entry);
               if (!blockHtml) return '';
@@ -2899,7 +2917,8 @@ function eventDateYmdFromKey(ev){
         function renderCards_(){
           var cards = evs.map(function(ev){
             var posBlocks = groupPositions.map(function(pos){
-              var cell = (res.cells&&res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+              var cellRaw = (res.cells&&res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+              var cell = normalizeServingCellEntries_(cellRaw);
               var entries = cell.map(function(entry,idx){
                 var block = renderServingMemberBlockHtml_(entry); if(!block) return '';
                 return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(String(entry.rawValue||entry.memberId||''))+'">'+block+'</button>';
@@ -2916,7 +2935,8 @@ function eventDateYmdFromKey(ev){
         function renderMatrix_(){
           var rows = evs.map(function(ev){
             var cols = groupPositions.map(function(pos){
-              var cell = (res.cells&&res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+              var cellRaw = (res.cells&&res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+              var cell = normalizeServingCellEntries_(cellRaw);
               var lines = cell.slice(0,3).map(function(entry){ return renderServingMemberBlockHtml_(entry); }).join('');
               if(!lines) lines = '<div class="small">空缺 / Vacant</div>';
               return '<div class="servingPlanPosBlock"><div>'+renderServingPositionLabelHtml_(pos)+'</div><div style="margin-top:6px;">'+lines+'</div></div>';
