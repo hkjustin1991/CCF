@@ -234,6 +234,8 @@
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
      .servingEditBtn{width:auto;padding:6px 10px;border-radius:10px;font-size:12px}
     .servingPlanEntry{
+      display:block;
+      width:100%;
       font-size:12px;
       margin-top:4px;
       padding:4px 6px;
@@ -241,6 +243,48 @@
       border-radius:10px;
       background:#fff;
       color:var(--muted);
+      text-align:left;
+    }
+    .servingMemberBlock{
+      display:flex;
+      flex-direction:column;
+      gap:1px;
+      line-height:1.2;
+    }
+    .servingMemberBlock .id{font-weight:900;color:var(--text)}
+    .servingMemberBlock .en{color:var(--text)}
+    .servingMemberBlock .zh{color:var(--muted)}
+    .mobileServingCard{border:1px solid var(--border);border-radius:14px;padding:10px;background:#fff;margin-top:10px}
+    .mobileServingPos{margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:10px;background:#f9fbff}
+    .mobileServingPosHead{font-weight:900}
+    .mobileServingPosActions{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+    .mobileServingPosActions .servingPlanEntry{width:100%}
+    .mobileServingActions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+    .mobileServingActions button{width:auto;min-height:40px;padding:8px 12px}
+    .mobileServingEventDate{font-weight:900}
+    .mobileServingFilters{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .mobileServingFilters select{width:100%}
+
+    .servingPlanEventsStack{display:flex;flex-direction:column;gap:10px}
+    .servingPlanEventCard{border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff}
+    .servingPlanPosGrid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px}
+    .servingPlanPosBlock{border:1px solid var(--border);border-radius:10px;padding:8px;background:#f8fbff}
+    .servingPosLabel3{display:flex;flex-direction:column;line-height:1.18;gap:1px}
+    .servingPosLabel3 .zh{font-weight:900;color:var(--text)}
+    .servingPosLabel3 .en{color:var(--text);font-size:12px}
+    .servingPosLabel3 .delta{color:var(--muted);font-size:11px}
+    .servingModeToggle{display:flex;gap:8px;margin-top:8px}
+    .servingModeToggle button{width:auto;min-height:40px;padding:8px 12px}
+    .mobileExit{margin-top:10px}
+    .embedWarnCta{margin-top:10px}
+    .embedWarnCta button{width:auto}
+    .quickBubbleName{display:flex;flex-direction:column;line-height:1.2}
+    .quickBubbleName .id{font-weight:900}
+    .quickBubbleName .en{font-size:11px}
+    .quickBubbleName .zh{font-size:11px;color:var(--muted)}
+
+    @media (max-width: 700px){
+      .tableWrap.mobileFriendly table{min-width:100%}
     }
     .servingGapUrgent{
       background:#fff0f0 !important;
@@ -367,7 +411,7 @@
     var App = {
       token:null,
       actor:null, // {id, role, nameZh, nameEn}
-      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan | glGroupMembers | adminGroupMembers
+      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan | mobileServing | glGroupMembers | adminGroupMembers
       debounceT:null,
       clockTimer:null,
 
@@ -380,8 +424,12 @@
       servingPlanInfoOpenGroups:{},
       servingGroupOverview:null,
       servingPlanTimer:null,
+      servingPlanCache:null,
       selectedServingGroup:null,
-      glBackGuardArmed:false
+      glBackGuardArmed:false,
+      mobileServingGroup:'',
+      mobileServingMonth:'',
+      mobileServingLayout:'card'
     };
 
     function $(id){ return document.getElementById(id); }
@@ -672,14 +720,23 @@
       finance: { zh:'財務公司', en:'Finance Dept', cls:'groupBadge finance' },
       other: { zh:'其他', en:'Other', cls:'groupBadge' }
     };
-    function servingPositionLabel_(pos){
-      if (!pos) return '—';
-      var key = String(pos.position || pos.key || '').trim();
+    function servingPositionLines_(pos){
+      if (!pos) return { zh:'—', en:'—', delta:'+/-（每月） / +/- (Monthly)' };
+      var key = String(pos.position || pos.key || pos || '').trim();
       var label = SERVING_POSITION_LABELS[key];
-      if (label) return label.zh + ' / ' + label.en;
+      if (label) return { zh: String(label.zh||key), en: String(label.en||key), delta:'+/-（每月） / +/- (Monthly)' };
       var group = getServingGroupLabel_(pos.group);
-      var position = String(pos.position || '').trim();
-      return position ? (position + (group ? (' / ' + group) : '')) : (group || '—');
+      var position = String(pos.position || key || '').trim();
+      var line = position || group || '—';
+      return { zh: line, en: line, delta:'+/-（每月） / +/- (Monthly)' };
+    }
+    function servingPositionLabel_(pos){
+      var lines = servingPositionLines_(pos);
+      return lines.zh + ' / ' + lines.en;
+    }
+    function renderServingPositionLabelHtml_(pos){
+      var lines = servingPositionLines_(pos);
+      return '<span class="servingPosLabel3"><span class="zh">'+escapeHtml(lines.zh)+'</span><span class="en">'+escapeHtml(lines.en)+'</span><span class="delta">'+escapeHtml(lines.delta)+'</span></span>';
     }
     function ymdToDmy_(ymd){
       var s = String(ymd||'').trim();
@@ -883,6 +940,12 @@
         detail,
         allowHtmlDetail
       );
+    }
+
+    function renderModalErrorHtml_(res){
+      var out = normalizeErrResForRender_(res || {code:'E500', zh:'系統錯誤', en:'System error'});
+      var detail = out.detail ? ('<div class="small" style="margin-top:6px;">'+escapeHtml(String(out.detail))+'</div>') : '';
+      return '<div class="big err">'+withErrorCodeTag_(escapeHtml(out.zh || '系統錯誤'), out)+' / '+escapeHtml(out.en || 'System error')+'</div>'+detail;
     }
 
 
@@ -1659,6 +1722,39 @@ function eventDateYmdFromKey(ev){
       }
       return upper + nameLine;
     }
+
+    function servingMemberLinesFromEntry_(entry){
+      var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
+      if (!raw) return null;
+      var upper = raw.toUpperCase();
+      if (upper === 'N/A' || upper === 'NA') return { id:'N/A', en:'', zh:'' };
+      if (isServingClosedToken_(upper)) return { id:'🔒 崗位關閉 / Closed', en:'', zh:'' };
+      if (!/^CCF\d{4}$/.test(upper)) return { id:raw, en:'', zh:'' };
+      return {
+        id: upper,
+        zh: String((entry && entry.nameZh) || '').trim(),
+        en: String((entry && entry.nameEn) || '').trim()
+      };
+    }
+    function renderServingMemberBlockHtml_(entry){
+      var lines = servingMemberLinesFromEntry_(entry);
+      if (!lines) return '';
+      return ''+
+        '<span class="servingMemberBlock">'+
+          '<span class="id">'+escapeHtml(lines.id||'')+'</span>'+
+          (lines.zh ? ('<span class="zh">'+escapeHtml(lines.zh)+'</span>') : '')+
+          (lines.en ? ('<span class="en">'+escapeHtml(lines.en)+'</span>') : '')+
+        '</span>';
+    }
+    function servingMemberLineHtmlFromMember_(m){
+      if (!m) return '';
+      return ''+
+        '<span class="quickBubbleName">'+
+          '<span class="id">'+escapeHtml(String(m.id||''))+'</span>'+
+          (String(m.nameZh||'').trim() ? ('<span class="zh">'+escapeHtml(String(m.nameZh||'').trim())+'</span>') : '')+
+          (String(m.nameEn||'').trim() ? ('<span class="en">'+escapeHtml(String(m.nameEn||'').trim())+'</span>') : '')+
+        '</span>';
+    }
     function splitServingValues_(raw){
       var s = String(raw||'').trim();
       if (!s) return [];
@@ -1721,14 +1817,27 @@ function eventDateYmdFromKey(ev){
       var pref = String(m.preferredName||'').trim();
       var zh = String(m.nameZh||'').trim();
       var en = String(m.nameEn||'').trim();
-      return m.id + ' ' + [zh, en].filter(Boolean).join(' ') + (pref ? (' ('+pref+')') : '');
+      return [m.id, en, zh].filter(Boolean).join(' · ');
     }
     function formatServingToken_(memberMap, memberId){
       var m = memberMap[String(memberId||'').toUpperCase()];
       if (!m) return String(memberId||'');
-      var name = preferredNameForSheet_(m);
-      return m.id + (name ? (' ('+name+')') : '');
+      var en = String(m.nameEn||'').trim();
+      var zh = String(m.nameZh||'').trim();
+      return [m.id, en, zh].filter(Boolean).join(' · ');
     }
+    function renderServingTokenHtml_(token, memberMap){
+      var t = String(token||'').trim();
+      if (!t) return '';
+      var up = t.toUpperCase();
+      if (up === 'N/A' || up === 'NA') return escapeHtml('N/A');
+      if (isServingClosedToken_(up)) return escapeHtml('🔒 崗位關閉 / Closed');
+      var mid = extractMemberId_(t);
+      var m = mid ? (memberMap || {})[mid] : null;
+      if (!m) return escapeHtml(t);
+      return servingMemberLineHtmlFromMember_(m);
+    }
+
     function memberDisplayWithName_(memberMap, memberId){
       var id = String(memberId||'').trim().toUpperCase();
       var m = memberMap[id];
@@ -1743,6 +1852,25 @@ function eventDateYmdFromKey(ev){
         var from = String(c.from || '');
         var to = String(c.to || '');
         return escapeHtml(who + '（假期: ' + from + ' - ' + to + '） / ' + who + ' on holiday from ' + from + ' to ' + to);
+      }).join('<br/>');
+    }
+
+    function buildDuplicateConflictDetailHtml_(duplicates, fallbackDate, activePos){
+      var list = Array.isArray(duplicates) ? duplicates : [];
+      return list.map(function(d){
+        var target = String(d.targetPosition || activePos || '').trim();
+        var existing = Array.isArray(d.existingPositions) ? d.existingPositions : (Array.isArray(d.positions)?d.positions:[]);
+        var existingNorm = existing.filter(function(p){ return String(p||'').trim() && String(p||'').trim() !== target; });
+        var targetLines = servingPositionLines_({ position: target });
+        var existingLabel = existingNorm.map(function(p){
+          var lines = servingPositionLines_({ position: p });
+          return (lines.zh + ' / ' + lines.en);
+        }).join('、');
+        if (!existingLabel){
+          existingLabel = (targetLines.zh + ' / ' + targetLines.en);
+        }
+        var dateLabel = formatYmdZhEn_(String(d.dateYmd || fallbackDate || '').trim());
+        return escapeHtml(String(d.memberId||'') + ' → ' + targetLines.zh + ' (你在指派中 / target) Vs ' + existingLabel + ' (已獲分配崗位 / assigned)' + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
       }).join('<br/>');
     }
     function memberMatchesGroup_(member, groupKey){
@@ -1992,11 +2120,11 @@ function eventDateYmdFromKey(ev){
       if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
         var d0 = collectCameraDiagnostics_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
         var detail0 = buildCameraStartDetail_({ name:'MediaDevicesUnsupported', message:'navigator.mediaDevices.getUserMedia is unavailable' });
-        console.error('E420 camera unsupported', detail0.diagnostics);
+        console.error('E420 camera unsupported', d0);
         reportScannerE420_('unsupported', d0);
         onCaptured(null, {
-          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0.detail,
-          detailHtml: '<div class="small">'+escapeHtml(detail0.detail||'')+'</div>' +
+          code:'E420', zh:'此裝置不支援相機', en:'Camera not supported', detail: detail0,
+          detailHtml: '<div class="small">'+escapeHtml(detail0||'')+'</div>' +
             bindCameraRetryButton_('scanMsg', function(){
               openExternalScanner_({
                 flow:'admin',
@@ -2346,7 +2474,6 @@ function eventDateYmdFromKey(ev){
       if (goServingPlan){
         goServingPlan.onclick = function(){ logAction('OPEN_SERVING_PLAN','', 'nav'); App.view='servingPlan'; render(); };
       }
-
       var goAttendance = $('goAttendance');
       if (goAttendance){
         goAttendance.onclick = function(){ logAction('OPEN_ATT_HOME','', 'nav'); App.view='attendanceHome'; render(); };
@@ -2458,8 +2585,11 @@ function eventDateYmdFromKey(ev){
     function viewServingPlan(){
       return ''+
         '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
-          '<div class="big">🧩 事奉排期 / Serving plan</div>'+
-          '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
+            '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+            '<button id="goMobileServingInline" class="btnStats btnSmall" style="width:auto;">📱</button>'+
+          '</div>'+
+          '<div class="small">先選擇月份，再選擇組別。以直向卡片顯示，避免橫向捲動。<br/>Select month and group. Vertical cards, no horizontal scrolling.</div>'+
           '<div id="servingPlanList" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -2470,205 +2600,206 @@ function eventDateYmdFromKey(ev){
 
     function bindServingPlan(){
       $('backServingPlan').onclick = function(){ App.view='menu'; render(); };
+      var inlineMobile = $('goMobileServingInline');
+      if (inlineMobile) inlineMobile.onclick = function(){ App.view='mobileServing'; render(); };
 
       var listEl = $('servingPlanList');
-      function loadServingPlan(){
-        listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
-
-        Promise.all([
+      function fetchServingPlan_(force){
+        if (!force && App.servingPlanCache && App.servingPlanCache.matrixRes && App.servingPlanCache.overviewRes){
+          return Promise.resolve(App.servingPlanCache);
+        }
+        return Promise.all([
           callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()),
           callApi('api_admin_serving_group_overview', App.token, getTodayYmdUk())
         ]).then(function(allRes){
-          var res = allRes[0];
-          var overviewRes = allRes[1];
-          if(!res || !res.ok){
-            listEl.innerHTML = '';
-            showErr('servingPlanMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
-            return;
-          }
-          App.servingGroupOverview = (overviewRes && overviewRes.ok) ? (overviewRes.overview || {}) : {};
-          var events = res.events || [];
-          var positions = res.positions || [];
-          var canEditByGroup = (res && res.canEditByGroup) ? res.canEditByGroup : {};
-          var normalizedCanEditByGroup = {};
-          Object.keys(canEditByGroup).forEach(function(k){
-            var nk = normalizeServingGroupKey_(k);
-            if (!nk) return;
-            normalizedCanEditByGroup[nk] = !!canEditByGroup[k];
-          });
-          if(!events.length){
-            listEl.innerHTML =
-              '<div class="msgBox warn">'+
-                '<div class="big warn">暫無記錄 / No events</div>'+
-              '</div>';
-            return;
-          }
-          if(!positions.length){
-            listEl.innerHTML =
-              '<div class="msgBox warn">'+
-                '<div class="big warn">暫無事奉資料 / No serving rows</div>'+
-              '</div>';
-            return;
-          }
-
-          var groupOrder = servingPlanGroupOrder_();
-          var monthMap = {};
-          var monthKeys = [];
-          events.forEach(function(ev){
-            var parts = parseYmdParts_(ev.dateYmd);
-            if (!parts) return;
-            var key = parts.m;
-            if (!monthMap[key]){
-              monthMap[key] = [];
-              monthKeys.push(key);
-            }
-            monthMap[key].push(ev);
-          });
-          monthKeys.sort(function(a,b){ return a - b; });
-          if (!App.servingPlanMonth && monthKeys.length){
-            App.servingPlanMonth = monthKeys[0];
-          }
-          var monthButtons = monthKeys.map(function(m){
-            var active = (String(App.servingPlanMonth) === String(m));
-            var cls = active ? 'btnMain' : 'btnBack';
-            return '<button class="'+cls+' monthPick" data-month="'+m+'">'+escapeHtml(monthLabel_(m))+'</button>';
-          }).join('');
-          var monthNavHtml =
-            '<div class="miniBtnRow" style="margin-top:6px;">'+
-              monthButtons+
-            '</div>';
-          var viewEvents = monthMap[App.servingPlanMonth] || [];
-          var groupSections = groupOrder.map(function(groupKey){
-            var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
-            var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
-            if (!groupPositions.length) return '';
-            var canEdit = canEditServingPlanGroup_(groupKey, normalizedCanEditByGroup);
-            var headerHtml = groupPositions.map(function(pos){
-              return '<th class="servingPlanCell posGroup-'+escapeHtml(groupKey)+'">'+escapeHtml(servingPositionLabel_(pos))+'</th>';
-            }).join('');
-            var bodyHtml = viewEvents.map(function(ev){
-              var rowCells = groupPositions.map(function(pos){
-                var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
-                var minReq = positionMinRequired_(pos.position);
-                var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
-                if (!maxSlots || maxSlots < 1) maxSlots = 1;
-                var existingEntries = (cell && cell.length) ? cell : [];
-                var hasClosed = existingEntries.some(function(entry){
-                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
-                  return isServingClosedToken_(raw);
-                });
-                var assignedMemberCount = hasClosed ? minReq : existingEntries.filter(function(entry){
-                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim().toUpperCase();
-                  if (!raw) return false;
-                  if (isServingClosedToken_(raw)) return false;
-                  return true;
-                }).length;
-                var ymd = eventDateYmdFromKey(ev.eventKey||'');
-                var evDate = parseYmd(ymd);
-                var today = parseYmd(getTodayYmdUk());
-                var diff = (evDate && today) ? daysBetween(today, evDate) : 9999;
-                var isMediaPos = /^Media_/i.test(String(pos.position||''));
-                var urgentGap = (!hasClosed) && (diff >= 0 && diff < 28 && assignedMemberCount < minReq);
-                if (isMediaPos && assignedMemberCount > 0) urgentGap = false;
-                var entries = existingEntries.map(function(entry, idx){
-                  var label = formatServingEntry_(entry);
-                  if (!label) return '';
-                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
-                  return ''+
-                    '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
-                      escapeHtml(label)+
-                    '</button>';
-                }).filter(Boolean);
-                var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
-                if (vacantCount > 0){
-                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 / Vacant x'+vacantCount+'</button>');
-                }
-                return '<td class="servingPlanCell posGroup-'+escapeHtml(groupKey)+(urgentGap ? ' servingGapUrgent' : '')+'">'+entries.join('')+'</td>';
-              }).join('');
-              return ''+
-                '<tr>'+
-                  '<td class="servingPlanEvent">'+
-                    '<div>'+escapeHtml(eventLabel_(ev))+'</div>'+
-                    (canEdit ? '<div style="margin-top:6px;"><button class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(groupKey)+'">✏️ 編輯 / Edit</button></div>' : '')+
-                  '</td>'+
-                  rowCells +
-                '</tr>';
-            }).join('');
-            var isOpen = !!App.servingPlanOpenGroups[groupKey];
-            return ''+
-              '<div class="monthSection" data-group="'+groupKey+'">'+
-                '<button class="btnPeriod servingGroupToggle '+badge.cls+'" data-group="'+groupKey+'">'+
-                  badge.zh + ' / ' + badge.en + (isOpen ? ' ▲' : ' ▼')+
-                '</button>'+
-                '<div class="monthBody '+(isOpen ? '' : 'hide')+'">'+
-                  '<div class="groupSectionHead" style="margin:8px 0 4px;">'+
-                    '<div></div>'+
-                    (groupKey === 'other' ? '' : '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 摘要 / Summary</button>')+
-                  '</div>'+
-                  '<div class="tableWrap">'+
-                    '<table class="servingPlanTable">'+
-                      '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
-                      '<tbody>'+bodyHtml+'</tbody>'+
-                    '</table>'+
-                  '</div>'+
-                '</div>'+
-              '</div>';
-          }).join('');
-
-          listEl.innerHTML = monthNavHtml + groupSections;
-          attachScrollControls_(listEl);
-          enableDragScroll_(listEl);
-
-          Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
-            btn.onclick = function(){
-              openServingEditModal(btn.getAttribute('data-event'), btn.getAttribute('data-group'));
-            };
-          });
-          Array.prototype.slice.call(listEl.querySelectorAll('.servingPlanEntry')).forEach(function(btn){
-            btn.onclick = function(){
-              if (String(btn.getAttribute('data-can-edit')||'0') !== '1') return;
-              openServingQuickEdit_(btn.getAttribute('data-event'), btn.getAttribute('data-position'), btn.getAttribute('data-idx'), btn.getAttribute('data-raw'), btn.getAttribute('data-group'));
-            };
-          });
-          Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupToggle')).forEach(function(btn){
-            btn.onclick = function(){
-              var key = String(btn.getAttribute('data-group')||'');
-              App.servingPlanOpenGroups[key] = !App.servingPlanOpenGroups[key];
-              loadServingPlan();
-            };
-          });
-          Array.prototype.slice.call(listEl.querySelectorAll('.servingGroupInfoToggle')).forEach(function(btn){
-            btn.onclick = function(){
-              var key = String(btn.getAttribute('data-group')||'');
-              if (!key) return;
-              var sumModal = openModal(buildServingGroupOverviewPopupHtml_(key, App.servingGroupOverview || {}));
-              var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
-              if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
-              var gapHost = sumModal.querySelector('#groupGapResult');
-              renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84);
-              var btn6 = sumModal.querySelector('#btnGroupGap6');
-              var btn12 = sumModal.querySelector('#btnGroupGap12');
-              if (btn6) btn6.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 42); };
-              if (btn12) btn12.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84); };
-            };
-          });
-          Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
-            btn.onclick = function(){
-              var monthKey = String(btn.getAttribute('data-month')||'');
-              App.servingPlanMonth = monthKey;
-              loadServingPlan();
-            };
-          });
-        }).catch(function(){
-          listEl.innerHTML = '';
-          showErr('servingPlanMsg', {code:'E500', zh:'系統錯誤', en:'System error'});
+          App.servingPlanCache = { matrixRes: allRes[0], overviewRes: allRes[1], fetchedAt: Date.now() };
+          return App.servingPlanCache;
         });
       }
+      function renderServingPlanFromCache_(){
+        var cache = App.servingPlanCache || {};
+        var res = cache.matrixRes;
+        if(!res || !res.ok){
+          listEl.innerHTML = '<div class="msgBox err">'+renderModalErrorHtml_(res||{code:'E500', zh:'系統錯誤', en:'System error'})+'</div>';
+          return;
+        }
+        var events = Array.isArray(res.events) ? res.events : [];
+        var positions = Array.isArray(res.positions) ? res.positions : [];
+        if(!events.length || !positions.length){
+          listEl.innerHTML = '<div class="msgBox warn"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
+          return;
+        }
+        var canEditByGroup = (res && res.canEditByGroup) ? res.canEditByGroup : {};
+        var normalizedCanEditByGroup = {};
+        Object.keys(canEditByGroup).forEach(function(k){
+          var nk = normalizeServingGroupKey_(k);
+          if (nk) normalizedCanEditByGroup[nk] = !!canEditByGroup[k];
+        });
 
-      App.refreshServingPlan = loadServingPlan;
+        var monthMap = {};
+        var monthKeys = [];
+        events.forEach(function(ev){
+          var parts = parseYmdParts_(ev.dateYmd);
+          if (!parts) return;
+          var key = String(parts.m);
+          if (!monthMap[key]){ monthMap[key]=[]; monthKeys.push(key); }
+          monthMap[key].push(ev);
+        });
+        monthKeys.sort(function(a,b){ return Number(a)-Number(b); });
+        if (!App.servingPlanMonth || monthKeys.indexOf(String(App.servingPlanMonth)) < 0){ App.servingPlanMonth = monthKeys[0] || ''; }
+
+        var monthButtons = monthKeys.map(function(m){
+          var active = (String(App.servingPlanMonth) === String(m));
+          return '<button class="'+(active?'btnMain':'btnBack')+' monthPick" data-month="'+escapeHtml(m)+'">'+escapeHtml(monthLabel_(Number(m)))+'</button>';
+        }).join('');
+
+        var groups = servingPlanGroupOrder_().filter(function(g){ return positions.some(function(pos){ return (POSITION_GROUP[pos.position]||'')===g; }); });
+        if (!App.selectedServingGroup || groups.indexOf(App.selectedServingGroup) < 0){ App.selectedServingGroup = groups[0] || ''; }
+        var groupButtons = groups.map(function(g){
+          var b = SERVING_GROUP_BADGES[g] || { zh:g, en:g, cls:'' };
+          var active = (g === App.selectedServingGroup);
+          return '<button type="button" class="groupContextBtn '+(active?'isSelected ':'')+(b.cls||'')+'" data-group="'+escapeHtml(g)+'">'+escapeHtml(b.zh)+'<br/>'+escapeHtml(b.en)+'</button>';
+        }).join('');
+
+        var gk = String(App.selectedServingGroup||'');
+        var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === gk; }).slice(0,5);
+        var canEdit = canEditServingPlanGroup_(gk, normalizedCanEditByGroup);
+        var viewEvents = monthMap[String(App.servingPlanMonth)] || [];
+        var cards = viewEvents.map(function(ev){
+          var posBlocks = groupPositions.map(function(pos){
+            var cell = (res.cells && res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+            var entries = cell.map(function(entry, idx){
+              var blockHtml = renderServingMemberBlockHtml_(entry);
+              if (!blockHtml) return '';
+              return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(String(entry.rawValue||entry.memberId||''))+'">'+blockHtml+'</button>';
+            }).filter(Boolean).join('');
+            if (!entries) entries = '<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="0" data-raw="">空缺 / Vacant</button>';
+            return '<div class="servingPlanPosBlock"><div>'+renderServingPositionLabelHtml_(pos)+'</div><div style="margin-top:6px;">'+entries+'</div></div>';
+          }).join('');
+          return '<div class="servingPlanEventCard"><div class="mobileServingEventDate">'+escapeHtml(eventLabel_(ev))+'</div>'+
+            (canEdit ? '<div class="mobileServingActions"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '')+
+            '<div class="servingPlanPosGrid">'+posBlocks+'</div></div>';
+        }).join('');
+
+        listEl.innerHTML = '<div class="miniBtnRow" style="margin-top:4px;">'+monthButtons+'</div>'+
+          '<div class="groupContextRow">'+groupButtons+'</div>'+
+          '<div class="servingPlanEventsStack">'+(cards || '<div class="msgBox warn"><div class="small">此月份暫無資料 / No events in this month</div></div>')+'</div>';
+
+        Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
+          btn.onclick = function(){ App.servingPlanMonth = String(btn.getAttribute('data-month')||''); renderServingPlanFromCache_(); };
+        });
+        Array.prototype.slice.call(listEl.querySelectorAll('[data-group]')).forEach(function(btn){
+          if (!btn.classList.contains('groupContextBtn')) return;
+          btn.onclick = function(){ App.selectedServingGroup = String(btn.getAttribute('data-group')||''); renderServingPlanFromCache_(); };
+        });
+        Array.prototype.slice.call(listEl.querySelectorAll('.servingEditBtn')).forEach(function(btn){
+          btn.onclick = function(){ openServingEditModal(btn.getAttribute('data-event'), btn.getAttribute('data-group')); };
+        });
+        Array.prototype.slice.call(listEl.querySelectorAll('.servingPlanEntry')).forEach(function(btn){
+          btn.onclick = function(){
+            if (String(btn.getAttribute('data-can-edit')||'0') !== '1') return;
+            openServingQuickEdit_(btn.getAttribute('data-event'), btn.getAttribute('data-position'), btn.getAttribute('data-idx'), btn.getAttribute('data-raw'), btn.getAttribute('data-group'));
+          };
+        });
+      }
+      function loadServingPlan(force){
+        listEl.innerHTML = '<div class="small">載入中… / Loading…</div>';
+        fetchServingPlan_(!!force).then(renderServingPlanFromCache_).catch(function(e){
+          listEl.innerHTML = '<div class="msgBox err">'+renderModalErrorHtml_({code:'E500', zh:'系統錯誤', en:'System error', detail:String(e&&e.message||e)})+'</div>';
+        });
+      }
+      App.refreshServingPlan = function(){ loadServingPlan(true); };
       if (App.servingPlanTimer) clearInterval(App.servingPlanTimer);
-      App.servingPlanTimer = setInterval(function(){ loadServingPlan(); }, 180000);
-      loadServingPlan();
+      App.servingPlanTimer = setInterval(function(){ if (App.view === 'servingPlan' || App.view === 'mobileServing') loadServingPlan(true); }, 180000);
+      loadServingPlan(!App.servingPlanCache);
+    }
+
+    function viewMobileServing(){
+      return ''+
+        '<div class="card" style="border-color:rgba(40,90,200,0.18);background:#f3f7ff;">'+
+          '<div class="big">📱 手機模式 / Mobile mode</div>'+
+          '<div class="small">手機友善事奉排期，可切換卡片與矩陣檢視。<br/>Mobile-optimised serving view with card and matrix layouts.</div>'+
+          '<div id="mobileServingHost" style="margin-top:10px;"></div>'+
+          '<button id="btnExitMobileMode" class="btnBack mobileExit">⬅️ 退出手機模式 / Exit mobile mode</button>'+
+        '</div>';
+    }
+
+    function bindMobileServing(){
+      $('btnExitMobileMode').onclick = function(){ App.view='servingPlan'; render(); };
+      var host = $('mobileServingHost');
+      if (!App.refreshServingPlan){ host.innerHTML = '<div class="small">載入中… / Loading…</div>'; }
+
+      function renderFromCache_(){
+        var cache = App.servingPlanCache || {};
+        var res = cache.matrixRes;
+        if (!res || !res.ok){ host.innerHTML = '<div class="msgBox err">'+renderModalErrorHtml_(res||{code:'E500', zh:'系統錯誤', en:'System error'})+'</div>'; return; }
+        var events = Array.isArray(res.events)?res.events:[];
+        var positions = Array.isArray(res.positions)?res.positions:[];
+        var canEditByGroup = (res && res.canEditByGroup) ? res.canEditByGroup : {};
+        var normalizedCanEditByGroup = {};
+        Object.keys(canEditByGroup).forEach(function(k){ var nk = normalizeServingGroupKey_(k); if (nk) normalizedCanEditByGroup[nk] = !!canEditByGroup[k]; });
+        var monthMap = {}; var monthKeys=[];
+        events.forEach(function(ev){ var parts=parseYmdParts_(ev.dateYmd); if(!parts) return; var key=String(parts.m); if(!monthMap[key]){monthMap[key]=[]; monthKeys.push(key);} monthMap[key].push(ev); });
+        monthKeys.sort(function(a,b){return Number(a)-Number(b);});
+        if (!App.mobileServingMonth || monthKeys.indexOf(String(App.mobileServingMonth))<0) App.mobileServingMonth = monthKeys[0] || '';
+        var groups = servingPlanGroupOrder_().filter(function(g){ return positions.some(function(pos){ return (POSITION_GROUP[pos.position]||'')===g; }); });
+        if (!App.mobileServingGroup || groups.indexOf(App.mobileServingGroup)<0) App.mobileServingGroup = groups[0] || '';
+        var gk=String(App.mobileServingGroup||'');
+        var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position]||'')===gk; }).slice(0,5);
+        var canEdit = canEditServingPlanGroup_(gk, normalizedCanEditByGroup);
+        var evs = monthMap[String(App.mobileServingMonth)] || [];
+
+        function renderCards_(){
+          var cards = evs.map(function(ev){
+            var posBlocks = groupPositions.map(function(pos){
+              var cell = (res.cells&&res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+              var entries = cell.map(function(entry,idx){
+                var block = renderServingMemberBlockHtml_(entry); if(!block) return '';
+                return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(String(entry.rawValue||entry.memberId||''))+'">'+block+'</button>';
+              }).filter(Boolean).join('');
+              if(!entries) entries = '<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(gk)+'" data-can-edit="'+(canEdit?'1':'0')+'" data-idx="0" data-raw="">空缺 / Vacant</button>';
+              return '<div class="servingPlanPosBlock"><div>'+renderServingPositionLabelHtml_(pos)+'</div><div style="margin-top:6px;">'+entries+'</div></div>';
+            }).join('');
+            return '<div class="servingPlanEventCard"><div class="mobileServingEventDate">'+escapeHtml(eventLabel_(ev))+'</div>'+
+              (canEdit ? '<div class="mobileServingActions"><button type="button" class="btnPeriod servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(gk)+'">✏️ 編輯 / Edit</button></div>' : '')+
+              '<div class="servingPlanPosGrid">'+posBlocks+'</div></div>';
+          }).join('');
+          return cards || '<div class="msgBox warn"><div class="small">此月份暫無資料 / No events in this month</div></div>';
+        }
+        function renderMatrix_(){
+          var rows = evs.map(function(ev){
+            var cols = groupPositions.map(function(pos){
+              var cell = (res.cells&&res.cells[ev.eventKey]) ? (res.cells[ev.eventKey][pos.key] || []) : [];
+              var lines = cell.slice(0,3).map(function(entry){ return renderServingMemberBlockHtml_(entry); }).join('');
+              if(!lines) lines = '<div class="small">空缺 / Vacant</div>';
+              return '<div class="servingPlanPosBlock"><div>'+renderServingPositionLabelHtml_(pos)+'</div><div style="margin-top:6px;">'+lines+'</div></div>';
+            }).join('');
+            return '<div class="servingPlanEventCard"><div class="mobileServingEventDate">'+escapeHtml(eventLabel_(ev))+'</div><div class="servingPlanPosGrid" style="margin-top:8px;">'+cols+'</div></div>';
+          }).join('');
+          return rows || '<div class="msgBox warn"><div class="small">此月份暫無資料 / No events in this month</div></div>';
+        }
+
+        var monthOpts = monthKeys.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(String(m)===String(App.mobileServingMonth)?' selected':'')+'>'+escapeHtml(monthLabel_(Number(m)))+'</option>'; }).join('');
+        var groupOpts = groups.map(function(g){ var b=SERVING_GROUP_BADGES[g]||{zh:g,en:g}; return '<option value="'+escapeHtml(g)+'"'+(String(g)===String(App.mobileServingGroup)?' selected':'')+'>'+escapeHtml(b.zh+' / '+b.en)+'</option>'; }).join('');
+        host.innerHTML = '<div class="mobileServingFilters"><select id="mobileServingMonthSel">'+monthOpts+'</select><select id="mobileServingGroupSel">'+groupOpts+'</select></div>'+
+          '<div class="servingModeToggle"><button id="modeCard" class="'+(App.mobileServingLayout==='card'?'btnMain':'btnBack')+'">🗂️ 卡片 / Card</button><button id="modeMatrix" class="'+(App.mobileServingLayout==='matrix'?'btnMain':'btnBack')+'">🔢 矩陣 / Matrix</button><button id="mobileServingRefresh" class="btnBack">🔄 重新整理 / Refresh</button></div>'+
+          '<div id="mobileServingBody" style="margin-top:8px;">'+(App.mobileServingLayout==='matrix'?renderMatrix_():renderCards_())+'</div>';
+        $('mobileServingMonthSel').onchange = function(){ App.mobileServingMonth = String(this.value||''); renderFromCache_(); };
+        $('mobileServingGroupSel').onchange = function(){ App.mobileServingGroup = String(this.value||''); renderFromCache_(); };
+        $('modeCard').onclick = function(){ App.mobileServingLayout='card'; renderFromCache_(); };
+        $('modeMatrix').onclick = function(){ App.mobileServingLayout='matrix'; renderFromCache_(); };
+        $('mobileServingRefresh').onclick = function(){ if (App.refreshServingPlan) App.refreshServingPlan(); setTimeout(renderFromCache_,150); };
+        Array.prototype.slice.call(host.querySelectorAll('.servingEditBtn')).forEach(function(btn){ btn.onclick=function(){ openServingEditModal(btn.getAttribute('data-event'), btn.getAttribute('data-group')); }; });
+        Array.prototype.slice.call(host.querySelectorAll('.servingPlanEntry')).forEach(function(btn){ btn.onclick=function(){ if(String(btn.getAttribute('data-can-edit')||'0')!=='1') return; openServingQuickEdit_(btn.getAttribute('data-event'), btn.getAttribute('data-position'), btn.getAttribute('data-idx'), btn.getAttribute('data-raw'), btn.getAttribute('data-group')); }; });
+      }
+
+      if (App.servingPlanCache && App.servingPlanCache.matrixRes){ renderFromCache_(); return; }
+      host.innerHTML = '<div class="small">載入中… / Loading…</div>';
+      Promise.all([
+        callApi('api_admin_serving_plan_matrix', App.token, getTodayYmdUk()),
+        callApi('api_admin_serving_group_overview', App.token, getTodayYmdUk())
+      ]).then(function(allRes){ App.servingPlanCache={ matrixRes:allRes[0], overviewRes:allRes[1], fetchedAt:Date.now() }; renderFromCache_(); })
+        .catch(function(e){ host.innerHTML = '<div class="msgBox err">'+renderModalErrorHtml_({code:'E500', zh:'系統錯誤', en:'System error', detail:String(e&&e.message||e)})+'</div>'; });
     }
 
     function openServingEditModal(eventKey, groupKey){
@@ -2681,8 +2812,7 @@ function eventDateYmdFromKey(ev){
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            renderModalErrorHtml_(res || {code:'E500', zh:'系統錯誤', en:'System error'})+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -2750,7 +2880,7 @@ function eventDateYmdFromKey(ev){
             if (!token){
               chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">空缺 '+(slotIdx+1)+' / Vacant '+(slotIdx+1)+'</span>');
             } else {
-              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span>'+escapeHtml(token)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
+              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span>'+renderServingTokenHtml_(token, memberMap)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
             }
           }
           return '<div class="quickBubbleWrap">'+chips.join('')+'</div>';
@@ -3070,7 +3200,7 @@ function eventDateYmdFromKey(ev){
                   var titleEn = 'Serving assignment conflict. Please review.';
                   if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
                     titleZh = '同一會員重覆崗位';
-                    titleEn = 'They are already serving this position.';
+                    titleEn = '該會員已在此崗位事奉 / They are already serving this position.';
                   } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
                     titleZh = '事奉安排與離開期重疊';
                     titleEn = 'Serving assignment overlaps holiday period.';
@@ -3092,15 +3222,8 @@ function eventDateYmdFromKey(ev){
                   }
                   if (res2.duplicates && res2.duplicates.length){
                     titleZh = '同一會員重覆崗位';
-                    titleEn = 'They are already serving this position.';
-                    detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                      var posLabelsZh = (d.positions||[]).map(function(p){
-                        var label = SERVING_POSITION_LABELS[p] || {};
-                        return label.zh || p;
-                      });
-                      var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                    }).join('<br/>');
+                    titleEn = '該會員已在此崗位事奉 / They are already serving this position.';
+                    detail = (detail ? (detail + '<br/>') : '') + buildDuplicateConflictDetailHtml_(res2.duplicates, res2.dateYmd, '');
                   }
                 showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                   var btnRow = document.createElement('div');
@@ -3145,8 +3268,7 @@ function eventDateYmdFromKey(ev){
         render();
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
+          renderModalErrorHtml_({code:'E500', zh:'系統錯誤', en:'System error'})+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -3167,8 +3289,7 @@ function eventDateYmdFromKey(ev){
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            renderModalErrorHtml_(res || {code:'E500', zh:'系統錯誤', en:'System error'})+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -3221,7 +3342,7 @@ function eventDateYmdFromKey(ev){
                 var titleEn = 'Serving assignment conflict. Please review.';
                 if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
                   titleZh = '同一會員重覆崗位';
-                  titleEn = 'They are already serving this position.';
+                  titleEn = '該會員已在此崗位事奉 / They are already serving this position.';
                 } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
                   titleZh = '事奉安排與離開期重疊';
                   titleEn = 'Serving assignment overlaps holiday period.';
@@ -3243,15 +3364,8 @@ function eventDateYmdFromKey(ev){
                 }
                 if (res2.duplicates && res2.duplicates.length){
                   titleZh = '同一會員重覆崗位';
-                  titleEn = 'They are already serving this position.';
-                  detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                    var posLabelsZh = (d.positions||[]).map(function(p){
-                      var label = SERVING_POSITION_LABELS[p] || {};
-                      return label.zh || p;
-                    });
-                    var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                  }).join('<br/>');
+                  titleEn = '該會員已在此崗位事奉 / They are already serving this position.';
+                  detail = (detail ? (detail + '<br/>') : '') + buildDuplicateConflictDetailHtml_(res2.duplicates, res2.dateYmd, pos);
                 }
                 showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                 var btnRow = document.createElement('div');
@@ -3306,10 +3420,10 @@ function eventDateYmdFromKey(ev){
             var chips = draftSlots.map(function(token, slotIdx){
               var selectedCls = (slotIdx === selectedSlotIdx) ? ' slotSelected' : '';
               var isVac = !String(token||'').trim();
-              var label = isVac ? ('空缺 ' + (slotIdx + 1) + ' / Vacant ' + (slotIdx + 1)) : token;
+              var label = isVac ? escapeHtml('空缺 ' + (slotIdx + 1) + ' / Vacant ' + (slotIdx + 1)) : renderServingTokenHtml_(token, memberMap);
               var bubbleCls = 'quickBubble' + (isVac ? ' quickBubbleVacancy' : '') + selectedCls;
               var rm = isVac ? '' : '<button type="button" data-rm="'+slotIdx+'">×</button>' ;
-              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+escapeHtml(label)+rm+'</span>';
+              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+label+rm+'</span>';
             });
             wrap.innerHTML = chips.join('');
           }
@@ -3421,8 +3535,7 @@ function eventDateYmdFromKey(ev){
         enableDragScroll_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
+          renderModalErrorHtml_({code:'E500', zh:'系統錯誤', en:'System error'})+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -3613,7 +3726,7 @@ function eventDateYmdFromKey(ev){
 
       function doSearch(q){
         clear('memberMsg');
-        $('mResults').innerHTML = '<div class="small">Searching…</div>';
+        $('mResults').innerHTML = '<div class="small">搜尋中… / Searching…</div>';
         logAction('MEMBER_SEARCH', q, 'member_search');
 
         callApi('api_admin_member_search', App.token, q).then(function(res){
@@ -3948,8 +4061,7 @@ function eventDateYmdFromKey(ev){
       callApi('api_admin_event_detail', App.token, eventKey).then(function(res){
         if(!res || !res.ok){
           m.querySelector('.modal').innerHTML =
-            '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            renderModalErrorHtml_(res || {code:'E500', zh:'系統錯誤', en:'System error'})+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -3994,12 +4106,6 @@ function eventDateYmdFromKey(ev){
             return '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
           }
 
-          function formatServingName_(r){
-            var pref = String(r.preferredName||'').trim();
-            var en = String(r.nameEn||'').trim();
-            var zh = String(r.nameZh||'').trim();
-            return [pref, en, zh].filter(Boolean).join(' / ');
-          }
           function servingBadgeHtml_(groupKey){
             var badge = SERVING_GROUP_BADGES[normalizeServingGroupKey_(groupKey)] || null;
             if (!badge) return escapeHtml(getServingGroupLabel_(groupKey));
@@ -4013,15 +4119,14 @@ function eventDateYmdFromKey(ev){
               currentGroup = r.group;
               html += '<div class="big" style="margin-top:10px;">'+servingBadgeHtml_(currentGroup)+'</div>';
             }
-            var who = formatServingName_(r);
             var slot = r.slot ? (' · ' + r.slot) : '';
             var status = r.checkedIn ? '✅' : '❌';
             var posLabel = servingPositionLabel_({ position: r.position, group: r.group });
-            var idLine = r.memberId || '—';
+            var entry = { memberId:r.memberId || '', nameEn:r.nameEn || '', nameZh:r.nameZh || '', rawValue:r.memberId || '' };
             html += ''+
               '<div class="nameItem">'+
                 '<div class="zh">'+escapeHtml(status+' '+posLabel+slot)+'</div>'+
-                '<div class="en">'+escapeHtml(idLine+(who ? (' · '+who) : ''))+'</div>'+
+                renderServingMemberBlockHtml_(entry)+
               '</div>';
           });
           return '<div class="listWrap" style="margin-top:10px;">'+html+'</div>';
@@ -4073,8 +4178,7 @@ function eventDateYmdFromKey(ev){
 
       }).catch(function(){
         m.querySelector('.modal').innerHTML =
-          '<div class="big err">系統錯誤 / Error</div>'+
-          '<div class="small">System error</div>'+
+          renderModalErrorHtml_({code:'E500', zh:'系統錯誤', en:'System error'})+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -4392,7 +4496,20 @@ function eventDateYmdFromKey(ev){
       try{ return window.top !== window.self; }catch(e){ return true; }
     }
     function ensureNotEmbeddedForSensitive_(){
-      return true;
+      if (!isEmbeddedBlocked_()) return true;
+      showErr('app', { code:'E403', zh:'為保障私隱，內嵌瀏覽器已封鎖此敏感操作。請按下方按鈕在 Safari/Chrome 開啟。', en:'For privacy, this sensitive action is blocked in embedded browsers. Please open this page in Safari/Chrome.' });
+      var host = $('app');
+      if (host){
+        var ctaId = 'openSystemBrowserCta';
+        if (!$(ctaId)) host.insertAdjacentHTML('afterbegin', '<div class="card msgBox warn embedWarnCta" id="'+ctaId+'"><div class="small">請在 Safari/Chrome 開啟此頁面再重試。 / Open this page in Safari/Chrome and try again.</div><div style="margin-top:8px;"><button id="btnCopyUrlOpen" class="btnBack">📋 複製連結 / Copy link</button></div></div>');
+        var btn = $('btnCopyUrlOpen');
+        if (btn) btn.onclick = function(){
+          var url = String(window.location.href||'');
+          if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url); }
+          alert('已複製連結，請貼到 Safari/Chrome 開啟。\nLink copied. Open in Safari/Chrome.');
+        };
+      }
+      return false;
     }
     function openContactFlow_(memberId){
       if(!ensureNotEmbeddedForSensitive_()) return;
@@ -4663,6 +4780,7 @@ function eventDateYmdFromKey(ev){
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); startClock(); attachScrollControls_(root); return; }
       if(App.view==='attendanceHome'){ root.innerHTML = viewAttendanceHome(); bindAttendanceHome(); attachScrollControls_(root); return; }
       if(App.view==='servingPlan'){ root.innerHTML = viewServingPlan(); bindServingPlan(); attachScrollControls_(root); return; }
+      if(App.view==='mobileServing'){ root.innerHTML = viewMobileServing(); bindMobileServing(); attachScrollControls_(root); return; }
       if(App.view==='glGroupMembers'){ root.innerHTML = viewServingGroupMembersPage_(true); bindServingGroupMembersPage_(true); attachScrollControls_(root); return; }
       if(App.view==='adminGroupMembers'){ root.innerHTML = viewServingGroupMembersPage_(false); bindServingGroupMembersPage_(false); attachScrollControls_(root); return; }
       if(App.view==='matrix'){ root.innerHTML = viewMatrix(); bindMatrix(); attachScrollControls_(root); return; }
