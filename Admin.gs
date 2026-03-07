@@ -387,6 +387,7 @@ function api_admin_serving_plan_matrix(token, fromDate){
     events: matrix.events,
     positions: matrix.positions,
     cells: matrix.cells,
+    memberDirectory: matrix.memberDirectory,
     canEditByGroup: admin_getServingPlanEditMap_(s.actor, matrix.positions),
     maxMonths: ADMIN_SERVING_MONTHS_AHEAD
   };
@@ -599,13 +600,23 @@ function api_admin_serving_event_rows(token, eventKey){
   const positions = ADMIN_SERVING_POSITIONS.slice();
   const values = admin_getServingValuesForEvent_(ev);
   const mi = admin_getMembersIndex_();
+  const memberDirectory = admin_buildServingMemberDirectory_(mi.byId || {});
+  const cells = admin_buildServingEventCells_(values);
   const members = Object.keys(mi.byId).map(function(id){
     const m = mi.byId[id];
     const groups = (m.servingGroups || []).concat(m.servingGLGroups || []).filter(Boolean);
     return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', preferredName: m.preferredName||'', groups: groups };
   });
   members.sort(function(a,b){ return a.id.localeCompare(b.id); });
-  return { ok:true, eventKey: ev, positions: positions, values: values, members: members };
+  return {
+    ok:true,
+    eventKey: ev,
+    positions: positions,
+    values: values,
+    cells: cells,
+    memberDirectory: memberDirectory,
+    members: members
+  };
 }
 
 /**
@@ -648,7 +659,19 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const membersById = mi.byId || {};
   const existingValues = admin_getServingValuesForEvent_(ev);
   const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
+  const existingMemberPositionMap = {};
   const mergedValues = Object.assign({}, existingValues);
+  const targetPositionMap = {};
+
+  ADMIN_SERVING_POSITIONS.forEach(function(pos){
+    const raw = String(existingValues[pos] || '').trim();
+    if (!raw) return;
+    const ids = admin_extractMemberIdsFromServingValue_(raw);
+    ids.forEach(function(id){
+      if (!existingMemberPositionMap[id]) existingMemberPositionMap[id] = [];
+      existingMemberPositionMap[id].push(pos);
+    });
+  });
 
   const changedPositions = new Set();
   const changedMembers = new Set();
@@ -2469,17 +2492,17 @@ function admin_getServingPlanMatrix_(events){
 
   const sh = admin_getServingSheet_();
   if (!sh){
-    return { events: eventList, positions: [], cells: cells };
+    return { events: eventList, positions: [], cells: cells, memberDirectory: {} };
   }
   const lastRow = sh.getLastRow();
   if (lastRow < 2){
-    return { events: eventList, positions: [], cells: cells };
+    return { events: eventList, positions: [], cells: cells, memberDirectory: {} };
   }
 
   const matrix = admin_getServingMatrix_(sh);
   const lastCol = sh.getLastColumn();
   if (lastCol < 2){
-    return { events: eventList, positions: [], cells: cells };
+    return { events: eventList, positions: [], cells: cells, memberDirectory: {} };
   }
   const positions = matrix.positions.map(function(pos){
     return { key: pos.key, group: pos.group, position: pos.position };
@@ -2487,6 +2510,7 @@ function admin_getServingPlanMatrix_(events){
 
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
+  const memberDirectory = admin_buildServingMemberDirectory_(byId);
   const rowLookup = admin_getServingEventRowLookup_(sh);
 
   const targetRows = [];
@@ -2499,7 +2523,7 @@ function admin_getServingPlanMatrix_(events){
   });
 
   if (!targetRows.length){
-    return { events: eventList, positions: positions, cells: cells };
+    return { events: eventList, positions: positions, cells: cells, memberDirectory: memberDirectory };
   }
 
   const minRow = Math.min.apply(null, targetRows);
@@ -2520,25 +2544,54 @@ function admin_getServingPlanMatrix_(events){
       const raw = String(row[pos.colIndex-1] || '').trim();
       if (!raw) return;
       const values = admin_splitServingValues_(raw);
+      const memberIds = [];
+      const rawValues = [];
       values.forEach(function(val){
         const token = String(val||'').trim();
+        if (!token) return;
+        rawValues.push(token);
         const matched = token.match(/CCF\d{4}/i);
-        const memberId = matched ? matched[0].toUpperCase() : '';
-        const member = memberId ? (byId[memberId] || {}) : {};
-        const entry = {
-          memberId: memberId,
-          rawValue: val,
-          nameZh: String(member.nameZh || ''),
-          nameEn: String(member.nameEn || ''),
-          slot: ''
-        };
-        if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
-        cells[ev][pos.key].push(entry);
+        if (matched){
+          memberIds.push(matched[0].toUpperCase());
+        }
       });
+      cells[ev][pos.key] = { memberId: memberIds, rawValue: rawValues };
     });
   });
 
-  return { events: eventList, positions: positions, cells: cells };
+  return { events: eventList, positions: positions, cells: cells, memberDirectory: memberDirectory };
+}
+
+function admin_buildServingMemberDirectory_(byId){
+  const src = byId || {};
+  const out = {};
+  Object.keys(src).sort().forEach(function(id){
+    const key = String(id||'').trim().toUpperCase();
+    if (!/^CCF\d{4}$/.test(key)) return;
+    const m = src[id] || {};
+    out[key] = {
+      nameEn: String(m.nameEn || ''),
+      nameZh: String(m.nameZh || '')
+    };
+  });
+  return out;
+}
+
+function admin_buildServingEventCells_(valuesByPosition){
+  const values = valuesByPosition || {};
+  const out = {};
+  ADMIN_SERVING_POSITIONS.forEach(function(position){
+    const raw = String(values[position] || '').trim();
+    const tokens = admin_splitServingValues_(raw);
+    const ids = [];
+    tokens.forEach(function(token){
+      const matched = String(token||'').match(/CCF\d{4}/i);
+      if (!matched) return;
+      ids.push(String(matched[0] || '').toUpperCase());
+    });
+    out[position] = { memberId: ids, rawValue: tokens };
+  });
+  return out;
 }
 
 // Bypass code from Script Properties
