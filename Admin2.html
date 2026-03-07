@@ -1032,6 +1032,18 @@
       );
     }
 
+    function renderBilingualError_(res, fallbackKey){
+      var key = String(fallbackKey || 'SYSTEM_ERROR');
+      var fallback = uiText_(key);
+      var normalized = normalizeErrResForRender_(res || {
+        zh: fallback.zh,
+        en: fallback.en
+      });
+      return ''+
+        '<div class="big err">'+withErrorCodeTag_(escapeHtml(normalized.zh || fallback.zh), normalized)+'</div>'+
+        '<div class="small">'+escapeHtml(normalized.en || fallback.en)+'</div>';
+    }
+
 
 
     function bindGasRetryButton_(targetId, retryFn){
@@ -3033,9 +3045,12 @@ function eventDateYmdFromKey(ev){
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
-          var modalBody = modal.querySelector('.modal');
-          showModalError_(modalBody, res || systemErrorRes_());
-          modalBody.querySelector('#c').onclick = function(){ closeModal(modal); };
+          modal.querySelector('.modal').innerHTML =
+            renderBilingualError_(res, 'SYSTEM_ERROR')+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
           return;
         }
 
@@ -3489,8 +3504,7 @@ function eventDateYmdFromKey(ev){
         render();
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
-          '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
-          '<div class="small">'+escapeHtml(uiText_('SYSTEM_ERROR').en)+'</div>'+
+          renderBilingualError_(systemErrorRes_(), 'SYSTEM_ERROR')+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -3509,9 +3523,12 @@ function eventDateYmdFromKey(ev){
 
       callApi('api_admin_serving_event_rows', App.token, ev).then(function(res){
         if(!res || !res.ok){
-          var modalBody = modal.querySelector('.modal');
-          showModalError_(modalBody, res || systemErrorRes_());
-          modalBody.querySelector('#c').onclick = function(){ closeModal(modal); };
+          modal.querySelector('.modal').innerHTML =
+            renderBilingualError_(res, 'SYSTEM_ERROR')+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          modal.querySelector('#c').onclick = function(){ closeModal(modal); };
           return;
         }
 
@@ -3755,8 +3772,7 @@ function eventDateYmdFromKey(ev){
         enableDragScroll_(modal);
       }).catch(function(){
         modal.querySelector('.modal').innerHTML =
-          '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
-          '<div class="small">'+escapeHtml(uiText_('SYSTEM_ERROR').en)+'</div>'+
+          renderBilingualError_(systemErrorRes_(), 'SYSTEM_ERROR')+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
@@ -4281,9 +4297,12 @@ function eventDateYmdFromKey(ev){
 
       callApi('api_admin_event_detail', App.token, eventKey).then(function(res){
         if(!res || !res.ok){
-          var modalBody = m.querySelector('.modal');
-          showModalError_(modalBody, res || systemErrorRes_());
-          modalBody.querySelector('#c').onclick = function(){ closeModal(m); };
+          m.querySelector('.modal').innerHTML =
+            renderBilingualError_(res, 'SYSTEM_ERROR')+
+            '<div class="miniBtnRow" style="margin-top:12px;">'+
+              '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
+            '</div>';
+          m.querySelector('#c').onclick = function(){ closeModal(m); };
           return;
         }
 
@@ -4396,8 +4415,7 @@ function eventDateYmdFromKey(ev){
 
       }).catch(function(){
         m.querySelector('.modal').innerHTML =
-          '<div class="big err">'+escapeHtml(uiBi_('SYSTEM_ERROR'))+'</div>'+
-          '<div class="small">'+escapeHtml(uiText_('SYSTEM_ERROR').en)+'</div>'+
+          renderBilingualError_(systemErrorRes_(), 'SYSTEM_ERROR')+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>';
