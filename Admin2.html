@@ -91,6 +91,16 @@
 
     .footer{margin-top:14px;padding:6px 4px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 
+    /* Shell variants (driven by App.view) */
+    body.shell-serving .topbar,
+    body.shell-serving .footer{display:none}
+    body.shell-serving .wrap{max-width:1200px;padding:8px var(--pad) 12px}
+    body.shell-serving #backServingPlan,
+    body.shell-serving #btnExitMobileMode{
+      border-width:2px;
+      box-shadow:0 8px 18px rgba(40,90,200,0.22);
+    }
+
     .menuGrid{
       display:grid;
       grid-template-columns: 1fr 1fr;
@@ -384,7 +394,7 @@
 </head>
 
 <body>
-  <div class="wrap">
+  <div class="wrap" id="shellWrap">
     <header class="topbar">
       <div>
         <div class="title"><?= ADMIN_TITLE_ZH ?></div>
@@ -4843,6 +4853,7 @@ function eventDateYmdFromKey(ev){
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
+      syncShellClass_();
       if (App.view !== 'servingPlan' && App.servingPlanTimer){
         clearInterval(App.servingPlanTimer);
         App.servingPlanTimer = null;
@@ -4859,6 +4870,13 @@ function eventDateYmdFromKey(ev){
       if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); attachScrollControls_(root); return; }
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
       if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
+    }
+
+    function syncShellClass_(){
+      var body = document.body;
+      if (!body) return;
+      var isServingShell = (App.view === 'servingPlan' || App.view === 'mobileServing');
+      body.classList.toggle('shell-serving', isServingShell);
     }
 
     /* init */
