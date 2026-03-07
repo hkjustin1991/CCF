@@ -256,7 +256,7 @@ function doGetAdmin_(e){
  */
 function api_admin_login(input){
   const raw = String(input || '').trim();
-  if (!raw) return admin_err_('E401','請掃描你自己的同工 QR 登入','Please scan your own staff QR to login.');
+  if (!raw) return admin_err_('E401','請掃描你自己的同工 QR 登入','請掃描你自己的同工 QR 登入 / Please scan your own staff QR to login.');
 
   // SUPERUSER via secret stored in Script Properties (NOT hard-coded)
   const bypass = admin_getBypassCode_();
@@ -268,7 +268,7 @@ function api_admin_login(input){
 
   // If it's not a QR payload, treat as invalid login (not QR format error)
   if (raw.indexOf('|') < 0){
-    return admin_err_('E401','請掃描你自己的同工 QR 登入','Please scan your own staff QR to login.');
+    return admin_err_('E401','請掃描你自己的同工 QR 登入','請掃描你自己的同工 QR 登入 / Please scan your own staff QR to login.');
   }
 
   const parsed = admin_parseQrStrict_(raw);
@@ -652,6 +652,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
 
   const duplicateMap = {};
   const duplicateDetails = [];
+  const targetPositionMap = {};
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
@@ -712,7 +713,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         memberIdsForAway.push(id);
         changedMembers.add(id);
         if (!targetPositionMap[id]) targetPositionMap[id] = [];
-        targetPositionMap[id].push(r.position);
+        if (targetPositionMap[id].indexOf(r.position) < 0) targetPositionMap[id].push(r.position);
       }
     });
   }
@@ -740,21 +741,9 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    const targets = (targetPositionMap[id] || []).filter(function(p){ return effectivePositions.indexOf(p) >= 0; });
-    const uniqueTargets = Array.from(new Set(targets));
-    if (!uniqueTargets.length) return;
-    uniqueTargets.forEach(function(targetPosition){
-      const existingPositions = admin_filterDuplicateConflictPositions_((existingMemberPositionMap[id] || []).filter(function(p){
-        return p !== targetPosition;
-      }));
-      duplicateDetails.push({
-        memberId: id,
-        targetPosition: targetPosition,
-        existingPositions: existingPositions,
-        dateYmd: eventDateYmd,
-        newlyIntroduced: true
-      });
-    });
+    const targetPosition = ((targetPositionMap[id] && targetPositionMap[id][0]) || effectivePositions[0] || '');
+    const existingPositions = effectivePositions.filter(function(p){ return p !== targetPosition; });
+    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), targetPosition: targetPosition, existingPositions: existingPositions, dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -777,14 +766,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   if (duplicateDetails.length){
     if (!canOverride){
       const detail = duplicateDetails.map(function(d){
-        const targetLabel = admin_servingPositionLabel_(d.targetPosition);
-        const existingLabels = (d.existingPositions || []).map(admin_servingPositionLabel_);
-        return d.memberId + ': ' + targetLabel + (existingLabels.length ? (' vs ' + existingLabels.join(', ')) : '');
+        const target = String(d.targetPosition || ((d.positions||[])[0]||''));
+        const targetLabel = admin_servingPositionLabel_(target);
+        const assignedLabels = (Array.isArray(d.existingPositions) && d.existingPositions.length ? d.existingPositions : (d.positions||[]).filter(function(p){ return p !== target; })).map(admin_servingPositionLabel_);
+        return d.memberId + ' → ' + targetLabel + ' (target) vs ' + assignedLabels.join(', ') + ' (assigned)';
       }).join(' | ');
-      return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
+      return admin_conflict_('該會員已在此崗位事奉','該會員已在此崗位事奉 / They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
+      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'該會員已在此崗位事奉 / They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
@@ -3237,7 +3227,7 @@ function admin_buildLowAttendanceFlags_(){
 // Reauth verification (normal: scan own QR; SUPERUSER: must scan ADMIN QR)
 function admin_verifyReauth_(actor, reauthQrPayload){
   const raw = String(reauthQrPayload||'').trim();
-  if (!raw) return admin_err_('E401','請掃描你本人同工 QR 作確認','Please scan your own staff QR to confirm.');
+  if (!raw) return admin_err_('E401','請掃描你本人同工 QR 作確認','請掃描你本人同工 QR 作確認 / Please scan your own staff QR to confirm.');
 
   const bypass = (String(actor.id||'') === 'SUPERUSER');
 
@@ -3267,7 +3257,7 @@ function admin_verifyReauth_(actor, reauthQrPayload){
   // Normal actor: must match current session id
   const expected = String(actor.id||'').trim().toUpperCase();
   if (parsed.id !== expected){
-    return admin_err_('E431','請掃描你本人同工 QR 作確認（不可用其他同工）','Please scan your own staff QR to confirm (cannot use another staff).');
+    return admin_err_('E431','請掃描你本人同工 QR 作確認（不可用其他同工）','請掃描你本人同工 QR 作確認（不可用其他同工） / Please scan your own staff QR to confirm (cannot use another staff).');
   }
 
   const actorRole = String(actor.role||'').trim().toUpperCase();
