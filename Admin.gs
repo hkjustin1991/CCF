@@ -652,7 +652,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
 
   const duplicateMap = {};
   const duplicateDetails = [];
-  var targetPositionMap = {};
+  const targetPosByMember = {};
   const memberIdsForAway = [];
   const invalidGroupAssignments = [];
   const mi = admin_getMembersIndex_();
@@ -712,8 +712,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       if (isChanged){
         memberIdsForAway.push(id);
         changedMembers.add(id);
-        if (!targetPositionMap[id]) targetPositionMap[id] = [];
-        if (targetPositionMap[id].indexOf(r.position) < 0) targetPositionMap[id].push(r.position);
+        if (!targetPosByMember[id]) targetPosByMember[id] = [];
+        if (targetPosByMember[id].indexOf(r.position) < 0) targetPosByMember[id].push(r.position);
       }
     });
   }
@@ -741,7 +741,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    const targetPosition = ((targetPositionMap[id] && targetPositionMap[id][0]) || effectivePositions[0] || '');
+    const targetPosition = ((targetPosByMember[id] && targetPosByMember[id][0]) || effectivePositions[0] || '');
     const existingPositions = effectivePositions.filter(function(p){ return p !== targetPosition; });
     duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), targetPosition: targetPosition, existingPositions: existingPositions, dateYmd: eventDateYmd, newlyIntroduced:true });
   });
