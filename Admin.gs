@@ -658,7 +658,19 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const membersById = mi.byId || {};
   const existingValues = admin_getServingValuesForEvent_(ev);
   const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
+  const existingMemberPositionMap = {};
   const mergedValues = Object.assign({}, existingValues);
+  const targetPositionMap = {};
+
+  ADMIN_SERVING_POSITIONS.forEach(function(pos){
+    const raw = String(existingValues[pos] || '').trim();
+    if (!raw) return;
+    const ids = admin_extractMemberIdsFromServingValue_(raw);
+    ids.forEach(function(id){
+      if (!existingMemberPositionMap[id]) existingMemberPositionMap[id] = [];
+      existingMemberPositionMap[id].push(pos);
+    });
+  });
 
   const changedPositions = new Set();
   const changedMembers = new Set();
@@ -699,6 +711,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
       if (isChanged){
         memberIdsForAway.push(id);
         changedMembers.add(id);
+        if (!targetPositionMap[id]) targetPositionMap[id] = [];
+        targetPositionMap[id].push(r.position);
       }
     });
   }
@@ -726,7 +740,21 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
+    const targets = (targetPositionMap[id] || []).filter(function(p){ return effectivePositions.indexOf(p) >= 0; });
+    const uniqueTargets = Array.from(new Set(targets));
+    if (!uniqueTargets.length) return;
+    uniqueTargets.forEach(function(targetPosition){
+      const existingPositions = admin_filterDuplicateConflictPositions_((existingMemberPositionMap[id] || []).filter(function(p){
+        return p !== targetPosition;
+      }));
+      duplicateDetails.push({
+        memberId: id,
+        targetPosition: targetPosition,
+        existingPositions: existingPositions,
+        dateYmd: eventDateYmd,
+        newlyIntroduced: true
+      });
+    });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -749,8 +777,9 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   if (duplicateDetails.length){
     if (!canOverride){
       const detail = duplicateDetails.map(function(d){
-        const labels = (d.positions || []).map(admin_servingPositionLabel_);
-        return d.memberId + ': ' + labels.join(', ');
+        const targetLabel = admin_servingPositionLabel_(d.targetPosition);
+        const existingLabels = (d.existingPositions || []).map(admin_servingPositionLabel_);
+        return d.memberId + ': ' + targetLabel + (existingLabels.length ? (' vs ' + existingLabels.join(', ')) : '');
       }).join(' | ');
       return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
