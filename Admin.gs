@@ -480,7 +480,7 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
   if (up === 'ADD' && role === 'GL'){
     const parsed = admin_parseQrStrict_(String(targetQrPayload||'').trim());
     if (!parsed.ok) return parsed;
-    id = String(parsed.memberId||'').trim().toUpperCase();
+    id = String(parsed.id||'').trim().toUpperCase();
   }
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
 
@@ -915,10 +915,17 @@ function api_admin_set_away_period(token, memberId, fromDmy1, toDmy1, fromDmy2, 
     return admin_conflict_('設定假期前，請先取消該時段已編排的事奉。','Please cancel existing serving assignments in the selected holiday period before saving holiday.', detail, 'HOLIDAY_HAS_SERVING_ASSIGNMENTS', 'HOLIDAY');
   }
 
-  sh.getRange(rowNumber, col.AwayFrom1+1).setValue(p1.from || '');
-  sh.getRange(rowNumber, col.AwayTo1+1).setValue(p1.to || '');
-  sh.getRange(rowNumber, col.AwayFrom2+1).setValue(p2.from || '');
-  sh.getRange(rowNumber, col.AwayTo2+1).setValue(p2.to || '');
+  const awayCols = [col.AwayFrom1, col.AwayTo1, col.AwayFrom2, col.AwayTo2];
+  const minAwayCol = Math.min.apply(null, awayCols);
+  const maxAwayCol = Math.max.apply(null, awayCols);
+  if ((maxAwayCol - minAwayCol) === 3){
+    sh.getRange(rowNumber, minAwayCol+1, 1, 4).setValues([[p1.from || '', p1.to || '', p2.from || '', p2.to || '']]);
+  } else {
+    sh.getRange(rowNumber, col.AwayFrom1+1).setValue(p1.from || '');
+    sh.getRange(rowNumber, col.AwayTo1+1).setValue(p1.to || '');
+    sh.getRange(rowNumber, col.AwayFrom2+1).setValue(p2.from || '');
+    sh.getRange(rowNumber, col.AwayTo2+1).setValue(p2.to || '');
+  }
   admin_appendAwayHistory_(id, [p1, p2].filter(function(x){ return x.from && x.to; }), s.actor);
 
   admin_audit_(
@@ -1776,12 +1783,27 @@ function admin_ensureServingSheet_(){
 }
 function admin_ensureServingEventKeys_(sh){
   const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), ADMIN_SERVING_MONTHS_AHEAD);
-  for (let i=0;i<events.length;i++){
-    const row = 2 + i;
-    const current = String(sh.getRange(row, 1).getValue() || '').trim();
-    if (!current){
-      sh.getRange(row, 1).setValue(events[i].eventKey);
-    }
+  if (!events.length) return;
+  const rows = events.length;
+  const existing = sh.getRange(2, 1, rows, 1).getValues();
+  const emptyRows = [];
+  for (let i=0;i<rows;i++){
+    const current = String((existing[i] && existing[i][0]) || '').trim();
+    if (!current) emptyRows.push(i);
+  }
+  if (!emptyRows.length) return;
+  const first = emptyRows[0];
+  const last = emptyRows[emptyRows.length - 1];
+  const isContiguous = (emptyRows.length === (last - first + 1));
+  if (isContiguous){
+    const values = [];
+    for (let i=first; i<=last; i++) values.push([events[i].eventKey]);
+    sh.getRange(2 + first, 1, values.length, 1).setValues(values);
+    return;
+  }
+  for (let k=0; k<emptyRows.length; k++){
+    const i = emptyRows[k];
+    sh.getRange(2 + i, 1).setValue(events[i].eventKey);
   }
 }
 function admin_ensureServingHeaders_(sh){
@@ -2686,6 +2708,8 @@ function admin_findMembersSheet_(){
   return null;
 }
 function admin_debug_members_sheet_pick_(){
+  const selected = admin_findMembersSheet_();
+  const selectedName = selected ? selected.getName() : '';
   const ss = admin_openSs_();
   return ss.getSheets().map(function(s){
     const lastCol = s.getLastColumn();
@@ -2693,6 +2717,7 @@ function admin_debug_members_sheet_pick_(){
     const headerSet = new Set(headers);
     return {
       sheet: s.getName(),
+      isSelectedMembersSheet: (s.getName() === selectedName),
       hasAllRequiredAnywhere: ADMIN_MEMBERS_HEADERS_REQUIRED.every(h => headerSet.has(h)),
       colMap: ['ID','Status','ServingGroups','ServingGLGroups','Email','Mobile'].reduce(function(acc, h){
         acc[h] = headers.indexOf(h);
@@ -2700,6 +2725,21 @@ function admin_debug_members_sheet_pick_(){
       }, {})
     };
   });
+}
+function admin_debug_member_cache_record_(memberId){
+  const id = String(memberId || 'CCF0104').trim().toUpperCase();
+  const mi = admin_getMembersIndex_();
+  const m = mi && mi.byId ? mi.byId[id] : null;
+  return {
+    id: id,
+    found: !!m,
+    statusRaw: m ? String(m.status || '') : '',
+    statusNormalized: m ? admin_normStatus_(m.status || '') : '',
+    servingGroups: m ? (Array.isArray(m.servingGroups) ? m.servingGroups : []) : [],
+    servingGLGroups: m ? (Array.isArray(m.servingGLGroups) ? m.servingGLGroups : []) : [],
+    key: m ? String(m.key || '') : '',
+    roleExpires: m ? String(m.roleExpires || '') : ''
+  };
 }
 function admin_getMembersColMap_(sh){
   const lastCol = sh.getLastColumn();
@@ -2795,7 +2835,7 @@ function admin_getMembersIndex_(){
   }
 
   const payload = { byId: byId, all: all };
-  cache.put(key, JSON.stringify(payload), 120);
+  cache.put(key, JSON.stringify(payload), 15);
   return payload;
 }
 
