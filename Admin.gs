@@ -2832,8 +2832,8 @@ function admin_getCheckinsData_(){
   if (lastRow < 2) return { ok:true, rows:[] };
 
   const col = admin_getCheckinsColMap_(sh);
-  const lastCol = sh.getLastColumn();
-  const data = sh.getRange(2,1,lastRow-1,lastCol).getValues();
+  const requiredLastCol = Math.max(Number(col.Timestamp||0), Number(col.EventKey||0), Number(col.MemberId||0)) + 1;
+  const data = sh.getRange(2,1,lastRow-1,requiredLastCol).getValues();
 
   const rows = [];
   for (let i=0;i<data.length;i++){
@@ -2862,6 +2862,14 @@ function admin_logCheckinsCacheTelemetry_(action, details){
     cache.put(throttleKey, '1', ADMIN_CACHE_CHECKINS_TELEMETRY_THROTTLE);
   }catch(e){}
   admin_audit_({id:'SYSTEM', role:'SYSTEM'}, String(action||''), JSON.stringify(details||{}), 'checkins_cache');
+}
+
+function admin_invalidateCheckinsCache_(){
+  const cache = CacheService.getScriptCache();
+  try{ cache.remove(ADMIN_CACHE_CHECKINS_MANIFEST_KEY); }catch(e){}
+  for (let i=0; i<ADMIN_CACHE_CHECKINS_MAX_PARTS; i++){
+    try{ cache.remove(ADMIN_CACHE_CHECKINS_PART_PREFIX + i); }catch(e){}
+  }
 }
 
 function admin_getCheckinsDataCached_(){
@@ -2897,7 +2905,7 @@ function admin_getCheckinsDataCached_(){
     const maxPayloadChars = ADMIN_CACHE_CHECKINS_PART_CHARS * maxParts;
     if (payload.length > maxPayloadChars || nParts > maxParts){
       cacheMode = 'skip_oversize';
-      try{ cache.remove(ADMIN_CACHE_CHECKINS_MANIFEST_KEY); }catch(e){}
+      admin_invalidateCheckinsCache_();
       admin_logCheckinsCacheTelemetry_('CHECKINS_CACHE_SKIP_OVERSIZE', { count: (fresh.rows||[]).length, payloadChars: payload.length, nParts: nParts, maxParts: maxParts });
     }else{
       const manifest = { count: (fresh.rows||[]).length, updatedAt: admin_nowIso_(), nParts: nParts };
