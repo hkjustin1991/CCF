@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-01.admin103
+ * v2026-03-07.admin104
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -14,7 +14,7 @@
  * - UI must not display the secret.
  *
  * Data sources:
- * - Members sheet (existing schema; first 11 headers match)
+ * - Members sheet (existing schema; required headers may be in any order)
  * - Checkins sheet (existing)
  *
  * Limits:
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-01.admin103';
+const ADMIN_VERSION = '2026-03-07.admin104';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
