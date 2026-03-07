@@ -782,7 +782,12 @@
         '</div>';
     }
 
-    var ADMIN_MSG = Object.freeze({
+    function showBoxKey(targetId, kind, i18nKey, detailHtml, allowHtmlDetail){
+      var text = t(i18nKey);
+      showBox(targetId, kind, String(text.zh || i18nKey || ''), String(text.en || i18nKey || ''), detailHtml, allowHtmlDetail);
+    }
+
+    var I18N = Object.freeze({
       WORKING: { code:'S100', zh:'處理中…', en:'處理中… / Working…' },
       SCAN_START_CAMERA: { code:'S101', zh:'請按「啟動相機」以開始掃描', en:'Tap "Start camera" to begin scanning.' },
       EXTERNAL_SCANNER_TIMEOUT: { code:'S421', zh:'外置掃描器逾時', en:'External scanner timed out.' },
@@ -791,10 +796,7 @@
       LOGIN_READING_IMAGE: { code:'S110', zh:'讀取圖片中…', en:'Reading image…' },
       SCAN_CANCELLED: { code:'S424', zh:'已取消掃描', en:'已取消掃描 / Scan cancelled.' },
       EXTERNAL_SCANNER_RECOMMENDED: { code:'S425', zh:'建議使用外部掃描器', en:'建議使用外部掃描器 / Open external scanner is recommended in this browser.' },
-      EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN: { code:'E426', zh:'未能打開彈出視窗，請使用下方內置掃描器', en:'彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.' }
-    });
-
-    var ADMIN_UI_TEXT = Object.freeze({
+      EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN: { code:'E426', zh:'未能打開彈出視窗，請使用下方內置掃描器', en:'彈出視窗被封鎖，請使用下方內置掃描器 / Popup blocked; please use built-in scanner below.' },
       SYSTEM_ERROR: { zh:'系統錯誤', en:'System error' },
       INTERNAL_ERROR: { zh:'內部錯誤', en:'Internal error' },
       LOADING: { zh:'載入中…', en:'載入中… / Loading…' },
@@ -812,11 +814,37 @@
       SCANNER_CONFIG_MISSING: { zh:'外置掃描器設定遺失或無效。', en:'External scanner settings are missing or invalid.' },
       SCANNER_CONFIG_WARNING_TITLE: { zh:'⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕', en:'⚠️ External scanner config is invalid. External scanner has been disabled.' },
       SCANNER_CONFIG_ISSUE_PREFIX: { zh:'外置掃描器設定問題', en:'External scanner config issue' },
-      MODAL_SERVICE_STATS_TITLE: { zh:'📊 聚會統計', en:'Service stats', bi:'📊 聚會統計 / Service stats' }
+      MODAL_SERVICE_STATS_TITLE: { zh:'📊 聚會統計', en:'Service stats', bi:'📊 聚會統計 / Service stats' },
+      LOGIN_TITLE: { zh:'🔐 登入', en:'Login', bi:'🔐 登入 / Login' },
+      LOGIN_SUBTITLE: { zh:'請掃描你自己的同工 QR 登入。', en:'Please scan your own staff QR to login.', bi:'請掃描你自己的同工 QR 登入。<br/>Please scan your own staff QR to login.' },
+      LOGIN_SCAN_BUTTON: { zh:'📷 掃描 QR', en:'Scan QR', bi:'📷 掃描 QR / Scan QR' },
+      LOGIN_UPLOAD_BUTTON: { zh:'🖼️ 上傳 QR 圖片', en:'Upload QR image', bi:'🖼️ 上傳 QR 圖片 / Upload QR image' },
+      LOGIN_AUTHORISED_LABEL: { zh:'授權登入', en:'Authorised login', bi:'授權登入 / Authorised login' },
+      MODAL_SCAN_TITLE: { zh:'📷 掃描 QR', en:'Scan QR', bi:'📷 掃描 QR / Scan QR' },
+      MODAL_SCAN_SUBTITLE: { zh:'請掃描你自己的同工 QR。', en:'Please scan your own staff QR.', bi:'請掃描你自己的同工 QR。<br/>Please scan your own staff QR.' },
+      SCAN_START_BUTTON: { zh:'▶️ 啟動相機', en:'Start camera', bi:'▶️ 啟動相機 / Start camera' },
+      SCAN_CANCEL_BUTTON: { zh:'取消', en:'Cancel', bi:'取消 / Cancel' },
+      EXTERNAL_SCANNER_BUTTON: { zh:'🌐 外置掃描器', en:'External scanner', bi:'🌐 外置掃描器 / External scanner' },
+      REAUTH_SCAN_TITLE: { zh:'🔐 最後確認', en:'Final confirm', bi:'🔐 最後確認 / Final confirm' },
+      REAUTH_SCAN_SUBTITLE: { zh:'請掃描你本人同工 QR 作確認。', en:'Please scan your own staff QR to confirm.', bi:'請掃描你本人同工 QR 作確認。<br/>Please scan your own staff QR to confirm.' },
+      OPEN_EXTERNAL_SCANNER_BUTTON: { zh:'🌐 使用外部掃描器', en:'Open external scanner', bi:'🌐 使用外部掃描器 / Open external scanner' },
+      PLEASE_PROVIDE_REASON: { zh:'請填寫原因', en:'Please provide a reason.' },
+      NO_REMOVABLE_SERVING_GROUP: { zh:'此會員沒有可移除的組別', en:'No removable serving group for this member.' },
+      RETRY_CAMERA_BUTTON: { zh:'重新嘗試相機（Git 掃描）', en:'Retry camera (Git scanner)', bi:'重新嘗試相機（Git 掃描） / Retry camera (Git scanner)' }
     });
 
+    var ADMIN_MSG = I18N;
+    var ADMIN_UI_TEXT = I18N;
+
+    function t(key){
+      return I18N[key] || { zh:key || '', en:key || '', bi:key || '' };
+    }
+    function msg(key){
+      return t(key);
+    }
+
     function uiText_(key){
-      return ADMIN_UI_TEXT[key] || { zh:key || '', en:key || '', bi:key || '' };
+      return t(key);
     }
     function uiBi_(key){
       var t = uiText_(key);
@@ -2112,15 +2140,15 @@ function eventDateYmdFromKey(ev){
     function viewLogin(){
       return ''+
         '<div class="card">'+
-          '<div class="big">🔐 登入 / Login</div>'+
-          '<div class="small">請掃描你自己的同工 QR 登入。<br/>Please scan your own staff QR to login.</div>'+
+          '<div class="big">'+uiBi_('LOGIN_TITLE')+'</div>'+
+          '<div class="small">'+uiText_('LOGIN_SUBTITLE').bi+'</div>'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+
-            '<button id="btnScanLogin" class="btnMain">📷 掃描 QR / Scan QR</button>'+
-            '<button id="btnUploadLoginQr" class="btnSub">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<button id="btnScanLogin" class="btnMain">'+uiBi_('LOGIN_SCAN_BUTTON')+'</button>'+
+            '<button id="btnUploadLoginQr" class="btnSub">'+uiBi_('LOGIN_UPLOAD_BUTTON')+'</button>'+
             '<input id="loginQrImageInput" type="file" accept="image/*" class="hide" />'+
           '</div>'+
           '<div class="divider"></div>'+
-          '<div class="label">授權登入 / Authorised login</div>'+
+          '<div class="label">'+uiBi_('LOGIN_AUTHORISED_LABEL')+'</div>'+
           '<input id="internalField" type="password" autocomplete="off" class="inputMini" />'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnInternal" class="btnBack btnMini">OK</button>'+
@@ -2177,7 +2205,7 @@ function eventDateYmdFromKey(ev){
           if(typeof retryFn === 'function') retryFn();
         };
       }, 0);
-      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">重新嘗試相機（Git 掃描） / Retry camera (Git scanner)</button></div>';
+      return '<div style="margin-top:10px;"><button id="'+btnId+'" class="alt" type="button">'+uiBi_('RETRY_CAMERA_BUTTON')+'</button></div>';
     }
 
     function bindImageQrFallback_(msgTarget, onDecoded){
@@ -2400,13 +2428,13 @@ function eventDateYmdFromKey(ev){
         clear('loginMsg');
 
         var modal = openModal(
-          '<div class="big">📷 掃描 QR / Scan QR</div>'+
-          '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
+          '<div class="big">'+uiBi_('MODAL_SCAN_TITLE')+'</div>'+
+          '<div class="small">'+uiText_('MODAL_SCAN_SUBTITLE').bi+'</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
-            '<button id="btnExtScan" class="btnSub">🌐 外置掃描器 / External scanner</button>'+
-            '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
+            '<button id="btnStartCam" class="btnMain" type="button">'+uiBi_('SCAN_START_BUTTON')+'</button>'+
+            '<button id="btnExtScan" class="btnSub">'+uiBi_('EXTERNAL_SCANNER_BUTTON')+'</button>'+
+            '<button id="btnCancel" class="btnDanger">'+uiBi_('SCAN_CANCEL_BUTTON')+'</button>'+
           '</div>'+
           '<div id="scanMsg"></div>'
         );
@@ -4765,7 +4793,7 @@ function eventDateYmdFromKey(ev){
       m.querySelector('#btnCancel').onclick = function(){ closeModal(m); };
       m.querySelector('#btnNext').onclick = function(){
         var reason = String(m.querySelector('#reason').value||'').trim();
-        if(!reason){ showBox('msg','err','請填寫原因','Please provide a reason.'); return; }
+        if(!reason){ showBoxKey('msg','err','PLEASE_PROVIDE_REASON'); return; }
         closeModal(m);
         openReauthScan_('contact', memberId, reason);
       };
@@ -4776,7 +4804,7 @@ function eventDateYmdFromKey(ev){
 
       var groups = Array.isArray(removableGroups) ? removableGroups.filter(Boolean) : [];
       if (!groups.length){
-        showBox('app','warn','此會員沒有可移除的組別','No removable serving group for this member.');
+        showBoxKey('app','warn','NO_REMOVABLE_SERVING_GROUP');
         return;
       }
       var todayYmd = getTodayYmdUk();
@@ -4871,12 +4899,12 @@ function eventDateYmdFromKey(ev){
       logAction('OPEN_REAUTH', memberId+'|'+mode, mode);
 
       var m = openModal(
-        '<div class="big">🔐 最後確認 / Final confirm</div>'+
-        '<div class="small">請掃描你本人同工 QR 作確認。<br/>Please scan your own staff QR to confirm.</div>'+
+        '<div class="big">'+uiBi_('REAUTH_SCAN_TITLE')+'</div>'+
+        '<div class="small">'+uiText_('REAUTH_SCAN_SUBTITLE').bi+'</div>'+
         '<div class="videoWrap" style="margin-top:10px;"><video id="vReauth" playsinline></video></div>'+
         '<div class="miniBtnRow">'+
-          '<button id="btnOpenExternal" class="btnBack" type="button">🌐 使用外部掃描器 / Open external scanner</button>'+
-          '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
+          '<button id="btnOpenExternal" class="btnBack" type="button">'+uiBi_('OPEN_EXTERNAL_SCANNER_BUTTON')+'</button>'+
+          '<button id="btnCancel" class="btnDanger">'+uiBi_('SCAN_CANCEL_BUTTON')+'</button>'+
         '</div>'+
         '<div id="msg"></div>'
       );
