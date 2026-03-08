@@ -12,8 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-07.admin104
-  For Admin.gs: v2026-03-07.admin104
+  UI VERSION TAG: admin2-ui-2026-03-07.admin107
+  For Admin.gs: v2026-03-07.admin107
+  PR REFRESH: admin107 follow-up submission
   ============================================================
   -->
 
@@ -188,7 +189,7 @@
       cursor:pointer;
     }
     .quickBubbleWrap{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
-    .quickBubble{border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;background:#fff;display:inline-flex;align-items:center;gap:6px}
+    .quickBubble{border:1px solid var(--border);border-radius:14px;padding:8px 10px;font-size:12px;background:#fff;display:inline-flex;align-items:flex-start;gap:6px;min-height:58px}
     .quickBubbleVacancy{background:#fff6e6;border-color:rgba(200,132,0,0.45);color:#8a5a00}
     .quickBubble button{border:none;background:transparent;color:#d93c5e;cursor:pointer;font-weight:900;padding:0;line-height:1}
     .quickBubble.slotSelected{box-shadow:inset 0 0 0 2px #285ac8}
@@ -234,14 +235,20 @@
     .groupSummaryMini{width:auto;padding:6px 10px;border-radius:10px;font-size:12px;line-height:1.2}
      .servingEditBtn{width:auto;padding:6px 10px;border-radius:10px;font-size:12px}
     .servingPlanEntry{
-      font-size:12px;
+      font-size:13px;
       margin-top:4px;
-      padding:4px 6px;
+      padding:8px 10px;
       border:1px solid var(--border);
       border-radius:10px;
       background:#fff;
       color:var(--muted);
+      line-height:1.3;
+      text-align:left;
     }
+    .servingPersonLabel{display:flex;flex-direction:column;gap:2px;white-space:normal}
+    .servingPersonLabel .id{font-weight:900;color:var(--text)}
+    .servingPersonLabel .zh{font-weight:800;color:var(--text)}
+    .servingPersonLabel .en{font-size:12px;color:var(--muted)}
     .servingGapUrgent{
       background:#fff0f0 !important;
       box-shadow:inset 0 0 0 2px #d93c5e;
@@ -330,6 +337,13 @@
       background:#fff;
       padding:10px;
     }
+    body.serving-rota-mode{overflow-y:auto;-webkit-overflow-scrolling:touch}
+    body.serving-rota-mode .wrap{max-width:none;padding:6px}
+    body.serving-rota-mode .topbar,
+    body.serving-rota-mode .footer{display:none}
+    body.serving-rota-mode .card{margin:4px 0;padding:8px;border-radius:12px}
+    body.serving-rota-mode .servingGroupToggle{min-height:52px;font-size:16px}
+    body.serving-rota-mode .servingPlanEntry{font-size:13px;padding:8px}
     @media (max-width: 520px){
       .chartCard{ height:440px; }
     }
@@ -439,6 +453,14 @@
       return '';
     }
 
+    function normalizeApiError_(err, fallbackEn){
+      var fb = String(fallbackEn || 'API call failed');
+      if (!err) return { code:'E500', zh:'系統錯誤', en:fb };
+      if (typeof err === 'string') return { code:'E500', zh:'系統錯誤', en:String(err) };
+      if (err && typeof err === 'object') return err;
+      return { code:'E500', zh:'系統錯誤', en:String(err) };
+    }
+
     function callApiViaRpc(endpoint, fn, args){
       return fetch(endpoint, {
         method:'POST',
@@ -450,8 +472,8 @@
           var data;
           try{ data = JSON.parse(txt); }catch(e){ throw new Error('Invalid API response'); }
           if(!resp.ok || !data || !data.ok){
-            var err = (data && data.error) ? data.error : { message:'API call failed' };
-            throw err;
+            var err = (data && data.error) ? data.error : { en:'API call failed' };
+            throw normalizeApiError_(err, 'API call failed');
           }
           return data.result;
         });
@@ -461,10 +483,10 @@
     function callApiViaGas(fn, args){
       return new Promise(function(resolve, reject){
         try{
-          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(function(err){ reject(normalizeApiError_(err, 'GAS call failed')); });
           runner[fn].apply(runner, args || []);
         }catch(err){
-          reject(err);
+          reject(normalizeApiError_(err, 'GAS call failed'));
         }
       });
     }
@@ -739,11 +761,12 @@
         console.error('showStatus metadata missing', { targetId:targetId, kind:kind, msgKey:msgKey, detail:detail });
         msg = { code:'E500', zh:'內部錯誤', en:'Internal error' };
       }
-      var titleZh = String(msg.zh || '');
+      var title = toBilingualText_(msg, '系統訊息', 'System message');
+      var titleZh = String(title.zh || '');
       if (kind === 'warn' || kind === 'err'){
         titleZh = withErrorCodeTag_(titleZh, { code: msg.code || 'E500' });
       }
-      showBox(targetId, kind, titleZh, String(msg.en || ''), detail || '');
+      showBox(targetId, kind, titleZh, String(title.en || ''), detail || '');
     }
 
     function formatErrorCodeTag_(res){
@@ -792,11 +815,38 @@
     function normalizeErrResForRender_(res){
       if (!res) return { code:'E500', zh:'系統錯誤', en:'System error' };
       if (typeof res === 'string') return { code:'E500', zh:'系統錯誤', en:String(res) };
-      return res;
+      var out = res;
+      if (out && typeof out === 'object'){
+        if (!out.en && out.message) out.en = String(out.message);
+        if (!out.detail && out.message && out.message !== out.en) out.detail = String(out.message);
+      }
+      return out;
+    }
+    function normalizeMessageText_(v){
+      return String(v == null ? '' : v).trim();
+    }
+    function looksBilingualCombined_(text){
+      var t = normalizeMessageText_(text);
+      return !!(t && (t.indexOf(' / ') >= 0 || t.indexOf('/') >= 0));
+    }
+    function toBilingualText_(res, fallbackZh, fallbackEn){
+      var r = normalizeErrResForRender_(res);
+      var zh = normalizeMessageText_(r.zh || fallbackZh || '');
+      var en = normalizeMessageText_(r.en || fallbackEn || '');
+      if (zh && en){
+        if (zh === en || looksBilingualCombined_(zh)) en = '';
+      } else if (!zh && en){
+        zh = en;
+        en = '';
+      } else if (!en && zh && looksBilingualCombined_(zh)){
+        en = '';
+      }
+      return { zh: zh || String(fallbackZh || ''), en: en || '' };
     }
 
     function showErr(targetId, res){
       res = normalizeErrResForRender_(res);
+      var titles = toBilingualText_(res, '系統錯誤', 'System error');
       var detail = '';
       var allowHtmlDetail = false;
       if (res && res.trustedDetailHtml && res.detailHtml){
@@ -824,8 +874,8 @@
       showBox(
         targetId,
         'err',
-        withErrorCodeTag_(escapeHtml((res && res.zh) || '系統錯誤'), res),
-        escapeHtml((res && res.en) || 'System error'),
+        withErrorCodeTag_(titles.zh, res),
+        titles.en,
         detail,
         allowHtmlDetail
       );
@@ -1566,15 +1616,14 @@ function eventDateYmdFromKey(ev){
       var upper = raw.toUpperCase();
       if (upper === 'N/A' || upper === 'NA') return 'N/A';
       if (isServingClosedToken_(upper)) return '🔒 崗位關閉 / Closed';
-      var isCcf = /^CCF\d{4}$/.test(upper);
-      if (!isCcf) return raw;
-      var hasName = entry.nameZh || entry.nameEn;
-      var nameLine = '';
-      if (hasName){
-        var names = [entry.nameZh, entry.nameEn].filter(Boolean).join(' / ');
-        nameLine = names ? (' ' + names) : '';
-      }
-      return upper + nameLine;
+      var id = extractMemberId_(raw);
+      if (!id) return escapeHtml(raw);
+      return renderServingPersonLabelHtml_({
+        id: id,
+        nameZh: entry.nameZh || '',
+        nameEn: entry.nameEn || '',
+        preferredName: entry.preferredName || ''
+      });
     }
     function splitServingValues_(raw){
       var s = String(raw||'').trim();
@@ -1622,7 +1671,7 @@ function eventDateYmdFromKey(ev){
     }
 
     function extractMemberId_(token){
-      var m = String(token||'').match(/CCF\\d{4}/i);
+      var m = String(token||'').match(/CCF\d{4}/i);
       return m ? String(m[0]||'').toUpperCase() : '';
     }
     function preferredNameForSheet_(m){
@@ -1633,18 +1682,49 @@ function eventDateYmdFromKey(ev){
       if (en) return en;
       return String(m.nameZh||'').trim();
     }
+    function formatCcfidLine_(memberId){
+      var id = String(memberId||'').trim().toUpperCase();
+      var m = id.match(/^CCF(\d{4})$/);
+      return m ? ('CCF ID ' + m[1]) : (id || 'CCF ID —');
+    }
+    function servingPersonLines_(m){
+      var o = m || {};
+      var id = String(o.id || o.memberId || '').trim().toUpperCase();
+      var zh = String(o.nameZh || '').trim();
+      var en = String(o.nameEn || '').trim();
+      if (!zh && !en){
+        var pref = String(o.preferredName || '').trim();
+        if (pref) en = pref;
+      }
+      return { id: formatCcfidLine_(id), zh: zh, en: en };
+    }
+    function renderServingPersonLabelHtml_(m){
+      var lines = servingPersonLines_(m);
+      return '<span class="servingPersonLabel">'+
+        '<span class="id">'+escapeHtml(lines.id)+'</span>'+
+        '<span class="zh">'+escapeHtml(lines.zh || '')+'</span>'+
+        '<span class="en">'+escapeHtml(lines.en || '')+'</span>'+
+      '</span>';
+    }
     function memberLabel_(m){
       if (!m) return '';
-      var pref = String(m.preferredName||'').trim();
-      var zh = String(m.nameZh||'').trim();
-      var en = String(m.nameEn||'').trim();
-      return m.id + ' ' + [zh, en].filter(Boolean).join(' ') + (pref ? (' ('+pref+')') : '');
+      var lines = servingPersonLines_(m);
+      return [lines.id, lines.zh, lines.en].filter(Boolean).join(' · ');
     }
     function formatServingToken_(memberMap, memberId){
-      var m = memberMap[String(memberId||'').toUpperCase()];
-      if (!m) return String(memberId||'');
-      var name = preferredNameForSheet_(m);
-      return m.id + (name ? (' ('+name+')') : '');
+      var id = extractMemberId_(memberId) || String(memberId||'').trim().toUpperCase();
+      return id || String(memberId||'').trim();
+    }
+    function renderServingTokenDisplayHtml_(token, memberMap){
+      var raw = String(token||'').trim();
+      if (!raw) return '';
+      var upper = raw.toUpperCase();
+      if (upper === 'N/A' || upper === 'NA') return escapeHtml(raw);
+      if (isServingClosedToken_(upper)) return '🔒 崗位關閉 / Closed';
+      var id = extractMemberId_(raw);
+      if (!id) return escapeHtml(raw);
+      var m = (memberMap || {})[id] || { id:id };
+      return renderServingPersonLabelHtml_(m);
     }
     function memberDisplayWithName_(memberMap, memberId){
       var id = String(memberId||'').trim().toUpperCase();
@@ -2493,7 +2573,7 @@ function eventDateYmdFromKey(ev){
                   var rawValue = String(entry.rawValue || entry.memberId || '').trim();
                   return ''+
                     '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+
-                      escapeHtml(label)+
+                      label+
                     '</button>';
                 }).filter(Boolean);
                 var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
@@ -2599,7 +2679,7 @@ function eventDateYmdFromKey(ev){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
             '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="small">'+escapeHtml(String((res && res.zh) || '系統錯誤'))+'<br/>'+escapeHtml(String((res && res.en) || 'System error'))+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -2667,7 +2747,7 @@ function eventDateYmdFromKey(ev){
             if (!token){
               chips.push('<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'">空缺 '+(slotIdx+1)+' / Vacant '+(slotIdx+1)+'</span>');
             } else {
-              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span>'+escapeHtml(token)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
+              chips.push('<span class="quickBubble'+selectedCls+'" data-pos="'+escapeHtml(pos)+'" data-slot="'+slotIdx+'"><span style="white-space:normal">'+renderServingTokenDisplayHtml_(token, memberMap)+'</span><button type="button" data-pos="'+escapeHtml(pos)+'" data-idx="'+slotIdx+'">×</button></span>');
             }
           }
           return '<div class="quickBubbleWrap">'+chips.join('')+'</div>';
@@ -3085,7 +3165,7 @@ function eventDateYmdFromKey(ev){
         if(!res || !res.ok){
           modal.querySelector('.modal').innerHTML =
             '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="small">'+escapeHtml(String((res && res.zh) || '系統錯誤'))+'<br/>'+escapeHtml(String((res && res.en) || 'System error'))+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -3226,7 +3306,7 @@ function eventDateYmdFromKey(ev){
               var label = isVac ? ('空缺 ' + (slotIdx + 1) + ' / Vacant ' + (slotIdx + 1)) : token;
               var bubbleCls = 'quickBubble' + (isVac ? ' quickBubbleVacancy' : '') + selectedCls;
               var rm = isVac ? '' : '<button type="button" data-rm="'+slotIdx+'">×</button>' ;
-              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'">'+escapeHtml(label)+rm+'</span>';
+              return '<span class="'+bubbleCls+'" data-slot="'+slotIdx+'"><span style="white-space:normal">'+(isVac ? escapeHtml(label) : renderServingTokenDisplayHtml_(label, memberMap))+'</span>'+rm+'</span>';
             });
             wrap.innerHTML = chips.join('');
           }
@@ -3866,7 +3946,7 @@ function eventDateYmdFromKey(ev){
         if(!res || !res.ok){
           m.querySelector('.modal').innerHTML =
             '<div class="big err">系統錯誤 / Error</div>'+
-            '<div class="small">'+escapeHtml((res && res.en) || 'Error')+'</div>'+
+            '<div class="small">'+escapeHtml(String((res && res.zh) || '系統錯誤'))+'<br/>'+escapeHtml(String((res && res.en) || 'System error'))+'</div>'+
             '<div class="miniBtnRow" style="margin-top:12px;">'+
               '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
             '</div>';
@@ -4568,9 +4648,16 @@ function eventDateYmdFromKey(ev){
       modalOverlay.querySelector('#btnClose').onclick = function(){ closeModal(modalOverlay); };
     }
 
+    function setServingRotaMode_(enabled){
+      if (!document || !document.body || !document.body.classList) return;
+      document.body.classList.toggle('serving-rota-mode', !!enabled);
+    }
+
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
+      var servingRotaMode = (App.view === 'servingPlan');
+      setServingRotaMode_(servingRotaMode);
       if (App.view !== 'servingPlan' && App.servingPlanTimer){
         clearInterval(App.servingPlanTimer);
         App.servingPlanTimer = null;
