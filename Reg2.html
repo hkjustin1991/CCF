@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg98
+  UI VERSION TAG: reg2-ui-2026-03-09.reg99
   ============================================================
 
   Changes (reg2-ui2):
@@ -129,6 +129,8 @@
     .worshipTable th,.worshipTable td{border:1px solid var(--border);padding:8px;vertical-align:top}
     .worshipSaveBtn{min-height:42px;padding:8px 10px;font-size:13px;border-radius:10px}
     .selfMainBtn{min-height:52px;font-size:15px}
+    .selfMainGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+    .selfMainGrid button{width:100%}
     .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
     .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
     .groupBadge.support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
@@ -159,7 +161,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg98</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg99</span></div>
     </header>
 
     <main id="app"></main>
@@ -1047,7 +1049,7 @@
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
             '<div class="big">📌 選擇 / Choose</div>'+
           '</div>'+
-          '<div class="miniBtnRow">'+
+          '<div class="selfMainGrid">'+
             '<button id="btnSelfDetails" class="primary selfMainBtn">🪪 更改資料 / Change details</button>'+
             '<button id="btnSelfServing" class="alt selfMainBtn">🧩 事奉報名/更改 / Serving</button>'+
             (hasWorship ? '<button id="btnSelfWorship" class="btnWorship selfMainBtn">🎵 敬拜排期 / Worship planning</button>' : '')+
@@ -2024,7 +2026,10 @@
           State.lastResult = res;
           State.view = 'selfWorship';
           render();
-        }).catch(function(){ $('selfMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+        }).catch(function(err){
+          var msg = (err && err.message) ? String(err.message) : String(err || '');
+          $('selfMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+        });
       };
     }
 
