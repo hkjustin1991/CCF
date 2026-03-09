@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg103
+ * v2026-03-09.reg104
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg103';
+const REG_VERSION = '2026-03-09.reg104';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1414,6 +1414,14 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
 
   return {
     ok:true,
+    viewer:{
+      id: effectiveMember.id || auth.parsed.id,
+      preferredName: effectiveMember.preferredName || '',
+      status: statusNorm,
+      servingGroups: effectiveMember.servingGroups || [],
+      servingGLGroups: effectiveMember.servingGLGroups || [],
+      isGl: !!canGl
+    },
     permission:{
       isWorshipMember:true,
       canSongEditAllFuture:true,

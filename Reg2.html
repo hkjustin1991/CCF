@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg103
+  UI VERSION TAG: reg2-ui-2026-03-09.reg104
   ============================================================
 
   Changes (reg2-ui2):
@@ -49,6 +49,7 @@
     html { -webkit-text-size-adjust: 100%; }
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text);overflow-x:hidden}
     .wrap{max-width:900px;margin:0 auto;padding:var(--pad)}
+    body.worshipWide .wrap{max-width:none}
     .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
     .title{font-size:var(--fs-title);font-weight:900}
     .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
@@ -128,6 +129,12 @@
     .worshipTable input{min-height:42px}
     .worshipTable th,.worshipTable td{border:1px solid var(--border);padding:8px;vertical-align:top}
     .worshipSaveBtn{min-height:42px;padding:8px 10px;font-size:13px;border-radius:10px}
+    .rotaStack{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .rotaRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .rotaLabel{font-weight:900;min-width:130px}
+    .rotaBubble{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:13px}
+    .worshipTopRow{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+    .worshipExportBtn{width:auto;padding:8px 12px;border-radius:10px;font-size:13px;min-height:auto}
     .selfMainBtn{min-height:52px;font-size:15px}
     .selfMainGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
     .selfMainGrid button{width:100%}
@@ -161,7 +168,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg103</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg104</span></div>
     </header>
 
     <main id="app"></main>
@@ -1302,6 +1309,7 @@
       res = res || {};
       var events = Array.isArray(res.events) ? res.events : [];
       var perm = res.permission || {};
+      var viewer = res.viewer || {};
       function songCell(ev, sec, key, value){
         return '<input id="'+worshipSongInputId_(ev.eventKey, sec, key)+'" value="'+escapeHtml(String(value||''))+'" />';
       }
@@ -1317,12 +1325,14 @@
       State.worshipMonth = selectedMonth;
       var monthOptions = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
       var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth] : events;
+      var gBadges = ((viewer.servingGroups||[]).concat(viewer.servingGLGroups||[])).map(function(g){ return '<span class="groupBadge '+servingGroupCss(g)+'">'+escapeHtml(servingGroupLabel(g))+'</span>'; }).join('');
+      var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''))+(viewer.isGl?' · GL':'');
 
-      var html = '<div class="card"><div class="big">🎵 敬拜排期 / Worship planning</div>'+
-        '<div class="small">可編輯將來聚會敬拜歌曲與匯入/匯出。<br/>Edit worship songs for upcoming services and use import/export tools.</div>'+
+      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div></div><div><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
+        '<div class="hide"><button id="btnWorshipExportXlsx" class="btnWorship">x</button><button id="btnWorshipExportPdf" class="btnWorship">x</button></div>'+
         '<div class="label" style="margin-top:10px;">月份 / Month</div>'+
         '<select id="worshipMonthSelect">'+(monthOptions || '<option value="">全部 / All</option>')+'</select>'+
-        '<div class="miniBtnRow"><button id="btnWorshipExportXlsx" class="btnWorship">⬇️ 匯出試算表 / Export sheet</button><button id="btnWorshipExportPdf" class="btnWorship">🖨️ 匯出 PDF / Export PDF</button><button id="btnWorshipBack" class="danger">⬅️ 返回 / Back</button></div>'+
+        '<div class="miniBtnRow"><button id="btnWorshipBack" class="danger">⬅️ 返回 / Back</button></div>'+
         '<div class="miniBtnRow"><button id="btnWorshipImportPreview" class="btnWorship">📥 匯入預覽 / Import preview</button><button id="btnWorshipImportCommit" class="btnWorship">✅ 確認匯入 / Import commit</button></div>'+
         '<textarea id="worshipImportText" placeholder="貼上 CSV/TSV（Worship_Import 欄位） / Paste CSV/TSV (Worship_Import columns)"></textarea><div id="worshipMsg"></div></div>';
 
@@ -1337,13 +1347,24 @@
         var s = ev.songs || {};
         function g(sec, k){ return ((s[sec] || {})[k]) || ''; }
         function meta(sec){ var x=s[sec]||{}; return '<div class="small">最後更新 / Last updated: '+escapeHtml(String(x.lastUpdatedBy||''))+' '+escapeHtml(String(x.lastUpdatedAt||''))+'</div>'; }
+        function rotaLine(posZh, posKey){
+          var v = String(rota[posKey] || '');
+          var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'"') : '';
+          return '<div class="rotaRow"><div class="rotaLabel">'+posZh+'</div><span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(v||'Vacant')+'</span></div>';
+        }
         html += '<div class="card"><div><b>'+escapeHtml(eventLabel)+'</b></div>'+
-          '<div class="small">主領 / Lead: '+escapeHtml(rota.Worship_Lead||'')+' | 和唱 / Singer: '+escapeHtml(rota.Worship_Singer||'')+' | 司琴 / Pianist: '+escapeHtml(rota.Worship_Pianist||'')+' | 鼓手 / Drum: '+escapeHtml(rota.Worship_Drum||'')+' | 樂器 / Instrument: '+escapeHtml(rota.Worship_Instrument||'')+'</div>'+
-          '<table class="worshipTable" style="width:100%;border-collapse:collapse;"><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Capo</th><th>版本 / Version</th><th>連結 / Link</th><th>操作 / Action</th></tr>'+
-          '<tr><td>敬拜 1 / Main 1</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songTitle',g('WORSHIP_MAIN_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songKey',g('WORSHIP_MAIN_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','capo',g('WORSHIP_MAIN_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','versionNote',g('WORSHIP_MAIN_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','linkUrl',g('WORSHIP_MAIN_1','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_1">儲存 / Save</button>'+meta('WORSHIP_MAIN_1')+'</td></tr>'+
-          '<tr><td>敬拜 2 / Main 2</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songTitle',g('WORSHIP_MAIN_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songKey',g('WORSHIP_MAIN_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','capo',g('WORSHIP_MAIN_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','versionNote',g('WORSHIP_MAIN_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','linkUrl',g('WORSHIP_MAIN_2','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_2">儲存 / Save</button>'+meta('WORSHIP_MAIN_2')+'</td></tr>'+
-          '<tr><td>回應 1 / Response 1</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songTitle',g('WORSHIP_RESPONSE_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songKey',g('WORSHIP_RESPONSE_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','capo',g('WORSHIP_RESPONSE_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','versionNote',g('WORSHIP_RESPONSE_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','linkUrl',g('WORSHIP_RESPONSE_1','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_1">儲存 / Save</button>'+meta('WORSHIP_RESPONSE_1')+'</td></tr>'+
-          '<tr><td>回應 2 / Response 2</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songTitle',g('WORSHIP_RESPONSE_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songKey',g('WORSHIP_RESPONSE_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','capo',g('WORSHIP_RESPONSE_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','versionNote',g('WORSHIP_RESPONSE_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','linkUrl',g('WORSHIP_RESPONSE_2','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_2">儲存 / Save</button>'+meta('WORSHIP_RESPONSE_2')+'</td></tr>'+
+          '<div class="rotaStack">'+
+            rotaLine('主領 / Lead', 'Worship_Lead')+
+            rotaLine('和唱 / Singer', 'Worship_Singer')+
+            rotaLine('司琴 / Pianist', 'Worship_Pianist')+
+            rotaLine('鼓手 / Drum', 'Worship_Drum')+
+            rotaLine('樂器 / Instrument', 'Worship_Instrument')+
+          '</div>'+
+          '<table class="worshipTable" style="width:100%;border-collapse:collapse;"><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Note (Capo/Version)</th><th>連結 / Link</th><th>操作 / Action</th></tr>'+
+          '<tr><td>敬拜 1 / Main 1</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songTitle',g('WORSHIP_MAIN_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songKey',g('WORSHIP_MAIN_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','capo',g('WORSHIP_MAIN_1','capo'))+' '+songCell(ev,'WORSHIP_MAIN_1','versionNote',g('WORSHIP_MAIN_1','versionNote'))+'</td><td><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_1">連結 / Link</button></td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_1">儲存 / Save</button>'+meta('WORSHIP_MAIN_1')+'</td></tr>'+
+          '<tr><td>敬拜 2 / Main 2</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songTitle',g('WORSHIP_MAIN_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songKey',g('WORSHIP_MAIN_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','capo',g('WORSHIP_MAIN_2','capo'))+' '+songCell(ev,'WORSHIP_MAIN_2','versionNote',g('WORSHIP_MAIN_2','versionNote'))+'</td><td><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_2">連結 / Link</button></td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_2">儲存 / Save</button>'+meta('WORSHIP_MAIN_2')+'</td></tr>'+
+          '<tr><td>回應 1 / Response 1</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songTitle',g('WORSHIP_RESPONSE_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songKey',g('WORSHIP_RESPONSE_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','capo',g('WORSHIP_RESPONSE_1','capo'))+' '+songCell(ev,'WORSHIP_RESPONSE_1','versionNote',g('WORSHIP_RESPONSE_1','versionNote'))+'</td><td><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_1">連結 / Link</button></td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_1">儲存 / Save</button>'+meta('WORSHIP_RESPONSE_1')+'</td></tr>'+
+          '<tr><td>回應 2 / Response 2</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songTitle',g('WORSHIP_RESPONSE_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songKey',g('WORSHIP_RESPONSE_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','capo',g('WORSHIP_RESPONSE_2','capo'))+' '+songCell(ev,'WORSHIP_RESPONSE_2','versionNote',g('WORSHIP_RESPONSE_2','versionNote'))+'</td><td><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_2">連結 / Link</button></td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_2">儲存 / Save</button>'+meta('WORSHIP_RESPONSE_2')+'</td></tr>'+
           '</table>'+
           (perm.canGlRotaEdit ? '<div class="small">組長模式 / GL mode：匯入 rota 會沿用現有 admin 驗證規則。<br/>Import rota will reuse existing admin validations.</div>' : '')+
           '</div>';
@@ -1645,6 +1666,7 @@
 
     function render(){
       stopScan();
+      document.body.classList.toggle('worshipWide', State.view === 'selfWorship');
       if (State.view !== 'selfServing' && State.servingRefreshTimer){
         clearInterval(State.servingRefreshTimer);
         State.servingRefreshTimer = null;
@@ -2069,8 +2091,62 @@
 
       var backBtn = $('btnWorshipBack');
       if (backBtn) backBtn.onclick = function(){ State.view = 'selfHome'; render(); };
+      var exportBtn = $('btnWorshipExportMenu');
+      if (exportBtn) exportBtn.onclick = function(){
+        var modal = openModal(
+          '<div class="big">匯出 / Export</div>'+
+          '<div class="miniBtnRow"><button id="btnExpSheet" class="btnWorship">⬇️ 匯出試算表 / Export sheet</button><button id="btnExpPdf" class="btnWorship">🖨️ 匯出 PDF / Export PDF</button><button id="btnExpClose" class="danger">關閉 / Close</button></div>'
+        );
+        modal.querySelector('#btnExpClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#btnExpSheet').onclick = function(){ closeModal(modal); var x = $('btnWorshipExportXlsx'); if (x) x.click(); };
+        modal.querySelector('#btnExpPdf').onclick = function(){ closeModal(modal); var x = $('btnWorshipExportPdf'); if (x) x.click(); };
+      };
       var monthSel = $('worshipMonthSelect');
       if (monthSel) monthSel.onchange = function(){ State.worshipMonth = String(monthSel.value || ''); render(); };
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-link-edit]')).forEach(function(btn){
+        btn.onclick = function(){
+          var ev = String(btn.getAttribute('data-ev') || '');
+          var sec = String(btn.getAttribute('data-sec') || '');
+          var inp = $(worshipSongInputId_(ev, sec, 'linkUrl'));
+          var cur = inp ? String(inp.value || '') : '';
+          var modal = openModal(
+            '<div class="big">連結 / Link</div>'+
+            '<textarea id="wLinkBox">'+escapeHtml(cur)+'</textarea>'+
+            '<div class="miniBtnRow"><button id="wLinkOpen" class="alt">開啟 / Open</button><button id="wLinkClear" class="alt">清除 / Clear</button><button id="wLinkSave" class="btnWorship">儲存 / Save</button><button id="wLinkClose" class="danger">關閉 / Close</button></div>'
+          );
+          modal.querySelector('#wLinkClose').onclick = function(){ closeModal(modal); };
+          modal.querySelector('#wLinkOpen').onclick = function(){ var v = modal.querySelector('#wLinkBox').value.trim(); if(v) window.open(v, '_blank'); };
+          modal.querySelector('#wLinkClear').onclick = function(){ modal.querySelector('#wLinkBox').value = ''; };
+          modal.querySelector('#wLinkSave').onclick = function(){ if (inp) inp.value = modal.querySelector('#wLinkBox').value.trim(); closeModal(modal); };
+        };
+      });
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-rota-edit]')).forEach(function(b){
+        b.onclick = function(){
+          var ev = String(b.getAttribute('data-ev') || '');
+          var pos = String(b.getAttribute('data-pos') || '');
+          var cur = String(b.textContent || '').trim();
+          var modal = openModal(
+            '<div class="big">快速更改排更 / Quick rota edit</div>'+
+            '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(pos)+'</div>'+
+            '<input id="wRotaVal" value="'+escapeHtml(cur)+'" placeholder="CCF#### / CLOSED / N/A" />'+
+            '<div class="miniBtnRow"><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
+          );
+          modal.querySelector('#wRotaCancel').onclick = function(){ closeModal(modal); };
+          modal.querySelector('#wRotaSave').onclick = function(){
+            var v = modal.querySelector('#wRotaVal').value.trim();
+            if (!confirm('確認更新並進行重複/假期檢查？\nConfirm update and run duplicate/holiday checks?')) return;
+            closeModal(modal);
+            var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
+            callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v }], false).then(function(r){
+              if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
+              if (msgEl) msgEl.innerHTML = showBox('ok','已更新排更','Rota updated');
+              return callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){ if(res&&res.ok){ State.lastResult=res; render(); } });
+            }).catch(function(err){ showWorshipErr_('更新失敗','Update failed', err); });
+          };
+        };
+      });
 
       Array.prototype.slice.call(document.querySelectorAll('button[data-w-save]')).forEach(function(btn){
         btn.onclick = function(){
