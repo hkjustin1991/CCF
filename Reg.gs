@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg101
+ * v2026-03-09.reg102
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg101';
+const REG_VERSION = '2026-03-09.reg102';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1273,7 +1273,14 @@ function reg_tryFetchYoutubeMeta_(url){
   }catch(e){ return { ok:false }; }
 }
 
+function reg_assertWorshipDeps_(){
+  const required = ['admin_getMembersIndex_','admin_getServingPlanMatrix_','admin_getUpcomingSundayEventKeys_','admin_memberHasServingGroup_'];
+  const missing = required.filter(function(name){ return typeof this[name] !== 'function'; }, this);
+  if (missing.length) throw new Error('Missing dependencies: ' + missing.join(', '));
+}
+
 function reg_buildWorshipPagePayload_(auth, includeMembers){
+  reg_assertWorshipDeps_();
   regRefreshMembersCachesForSelfPortal_();
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
@@ -2341,7 +2348,8 @@ function regConflict_(zh, en, detail, subCode, subGroup){
 }
 
 function regErr_(code, zh, en, e){
-  return { ok:false, code: code || 'E500', zh: zh || '系統錯誤', en: en || 'System error', detail: String(e && e.message || e || '') };
+  const msg = String((e && (e.stack || e.message)) || e || '');
+  return { ok:false, code: code || 'E500', zh: zh || '系統錯誤', en: en || 'System error', detail: msg };
 }
 
 function regDeviceHint_(inObj){
