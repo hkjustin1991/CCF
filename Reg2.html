@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg100
+  UI VERSION TAG: reg2-ui-2026-03-09.reg101
   ============================================================
 
   Changes (reg2-ui2):
@@ -161,7 +161,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg100</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg101</span></div>
     </header>
 
     <main id="app"></main>
@@ -1279,7 +1279,8 @@
     }
 
     function worshipSongInputId_(eventKey, sec, key){
-      return 'w_' + eventKey.replace(/[^\w]/g,'_') + '_' + sec + '_' + key;
+      var ek = String(eventKey || '');
+      return 'w_' + ek.replace(/[^\w]/g,'_') + '_' + String(sec||'') + '_' + String(key||'');
     }
 
     function viewSelfWorship(res){
@@ -2030,8 +2031,9 @@
           State.view = 'selfWorship';
           render();
         }).catch(function(err){
-          var msg = (err && err.message) ? String(err.message) : String(err || '');
-          $('selfMsg').innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
+          var msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : String(err || '');
+          var detail = msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '';
+          $('selfMsg').innerHTML = showBox('err','系統錯誤（開啟敬拜頁失敗）','System error (failed opening worship page)', detail);
         });
       };
     }
