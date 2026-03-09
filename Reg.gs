@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg96
+ * v2026-03-09.reg97
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg96';
+const REG_VERSION = '2026-03-09.reg97';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1174,8 +1174,25 @@ const REG_WORSHIP_IMPORT_HEADERS = [
 ];
 const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
 
+
+function reg_openSsForWorship_(){
+  try{
+    if (typeof openSs_ === 'function'){
+      const ss = openSs_();
+      if (ss) return ss;
+    }
+  }catch(e){}
+  try{
+    if (typeof SPREADSHEET_ID !== 'undefined' && SPREADSHEET_ID){
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
+    }
+  }catch(e){}
+  return SpreadsheetApp.getActive();
+}
+
 function reg_ensureWorshipPlanningSheet_(){
-  const ss = SpreadsheetApp.getActive();
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
   let sh = ss.getSheetByName(REG_WORSHIP_PLANNING_SHEET);
   if (!sh) sh = ss.insertSheet(REG_WORSHIP_PLANNING_SHEET);
   const headers = ['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID'];
@@ -1186,7 +1203,8 @@ function reg_ensureWorshipPlanningSheet_(){
 }
 
 function reg_ensureWorshipAuditSheet_(){
-  const ss = SpreadsheetApp.getActive();
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
   let sh = ss.getSheetByName(REG_WORSHIP_AUDIT_SHEET);
   if (!sh) sh = ss.insertSheet(REG_WORSHIP_AUDIT_SHEET);
   const headers = ['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context'];

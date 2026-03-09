@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg96
+  UI VERSION TAG: reg2-ui-2026-03-09.reg97
   ============================================================
 
   Changes (reg2-ui2):
@@ -124,6 +124,10 @@
     .nameItem .en{color:var(--muted);font-size:14px;margin-top:4px;font-weight:700;}
     .groupBadge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:900;margin:2px;border:1px solid var(--border)}
     .groupBadge.worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
+    .btnWorship{background:#ffe3e8 !important;border-color:rgba(217,60,94,0.35) !important;color:#8a1230 !important}
+    .worshipTable input{min-height:42px}
+    .worshipTable th,.worshipTable td{border:1px solid var(--border);padding:8px;vertical-align:top}
+    .worshipSaveBtn{min-height:42px;padding:8px 10px;font-size:13px;border-radius:10px}
     .groupBadge.media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
     .groupBadge.logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
     .groupBadge.support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
@@ -154,7 +158,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg96</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg97</span></div>
     </header>
 
     <main id="app"></main>
@@ -1044,7 +1048,7 @@
           '<div class="miniBtnRow">'+
             '<button id="btnSelfDetails" class="primary">🪪 更改資料 / Change details</button>'+
             '<button id="btnSelfServing" class="alt">🧩 事奉報名/更改 / Serving</button>'+
-            (hasWorship ? '<button id="btnSelfWorship" class="alt">🎵 敬拜排期 / Worship planning</button>' : '')+
+            (hasWorship ? '<button id="btnSelfWorship" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
             '<button id="btnSelfLive" class="alt">📡 聚會資訊 / Service information</button>'+
             '<button id="btnSelfHoliday" class="alt">🏖️ 請假 / Absence</button>'+
           '</div>'+
@@ -1283,8 +1287,8 @@
       }
       var html = '<div class="card"><div class="big">🎵 敬拜排期 / Worship planning</div>'+
         '<div class="small">Last save wins. 匯出 PDF 會附上 Uncontrolled warning。</div>'+
-        '<div class="miniBtnRow"><button id="btnWorshipExportXlsx" class="alt">⬇️ Export sheet</button><button id="btnWorshipExportPdf" class="alt">🖨️ Export PDF</button><button id="btnWorshipBack" class="danger">⬅️ 返回 / Back</button></div>'+
-        '<div class="miniBtnRow"><button id="btnWorshipImportPreview" class="alt">📥 Import preview</button><button id="btnWorshipImportCommit" class="primary">✅ Import commit</button></div>'+
+        '<div class="miniBtnRow"><button id="btnWorshipExportXlsx" class="btnWorship">⬇️ Export sheet</button><button id="btnWorshipExportPdf" class="btnWorship">🖨️ Export PDF</button><button id="btnWorshipBack" class="danger">⬅️ 返回 / Back</button></div>'+
+        '<div class="miniBtnRow"><button id="btnWorshipImportPreview" class="btnWorship">📥 Import preview</button><button id="btnWorshipImportCommit" class="btnWorship">✅ Import commit</button></div>'+
         '<textarea id="worshipImportText" placeholder="Paste CSV/TSV (Worship_Import columns)"></textarea><div id="worshipMsg"></div></div>';
       events.forEach(function(ev){
         var s = ev.songs || {};
@@ -1292,11 +1296,11 @@
         function meta(sec){ var x=s[sec]||{}; return '<div class="small">'+escapeHtml(String(x.lastUpdatedBy||''))+' '+escapeHtml(String(x.lastUpdatedAt||''))+'</div>'; }
         html += '<div class="card"><div><b>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</b></div>'+
           '<div class="small">Lead:'+escapeHtml(ev.rota.Worship_Lead||'')+' | Singer:'+escapeHtml(ev.rota.Worship_Singer||'')+' | Pianist:'+escapeHtml(ev.rota.Worship_Pianist||'')+' | Drum:'+escapeHtml(ev.rota.Worship_Drum||'')+' | Instrument:'+escapeHtml(ev.rota.Worship_Instrument||'')+'</div>'+
-          '<table style="width:100%;border-collapse:collapse;"><tr><th>Section</th><th>Title</th><th>Key</th><th>Capo</th><th>Version</th><th>Link</th><th></th></tr>'+
-          '<tr><td>Main 1</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songTitle',g('WORSHIP_MAIN_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songKey',g('WORSHIP_MAIN_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','capo',g('WORSHIP_MAIN_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','versionNote',g('WORSHIP_MAIN_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','linkUrl',g('WORSHIP_MAIN_1','linkUrl'))+'</td><td><button class="primary btnSmall" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_1">Save</button>'+meta('WORSHIP_MAIN_1')+'</td></tr>'+
-          '<tr><td>Main 2</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songTitle',g('WORSHIP_MAIN_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songKey',g('WORSHIP_MAIN_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','capo',g('WORSHIP_MAIN_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','versionNote',g('WORSHIP_MAIN_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','linkUrl',g('WORSHIP_MAIN_2','linkUrl'))+'</td><td><button class="primary btnSmall" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_2">Save</button>'+meta('WORSHIP_MAIN_2')+'</td></tr>'+
-          '<tr><td>Response 1</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songTitle',g('WORSHIP_RESPONSE_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songKey',g('WORSHIP_RESPONSE_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','capo',g('WORSHIP_RESPONSE_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','versionNote',g('WORSHIP_RESPONSE_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','linkUrl',g('WORSHIP_RESPONSE_1','linkUrl'))+'</td><td><button class="primary btnSmall" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_1">Save</button>'+meta('WORSHIP_RESPONSE_1')+'</td></tr>'+
-          '<tr><td>Response 2</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songTitle',g('WORSHIP_RESPONSE_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songKey',g('WORSHIP_RESPONSE_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','capo',g('WORSHIP_RESPONSE_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','versionNote',g('WORSHIP_RESPONSE_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','linkUrl',g('WORSHIP_RESPONSE_2','linkUrl'))+'</td><td><button class="primary btnSmall" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_2">Save</button>'+meta('WORSHIP_RESPONSE_2')+'</td></tr>'+
+          '<table class="worshipTable" style="width:100%;border-collapse:collapse;"><tr><th>Section</th><th>Title</th><th>Key</th><th>Capo</th><th>Version</th><th>Link</th><th></th></tr>'+
+          '<tr><td>Main 1</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songTitle',g('WORSHIP_MAIN_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songKey',g('WORSHIP_MAIN_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','capo',g('WORSHIP_MAIN_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','versionNote',g('WORSHIP_MAIN_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','linkUrl',g('WORSHIP_MAIN_1','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_1">Save</button>'+meta('WORSHIP_MAIN_1')+'</td></tr>'+
+          '<tr><td>Main 2</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songTitle',g('WORSHIP_MAIN_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songKey',g('WORSHIP_MAIN_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','capo',g('WORSHIP_MAIN_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','versionNote',g('WORSHIP_MAIN_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','linkUrl',g('WORSHIP_MAIN_2','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_2">Save</button>'+meta('WORSHIP_MAIN_2')+'</td></tr>'+
+          '<tr><td>Response 1</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songTitle',g('WORSHIP_RESPONSE_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','songKey',g('WORSHIP_RESPONSE_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','capo',g('WORSHIP_RESPONSE_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','versionNote',g('WORSHIP_RESPONSE_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_1','linkUrl',g('WORSHIP_RESPONSE_1','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_1">Save</button>'+meta('WORSHIP_RESPONSE_1')+'</td></tr>'+
+          '<tr><td>Response 2</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songTitle',g('WORSHIP_RESPONSE_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','songKey',g('WORSHIP_RESPONSE_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','capo',g('WORSHIP_RESPONSE_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','versionNote',g('WORSHIP_RESPONSE_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_RESPONSE_2','linkUrl',g('WORSHIP_RESPONSE_2','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_RESPONSE_2">Save</button>'+meta('WORSHIP_RESPONSE_2')+'</td></tr>'+
           '</table>'+
           (perm.canGlRotaEdit ? '<div class="small">GL mode: rota import will use admin-style validations.</div>' : '')+
           '</div>';
