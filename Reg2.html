@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg99
+  UI VERSION TAG: reg2-ui-2026-03-09.reg100
   ============================================================
 
   Changes (reg2-ui2):
@@ -161,7 +161,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg99</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg100</span></div>
     </header>
 
     <main id="app"></main>
@@ -1315,11 +1315,14 @@
       }
 
       monthEvents.forEach(function(ev){
+        ev = ev || {};
+        var rota = ev.rota || {};
+        var eventLabel = String(ev.eventKey || '').replace('SundayService_','');
         var s = ev.songs || {};
         function g(sec, k){ return ((s[sec] || {})[k]) || ''; }
         function meta(sec){ var x=s[sec]||{}; return '<div class="small">最後更新 / Last updated: '+escapeHtml(String(x.lastUpdatedBy||''))+' '+escapeHtml(String(x.lastUpdatedAt||''))+'</div>'; }
-        html += '<div class="card"><div><b>'+escapeHtml(ev.eventKey.replace('SundayService_',''))+'</b></div>'+
-          '<div class="small">主領 / Lead: '+escapeHtml(ev.rota.Worship_Lead||'')+' | 和唱 / Singer: '+escapeHtml(ev.rota.Worship_Singer||'')+' | 司琴 / Pianist: '+escapeHtml(ev.rota.Worship_Pianist||'')+' | 鼓手 / Drum: '+escapeHtml(ev.rota.Worship_Drum||'')+' | 樂器 / Instrument: '+escapeHtml(ev.rota.Worship_Instrument||'')+'</div>'+
+        html += '<div class="card"><div><b>'+escapeHtml(eventLabel)+'</b></div>'+
+          '<div class="small">主領 / Lead: '+escapeHtml(rota.Worship_Lead||'')+' | 和唱 / Singer: '+escapeHtml(rota.Worship_Singer||'')+' | 司琴 / Pianist: '+escapeHtml(rota.Worship_Pianist||'')+' | 鼓手 / Drum: '+escapeHtml(rota.Worship_Drum||'')+' | 樂器 / Instrument: '+escapeHtml(rota.Worship_Instrument||'')+'</div>'+
           '<table class="worshipTable" style="width:100%;border-collapse:collapse;"><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Capo</th><th>版本 / Version</th><th>連結 / Link</th><th>操作 / Action</th></tr>'+
           '<tr><td>敬拜 1 / Main 1</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songTitle',g('WORSHIP_MAIN_1','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','songKey',g('WORSHIP_MAIN_1','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','capo',g('WORSHIP_MAIN_1','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','versionNote',g('WORSHIP_MAIN_1','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_1','linkUrl',g('WORSHIP_MAIN_1','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_1">儲存 / Save</button>'+meta('WORSHIP_MAIN_1')+'</td></tr>'+
           '<tr><td>敬拜 2 / Main 2</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songTitle',g('WORSHIP_MAIN_2','songTitle'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','songKey',g('WORSHIP_MAIN_2','songKey'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','capo',g('WORSHIP_MAIN_2','capo'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','versionNote',g('WORSHIP_MAIN_2','versionNote'))+'</td><td>'+songCell(ev,'WORSHIP_MAIN_2','linkUrl',g('WORSHIP_MAIN_2','linkUrl'))+'</td><td><button class="btnWorship worshipSaveBtn" data-w-save="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="WORSHIP_MAIN_2">儲存 / Save</button>'+meta('WORSHIP_MAIN_2')+'</td></tr>'+
