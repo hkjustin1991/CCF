@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-02-15.reg95
+ * v2026-03-09.reg96
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-02-15.reg95';
+const REG_VERSION = '2026-03-09.reg96';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1198,14 +1198,14 @@ function reg_ensureWorshipAuditSheet_(){
 
 function reg_isWorshipMember_(member){
   const groups = ((member && member.servingGroups) || []).concat((member && member.servingGLGroups) || []);
-  return groups.some(function(g){ return admin_normalizeServingGroup_(g) === 'WORSHIP'; });
+  return groups.some(function(g){ return admin_normalizeServingGroup_(g) === 'worship'; });
 }
 
 function reg_isWorshipGlOrAdminForWorship_(member, statusNorm){
   const role = String(statusNorm || '').trim().toUpperCase();
   if (role === 'ADMIN' || role === 'SUPERUSER') return reg_isWorshipMember_(member);
   const gl = (member && member.servingGLGroups) || [];
-  return gl.some(function(g){ return admin_normalizeServingGroup_(g) === 'WORSHIP'; });
+  return gl.some(function(g){ return admin_normalizeServingGroup_(g) === 'worship'; });
 }
 
 function reg_getFutureWorshipEvents_(){
@@ -1266,20 +1266,25 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
   const events = reg_getFutureWorshipEvents_();
   const eventKeys = events.map(function(e){ return e.eventKey; });
   const planningMap = reg_getWorshipPlanningMapByEventKeys_(eventKeys);
-  const matrix = admin_getServingPlanMatrix_(events.map(function(e){ return e.eventKey; }));
+  const matrix = admin_getServingPlanMatrix_(events);
   const canGl = reg_isWorshipGlOrAdminForWorship_(member, statusNorm);
 
   const rows = events.map(function(e){
-    const pos = (matrix.byEvent && matrix.byEvent[e.eventKey]) ? matrix.byEvent[e.eventKey] : {};
+    function joinCell_(position){
+      const key = 'worship__' + position;
+      const list = (((matrix.cells || {})[e.eventKey] || {})[key]) || [];
+      if (!list.length) return '';
+      return list.map(function(it){ return String((it && it.rawValue) || '').trim(); }).filter(Boolean).join(', ');
+    }
     return {
       eventKey: e.eventKey,
       dateYmd: e.dateYmd,
       rota: {
-        Worship_Lead: String(pos.Worship_Lead || ''),
-        Worship_Singer: String(pos.Worship_Singer || ''),
-        Worship_Pianist: String(pos.Worship_Pianist || ''),
-        Worship_Drum: String(pos.Worship_Drum || ''),
-        Worship_Instrument: String(pos.Worship_Instrument || '')
+        Worship_Lead: joinCell_('Worship_Lead'),
+        Worship_Singer: joinCell_('Worship_Singer'),
+        Worship_Pianist: joinCell_('Worship_Pianist'),
+        Worship_Drum: joinCell_('Worship_Drum'),
+        Worship_Instrument: joinCell_('Worship_Instrument')
       },
       songs: planningMap[e.eventKey] || {}
     };
@@ -1296,7 +1301,7 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
     members: includeMembers ? Object.keys(byId).map(function(id){
       const m = byId[id];
       return { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', preferredName:m.preferredName||'', servingGroups:m.servingGroups||[] };
-    }).filter(function(m){ return admin_memberHasServingGroup_({ servingGroups:m.servingGroups, servingGLGroups:[] }, 'WORSHIP'); }) : []
+    }).filter(function(m){ return admin_memberHasServingGroup_({ servingGroups:m.servingGroups, servingGLGroups:[] }, 'worship'); }) : []
   };
 }
 
