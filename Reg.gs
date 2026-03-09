@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg102
+ * v2026-03-09.reg103
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg102';
+const REG_VERSION = '2026-03-09.reg103';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1226,32 +1226,54 @@ function reg_isWorshipGlOrAdminForWorship_(member, statusNorm){
   return gl.some(function(g){ return admin_normalizeServingGroup_(g) === 'worship'; });
 }
 
+function reg_clientSafeDateTime_(v){
+  if (v === null || v === undefined || v === '') return '';
+  const d = regSafeToDate_(v);
+  if (!d) return String(v || '');
+  return Utilities.formatDate(d, 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
+}
+
 function reg_getFutureWorshipEvents_(){
   const today = admin_todayUkYmd_();
-  const evs = admin_getUpcomingSundayEventKeys_(today, 26) || [];
-  return evs.map(function(e){ return { eventKey: e.eventKey, dateYmd: e.dateYmd || '' }; });
+  const monthsAhead = (typeof ADMIN_SERVING_MONTHS_AHEAD !== 'undefined' && ADMIN_SERVING_MONTHS_AHEAD)
+    ? Math.max(1, Number(ADMIN_SERVING_MONTHS_AHEAD))
+    : 6;
+  const evs = admin_getUpcomingSundayEventKeys_(today, monthsAhead) || [];
+  return evs.map(function(e){
+    return { eventKey: e.eventKey, dateYmd: e.dateYmd || '' };
+  });
 }
 
 function reg_getWorshipPlanningMapByEventKeys_(eventKeys){
   const map = {};
   eventKeys.forEach(function(ev){ map[ev] = {}; });
+
   const sh = reg_ensureWorshipPlanningSheet_();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return map;
-  const set = {};
-  eventKeys.forEach(function(ev){ set[ev] = true; });
+
+  const wanted = {};
+  eventKeys.forEach(function(ev){ wanted[ev] = true; });
+
   const rows = sh.getRange(2, 1, lastRow - 1, 10).getValues();
   rows.forEach(function(r){
     const ev = String(r[0] || '').trim();
     const sec = String(r[1] || '').trim().toUpperCase();
-    if (!set[ev] || REG_WORSHIP_SECTIONS.indexOf(sec) < 0) return;
+    if (!wanted[ev] || REG_WORSHIP_SECTIONS.indexOf(sec) < 0) return;
+
     if (!map[ev]) map[ev] = {};
     map[ev][sec] = {
-      songTitle: String(r[2] || '').trim(), songKey: String(r[3] || '').trim(), capo: String(r[4] || '').trim(),
-      versionNote: String(r[5] || '').trim(), linkUrl: String(r[6] || '').trim(), linkTitle: String(r[7] || '').trim(),
-      lastUpdatedAt: r[8] || '', lastUpdatedBy: String(r[9] || '').trim().toUpperCase()
+      songTitle: String(r[2] || '').trim(),
+      songKey: String(r[3] || '').trim(),
+      capo: String(r[4] || '').trim(),
+      versionNote: String(r[5] || '').trim(),
+      linkUrl: String(r[6] || '').trim(),
+      linkTitle: String(r[7] || '').trim(),
+      lastUpdatedAt: reg_clientSafeDateTime_(r[8]),
+      lastUpdatedBy: String(r[9] || '').trim().toUpperCase()
     };
   });
+
   return map;
 }
 
@@ -1274,46 +1296,121 @@ function reg_tryFetchYoutubeMeta_(url){
 }
 
 function reg_assertWorshipDeps_(){
-  const required = ['admin_getMembersIndex_','admin_getServingPlanMatrix_','admin_getUpcomingSundayEventKeys_','admin_memberHasServingGroup_'];
-  const missing = required.filter(function(name){ return typeof this[name] !== 'function'; }, this);
+  const root = (typeof globalThis !== 'undefined') ? globalThis : this;
+  const required = [
+    'admin_getMembersIndex_',
+    'admin_getServingPlanMatrix_',
+    'admin_getUpcomingSundayEventKeys_',
+    'admin_todayUkYmd_',
+    'admin_normalizeServingGroup_'
+  ];
+  const missing = required.filter(function(name){
+    return typeof root[name] !== 'function';
+  });
   if (missing.length) throw new Error('Missing dependencies: ' + missing.join(', '));
 }
 
 function reg_buildWorshipPagePayload_(auth, includeMembers){
   reg_assertWorshipDeps_();
   regRefreshMembersCachesForSelfPortal_();
+
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
-  const member = byId[auth.parsed.id] || null;
-  const statusNorm = regStatus_((auth.row && auth.row.Status) || (member && member.status) || '');
-  if (!member || !reg_isWorshipMember_(member)) return { ok:false, code:'E403', zh:'你沒有權限檢視敬拜排期', en:'No permission for worship planning.' };
+  const cachedMember = byId[auth.parsed.id] || null;
+  const rowServing = regServingGroupsFromRow_(auth.row);
+
+  const effectiveMember = cachedMember ? {
+    id: cachedMember.id,
+    nameZh: cachedMember.nameZh || '',
+    nameEn: cachedMember.nameEn || '',
+    preferredName: cachedMember.preferredName || '',
+    servingGroups: reg_mergeServingGroups_(cachedMember.servingGroups || [], rowServing.serving || []),
+    servingGLGroups: reg_mergeServingGroups_(cachedMember.servingGLGroups || [], rowServing.gl || [])
+  } : {
+    id: auth.parsed.id,
+    nameZh: String((auth.row && auth.row.NameZh) || '').trim(),
+    nameEn: String((auth.row && auth.row.NameEn) || '').trim(),
+    preferredName: String((auth.row && auth.row.PreferredName) || '').trim(),
+    servingGroups: rowServing.serving || [],
+    servingGLGroups: rowServing.gl || []
+  };
+
+  const statusNorm = regStatus_(
+    (auth.row && auth.row.Status) ||
+    (cachedMember && cachedMember.status) ||
+    ''
+  );
+
+  if (!reg_isWorshipMember_(effectiveMember)) {
+    return {
+      ok:false,
+      code:'E403',
+      zh:'你沒有權限檢視敬拜排期',
+      en:'No permission for worship planning.'
+    };
+  }
 
   const events = reg_getFutureWorshipEvents_();
   const eventKeys = events.map(function(e){ return e.eventKey; });
   const planningMap = reg_getWorshipPlanningMapByEventKeys_(eventKeys);
   const matrix = admin_getServingPlanMatrix_(events);
-  const canGl = reg_isWorshipGlOrAdminForWorship_(member, statusNorm);
+  const canGl = reg_isWorshipGlOrAdminForWorship_(effectiveMember, statusNorm);
+
+  function getCellList_(eventKey, position){
+    const bucket = ((matrix.cells || {})[eventKey] || {});
+    return (
+      bucket[position] ||
+      bucket['worship__' + position] ||
+      bucket['Worship__' + position] ||
+      []
+    );
+  }
+
+  function joinCell_(eventKey, position){
+    const list = getCellList_(eventKey, position);
+    if (!Array.isArray(list) || !list.length) return '';
+
+    return list.map(function(it){
+      const raw = String((it && it.rawValue) || '').trim();
+      const memberId = String((it && it.memberId) || '').trim().toUpperCase();
+
+      if (memberId && byId[memberId] && typeof admin_memberLabelCompact_ === 'function') {
+        return admin_memberLabelCompact_(byId[memberId]).label || raw || memberId;
+      }
+      return raw || memberId;
+    }).filter(Boolean).join(', ');
+  }
 
   const rows = events.map(function(e){
-    function joinCell_(position){
-      const key = 'worship__' + position;
-      const list = (((matrix.cells || {})[e.eventKey] || {})[key]) || [];
-      if (!list.length) return '';
-      return list.map(function(it){ return String((it && it.rawValue) || '').trim(); }).filter(Boolean).join(', ');
-    }
     return {
       eventKey: e.eventKey,
       dateYmd: e.dateYmd,
       rota: {
-        Worship_Lead: joinCell_('Worship_Lead'),
-        Worship_Singer: joinCell_('Worship_Singer'),
-        Worship_Pianist: joinCell_('Worship_Pianist'),
-        Worship_Drum: joinCell_('Worship_Drum'),
-        Worship_Instrument: joinCell_('Worship_Instrument')
+        Worship_Lead: joinCell_(e.eventKey, 'Worship_Lead'),
+        Worship_Singer: joinCell_(e.eventKey, 'Worship_Singer'),
+        Worship_Pianist: joinCell_(e.eventKey, 'Worship_Pianist'),
+        Worship_Drum: joinCell_(e.eventKey, 'Worship_Drum'),
+        Worship_Instrument: joinCell_(e.eventKey, 'Worship_Instrument')
       },
       songs: planningMap[e.eventKey] || {}
     };
   });
+
+  const membersPayload = includeMembers
+    ? Object.keys(byId).map(function(id){
+        const m = byId[id] || {};
+        return {
+          id: m.id || id,
+          nameZh: m.nameZh || '',
+          nameEn: m.nameEn || '',
+          preferredName: m.preferredName || '',
+          servingGroups: m.servingGroups || [],
+          servingGLGroups: m.servingGLGroups || []
+        };
+      }).filter(function(m){
+        return reg_isWorshipMember_(m);
+      })
+    : [];
 
   return {
     ok:true,
@@ -1323,10 +1420,7 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
       canGlRotaEdit: !!canGl
     },
     events: rows,
-    members: includeMembers ? Object.keys(byId).map(function(id){
-      const m = byId[id];
-      return { id:m.id, nameZh:m.nameZh||'', nameEn:m.nameEn||'', preferredName:m.preferredName||'', servingGroups:m.servingGroups||[] };
-    }).filter(function(m){ return admin_memberHasServingGroup_({ servingGroups:m.servingGroups, servingGLGroups:[] }, 'worship'); }) : []
+    members: membersPayload
   };
 }
 
@@ -1334,8 +1428,10 @@ function api_reg_self_worship_page_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
-    return reg_buildWorshipPagePayload_(auth, true);
-  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+    return reg_buildWorshipPagePayload_(auth, false);
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
 }
 
 function api_reg_self_worship_song_save_public(qrPayload, payload){

@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg102
+  UI VERSION TAG: reg2-ui-2026-03-09.reg103
   ============================================================
 
   Changes (reg2-ui2):
@@ -161,7 +161,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg102</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg103</span></div>
     </header>
 
     <main id="app"></main>
@@ -248,10 +248,14 @@
     function callApiViaGas(fn, args){
       return new Promise(function(resolve, reject){
         try{
-          var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          var runner = google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler(function(err){
+              reject({ message: clientErrText_(err), raw: err });
+            });
           runner[fn].apply(runner, args || []);
         }catch(err){
-          reject(err);
+          reject({ message: clientErrText_(err), raw: err });
         }
       });
     }
@@ -288,6 +292,17 @@
       }
 
       return done(callApiViaGas(fn, args));
+    }
+
+    function clientErrText_(err){
+      try{
+        if (!err) return '';
+        if (typeof err === 'string') return err;
+        if (err.message) return String(err.message);
+        return JSON.stringify(err);
+      }catch(e){
+        try{ return String(err); }catch(_e){ return ''; }
+      }
     }
 
     function escapeHtml(s){
@@ -2031,9 +2046,14 @@
           State.view = 'selfWorship';
           render();
         }).catch(function(err){
-          var msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : String(err || '');
+          var msg = clientErrText_(err);
           var detail = msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '';
-          $('selfMsg').innerHTML = showBox('err','系統錯誤（開啟敬拜頁失敗）','System error (failed opening worship page)', detail);
+          $('selfMsg').innerHTML = showBox(
+            'err',
+            '系統錯誤（開啟敬拜頁失敗）',
+            'System error (failed opening worship page)',
+            detail
+          );
         });
       };
     }
