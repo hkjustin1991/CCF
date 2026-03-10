@@ -1375,7 +1375,7 @@
           var rm = rotaMeta[posKey] || {};
           var vac = Number(rm.vacantSlots || 0);
           var total = Number(rm.totalSlots || 0);
-          var vacBadge = total > 0 ? (' <span class="pill">Vacancy '+vac+'/'+total+'</span>') : '';
+          var vacBadge = total > 0 ? (' <span class="pill">空缺 / Vacancy '+vac+'/'+total+'</span>') : '';
           var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'" data-total="'+escapeHtml(String(total||0))+'"') : '';
           return '<div class="rotaRow"><div class="rotaLabel">'+posZh+vacBadge+'</div><span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(v||'Vacant')+'</span></div>';
         }
@@ -2174,7 +2174,7 @@
           var modal = openModal(
             '<div class="big">連結 / Link</div>'+
             '<textarea id="wLinkBox">'+escapeHtml(cur)+'</textarea>'+
-            '<div class="miniBtnRow"><button id="wLinkOpen" class="alt">Open URL</button><button id="wLinkClear" class="alt">❌ Clear</button><button id="wLinkSave" class="btnWorship">💾 Save</button><button id="wLinkClose" class="danger">關閉 / Close</button></div>'
+            '<div class="miniBtnRow"><button id="wLinkOpen" class="alt">開啟連結 / Open URL</button><button id="wLinkClear" class="alt">❌ 清除 / Clear</button><button id="wLinkSave" class="btnWorship">💾 儲存 / Save</button><button id="wLinkClose" class="danger">關閉 / Close</button></div>'
           );
           modal.querySelector('#wLinkClose').onclick = function(){ closeModal(modal); };
           modal.querySelector('#wLinkOpen').onclick = function(){ var v = modal.querySelector('#wLinkBox').value.trim(); if(v) window.open(v, '_blank'); };
@@ -2207,11 +2207,11 @@
           var total = Number(b.getAttribute('data-total') || 1);
           if (!total || total < 1) total = 1;
           var slotOptions = '';
-          for (var i=0;i<total;i++) slotOptions += '<option value="'+(i+1)+'">Slot '+(i+1)+'</option>';
+          for (var i=0;i<total;i++) slotOptions += '<option value="'+(i+1)+'">位置 '+(i+1)+' / Slot '+(i+1)+'</option>';
           var modal = openModal(
             '<div class="big">快速更改排更 / Quick rota edit</div>'+
             '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(pos)+'</div>'+
-            '<div class="label">Slot</div><select id="wRotaSlot">'+slotOptions+'</select>'+
+            '<div class="label">位置 / Slot</div><select id="wRotaSlot">'+slotOptions+'</select>'+
             '<input id="wRotaVal" value="'+escapeHtml(cur)+'" list="worshipMemberOptions" placeholder="搜尋成員 / Search member" />'+
             '<div class="miniBtnRow"><button id="wRotaVacant" class="alt">Vacant</button><button id="wRotaClosed" class="alt">Closed</button><button id="wRotaNA" class="alt">N/A</button><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
           );
