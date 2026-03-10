@@ -1328,10 +1328,8 @@
         return '<textarea class="worshipCellInput" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+escapeHtml(sec)+'" data-key="'+escapeHtml(key)+'" id="'+worshipSongInputId_(ev.eventKey, sec, key)+'">'+escapeHtml(String(value||''))+'</textarea>';
       }
       function memberOption_(m){
-        var g = String(m.gender||'').toUpperCase();
-        var suf = (g==='M'||g==='MALE'||g==='男') ? '弟兄 / Brother' : ((g==='F'||g==='FEMALE'||g==='女') ? '姊妹 / Sister' : '');
         var pref = m.preferredName ? (' ('+m.preferredName+')') : '';
-        return (m.id||'')+' · '+(m.nameZh||'')+' · '+(m.nameEn||'')+(suf?(' · '+suf):'')+pref;
+        return (m.id||'')+' · '+(m.nameZh||'')+' · '+(m.nameEn||'')+pref;
       }
       var monthMap = {};
       events.forEach(function(ev){
@@ -1366,6 +1364,7 @@
       monthEvents.forEach(function(ev){
         ev = ev || {};
         var rota = ev.rota || {};
+        var rotaMeta = ev.rotaMeta || {};
         var eventLabel = String(ev.eventKey || '').replace('SundayService_','');
         var songMap = ev.songs || {};
         function g(sec, k){ return ((songMap[sec] || {})[k]) || ''; }
@@ -1373,8 +1372,12 @@
         function rotaLine(posZh, posKey){
           var v = String(rota[posKey] || '');
           if (/^closed$/i.test(v)) return '';
-          var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'"') : '';
-          return '<div class="rotaRow"><div class="rotaLabel">'+posZh+'</div><span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(v||'Vacant')+'</span></div>';
+          var rm = rotaMeta[posKey] || {};
+          var vac = Number(rm.vacantSlots || 0);
+          var total = Number(rm.totalSlots || 0);
+          var vacBadge = total > 0 ? (' <span class="pill">Vacancy '+vac+'/'+total+'</span>') : '';
+          var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'" data-total="'+escapeHtml(String(total||0))+'"') : '';
+          return '<div class="rotaRow"><div class="rotaLabel">'+posZh+vacBadge+'</div><span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(v||'Vacant')+'</span></div>';
         }
         function linkCell_(sec){
           return '<div class="worshipLinkCell"><textarea class="worshipLinkPreview" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="linkUrl" id="'+worshipSongInputId_(ev.eventKey, sec, 'linkUrl')+'">'+escapeHtml(g(sec,'linkUrl'))+'</textarea><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'">編輯 / Edit</button></div>';
@@ -2125,6 +2128,20 @@
         if (el) el.innerHTML = showBox('err', titleZh, titleEn, detail);
       }
 
+      function findWorshipEvent_(ev){
+        var cache = State.worshipRenderCache || {};
+        var list = Array.isArray(cache.events) ? cache.events : [];
+        for (var i=0;i<list.length;i++) if (String((list[i]||{}).eventKey||'')===ev) return list[i]||{};
+        return {};
+      }
+      function songFieldVal_(ev, sec, key){
+        var el = $(worshipSongInputId_(ev, sec, key));
+        if (el) return String(el.value || '');
+        var e = findWorshipEvent_(ev);
+        var songs = (e && e.songs) || {};
+        return String((((songs[sec]||{})[key]) || ''));
+      }
+
       var backBtn = $('btnWorshipBack');
       if (backBtn) backBtn.onclick = function(){ State.view = 'selfHome'; render(); };
       var exportBtn = $('btnWorshipExportMenu');
@@ -2157,7 +2174,7 @@
           var modal = openModal(
             '<div class="big">連結 / Link</div>'+
             '<textarea id="wLinkBox">'+escapeHtml(cur)+'</textarea>'+
-            '<div class="miniBtnRow"><button id="wLinkOpen" class="alt">開啟 / Open</button><button id="wLinkClear" class="alt">清除 / Clear</button><button id="wLinkSave" class="btnWorship">儲存 / Save</button><button id="wLinkClose" class="danger">關閉 / Close</button></div>'
+            '<div class="miniBtnRow"><button id="wLinkOpen" class="alt">Open URL</button><button id="wLinkClear" class="alt">❌ Clear</button><button id="wLinkSave" class="btnWorship">💾 Save</button><button id="wLinkClose" class="danger">關閉 / Close</button></div>'
           );
           modal.querySelector('#wLinkClose').onclick = function(){ closeModal(modal); };
           modal.querySelector('#wLinkOpen').onclick = function(){ var v = modal.querySelector('#wLinkBox').value.trim(); if(v) window.open(v, '_blank'); };
@@ -2166,12 +2183,15 @@
             var v = modal.querySelector('#wLinkBox').value.trim();
             if (inp) inp.value = v;
             var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
-            function val(k){ var el = $(worshipSongInputId_(ev, sec, k)); return el ? el.value : ''; }
             callApi('api_reg_self_worship_song_save_public', State.authQrPayload, {
-              eventKey:ev, songSection:sec, songTitle:val('songTitle'), songKey:val('songKey'), capo:'', versionNote:val('versionNote'), linkUrl:v, linkTitle:''
+              eventKey:ev, songSection:sec, songTitle:songFieldVal_(ev, sec, 'songTitle'), songKey:songFieldVal_(ev, sec, 'songKey'), capo:'', versionNote:songFieldVal_(ev, sec, 'versionNote'), linkUrl:v, linkTitle:''
             }).then(function(r){
               if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
-              if ($(worshipSongInputId_(ev, sec, 'songTitle')) && r.saved && r.saved.songTitle){ $(worshipSongInputId_(ev, sec, 'songTitle')).value = r.saved.songTitle; }
+              if (r.saved){
+                var t = $(worshipSongInputId_(ev, sec, 'songTitle')); if (t && r.saved.songTitle){ t.value = r.saved.songTitle; }
+                var l = $(worshipSongInputId_(ev, sec, 'linkUrl')); if (l){ l.value = String(r.saved.linkUrl || v); }
+                var e = findWorshipEvent_(ev); if (e && e.songs){ if (!e.songs[sec]) e.songs[sec] = {}; e.songs[sec].songTitle = String(r.saved.songTitle || songFieldVal_(ev, sec, 'songTitle')); e.songs[sec].songKey = String(r.saved.songKey || songFieldVal_(ev, sec, 'songKey')); e.songs[sec].versionNote = String(r.saved.versionNote || songFieldVal_(ev, sec, 'versionNote')); e.songs[sec].linkUrl = String(r.saved.linkUrl || v); }
+              }
               if (msgEl) msgEl.innerHTML = showBox('ok','已儲存連結','Link saved');
               closeModal(modal);
             }).catch(function(err){ showWorshipErr_('連結儲存失敗','Link save failed', err); });
@@ -2184,9 +2204,14 @@
           var ev = String(b.getAttribute('data-ev') || '');
           var pos = String(b.getAttribute('data-pos') || '');
           var cur = String(b.textContent || '').trim();
+          var total = Number(b.getAttribute('data-total') || 1);
+          if (!total || total < 1) total = 1;
+          var slotOptions = '';
+          for (var i=0;i<total;i++) slotOptions += '<option value="'+(i+1)+'">Slot '+(i+1)+'</option>';
           var modal = openModal(
             '<div class="big">快速更改排更 / Quick rota edit</div>'+
             '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(pos)+'</div>'+
+            '<div class="label">Slot</div><select id="wRotaSlot">'+slotOptions+'</select>'+
             '<input id="wRotaVal" value="'+escapeHtml(cur)+'" list="worshipMemberOptions" placeholder="搜尋成員 / Search member" />'+
             '<div class="miniBtnRow"><button id="wRotaVacant" class="alt">Vacant</button><button id="wRotaClosed" class="alt">Closed</button><button id="wRotaNA" class="alt">N/A</button><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
           );
@@ -2198,10 +2223,11 @@
             var vRaw = modal.querySelector('#wRotaVal').value.trim();
             var m = vRaw.match(/CCF\d{4}/i);
             var v = m ? m[0].toUpperCase() : vRaw;
+            var slotIdx = Math.max(1, Number(modal.querySelector('#wRotaSlot').value || 1));
             if (!confirm('確認更新並進行重複/假期檢查？\nConfirm update and run duplicate/holiday checks?')) return;
             closeModal(modal);
             var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
-            callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v }], false).then(function(r){
+            callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v, slotIndex:slotIdx }], false).then(function(r){
               if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
               if (msgEl) msgEl.innerHTML = showBox('ok','已更新排更','Rota updated');
               return callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){ if(res&&res.ok){ State.lastResult=res; render(); } });

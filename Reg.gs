@@ -1381,19 +1381,51 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
     }).filter(Boolean).join(', ');
   }
 
+  const allowedPositions = ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'];
+
+  function rotaStats_(eventKey, position){
+    const list = getCellList_(eventKey, position);
+    if (!Array.isArray(list) || !list.length) return { totalSlots:0, vacantSlots:0 };
+    let total = 0;
+    let vacant = 0;
+    list.forEach(function(it){
+      const raw = String((it && it.rawValue) || '').trim();
+      const up = raw.toUpperCase();
+      if (!raw || up === 'VACANT') { total += 1; vacant += 1; return; }
+      if (up === 'CLOSED') return;
+      total += 1;
+    });
+    return { totalSlots: total, vacantSlots: vacant };
+  }
+
   const rows = events.map(function(e){
+    const rota = {
+      Worship_Lead: joinCell_(e.eventKey, 'Worship_Lead'),
+      Worship_Singer: joinCell_(e.eventKey, 'Worship_Singer'),
+      Worship_Pianist: joinCell_(e.eventKey, 'Worship_Pianist'),
+      Worship_Drum: joinCell_(e.eventKey, 'Worship_Drum'),
+      Worship_Instrument: joinCell_(e.eventKey, 'Worship_Instrument')
+    };
+    const rotaMeta = {};
+    allowedPositions.forEach(function(pos){ rotaMeta[pos] = rotaStats_(e.eventKey, pos); });
     return {
       eventKey: e.eventKey,
       dateYmd: e.dateYmd,
-      rota: {
-        Worship_Lead: joinCell_(e.eventKey, 'Worship_Lead'),
-        Worship_Singer: joinCell_(e.eventKey, 'Worship_Singer'),
-        Worship_Pianist: joinCell_(e.eventKey, 'Worship_Pianist'),
-        Worship_Drum: joinCell_(e.eventKey, 'Worship_Drum'),
-        Worship_Instrument: joinCell_(e.eventKey, 'Worship_Instrument')
-      },
+      rota: rota,
+      rotaMeta: rotaMeta,
       songs: planningMap[e.eventKey] || {}
     };
+  });
+
+  const worshipIdsFromPlan = {};
+  events.forEach(function(e){
+    allowedPositions.forEach(function(pos){
+      const list = getCellList_(e.eventKey, pos);
+      (Array.isArray(list) ? list : []).forEach(function(it){
+        const id = String((it && it.memberId) || '').trim().toUpperCase();
+        if (id) worshipIdsFromPlan[id] = true;
+      });
+    });
   });
 
   const membersPayload = includeMembers
@@ -1409,7 +1441,8 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
           servingGLGroups: m.servingGLGroups || []
         };
       }).filter(function(m){
-        return reg_isWorshipMember_(m);
+        const mid = String(m.id || '').trim().toUpperCase();
+        return reg_isWorshipMember_(m) || !!worshipIdsFromPlan[mid];
       })
     : [];
 
@@ -1515,7 +1548,19 @@ function api_reg_self_worship_rota_gl_save_public(qrPayload, eventKey, rows, ove
     const statusNorm = regStatus_((auth.row && auth.row.Status) || (member && member.status) || '');
     if (!reg_isWorshipGlOrAdminForWorship_(member, statusNorm)) return { ok:false, code:'E403', zh:'你沒有權限修改敬拜排更', en:'No permission to edit worship rota.' };
     const allowed = ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'];
-    const cleaned = (Array.isArray(rows) ? rows : []).filter(function(r){ return allowed.indexOf(String(r.position||'')) >= 0; });
+    const list = (Array.isArray(rows) ? rows : []).filter(function(r){ return allowed.indexOf(String(r.position||'')) >= 0; });
+    const existing = admin_getServingValuesForEvent_(String(eventKey || ''));
+    const cleaned = list.map(function(r){
+      const out = { position:String(r.position||''), value:String(r.value||'').trim() };
+      const slotIndex = Number(r.slotIndex || 0);
+      if (!slotIndex || slotIndex < 1) return out;
+      const prev = String(existing[out.position] || '').trim();
+      const tokens = prev ? prev.split(',').map(function(x){ return String(x||'').trim(); }) : [];
+      while (tokens.length < slotIndex) tokens.push('Vacant');
+      tokens[slotIndex - 1] = out.value || 'Vacant';
+      out.value = tokens.join(', ');
+      return out;
+    });
     const sh = admin_ensureServingSheet_();
     admin_ensureServingEventKeys_(sh);
     const token = reg_issueTempAdminTokenForWorship_(auth.parsed.id);
