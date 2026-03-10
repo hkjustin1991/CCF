@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-07.admin107
+ * v2026-03-10.admin108
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-07.admin107';
+const ADMIN_VERSION = '2026-03-10.admin108';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -715,7 +715,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
+    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(), dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -741,10 +741,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         const labels = (d.positions || []).map(admin_servingPositionLabel_);
         return d.memberId + ': ' + labels.join(', ');
       }).join(' | ');
-      return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
+      return admin_conflict_('同一會員於同日被安排多個崗位','The same member is assigned to multiple positions on the same day.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
     if (!overrideAway){
-      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
+      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'同一會員於同日被安排多個崗位', en:'The same member is assigned to multiple positions on the same day.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
     }
   }
   if (conflicts.length){
