@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg108
+ * v2026-03-09.reg109
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg108';
+const REG_VERSION = '2026-03-09.reg109';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1470,7 +1470,19 @@ function api_reg_self_worship_page_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
-    return reg_buildWorshipPagePayload_(auth, true);
+    return reg_buildWorshipPagePayload_(auth, false);
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_worship_members_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const base = reg_buildWorshipPagePayload_(auth, true);
+    if (!base || !base.ok) return base;
+    return { ok:true, members: base.members || [] };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
