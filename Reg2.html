@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg107
+  UI VERSION TAG: reg2-ui-2026-03-09.reg108
   ============================================================
 
   Changes (reg2-ui2):
@@ -139,8 +139,8 @@
     .worshipToggleBtn{width:auto;min-height:auto;padding:6px 10px;border-radius:10px}
     .worshipTableWrap{overflow:auto;resize:both;min-width:620px;min-height:180px;border:1px dashed var(--border);padding:6px;border-radius:12px;background:#fff}
     .worshipCellInput{min-width:80px;min-height:42px;resize:both}
-    .worshipLinkCell{display:flex;align-items:center;gap:6px}
-    .worshipLinkPreview{min-width:120px;min-height:42px;resize:both}
+    .worshipLinkCell{display:block}
+    .worshipLinkPreview{width:100%;min-height:42px;resize:both}
     .quickBubbleWrap{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
     .quickBubble{border:1px solid var(--border);border-radius:14px;padding:8px 10px;font-size:12px;background:#fff;display:inline-flex;align-items:flex-start;gap:6px;min-height:46px;cursor:pointer}
     .quickBubbleVacancy{background:#fff6e6;border-color:rgba(200,132,0,0.45);color:#8a5a00}
@@ -151,6 +151,7 @@
     .worshipCols .colLink{width:110px}
     .worshipCols .colAction{width:120px}
     .autosaveHint{font-size:12px;color:var(--muted)}
+    .worshipMonthSelect{font-size:18px;font-weight:900;min-height:52px}
     .selfMainBtn{min-height:52px;font-size:15px}
     .selfMainGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
     .selfMainGrid button{width:100%}
@@ -184,7 +185,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg107</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg108</span></div>
     </header>
 
     <main id="app"></main>
@@ -1097,7 +1098,7 @@
             '<button id="btnSelfHoliday" class="alt selfMainBtn">🏖️ 請假 / Absence</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnSelfBack" class="danger">🚪 登出 / Log out</button>'+
+            '<button id="btnSelfBack" class="danger">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="selfMsg"></div>'+
         '</div>';
@@ -1332,6 +1333,16 @@
       function songCell(ev, sec, key, value){
         return '<textarea class="worshipCellInput" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+escapeHtml(sec)+'" data-key="'+escapeHtml(key)+'" id="'+worshipSongInputId_(ev.eventKey, sec, key)+'">'+escapeHtml(String(value||''))+'</textarea>';
       }
+      function songKeyCell(ev, sec, value){
+        var raw = String(value||'').trim();
+        var acc = '';
+        if (/[#♯]$/.test(raw)){ acc='♯'; raw = raw.replace(/[#♯]$/,'').trim(); }
+        else if (/[b♭]$/.test(raw)){ acc='♭'; raw = raw.replace(/[b♭]$/,'').trim(); }
+        var hid = worshipSongInputId_(ev.eventKey, sec, 'songKey');
+        var baseId = hid + '_base';
+        var accId = hid + '_acc';
+        return '<div><input class="worshipCellInput" id="'+baseId+'" data-key-part="base" data-target="'+hid+'" value="'+escapeHtml(raw)+'" placeholder="Key"/><select id="'+accId+'" data-key-part="acc" data-target="'+hid+'"><option value=""'+(acc===''?' selected':'')+'>—</option><option value="♯"'+(acc==='♯'?' selected':'')+'>♯</option><option value="♭"'+(acc==='♭'?' selected':'')+'>♭</option></select><input type="hidden" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+escapeHtml(sec)+'" data-key="songKey" id="'+hid+'" value="'+escapeHtml(String(value||''))+'"/></div>';
+      }
       function memberOption_(m){
         var pref = m.preferredName ? (' ('+m.preferredName+')') : '';
         return (m.id||'')+' · '+(m.nameZh||'')+' · '+(m.nameEn||'')+pref;
@@ -1354,14 +1365,13 @@
       var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''));
       var memberOptions = members.map(function(m){ return '<option value="'+escapeHtml(memberOption_(m))+'"></option>'; }).join('');
 
-      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存已啟用 / Auto-save enabled</div></div><div><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
+      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存已啟用 / Auto-save enabled</div></div><div><button id="btnWorshipImportMenu" class="btnWorship worshipExportBtn">📥 匯入 / Import</button><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
         '<datalist id="worshipMemberOptions">'+memberOptions+'</datalist>'+
         '<div class="hide"><button id="btnWorshipExportXlsx" class="btnWorship">x</button><button id="btnWorshipExportPdf" class="btnWorship">x</button></div>'+
         '<div class="label" style="margin-top:10px;">月份 / Month</div>'+
-        '<select id="worshipMonthSelect">'+(monthOptions || '<option value="">全部 / All</option>')+'</select>'+
-        '<div class="miniBtnRow"><button id="btnWorshipBack" class="danger">🚪 登出 / Log out</button></div>'+
-        '<div class="miniBtnRow"><button id="btnWorshipImportPreview" class="btnWorship">📥 匯入預覽 / Import preview</button><button id="btnWorshipImportCommit" class="btnWorship">✅ 確認匯入 / Import commit</button></div>'+
-        '<textarea id="worshipImportText" placeholder="貼上 CSV/TSV（Worship_Import 欄位） / Paste CSV/TSV (Worship_Import columns)"></textarea><div id="worshipMsg"></div></div>';
+        '<select id="worshipMonthSelect" class="worshipMonthSelect">'+(monthOptions || '<option value="">全部 / All</option>')+'</select>'+
+        '<div class="miniBtnRow"><button id="btnWorshipBack" class="danger">⬅️ 返回 / Back</button></div>'+
+        '<div id="worshipMsg"></div></div>';
 
       if (!monthEvents.length){
         return html + '<div class="card"><div class="msgBox warn">此月份沒有敬拜活動 / No worship events in selected month.</div></div>';
@@ -1377,19 +1387,21 @@
         function meta(sec){ var x=songMap[sec]||{}; return '<div class="small">最後更新 / Last updated: '+escapeHtml(String(x.lastUpdatedBy||''))+' '+escapeHtml(String(x.lastUpdatedAt||''))+'</div>'; }
         function rotaLine(posZh, posKey){
           var v = String(rota[posKey] || '');
-          if (/^closed$/i.test(v)) return '';
-          var rm = rotaMeta[posKey] || {};
-          var vac = Number(rm.vacantSlots || 0);
+                    var rm = rotaMeta[posKey] || {};
           var total = Number(rm.totalSlots || 0);
-          var vacBadge = total > 0 ? (' <span class="pill">空缺 / Vacancy '+vac+'/'+total+'</span>') : '';
-          var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'" data-total="'+escapeHtml(String(total||0))+'"') : '';
-          return '<div class="rotaRow"><div class="rotaLabel">'+posZh+vacBadge+'</div><span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(v||'Vacant')+'</span></div>';
+          var toks = String(v||'').split(',').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+          if (/^closed$/i.test(String(v||''))) toks = ['Closed'];
+          while (total>0 && toks.length < total) toks.push('Vacant');
+          if (!toks.length) toks = ['Vacant'];
+          var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'" data-total="'+escapeHtml(String(total||toks.length||1))+'"') : '';
+          var chips = toks.map(function(t){ return '<span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(t)+'</span>'; }).join(' ');
+          return '<div class="rotaRow"><div class="rotaLabel">'+posZh+'</div><div>'+chips+'</div></div>';
         }
         function linkCell_(sec){
-          return '<div class="worshipLinkCell"><textarea class="worshipLinkPreview" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="linkUrl" id="'+worshipSongInputId_(ev.eventKey, sec, 'linkUrl')+'">'+escapeHtml(g(sec,'linkUrl'))+'</textarea><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'">編輯 / Edit</button></div>';
+          return '<div class="worshipLinkCell"><textarea class="worshipLinkPreview" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="linkUrl" id="'+worshipSongInputId_(ev.eventKey, sec, 'linkUrl')+'">'+escapeHtml(g(sec,'linkUrl'))+'</textarea><div style="margin-top:6px"><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'">編輯 / Edit</button></div></div>';
         }
         function row_(label, sec){
-          return '<tr><td>'+label+'</td><td>'+songCell(ev,sec,'songTitle',g(sec,'songTitle'))+'</td><td>'+songCell(ev,sec,'songKey',g(sec,'songKey'))+'</td><td>'+songCell(ev,sec,'versionNote',g(sec,'versionNote'))+'</td><td>'+linkCell_(sec)+'</td><td>'+meta(sec)+'</td></tr>';
+          return '<tr><td>'+label+'</td><td>'+songCell(ev,sec,'songTitle',g(sec,'songTitle'))+'</td><td>'+songKeyCell(ev,sec,g(sec,'songKey'))+'</td><td>'+songCell(ev,sec,'versionNote',g(sec,'versionNote'))+'</td><td>'+linkCell_(sec)+'</td><td>'+meta(sec)+'</td></tr>';
         }
         var expanded = !!State.worshipEventExpanded[ev.eventKey];
         var rotaHtml = [
@@ -2180,7 +2192,47 @@
       }
 
       var backBtn = $('btnWorshipBack');
-      if (backBtn) backBtn.onclick = function(){ State.authQrPayload = null; State.lastResult = null; State.view = 'home'; render(); };
+      if (backBtn) backBtn.onclick = function(){ State.view = 'selfHome'; render(); };
+
+      function syncKeyField_(target){
+        var hid=$(target); if(!hid) return;
+        var base=$(target+'_base'); var acc=$(target+'_acc');
+        var v=((base?base.value:'').trim() + (acc&&acc.value?(' '+acc.value):'')).trim();
+        hid.value=v;
+        if (typeof hid.oninput === 'function') hid.oninput();
+      }
+      Array.prototype.slice.call(document.querySelectorAll('[data-key-part]')).forEach(function(el){
+        el.oninput=function(){ syncKeyField_(String(el.getAttribute('data-target')||'')); };
+        el.onchange=function(){ syncKeyField_(String(el.getAttribute('data-target')||'')); };
+      });
+
+      var importBtn = $('btnWorshipImportMenu');
+      if (importBtn) importBtn.onclick = function(){
+        var modal = openModal(
+          '<div class="big">匯入 / Import</div>'+ 
+          '<textarea id="wImportBox" placeholder="貼上 CSV/TSV（Worship_Import 欄位） / Paste CSV/TSV (Worship_Import columns)"></textarea>'+
+          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">📥 匯入預覽 / Import preview</button><button id="wImportCommit" class="btnWorship">✅ 確認匯入 / Import commit</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
+        );
+        modal.querySelector('#wImportClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#wImportPreview').onclick = function(){
+          var rows = parseImportTextRows_(modal.querySelector('#wImportBox').value || '');
+          callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, rows).then(function(res){
+            var msgEl = worshipMsgEl_();
+            if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
+            State.worshipImportRows = rows;
+            if (msgEl) msgEl.innerHTML = showBox('ok','預覽完成','Preview ready','<div class="small">Rows: '+escapeHtml(String(res.count||0))+'</div>');
+          }).catch(function(err){ showWorshipErr_('預覽失敗','Preview failed', err); });
+        };
+        modal.querySelector('#wImportCommit').onclick = function(){
+          var rows = State.worshipImportRows.length ? State.worshipImportRows : parseImportTextRows_(modal.querySelector('#wImportBox').value || '');
+          callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, rows, false).then(function(res){
+            var msgEl = worshipMsgEl_();
+            if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
+            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed');
+            closeModal(modal);
+          }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); });
+        };
+      };
       var exportBtn = $('btnWorshipExportMenu');
       if (exportBtn) exportBtn.onclick = function(){
         var modal = openModal(
@@ -2324,28 +2376,7 @@
         };
       });
 
-      var previewBtn = $('btnWorshipImportPreview');
-      if (previewBtn) previewBtn.onclick = function(){
-        var textEl = $('worshipImportText');
-        var rows = parseImportTextRows_(textEl ? textEl.value : '');
-        callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, rows).then(function(res){
-          var msgEl = worshipMsgEl_();
-          if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-          State.worshipImportRows = rows;
-          if (msgEl) msgEl.innerHTML = showBox('ok','預覽完成','Preview ready','<div class="small">Rows: '+escapeHtml(String(res.count||0))+'</div>');
-        }).catch(function(err){ showWorshipErr_('預覽失敗','Preview failed', err); });
-      };
-
-      var commitBtn = $('btnWorshipImportCommit');
-      if (commitBtn) commitBtn.onclick = function(){
-        var textEl = $('worshipImportText');
-        var rows = State.worshipImportRows.length ? State.worshipImportRows : parseImportTextRows_(textEl ? textEl.value : '');
-        callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, rows, false).then(function(res){
-          var msgEl = worshipMsgEl_();
-          if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-          if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed');
-        }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); });
-      };
+      // import handled in modal
 
       var xlsxBtn = $('btnWorshipExportXlsx');
       if (xlsxBtn) xlsxBtn.onclick = function(){
