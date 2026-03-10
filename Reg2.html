@@ -135,6 +135,12 @@
     .rotaBubble{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:13px}
     .worshipTopRow{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
     .worshipExportBtn{width:auto;padding:8px 12px;border-radius:10px;font-size:13px;min-height:auto}
+    .worshipCardHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .worshipToggleBtn{width:auto;min-height:auto;padding:6px 10px;border-radius:10px}
+    .worshipTableWrap{overflow:auto;resize:both;min-width:620px;min-height:180px;border:1px dashed var(--border);padding:6px;border-radius:12px;background:#fff}
+    .worshipCellInput{min-width:80px;min-height:42px;resize:both}
+    .worshipLinkCell{display:flex;align-items:center;gap:6px}
+    .worshipLinkPreview{min-width:120px;min-height:42px;resize:both}
     .worshipCols .colSection{width:110px}
     .worshipCols .colKey{width:90px}
     .worshipCols .colLink{width:110px}
@@ -659,6 +665,8 @@
       servingRefreshTimer: null,
       worshipImportRows: [],
       worshipMonth: '',
+      worshipEventExpanded: {},
+      worshipRenderCache: null,
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -1317,7 +1325,7 @@
       var viewer = res.viewer || {};
       var members = Array.isArray(res.members) ? res.members : [];
       function songCell(ev, sec, key, value){
-        return '<input data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+escapeHtml(sec)+'" data-key="'+escapeHtml(key)+'" id="'+worshipSongInputId_(ev.eventKey, sec, key)+'" value="'+escapeHtml(String(value||''))+'" />';
+        return '<textarea class="worshipCellInput" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+escapeHtml(sec)+'" data-key="'+escapeHtml(key)+'" id="'+worshipSongInputId_(ev.eventKey, sec, key)+'">'+escapeHtml(String(value||''))+'</textarea>';
       }
       function memberOption_(m){
         var g = String(m.gender||'').toUpperCase();
@@ -1337,6 +1345,7 @@
       State.worshipMonth = selectedMonth;
       var monthOptions = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
       var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth] : events;
+      State.worshipRenderCache = { month: selectedMonth, events: monthEvents };
       var gBadges = ((viewer.servingGroups||[]).concat(viewer.servingGLGroups||[])).map(function(g){ return '<span class="groupBadge '+servingGroupCss(g)+'">'+escapeHtml(servingGroupLabel(g))+'</span>'; }).join('');
       var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''))+(viewer.isGl?' · GL':'');
       var memberOptions = members.map(function(m){ return '<option value="'+escapeHtml(memberOption_(m))+'"></option>'; }).join('');
@@ -1363,29 +1372,37 @@
         function meta(sec){ var x=songMap[sec]||{}; return '<div class="small">最後更新 / Last updated: '+escapeHtml(String(x.lastUpdatedBy||''))+' '+escapeHtml(String(x.lastUpdatedAt||''))+'</div>'; }
         function rotaLine(posZh, posKey){
           var v = String(rota[posKey] || '');
+          if (/^closed$/i.test(v)) return '';
           var bubbleAttr = perm.canGlRotaEdit ? (' data-rota-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(posKey)+'"') : '';
           return '<div class="rotaRow"><div class="rotaLabel">'+posZh+'</div><span class="rotaBubble"'+bubbleAttr+'>'+escapeHtml(v||'Vacant')+'</span></div>';
         }
-        function row_(label, sec){
-          return '<tr><td>'+label+'</td><td>'+songCell(ev,sec,'songTitle',g(sec,'songTitle'))+'</td><td>'+songCell(ev,sec,'songKey',g(sec,'songKey'))+'</td><td>'+songCell(ev,sec,'versionNote',g(sec,'versionNote'))+'</td><td><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'">連結 / Link</button></td><td>'+meta(sec)+'</td></tr>';
+        function linkCell_(sec){
+          return '<div class="worshipLinkCell"><textarea class="worshipLinkPreview" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="linkUrl" id="'+worshipSongInputId_(ev.eventKey, sec, 'linkUrl')+'">'+escapeHtml(g(sec,'linkUrl'))+'</textarea><button class="alt btnSmall" data-link-edit="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'">編輯 / Edit</button></div>';
         }
-        html += '<div class="card"><div><b>'+escapeHtml(eventLabel)+'</b></div>'+
-          '<div class="rotaStack">'+
-            rotaLine('主領 / Lead', 'Worship_Lead')+
-            rotaLine('和唱 / Singer', 'Worship_Singer')+
-            rotaLine('司琴 / Pianist', 'Worship_Pianist')+
-            rotaLine('鼓手 / Drum', 'Worship_Drum')+
-            rotaLine('樂器 / Instrument', 'Worship_Instrument')+
-          '</div>'+
-          '<table class="worshipTable worshipCols" style="width:100%;border-collapse:collapse;"><colgroup><col class="colSection"/><col/><col class="colKey"/><col/><col class="colLink"/><col class="colAction"/></colgroup><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Note</th><th>連結 / Link</th><th>更新 / Updated</th></tr>'+
+        function row_(label, sec){
+          return '<tr><td>'+label+'</td><td>'+songCell(ev,sec,'songTitle',g(sec,'songTitle'))+'</td><td>'+songCell(ev,sec,'songKey',g(sec,'songKey'))+'</td><td>'+songCell(ev,sec,'versionNote',g(sec,'versionNote'))+'</td><td>'+linkCell_(sec)+'</td><td>'+meta(sec)+'</td></tr>';
+        }
+        var expanded = !!State.worshipEventExpanded[ev.eventKey];
+        var rotaHtml = [
+          rotaLine('主領 / Lead', 'Worship_Lead'),
+          rotaLine('和唱 / Singer', 'Worship_Singer'),
+          rotaLine('司琴 / Pianist', 'Worship_Pianist'),
+          rotaLine('鼓手 / Drum', 'Worship_Drum'),
+          rotaLine('樂器 / Instrument', 'Worship_Instrument')
+        ].join('');
+        if (!rotaHtml) rotaHtml = '<div class="small">全部崗位已關閉 / All positions are closed.</div>';
+        html += '<div class="card"><div class="worshipCardHead"><div><b>'+escapeHtml(eventLabel)+'</b><div class="small">'+escapeHtml(String(ev.eventKey||''))+'</div></div><button class="alt worshipToggleBtn" data-toggle-event="1" data-ev="'+escapeHtml(ev.eventKey)+'">'+(expanded?'收合 / Collapse':'展開 / Expand')+'</button></div>'+
+          '<div style="display:'+(expanded?'block':'none')+'">'+
+          '<div class="rotaStack">'+rotaHtml+'</div>'+
+          '<div class="worshipTableWrap"><table class="worshipTable worshipCols" style="width:100%;border-collapse:collapse;"><colgroup><col class="colSection"/><col/><col class="colKey"/><col/><col class="colLink"/><col class="colAction"/></colgroup><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Note</th><th>連結 / Link</th><th>更新 / Updated</th></tr>'+
           row_('敬拜 1 / Main 1','WORSHIP_MAIN_1')+
           row_('敬拜 2 / Main 2','WORSHIP_MAIN_2')+
           row_('敬拜 3 / Main 3','WORSHIP_MAIN_3')+
           row_('敬拜 4 / Main 4','WORSHIP_MAIN_4')+
           row_('回應 1 / Response 1','WORSHIP_RESPONSE_1')+
           row_('回應 2 / Response 2','WORSHIP_RESPONSE_2')+
-          '</table>'+
-          (perm.canGlRotaEdit ? '<div class="small">組長模式 / GL mode：匯入 rota 會沿用現有 admin 驗證規則。<br/>Import rota will reuse existing admin validations.</div>' : '')+
+          '</table></div>'+
+          '</div>'+          (perm.canGlRotaEdit ? '<div class="small">組長模式 / GL mode：匯入 rota 會沿用現有 admin 驗證規則。<br/>Import rota will reuse existing admin validations.</div>' : '')+
           '</div>';
       });
       return html;
@@ -2121,7 +2138,15 @@
         modal.querySelector('#btnExpPdf').onclick = function(){ closeModal(modal); var x = $('btnWorshipExportPdf'); if (x) x.click(); };
       };
       var monthSel = $('worshipMonthSelect');
-      if (monthSel) monthSel.onchange = function(){ State.worshipMonth = String(monthSel.value || ''); render(); };
+      if (monthSel) monthSel.onchange = function(){ State.worshipMonth = String(monthSel.value || ''); State.worshipEventExpanded = {}; render(); };
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-toggle-event]')).forEach(function(btn){
+        btn.onclick = function(){
+          var ev = String(btn.getAttribute('data-ev') || '');
+          State.worshipEventExpanded[ev] = !State.worshipEventExpanded[ev];
+          render();
+        };
+      });
 
       Array.prototype.slice.call(document.querySelectorAll('[data-link-edit]')).forEach(function(btn){
         btn.onclick = function(){
@@ -2198,7 +2223,7 @@
           if (msgEl) msgEl.innerHTML = showBox('ok','已自動儲存','Auto-saved');
         }).catch(function(err){ showWorshipErr_('自動儲存失敗','Auto-save failed', err); });
       }
-      Array.prototype.slice.call(document.querySelectorAll('input[data-auto-song]')).forEach(function(inp){
+      Array.prototype.slice.call(document.querySelectorAll('[data-auto-song]')).forEach(function(inp){
         inp.oninput = function(){
           var ev = String(inp.getAttribute('data-ev')||'');
           var sec = String(inp.getAttribute('data-sec')||'');
@@ -2242,14 +2267,54 @@
 
       var pdfBtn = $('btnWorshipExportPdf');
       if (pdfBtn) pdfBtn.onclick = function(){
-        callApi('api_reg_self_worship_export_public', State.authQrPayload, 'PDF').then(function(res){
+        try{
+          var cache = State.worshipRenderCache || {};
+          var month = String(cache.month || 'ALL');
+          var events = Array.isArray(cache.events) ? cache.events : [];
+          function secRow_(label, sec, song){
+            song = song || {};
+            var rowColor = sec.indexOf('RESPONSE') >= 0 ? '#f4fffa' : '#fff5f7';
+            return '<tr style="background:'+rowColor+'"><td>'+escapeHtml(label)+'</td><td>'+escapeHtml(String(song.songTitle||''))+'</td><td>'+escapeHtml(String(song.songKey||''))+'</td><td>'+escapeHtml(String(song.versionNote||''))+'</td><td>'+escapeHtml(String(song.linkUrl||''))+'</td></tr>';
+          }
+          var content = events.map(function(ev){
+            ev = ev || {};
+            var rota = ev.rota || {};
+            var songs = ev.songs || {};
+            var rotaLine = [
+              ['主領 / Lead', rota.Worship_Lead],
+              ['和唱 / Singer', rota.Worship_Singer],
+              ['司琴 / Pianist', rota.Worship_Pianist],
+              ['鼓手 / Drum', rota.Worship_Drum],
+              ['樂器 / Instrument', rota.Worship_Instrument]
+            ].filter(function(x){ return !/^closed$/i.test(String(x[1]||'')); })
+             .map(function(x){ return '<span style="display:inline-block;background:#e9f2ff;border:1px solid #cad9ff;border-radius:999px;padding:4px 10px;margin:2px 6px 2px 0">'+escapeHtml(x[0])+': '+escapeHtml(String(x[1]||'Vacant'))+'</span>'; })
+             .join('');
+            if (!rotaLine) rotaLine = '<span style="color:#777">全部崗位已關閉 / All positions are closed.</span>';
+            return '<section style="margin:14px 0;padding:12px;border:1px solid #d3d8ea;border-radius:10px;background:#fcfdff">'+
+              '<h3 style="margin:0;color:#163b7a">'+escapeHtml(String(ev.eventKey||''))+'</h3>'+
+              '<div style="margin-top:8px">'+rotaLine+'</div>'+
+              '<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">段落 / Section</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">歌名 / Title</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">Key</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">Note</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">連結 / Link</th></tr></thead><tbody>'+
+                secRow_('敬拜 1 / Main 1','WORSHIP_MAIN_1',songs.WORSHIP_MAIN_1)+
+                secRow_('敬拜 2 / Main 2','WORSHIP_MAIN_2',songs.WORSHIP_MAIN_2)+
+                secRow_('敬拜 3 / Main 3','WORSHIP_MAIN_3',songs.WORSHIP_MAIN_3)+
+                secRow_('敬拜 4 / Main 4','WORSHIP_MAIN_4',songs.WORSHIP_MAIN_4)+
+                secRow_('回應 1 / Response 1','WORSHIP_RESPONSE_1',songs.WORSHIP_RESPONSE_1)+
+                secRow_('回應 2 / Response 2','WORSHIP_RESPONSE_2',songs.WORSHIP_RESPONSE_2)+
+              '</tbody></table>'+
+            '</section>';
+          }).join('');
+
+          var win = window.open('', '_blank');
+          if (!win) throw new Error('Popup blocked');
+          win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Worship '+escapeHtml(month)+'</title></head><body style="font-family:Arial,sans-serif;padding:16px;color:#1a2a44"><h2 style="margin:0 0 8px 0">Worship Plan / 敬拜排期 · '+escapeHtml(month)+'</h2>'+content+'</body></html>');
+          win.document.close();
+          win.focus();
+          setTimeout(function(){ try{ win.print(); }catch(e){} }, 250);
           var msgEl = worshipMsgEl_();
-          if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-          var name = String(res.filename || 'Worship_Export.pdf');
-          var href = 'data:application/pdf;base64,' + String(res.base64 || '');
-          var link = '<a download="'+escapeHtml(name)+'" href="'+escapeHtml(href)+'">下載 PDF / Download PDF</a>';
-          if (msgEl) msgEl.innerHTML = showBox('ok','PDF 已生成','PDF generated', '<div class="small">'+link+'</div>');
-        }).catch(function(err){ showWorshipErr_('匯出失敗','Export failed', err); });
+          if (msgEl) msgEl.innerHTML = showBox('ok','已開啟 PDF 列印頁面（僅本月份）','Printable PDF view opened (selected month only)');
+        }catch(err){
+          showWorshipErr_('匯出失敗','Export failed', err);
+        }
       };
     }
 
