@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-02-15.reg95
+ * v2026-03-10.reg111
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-02-15.reg95';
+const REG_VERSION = '2026-03-10.reg111';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -649,6 +649,31 @@ function regGetSelfMemberByQr_(qrPayload){
   return { ok:true, parsed: parsed, ms: ms, rowNumber: rowNumber, row: row };
 }
 
+
+function regGetSelfMemberByIdForAdmin_(memberId){
+  const id = String(memberId || '').trim().toUpperCase();
+  if (!/^CCF\d{4,}$/.test(id)) return { ok:false, code:'E416', zh:'資料格式錯誤', en:'Invalid member id.' };
+
+  const ms = regGetMembersScan_({ ensureExtras:true });
+  const rowNumber = regFindRowByIdFromScan_(ms, id);
+  if (!rowNumber) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+  const row = regReadRow_(ms, rowNumber);
+  const st = regStatus_(row.Status);
+  if (st === 'DISABLED') return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
+  return { ok:true, parsed:{ id:id }, ms:ms, rowNumber:rowNumber, row:row };
+}
+
+function reg_getWorshipAuthFromAdminToken_(token){
+  if (typeof admin_requireSession_ !== 'function') return { ok:false, code:'E500', zh:'系統設定錯誤', en:'Admin session helper unavailable.' };
+  const s = admin_requireSession_(token);
+  if (!s || !s.ok) return s || { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  const actor = s.actor || {};
+  const id = String(actor.id || '').trim().toUpperCase();
+  if (!id || id === 'SUPERUSER') return { ok:false, code:'E403', zh:'未能識別會員身份', en:'Unable to identify member account.' };
+  return regGetSelfMemberByIdForAdmin_(id);
+}
+
 function regDisplayNameForPortal_(m){
   const pref = String((m && m.preferredName) || '').trim();
   const en = String((m && m.nameEn) || '').trim();
@@ -1152,15 +1177,702 @@ function api_reg_self_live_service_public(qrPayload){
       };
     });
 
+    const worshipSongsThisWeek = [];
+    if (next){
+      const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
+      const songs = planningMap[next] || {};
+      [
+        { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
+        { section:'WORSHIP_MAIN_2', labelZh:'敬拜 2', labelEn:'Main 2' },
+        { section:'WORSHIP_MAIN_3', labelZh:'敬拜 3', labelEn:'Main 3' },
+        { section:'WORSHIP_MAIN_4', labelZh:'敬拜 4', labelEn:'Main 4' },
+        { section:'WORSHIP_RESPONSE_1', labelZh:'回應 1', labelEn:'Response 1' },
+        { section:'WORSHIP_RESPONSE_2', labelZh:'回應 2', labelEn:'Response 2' }
+      ].forEach(function(meta){
+        const sec = songs[meta.section] || {};
+        worshipSongsThisWeek.push({
+          section: meta.section,
+          labelZh: meta.labelZh,
+          labelEn: meta.labelEn,
+          songTitle: String(sec.songTitle || '').trim()
+        });
+      });
+    }
+
     return {
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
-      servingThisWeek: serving
+      servingThisWeek: serving,
+      worshipSongsThisWeek: worshipSongsThisWeek
     };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
+}
+
+const REG_WORSHIP_PLANNING_SHEET = 'Worship_Planning';
+const REG_WORSHIP_AUDIT_SHEET = 'Worship_Audit';
+const REG_WORSHIP_IMPORT_HEADERS = [
+  'EventKey','Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument',
+  'WorshipSong1Title','WorshipSong1Key','WorshipSong1Capo','WorshipSong1Version','WorshipSong1Link',
+  'WorshipSong2Title','WorshipSong2Key','WorshipSong2Capo','WorshipSong2Version','WorshipSong2Link',
+  'ResponseSong1Title','ResponseSong1Key','ResponseSong1Capo','ResponseSong1Version','ResponseSong1Link',
+  'ResponseSong2Title','ResponseSong2Key','ResponseSong2Capo','ResponseSong2Version','ResponseSong2Link'
+];
+const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_MAIN_3','WORSHIP_MAIN_4','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
+
+
+function reg_openSsForWorship_(){
+  try{
+    if (typeof openSs_ === 'function'){
+      const ss = openSs_();
+      if (ss) return ss;
+    }
+  }catch(e){}
+  try{
+    if (typeof SPREADSHEET_ID !== 'undefined' && SPREADSHEET_ID){
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
+    }
+  }catch(e){}
+  return SpreadsheetApp.getActive();
+}
+
+function reg_ensureWorshipPlanningSheet_(){
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
+  let sh = ss.getSheetByName(REG_WORSHIP_PLANNING_SHEET);
+  if (!sh) sh = ss.insertSheet(REG_WORSHIP_PLANNING_SHEET);
+  const headers = ['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID'];
+  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
+  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
+  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return sh;
+}
+
+
+function reg_worshipSectionOrder_(section){
+  const sec = String(section || '').trim().toUpperCase();
+  const idx = REG_WORSHIP_SECTIONS.indexOf(sec);
+  return idx >= 0 ? idx : 999;
+}
+
+function reg_worshipEventDateSortKey_(eventKey){
+  const ev = String(eventKey || '').trim();
+  const m = ev.match(/(\d{4}-\d{2}-\d{2})$/);
+  return m ? m[1] : '9999-99-99';
+}
+
+function reg_sortAndDedupWorshipPlanningSheet_(sh){
+  const sheet = sh || reg_ensureWorshipPlanningSheet_();
+  const last = sheet.getLastRow();
+  if (last < 2) return;
+  const rows = sheet.getRange(2, 1, last - 1, 10).getValues();
+
+  const dedup = {};
+  rows.forEach(function(r, idx){
+    const ev = String(r[0] || '').trim();
+    const sec = String(r[1] || '').trim().toUpperCase();
+    if (!ev || REG_WORSHIP_SECTIONS.indexOf(sec) < 0) return;
+    const key = ev + '|' + sec;
+    dedup[key] = {
+      row: [
+        ev,
+        sec,
+        String(r[2] || '').trim(),
+        String(r[3] || '').trim(),
+        String(r[4] || '').trim(),
+        String(r[5] || '').trim(),
+        String(r[6] || '').trim(),
+        String(r[7] || '').trim(),
+        r[8],
+        String(r[9] || '').trim().toUpperCase()
+      ],
+      idx: idx
+    };
+  });
+
+  const merged = Object.keys(dedup).map(function(k){ return dedup[k]; });
+  merged.sort(function(a, b){
+    const ar = a.row, br = b.row;
+    const da = reg_worshipEventDateSortKey_(ar[0]);
+    const db = reg_worshipEventDateSortKey_(br[0]);
+    if (da < db) return -1;
+    if (da > db) return 1;
+    if (String(ar[0]) < String(br[0])) return -1;
+    if (String(ar[0]) > String(br[0])) return 1;
+    const sa = reg_worshipSectionOrder_(ar[1]);
+    const sb = reg_worshipSectionOrder_(br[1]);
+    if (sa !== sb) return sa - sb;
+    return a.idx - b.idx;
+  });
+
+  const out = merged.map(function(x){ return x.row; });
+  if (last > 1) sheet.getRange(2, 1, last - 1, 10).clearContent();
+  if (out.length) sheet.getRange(2, 1, out.length, 10).setValues(out);
+}
+
+function reg_ensureWorshipAuditSheet_(){
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
+  let sh = ss.getSheetByName(REG_WORSHIP_AUDIT_SHEET);
+  if (!sh) sh = ss.insertSheet(REG_WORSHIP_AUDIT_SHEET);
+  const headers = ['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context'];
+  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
+  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
+  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return sh;
+}
+
+function reg_isWorshipMember_(member){
+  const groups = ((member && member.servingGroups) || []).concat((member && member.servingGLGroups) || []);
+  return groups.some(function(g){ return admin_normalizeServingGroup_(g) === 'worship'; });
+}
+
+function reg_isWorshipGlOrAdminForWorship_(member, statusNorm){
+  const role = String(statusNorm || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'SUPERUSER') return reg_isWorshipMember_(member);
+  const gl = (member && member.servingGLGroups) || [];
+  return gl.some(function(g){ return admin_normalizeServingGroup_(g) === 'worship'; });
+}
+
+function reg_clientSafeDateTime_(v){
+  if (v === null || v === undefined || v === '') return '';
+  const d = regSafeToDate_(v);
+  if (!d) return String(v || '');
+  return Utilities.formatDate(d, 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
+}
+
+function reg_getFutureWorshipEvents_(){
+  const today = admin_todayUkYmd_();
+  const monthsAhead = (typeof ADMIN_SERVING_MONTHS_AHEAD !== 'undefined' && ADMIN_SERVING_MONTHS_AHEAD)
+    ? Math.max(1, Number(ADMIN_SERVING_MONTHS_AHEAD))
+    : 6;
+  const evs = admin_getUpcomingSundayEventKeys_(today, monthsAhead) || [];
+  return evs.map(function(e){
+    return { eventKey: e.eventKey, dateYmd: e.dateYmd || '' };
+  });
+}
+
+function reg_getWorshipPlanningMapByEventKeys_(eventKeys){
+  const map = {};
+  eventKeys.forEach(function(ev){ map[ev] = {}; });
+
+  const sh = reg_ensureWorshipPlanningSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return map;
+
+  const wanted = {};
+  eventKeys.forEach(function(ev){ wanted[ev] = true; });
+
+  const rows = sh.getRange(2, 1, lastRow - 1, 10).getValues();
+  rows.forEach(function(r){
+    const ev = String(r[0] || '').trim();
+    const sec = String(r[1] || '').trim().toUpperCase();
+    if (!wanted[ev] || REG_WORSHIP_SECTIONS.indexOf(sec) < 0) return;
+
+    if (!map[ev]) map[ev] = {};
+    map[ev][sec] = {
+      songTitle: String(r[2] || '').trim(),
+      songKey: String(r[3] || '').trim(),
+      capo: String(r[4] || '').trim(),
+      versionNote: String(r[5] || '').trim(),
+      linkUrl: String(r[6] || '').trim(),
+      linkTitle: String(r[7] || '').trim(),
+      lastUpdatedAt: reg_clientSafeDateTime_(r[8]),
+      lastUpdatedBy: String(r[9] || '').trim().toUpperCase()
+    };
+  });
+
+  return map;
+}
+
+function reg_writeWorshipAuditRows_(rows){
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return;
+  const sh = reg_ensureWorshipAuditSheet_();
+  sh.getRange(sh.getLastRow() + 1, 1, list.length, 9).setValues(list);
+}
+
+function reg_tryFetchYoutubeMeta_(url){
+  const s = String(url || '').trim();
+  if (!/(youtube\.com|youtu\.be)/i.test(s)) return { ok:false };
+  try{
+    const resp = UrlFetchApp.fetch('https://www.youtube.com/oembed?url=' + encodeURIComponent(s) + '&format=json', { muteHttpExceptions: true });
+    if (resp.getResponseCode() !== 200) return { ok:false };
+    const obj = JSON.parse(resp.getContentText() || '{}');
+    return { ok:true, title: String(obj.title || '').trim() };
+  }catch(e){ return { ok:false }; }
+}
+
+function reg_assertWorshipDeps_(){
+  const root = (typeof globalThis !== 'undefined') ? globalThis : this;
+  const required = [
+    'admin_getMembersIndex_',
+    'admin_getServingPlanMatrix_',
+    'admin_getUpcomingSundayEventKeys_',
+    'admin_todayUkYmd_',
+    'admin_normalizeServingGroup_'
+  ];
+  const missing = required.filter(function(name){
+    return typeof root[name] !== 'function';
+  });
+  if (missing.length) throw new Error('Missing dependencies: ' + missing.join(', '));
+}
+
+function reg_buildWorshipPagePayload_(auth, includeMembers){
+  reg_assertWorshipDeps_();
+  regRefreshMembersCachesForSelfPortal_();
+
+  const mi = admin_getMembersIndex_();
+  const byId = (mi && mi.byId) ? mi.byId : {};
+  const cachedMember = byId[auth.parsed.id] || null;
+  const rowServing = regServingGroupsFromRow_(auth.row);
+
+  const effectiveMember = cachedMember ? {
+    id: cachedMember.id,
+    nameZh: cachedMember.nameZh || '',
+    nameEn: cachedMember.nameEn || '',
+    preferredName: cachedMember.preferredName || '',
+    servingGroups: reg_mergeServingGroups_(cachedMember.servingGroups || [], rowServing.serving || []),
+    servingGLGroups: reg_mergeServingGroups_(cachedMember.servingGLGroups || [], rowServing.gl || [])
+  } : {
+    id: auth.parsed.id,
+    nameZh: String((auth.row && auth.row.NameZh) || '').trim(),
+    nameEn: String((auth.row && auth.row.NameEn) || '').trim(),
+    preferredName: String((auth.row && auth.row.PreferredName) || '').trim(),
+    servingGroups: rowServing.serving || [],
+    servingGLGroups: rowServing.gl || []
+  };
+
+  const statusNorm = regStatus_(
+    (auth.row && auth.row.Status) ||
+    (cachedMember && cachedMember.status) ||
+    ''
+  );
+
+  if (!reg_isWorshipMember_(effectiveMember)) {
+    return {
+      ok:false,
+      code:'E403',
+      zh:'你沒有權限檢視敬拜排期',
+      en:'No permission for worship planning.'
+    };
+  }
+
+  const events = reg_getFutureWorshipEvents_();
+  const eventKeys = events.map(function(e){ return e.eventKey; });
+  const planningMap = reg_getWorshipPlanningMapByEventKeys_(eventKeys);
+  const matrix = admin_getServingPlanMatrix_(events);
+  const canGl = reg_isWorshipGlOrAdminForWorship_(effectiveMember, statusNorm);
+
+  function getCellList_(eventKey, position){
+    const bucket = ((matrix.cells || {})[eventKey] || {});
+    return (
+      bucket[position] ||
+      bucket['worship__' + position] ||
+      bucket['Worship__' + position] ||
+      []
+    );
+  }
+
+  function joinCell_(eventKey, position){
+    const list = getCellList_(eventKey, position);
+    if (!Array.isArray(list) || !list.length) return '';
+
+    return list.map(function(it){
+      const raw = String((it && it.rawValue) || '').trim();
+      const memberId = String((it && it.memberId) || '').trim().toUpperCase();
+
+      if (memberId && byId[memberId] && typeof admin_memberLabelCompact_ === 'function') {
+        return admin_memberLabelCompact_(byId[memberId]).label || raw || memberId;
+      }
+      return raw || memberId;
+    }).filter(Boolean).join(', ');
+  }
+
+  const allowedPositions = ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'];
+
+  function rotaStats_(eventKey, position){
+    const list = getCellList_(eventKey, position);
+    if (!Array.isArray(list) || !list.length) return { totalSlots:0, vacantSlots:0 };
+    let total = 0;
+    let vacant = 0;
+    list.forEach(function(it){
+      const raw = String((it && it.rawValue) || '').trim();
+      const up = raw.toUpperCase();
+      if (!raw || up === 'VACANT') { total += 1; vacant += 1; return; }
+      if (up === 'CLOSED') return;
+      total += 1;
+    });
+    return { totalSlots: total, vacantSlots: vacant };
+  }
+
+  const rows = events.map(function(e){
+    const rota = {
+      Worship_Lead: joinCell_(e.eventKey, 'Worship_Lead'),
+      Worship_Singer: joinCell_(e.eventKey, 'Worship_Singer'),
+      Worship_Pianist: joinCell_(e.eventKey, 'Worship_Pianist'),
+      Worship_Drum: joinCell_(e.eventKey, 'Worship_Drum'),
+      Worship_Instrument: joinCell_(e.eventKey, 'Worship_Instrument')
+    };
+    const rotaMeta = {};
+    allowedPositions.forEach(function(pos){ rotaMeta[pos] = rotaStats_(e.eventKey, pos); });
+    return {
+      eventKey: e.eventKey,
+      dateYmd: e.dateYmd,
+      rota: rota,
+      rotaMeta: rotaMeta,
+      songs: planningMap[e.eventKey] || {}
+    };
+  });
+
+  const worshipIdsFromPlan = {};
+  events.forEach(function(e){
+    allowedPositions.forEach(function(pos){
+      const list = getCellList_(e.eventKey, pos);
+      (Array.isArray(list) ? list : []).forEach(function(it){
+        const id = String((it && it.memberId) || '').trim().toUpperCase();
+        if (id) worshipIdsFromPlan[id] = true;
+      });
+    });
+  });
+
+  const membersPayload = includeMembers
+    ? Object.keys(byId).map(function(id){
+        const m = byId[id] || {};
+        return {
+          id: m.id || id,
+          nameZh: m.nameZh || '',
+          nameEn: m.nameEn || '',
+          preferredName: m.preferredName || '',
+          gender: m.gender || '',
+          servingGroups: m.servingGroups || [],
+          servingGLGroups: m.servingGLGroups || []
+        };
+      }).filter(function(m){
+        const mid = String(m.id || '').trim().toUpperCase();
+        return reg_isWorshipMember_(m) || !!worshipIdsFromPlan[mid];
+      })
+    : [];
+
+  return {
+    ok:true,
+    viewer:{
+      id: effectiveMember.id || auth.parsed.id,
+      preferredName: effectiveMember.preferredName || '',
+      status: statusNorm,
+      servingGroups: effectiveMember.servingGroups || [],
+      servingGLGroups: effectiveMember.servingGLGroups || [],
+      isGl: !!canGl
+    },
+    permission:{
+      isWorshipMember:true,
+      canSongEditAllFuture:true,
+      canGlRotaEdit: !!canGl
+    },
+    events: rows,
+    members: membersPayload
+  };
+}
+
+
+function api_reg_self_worship_page_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    return reg_buildWorshipPagePayload_(auth, false);
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_self_worship_members_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const base = reg_buildWorshipPagePayload_(auth, true);
+    if (!base || !base.ok) return base;
+    return { ok:true, members: base.members || [] };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+
+function reg_worship_song_save_with_auth_(auth, payload, actionSource){
+  const base = reg_buildWorshipPagePayload_(auth, false);
+  if (!base.ok) return base;
+  const ev = String((payload && payload.eventKey) || '').trim();
+  const section = String((payload && payload.songSection) || '').trim().toUpperCase();
+  if (!admin_isSundayServiceKey_(ev) || REG_WORSHIP_SECTIONS.indexOf(section) < 0) return { ok:false, code:'E416', zh:'資料格式錯誤', en:'Invalid payload.' };
+  const p = payload || {};
+  const sh = reg_ensureWorshipPlanningSheet_();
+  const last = sh.getLastRow();
+  const now = new Date();
+  const nowStamp = Utilities.formatDate(now, 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
+  const actor = String((auth && auth.parsed && auth.parsed.id) || '').toUpperCase();
+  let targetRow = 0;
+  let old = { songTitle:'', songKey:'', capo:'', versionNote:'', linkUrl:'', linkTitle:'' };
+  if (last >= 2){
+    const vals = sh.getRange(2,1,last-1,10).getValues();
+    for (let i=0;i<vals.length;i++){
+      if (String(vals[i][0]||'').trim() === ev && String(vals[i][1]||'').trim().toUpperCase() === section){
+        targetRow = i + 2;
+        old = { songTitle:String(vals[i][2]||''), songKey:String(vals[i][3]||''), capo:String(vals[i][4]||''), versionNote:String(vals[i][5]||''), linkUrl:String(vals[i][6]||''), linkTitle:String(vals[i][7]||'') };
+      }
+    }
+  }
+  const next = {
+    songTitle: String(p.songTitle || '').trim(),
+    songKey: String(p.songKey || '').trim(),
+    capo: String(p.capo || '').trim(),
+    versionNote: String(p.versionNote || '').trim(),
+    linkUrl: String(p.linkUrl || '').trim(),
+    linkTitle: String(p.linkTitle || '').trim()
+  };
+  if (!next.linkTitle) next.linkTitle = String(old.linkTitle || '').trim();
+  const linkChanged = String(next.linkUrl || '') !== String(old.linkUrl || '');
+  const forceTitleFromLink = !!(p && p.forceTitleFromLink === true);
+  if (next.linkUrl && (linkChanged || forceTitleFromLink)){
+    const yt = reg_tryFetchYoutubeMeta_(next.linkUrl);
+    if (yt.ok && yt.title){
+      next.linkTitle = yt.title;
+      next.songTitle = yt.title;
+    }
+  }
+  const row = [ev, section, next.songTitle, next.songKey, next.capo, next.versionNote, next.linkUrl, next.linkTitle, now, actor];
+  if (targetRow){ sh.getRange(targetRow,1,1,10).setValues([row]); }
+  else { sh.getRange(sh.getLastRow()+1,1,1,10).setValues([row]); }
+  reg_sortAndDedupWorshipPlanningSheet_(sh);
+
+  const auditRows = [];
+  ['songTitle','songKey','capo','versionNote','linkUrl','linkTitle'].forEach(function(k){
+    if (String(old[k]||'') === String(next[k]||'')) return;
+    auditRows.push([nowStamp, actor, ev, 'SONG', section + '.' + k, String(old[k]||''), String(next[k]||''), String(actionSource || 'SELF_WORSHIP_SONG_SAVE'), '']);
+  });
+  reg_writeWorshipAuditRows_(auditRows);
+  return { ok:true, eventKey:ev, songSection:section, saved:next };
+}
+
+function reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway, actionSource){
+  regRefreshMembersCachesForSelfPortal_();
+  const mi = admin_getMembersIndex_();
+  const actorId = String((auth && auth.parsed && auth.parsed.id) || '').toUpperCase();
+  const member = (mi && mi.byId) ? mi.byId[actorId] : null;
+  const statusNorm = regStatus_((auth && auth.row && auth.row.Status) || (member && member.status) || '');
+  if (!reg_isWorshipGlOrAdminForWorship_(member, statusNorm)) return { ok:false, code:'E403', zh:'你沒有權限修改敬拜排更', en:'No permission to edit worship rota.' };
+  const allowed = ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'];
+  const list = (Array.isArray(rows) ? rows : []).filter(function(r){ return allowed.indexOf(String(r.position||'')) >= 0; });
+  const existing = admin_getServingValuesForEvent_(String(eventKey || ''));
+  const cleaned = list.map(function(r){
+    const out = { position:String(r.position||''), value:String(r.value||'').trim() };
+    const slotIndex = Number(r.slotIndex || 0);
+    if (!slotIndex || slotIndex < 1) return out;
+    const prev = String(existing[out.position] || '').trim();
+    const tokens = prev ? prev.split(',').map(function(x){ return String(x||'').trim(); }) : [];
+    while (tokens.length < slotIndex) tokens.push('Vacant');
+    tokens[slotIndex - 1] = out.value || 'Vacant';
+    out.value = tokens.join(', ');
+    return out;
+  });
+  const sh = admin_ensureServingSheet_();
+  admin_ensureServingEventKeys_(sh);
+  const token = reg_issueTempAdminTokenForWorship_(actorId);
+  if (!token) return { ok:false, code:'E403', zh:'授權失敗', en:'Authorization failed.' };
+  const res = api_admin_serving_event_save(token, eventKey, cleaned, overrideAway, 'WORSHIP');
+  if (!res || !res.ok) return res;
+  const now = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
+  const auditRows = cleaned.map(function(r){ return [now, actorId, String(eventKey||''), 'ROTA', String(r.position||''), '', String(r.value||''), String(actionSource || 'SELF_WORSHIP_GL_SAVE'), '']; });
+  reg_writeWorshipAuditRows_(auditRows);
+  return res;
+}
+
+function api_reg_self_worship_song_save_public(qrPayload, payload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    return reg_worship_song_save_with_auth_(auth, payload, 'SELF_WORSHIP_SONG_SAVE');
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_reg_self_worship_rota_member_action_public(qrPayload, eventKey, position, action, slotIndex){
+  const act = String(action || '').trim().toUpperCase();
+  if (act === 'ADD') return api_reg_self_serving_signup_public(qrPayload, eventKey, position, Number(slotIndex || 0));
+  if (act === 'REMOVE') return api_reg_self_serving_remove_public(qrPayload, eventKey, position);
+  return { ok:false, code:'E416', zh:'不支援的動作', en:'Unsupported action.' };
+}
+
+function api_reg_self_worship_rota_gl_save_public(qrPayload, eventKey, rows, overrideAway){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    return reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway, 'SELF_WORSHIP_GL_SAVE');
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function reg_issueTempAdminTokenForWorship_(memberId){
+  if (typeof admin_newSession_ !== 'function') return '';
+  const mi = admin_getMembersIndex_();
+  const m = (mi && mi.byId) ? mi.byId[String(memberId||'').toUpperCase()] : null;
+  if (!m) return '';
+  return admin_newSession_({
+    id:m.id, role:'ADMIN',
+    nameZh:m.nameZh||'', nameEn:m.nameEn||'', preferredName:m.preferredName||'',
+    servingGroups:m.servingGroups||[], servingGLGroups:(m.servingGLGroups||[]).concat(['WORSHIP'])
+  });
+}
+
+
+function api_admin_worship_page(token){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    return reg_buildWorshipPagePayload_(auth, false);
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_members(token){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    const base = reg_buildWorshipPagePayload_(auth, true);
+    if (!base || !base.ok) return base;
+    return { ok:true, members: base.members || [] };
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_song_save(token, payload){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    return reg_worship_song_save_with_auth_(auth, payload, 'ADMIN_WORSHIP_SONG_SAVE');
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_rota_member_action(token, eventKey, position, action, slotIndex){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    const key = String((auth && auth.row && auth.row.Key) || '').trim();
+    if (!key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
+    const qrPayload = String((auth && auth.parsed && auth.parsed.id) || '') + '|' + key;
+    return api_reg_self_worship_rota_member_action_public(qrPayload, eventKey, position, action, slotIndex);
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_rota_gl_save(token, eventKey, rows, overrideAway){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    return reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway, 'ADMIN_WORSHIP_GL_SAVE');
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_import_preview(token, importRows){
+  const auth = reg_getWorshipAuthFromAdminToken_(token);
+  if (!auth.ok) return auth;
+  return api_reg_self_worship_import_preview_public('__admin__', importRows);
+}
+
+function api_admin_worship_import_commit(token, importRows, overrideAway){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    const key = String((auth && auth.row && auth.row.Key) || '').trim();
+    if (!key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
+    const qrPayload = String((auth && auth.parsed && auth.parsed.id) || '') + '|' + key;
+    return api_reg_self_worship_import_commit_public(qrPayload, importRows, overrideAway);
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_export(token, format){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    const key = String((auth && auth.row && auth.row.Key) || '').trim();
+    if (!key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
+    const qrPayload = String((auth && auth.parsed && auth.parsed.id) || '') + '|' + key;
+    return api_reg_self_worship_export_public(qrPayload, format);
+  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function reg_parseWorshipImportRows_(rows){
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map(function(r){
+    const o = r || {};
+    const out = {};
+    REG_WORSHIP_IMPORT_HEADERS.forEach(function(h){ out[h] = String(o[h] || '').trim(); });
+    return out;
+  }).filter(function(r){ return !!r.EventKey; });
+}
+
+function api_reg_self_worship_import_preview_public(qrPayload, importRows){
+  const parsed = reg_parseWorshipImportRows_(importRows);
+  return { ok:true, rows:parsed, count:parsed.length };
+}
+
+function api_reg_self_worship_import_commit_public(qrPayload, importRows, overrideAway){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const parsed = reg_parseWorshipImportRows_(importRows);
+    const out = [];
+    parsed.forEach(function(r){
+      const rotaRows = [
+        { position:'Worship_Lead', value:r.Worship_Lead },
+        { position:'Worship_Singer', value:r.Worship_Singer },
+        { position:'Worship_Pianist', value:r.Worship_Pianist },
+        { position:'Worship_Drum', value:r.Worship_Drum },
+        { position:'Worship_Instrument', value:r.Worship_Instrument }
+      ];
+      const rr = api_reg_self_worship_rota_gl_save_public(qrPayload, r.EventKey, rotaRows, overrideAway);
+      if (!rr || !rr.ok) throw new Error((rr && (rr.zh || rr.en || rr.code)) || 'Import rota failed');
+      const songs = [
+        { sec:'WORSHIP_MAIN_1', title:r.WorshipSong1Title, key:r.WorshipSong1Key, capo:r.WorshipSong1Capo, ver:r.WorshipSong1Version, link:r.WorshipSong1Link },
+        { sec:'WORSHIP_MAIN_2', title:r.WorshipSong2Title, key:r.WorshipSong2Key, capo:r.WorshipSong2Capo, ver:r.WorshipSong2Version, link:r.WorshipSong2Link },
+        { sec:'WORSHIP_RESPONSE_1', title:r.ResponseSong1Title, key:r.ResponseSong1Key, capo:r.ResponseSong1Capo, ver:r.ResponseSong1Version, link:r.ResponseSong1Link },
+        { sec:'WORSHIP_RESPONSE_2', title:r.ResponseSong2Title, key:r.ResponseSong2Key, capo:r.ResponseSong2Capo, ver:r.ResponseSong2Version, link:r.ResponseSong2Link }
+      ];
+      songs.forEach(function(s){
+        api_reg_self_worship_song_save_public(qrPayload, { eventKey:r.EventKey, songSection:s.sec, songTitle:s.title, songKey:s.key, capo:s.capo, versionNote:s.ver, linkUrl:s.link, linkTitle:'' });
+      });
+      out.push({ eventKey:r.EventKey, ok:true });
+    });
+    return { ok:true, results:out };
+  }catch(e){ return regErr_('E500','匯入失敗', 'Import failed', e); }
+}
+
+function api_reg_self_worship_export_public(qrPayload, format){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const data = reg_buildWorshipPagePayload_(auth, false);
+    if (!data.ok) return data;
+    const ss = SpreadsheetApp.create('Worship_Export_' + Utilities.formatDate(new Date(), 'Europe/London', 'yyyyMMdd_HHmmss'));
+    const sh = ss.getSheets()[0];
+    sh.setName('Worship_Import');
+    sh.getRange(1,1,1,REG_WORSHIP_IMPORT_HEADERS.length).setValues([REG_WORSHIP_IMPORT_HEADERS]);
+    const rows = (data.events || []).map(function(ev){
+      const s = ev.songs || {};
+      function g(sec, key){ return String(((s[sec] || {})[key]) || ''); }
+      return [
+        ev.eventKey, ev.rota.Worship_Lead, ev.rota.Worship_Singer, ev.rota.Worship_Pianist, ev.rota.Worship_Drum, ev.rota.Worship_Instrument,
+        g('WORSHIP_MAIN_1','songTitle'), g('WORSHIP_MAIN_1','songKey'), g('WORSHIP_MAIN_1','capo'), g('WORSHIP_MAIN_1','versionNote'), g('WORSHIP_MAIN_1','linkUrl'),
+        g('WORSHIP_MAIN_2','songTitle'), g('WORSHIP_MAIN_2','songKey'), g('WORSHIP_MAIN_2','capo'), g('WORSHIP_MAIN_2','versionNote'), g('WORSHIP_MAIN_2','linkUrl'),
+        g('WORSHIP_RESPONSE_1','songTitle'), g('WORSHIP_RESPONSE_1','songKey'), g('WORSHIP_RESPONSE_1','capo'), g('WORSHIP_RESPONSE_1','versionNote'), g('WORSHIP_RESPONSE_1','linkUrl'),
+        g('WORSHIP_RESPONSE_2','songTitle'), g('WORSHIP_RESPONSE_2','songKey'), g('WORSHIP_RESPONSE_2','capo'), g('WORSHIP_RESPONSE_2','versionNote'), g('WORSHIP_RESPONSE_2','linkUrl')
+      ];
+    });
+    if (rows.length) sh.getRange(2,1,rows.length,REG_WORSHIP_IMPORT_HEADERS.length).setValues(rows);
+    const warn = 'Exported at ' + Utilities.formatDate(new Date(), 'Europe/London', 'dd/MM/yy HH:mm:ss') + '\nUncontrolled when exported. Please refer to portal for latest version.';
+    sh.getRange(1, REG_WORSHIP_IMPORT_HEADERS.length + 2).setValue(warn);
+    if (String(format||'').toUpperCase() === 'PDF'){
+      const pdf = UrlFetchApp.fetch('https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=pdf&portrait=false&fitw=true&sheetnames=false&printtitle=false&pagenumbers=false&gridlines=true&fzr=false', { headers:{ Authorization:'Bearer ' + ScriptApp.getOAuthToken() } }).getBlob();
+      return { ok:true, kind:'PDF', filename:'Worship_Export.pdf', base64:Utilities.base64Encode(pdf.getBytes()) };
+    }
+    return { ok:true, kind:'SPREADSHEET', url:ss.getUrl(), spreadsheetId:ss.getId() };
+  }catch(e){ return regErr_('E500','匯出失敗','Export failed', e); }
 }
 
 function getServingGroupLabelZh_(raw){
@@ -1997,7 +2709,8 @@ function regConflict_(zh, en, detail, subCode, subGroup){
 }
 
 function regErr_(code, zh, en, e){
-  return { ok:false, code: code || 'E500', zh: zh || '系統錯誤', en: en || 'System error', detail: String(e && e.message || e || '') };
+  const msg = String((e && (e.stack || e.message)) || e || '');
+  return { ok:false, code: code || 'E500', zh: zh || '系統錯誤', en: en || 'System error', detail: msg };
 }
 
 function regDeviceHint_(inObj){
