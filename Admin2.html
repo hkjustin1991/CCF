@@ -2309,9 +2309,11 @@ function eventDateYmdFromKey(ev){
             '<div class="menuGrid">'+
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
+              '<button id="goWorshipPlan" class="btnLookup">🎵 敬拜排期 / Worship planning</button>'+
             '</div>'+
             '<div class="divider"></div>'+
             '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+            '<div id="menuMsg"></div>'+
           '</div>';
       }
 
@@ -2343,10 +2345,12 @@ function eventDateYmdFromKey(ev){
             '<button id="goGroupMembersAdmin" class="btnLookup">👥 管理事奉組員 / Manage serving group members</button>'+
             '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
+            '<button id="goWorshipPlan" class="btnLookup">🎵 敬拜排期 / Worship planning</button>'+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
           '</div>'+
           '<div class="divider"></div>'+
           '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+          '<div id="menuMsg"></div>'+
         '</div>';
     }
 
@@ -2378,6 +2382,23 @@ function eventDateYmdFromKey(ev){
       var goAttendance = $('goAttendance');
       if (goAttendance){
         goAttendance.onclick = function(){ logAction('OPEN_ATT_HOME','', 'nav'); App.view='attendanceHome'; render(); };
+      }
+
+      var goWorshipPlan = $('goWorshipPlan');
+      if (goWorshipPlan){
+        goWorshipPlan.onclick = function(){
+          var msgId = 'menuMsg';
+          showBox(msgId,'warn','載入中…','Loading…');
+          callApi('api_admin_worship_bootstrap', App.token).then(function(res){
+            if(!res || !res.ok){ showErr(msgId, res || {code:'E500', zh:'未能開啟敬拜排期', en:'Unable to open worship planning.'}); return; }
+            var url = '?mode=reg&autoqr=' + encodeURIComponent(String(res.qrPayload||'')) + '&autoview=selfWorship';
+            logAction('OPEN_WORSHIP_PLAN','', 'nav');
+            window.open(url, '_blank', 'noopener');
+            showBox(msgId,'ok','已開啟敬拜排期','Worship planning opened');
+          }).catch(function(err){
+            showErr(msgId, err || {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        };
       }
       $('btnLogout').onclick = function(){
         logAction('LOGOUT','', 'nav');

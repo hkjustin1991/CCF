@@ -219,8 +219,7 @@
       manualSelectedId:null,
       manualLocked:false,
       servingOpenGroup:null,
-      uploadCheckinAutoPick:false,
-      worshipEmbedUrl:''
+      uploadCheckinAutoPick:false
     };
 
     const EXTERNAL_SCANNER_TIMEOUT_MS = 120000;
@@ -1238,7 +1237,6 @@
       if(App.view==='realtime'){ root.innerHTML = viewRealtime(); bindRealtime(); attachScrollControls_(root); return; }
       if(App.view==='vrm'){ root.innerHTML = viewVrm(); bindVrm(); attachScrollControls_(root); return; }
       if(App.view==='auth'){ root.innerHTML = viewAuth(); bindAuth(); attachScrollControls_(root); return; }
-      if(App.view==='worshipAdmin'){ root.innerHTML = viewWorshipAdmin(); bindWorshipAdmin(); attachScrollControls_(root); return; }
 
       // Failsafe: unknown/invalid view should never leave app blank
       App.view = 'login';
@@ -1309,32 +1307,11 @@
             '<button id="goVrm" class="blue">🚗 車牌搜尋 / Car reg</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="goWorshipAdmin" class="blue">🎵 敬拜排期 / Worship planning</button>'+
-          '</div>'+
-          '<div class="miniBtnRow">'+
             (showAuth
               ? '<button id="goAuth" class="orange">🔐 授權 / Authorise</button><button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>'
               : '<button id="goSelfcheck" class="orange">🩺 自我檢查 / Self-check</button>')+
           '</div>'+
           '<div id="menuMsg"></div>'+
-        '</div>';
-    }
-
-    function viewWorshipAdmin(){
-      var src = String(App.worshipEmbedUrl || '').trim();
-      return ''+
-        '<div class="card">'+
-          '<div class="topRow">'+
-            '<div class="big">🎵 敬拜排期 / Worship planning</div>'+
-            '<button id="btnWorshipAdminBack" class="danger btnSmall">⬅️ 返回 / Back</button>'+
-          '</div>'+
-          '<div class="small">使用與自助平台相同的敬拜排期功能與存取規則。<br/>Uses the same worship planning functions and access rules as the self-service portal.</div>'+
-          '<div id="worshipAdminMsg"></div>'+
-        '</div>'+
-        '<div class="card" style="padding:0;overflow:hidden;">'+
-          (src
-            ? ('<iframe src="'+escapeHtml(src)+'" style="width:100%;height:78vh;border:0;background:#fff;" loading="lazy" referrerpolicy="no-referrer"></iframe>')
-            : '<div class="msgBox warn" style="margin:12px;">未能開啟敬拜排期。<br/>Unable to open worship planning.</div>')+
         '</div>';
     }
 
@@ -1749,21 +1726,7 @@
       $('goVrm').onclick = function(){ App.view='vrm'; render(); };
       if ($('goAuth')) $('goAuth').onclick = function(){ App.view='auth'; render(); };
       if ($('goSelfcheck')) $('goSelfcheck').onclick = function(){ openSelfCheckModal(); };
-      if ($('goWorshipAdmin')) $('goWorshipAdmin').onclick = function(){
-        var msg = $('menuMsg');
-        if (msg) msg.innerHTML = '<div class="small">載入中… / Loading…</div>';
-        callApi('api_admin_worship_bootstrap', App.token).then(function(res){
-          if(!res || !res.ok){ if (msg) showErr('menuMsg', res || {code:'E500', zh:'未能開啟敬拜排期', en:'Unable to open worship planning.'}); return; }
-          App.worshipEmbedUrl = '?mode=reg&autoqr=' + encodeURIComponent(String(res.qrPayload||'')) + '&autoview=selfWorship';
-          App.view='worshipAdmin';
-          render();
-        }).catch(function(){ if (msg) showErr('menuMsg', {code:'E500', zh:'系統錯誤，請稍後再試', en:'System error. Please try again.'}); });
-      };
       if ($('btnLogoutTop')) $('btnLogoutTop').onclick = function(){ logout(); };
-    }
-
-    function bindWorshipAdmin(){
-      if ($('btnWorshipAdminBack')) $('btnWorshipAdminBack').onclick = function(){ App.view='menu'; render(); };
     }
 
     function bindCheckinMenu(){
