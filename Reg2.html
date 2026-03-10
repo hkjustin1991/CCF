@@ -3052,9 +3052,42 @@
       window._clockTimer = setInterval(updateGlobalClock_, 1000);
     }
 
+    function tryAutoEntryFromQuery_(){
+      try{
+        var qs = new URLSearchParams(window.location.search || '');
+        var autoQr = String(qs.get('autoqr') || '').trim();
+        var autoView = String(qs.get('autoview') || '').trim();
+        if (!autoQr || autoView !== 'selfWorship') return Promise.resolve(false);
+
+        State.authQrPayload = autoQr;
+        State.flow = 'self_update';
+        return callApi('api_reg_self_portal_snapshot_public', autoQr).then(function(snap){
+          if (snap && snap.ok) State.snapshot = snap;
+          return callApi('api_reg_self_worship_page_public', autoQr);
+        }).then(function(res){
+          if(!res || !res.ok) return false;
+          State.lastResult = res;
+          State.view = 'selfWorship';
+          render();
+          return callApi('api_reg_self_worship_members_public', autoQr).then(function(mr){
+            if (mr && mr.ok){
+              State.worshipMembers = Array.isArray(mr.members) ? mr.members : [];
+              State.worshipMembersLoaded = true;
+              State.worshipMembersFetchedAt = Date.now();
+              if (State.view === 'selfWorship') render();
+            }
+            return true;
+          });
+        }).catch(function(){ return false; });
+      }catch(e){ return Promise.resolve(false); }
+    }
+
 // init
     startGlobalClock_();
-    try { render(); } catch (e) { showBootError_(e); }
+    tryAutoEntryFromQuery_().then(function(ok){
+      if (ok) return;
+      try { render(); } catch (e) { showBootError_(e); }
+    });
   </script>
 </body>
 </html>

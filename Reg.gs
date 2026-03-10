@@ -1551,6 +1551,39 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
   };
 }
 
+
+function api_admin_worship_bootstrap(token){
+  try{
+    const auth = requireSession_(token);
+    if (!auth || !auth.ok) return auth || { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+
+    const staff = (auth.sess && auth.sess.staff) ? auth.sess.staff : {};
+    const id = String(staff.id || '').trim().toUpperCase();
+    if (!id || id === 'SUPERUSER') return { ok:false, code:'E403', zh:'未能識別會員身份', en:'Unable to identify member account.' };
+
+    regRefreshMembersCachesForSelfPortal_();
+    const mi = getMembersIndex_();
+    const m = (mi && mi.byId) ? mi.byId[id] : null;
+    if (!m) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
+
+    const member = {
+      servingGroups: m.servingGroups || [],
+      servingGLGroups: m.servingGlGroups || []
+    };
+    if (!reg_isWorshipMember_(member)) {
+      return { ok:false, code:'E403', zh:'你不是敬拜組成員，不能使用敬拜排期', en:'You are not a worship member. Access denied.' };
+    }
+
+    const key = String(m.key || '').trim();
+    if (!key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
+
+    const qrPayload = id + '|' + key;
+    return { ok:true, qrPayload: qrPayload };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
 function api_reg_self_worship_page_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
