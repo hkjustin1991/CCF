@@ -141,6 +141,11 @@
     .worshipCellInput{min-width:80px;min-height:42px;resize:both}
     .worshipLinkCell{display:flex;align-items:center;gap:6px}
     .worshipLinkPreview{min-width:120px;min-height:42px;resize:both}
+    .quickBubbleWrap{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+    .quickBubble{border:1px solid var(--border);border-radius:14px;padding:8px 10px;font-size:12px;background:#fff;display:inline-flex;align-items:flex-start;gap:6px;min-height:46px;cursor:pointer}
+    .quickBubbleVacancy{background:#fff6e6;border-color:rgba(200,132,0,0.45);color:#8a5a00}
+    .quickBubble button{border:none;background:transparent;color:#d93c5e;cursor:pointer;font-weight:900;padding:0;line-height:1}
+    .quickBubble.slotSelected{box-shadow:inset 0 0 0 2px #285ac8}
     .worshipCols .colSection{width:110px}
     .worshipCols .colKey{width:90px}
     .worshipCols .colLink{width:110px}
@@ -1092,7 +1097,7 @@
             '<button id="btnSelfHoliday" class="alt selfMainBtn">🏖️ 請假 / Absence</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnSelfBack" class="danger">⬅️ 返回 / Back</button>'+
+            '<button id="btnSelfBack" class="danger">🚪 登出 / Log out</button>'+
           '</div>'+
           '<div id="selfMsg"></div>'+
         '</div>';
@@ -1344,16 +1349,17 @@
       var monthOptions = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
       var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth] : events;
       State.worshipRenderCache = { month: selectedMonth, events: monthEvents };
-      var gBadges = ((viewer.servingGroups||[]).concat(viewer.servingGLGroups||[])).map(function(g){ return '<span class="groupBadge '+servingGroupCss(g)+'">'+escapeHtml(servingGroupLabel(g))+'</span>'; }).join('');
-      var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''))+(viewer.isGl?' · GL':'');
+      var gBadges = (viewer.servingGroups||[]).map(function(g){ return '<span class="groupBadge '+servingGroupCss(g)+'">'+escapeHtml(servingGroupLabel(g))+'</span>'; }).join('');
+      var glBadges = (viewer.servingGLGroups||[]).map(function(g){ return '<span class="groupBadge '+servingGroupCss(g)+'">'+escapeHtml(servingGroupLabel(g))+' · 組長 / GL</span>'; }).join('');
+      var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''));
       var memberOptions = members.map(function(m){ return '<option value="'+escapeHtml(memberOption_(m))+'"></option>'; }).join('');
 
-      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div class="autosaveHint">自動儲存已啟用 / Auto-save enabled</div></div><div><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
+      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存已啟用 / Auto-save enabled</div></div><div><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
         '<datalist id="worshipMemberOptions">'+memberOptions+'</datalist>'+
         '<div class="hide"><button id="btnWorshipExportXlsx" class="btnWorship">x</button><button id="btnWorshipExportPdf" class="btnWorship">x</button></div>'+
         '<div class="label" style="margin-top:10px;">月份 / Month</div>'+
         '<select id="worshipMonthSelect">'+(monthOptions || '<option value="">全部 / All</option>')+'</select>'+
-        '<div class="miniBtnRow"><button id="btnWorshipBack" class="danger">⬅️ 返回 / Back</button></div>'+
+        '<div class="miniBtnRow"><button id="btnWorshipBack" class="danger">🚪 登出 / Log out</button></div>'+
         '<div class="miniBtnRow"><button id="btnWorshipImportPreview" class="btnWorship">📥 匯入預覽 / Import preview</button><button id="btnWorshipImportCommit" class="btnWorship">✅ 確認匯入 / Import commit</button></div>'+
         '<textarea id="worshipImportText" placeholder="貼上 CSV/TSV（Worship_Import 欄位） / Paste CSV/TSV (Worship_Import columns)"></textarea><div id="worshipMsg"></div></div>';
 
@@ -1398,14 +1404,14 @@
           '<div style="display:'+(expanded?'block':'none')+'">'+
           '<div class="rotaStack">'+rotaHtml+'</div>'+
           '<div class="worshipTableWrap"><table class="worshipTable worshipCols" style="width:100%;border-collapse:collapse;"><colgroup><col class="colSection"/><col/><col class="colKey"/><col/><col class="colLink"/><col class="colAction"/></colgroup><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Note</th><th>連結 / Link</th><th>更新 / Updated</th></tr>'+
-          row_('敬拜 1 / Main 1','WORSHIP_MAIN_1')+
-          row_('敬拜 2 / Main 2','WORSHIP_MAIN_2')+
-          row_('敬拜 3 / Main 3','WORSHIP_MAIN_3')+
-          row_('敬拜 4 / Main 4','WORSHIP_MAIN_4')+
-          row_('回應 1 / Response 1','WORSHIP_RESPONSE_1')+
-          row_('回應 2 / Response 2','WORSHIP_RESPONSE_2')+
+          row_('敬拜 / Main 1','WORSHIP_MAIN_1')+
+          row_('敬拜 / Main 2','WORSHIP_MAIN_2')+
+          row_('敬拜 / Main 3','WORSHIP_MAIN_3')+
+          row_('敬拜 / Main 4','WORSHIP_MAIN_4')+
+          row_('回應 / Response 1','WORSHIP_RESPONSE_1')+
+          row_('回應 / Response 2','WORSHIP_RESPONSE_2')+
           '</table></div>'+
-          '</div>'+          (perm.canGlRotaEdit ? '<div class="small">組長模式 / GL mode：匯入 rota 會沿用現有 admin 驗證規則。<br/>Import rota will reuse existing admin validations.</div>' : '')+
+          '</div>'+          ''+
           '</div>';
       });
       return html;
@@ -2143,7 +2149,7 @@
       }
 
       var backBtn = $('btnWorshipBack');
-      if (backBtn) backBtn.onclick = function(){ State.view = 'selfHome'; render(); };
+      if (backBtn) backBtn.onclick = function(){ State.authQrPayload = null; State.lastResult = null; State.view = 'home'; render(); };
       var exportBtn = $('btnWorshipExportMenu');
       if (exportBtn) exportBtn.onclick = function(){
         var modal = openModal(
@@ -2206,28 +2212,57 @@
           var cur = String(b.textContent || '').trim();
           var total = Number(b.getAttribute('data-total') || 1);
           if (!total || total < 1) total = 1;
-          var slotOptions = '';
-          for (var i=0;i<total;i++) slotOptions += '<option value="'+(i+1)+'">位置 '+(i+1)+' / Slot '+(i+1)+'</option>';
+          var tokens = String(cur || '').split(',').map(function(x){ return String(x||'').trim(); }).filter(function(x){ return !!x; });
+          while (tokens.length < total) tokens.push('Vacant');
+          if (!tokens.length) tokens = ['Vacant'];
+          var selectedSlot = 0;
+
+          function renderSlots_(){
+            var chips = tokens.map(function(tok, idx){
+              var selectedCls = (idx===selectedSlot) ? ' slotSelected' : '';
+              if (!tok || /^vacant$/i.test(tok)) return '<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-slot="'+idx+'">空缺 '+(idx+1)+' / Vacant '+(idx+1)+'</span>';
+              if (/^closed$/i.test(tok)) return '<span class="quickBubble'+selectedCls+'" data-slot="'+idx+'">🔒 關閉 / Closed</span>';
+              if (/^n\/a$/i.test(tok)) return '<span class="quickBubble'+selectedCls+'" data-slot="'+idx+'">N/A</span>';
+              return '<span class="quickBubble'+selectedCls+'" data-slot="'+idx+'"><span style="white-space:normal">'+escapeHtml(tok)+'</span><button type="button" data-remove-slot="'+idx+'">×</button></span>';
+            }).join('');
+            return '<div class="quickBubbleWrap">'+chips+'</div>';
+          }
+
           var modal = openModal(
             '<div class="big">快速更改排更 / Quick rota edit</div>'+
             '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(pos)+'</div>'+
-            '<div class="label">位置 / Slot</div><select id="wRotaSlot">'+slotOptions+'</select>'+
-            '<input id="wRotaVal" value="'+escapeHtml(cur)+'" list="worshipMemberOptions" placeholder="搜尋成員 / Search member" />'+
-            '<div class="miniBtnRow"><button id="wRotaVacant" class="alt">Vacant</button><button id="wRotaClosed" class="alt">Closed</button><button id="wRotaNA" class="alt">N/A</button><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
+            '<div id="wRotaSlots">'+renderSlots_()+'</div>'+
+            '<input id="wRotaVal" value="" list="worshipMemberOptions" placeholder="搜尋成員並替換所選位置 / Search member for selected slot" />'+
+            '<div class="miniBtnRow"><button id="wRotaApply" class="alt">替換所選位置 / Apply to selected slot</button><button id="wRotaClosed" class="alt">關閉 / Closed</button><button id="wRotaNA" class="alt">不適用 / N/A</button><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
           );
+
+          function bindSlots_(){
+            Array.prototype.slice.call(modal.querySelectorAll('[data-slot]')).forEach(function(el){
+              el.onclick = function(){ selectedSlot = Number(el.getAttribute('data-slot')||0); modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
+            });
+            Array.prototype.slice.call(modal.querySelectorAll('[data-remove-slot]')).forEach(function(el){
+              el.onclick = function(e){ e.stopPropagation(); var idx = Number(el.getAttribute('data-remove-slot')||0); tokens[idx] = 'Vacant'; modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
+            });
+          }
+          bindSlots_();
+
           modal.querySelector('#wRotaCancel').onclick = function(){ closeModal(modal); };
-          modal.querySelector('#wRotaVacant').onclick = function(){ modal.querySelector('#wRotaVal').value = 'Vacant'; };
-          modal.querySelector('#wRotaClosed').onclick = function(){ modal.querySelector('#wRotaVal').value = 'Closed'; };
-          modal.querySelector('#wRotaNA').onclick = function(){ modal.querySelector('#wRotaVal').value = 'N/A'; };
-          modal.querySelector('#wRotaSave').onclick = function(){
+          modal.querySelector('#wRotaApply').onclick = function(){
             var vRaw = modal.querySelector('#wRotaVal').value.trim();
+            if (!vRaw) return;
             var m = vRaw.match(/CCF\d{4}/i);
-            var v = m ? m[0].toUpperCase() : vRaw;
-            var slotIdx = Math.max(1, Number(modal.querySelector('#wRotaSlot').value || 1));
+            tokens[selectedSlot] = m ? m[0].toUpperCase() : vRaw;
+            modal.querySelector('#wRotaVal').value = '';
+            modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_();
+          };
+          modal.querySelector('#wRotaClosed').onclick = function(){ tokens = ['Closed']; selectedSlot = 0; modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
+          modal.querySelector('#wRotaNA').onclick = function(){ tokens = ['N/A']; selectedSlot = 0; modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
+          modal.querySelector('#wRotaSave').onclick = function(){
+            var v = tokens.map(function(t){ return String(t||'').trim(); }).filter(function(t){ return !!t; }).join(', ');
             if (!confirm('確認更新並進行重複/假期檢查？\nConfirm update and run duplicate/holiday checks?')) return;
             closeModal(modal);
             var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
-            callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v, slotIndex:slotIdx }], false).then(function(r){
+            callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v }], false).then(function(r){
               if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
               if (msgEl) msgEl.innerHTML = showBox('ok','已更新排更','Rota updated');
               return callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){ if(res&&res.ok){ State.lastResult=res; render(); } });
@@ -2320,12 +2355,12 @@
               '<h3 style="margin:0;color:#163b7a">'+escapeHtml(String(ev.eventKey||''))+'</h3>'+
               '<div style="margin-top:8px">'+rotaLine+'</div>'+
               '<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">段落 / Section</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">歌名 / Title</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">Key</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">Note</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">連結 / Link</th></tr></thead><tbody>'+
-                secRow_('敬拜 1 / Main 1','WORSHIP_MAIN_1',songs.WORSHIP_MAIN_1)+
-                secRow_('敬拜 2 / Main 2','WORSHIP_MAIN_2',songs.WORSHIP_MAIN_2)+
-                secRow_('敬拜 3 / Main 3','WORSHIP_MAIN_3',songs.WORSHIP_MAIN_3)+
-                secRow_('敬拜 4 / Main 4','WORSHIP_MAIN_4',songs.WORSHIP_MAIN_4)+
-                secRow_('回應 1 / Response 1','WORSHIP_RESPONSE_1',songs.WORSHIP_RESPONSE_1)+
-                secRow_('回應 2 / Response 2','WORSHIP_RESPONSE_2',songs.WORSHIP_RESPONSE_2)+
+                secRow_('敬拜 / Main 1','WORSHIP_MAIN_1',songs.WORSHIP_MAIN_1)+
+                secRow_('敬拜 / Main 2','WORSHIP_MAIN_2',songs.WORSHIP_MAIN_2)+
+                secRow_('敬拜 / Main 3','WORSHIP_MAIN_3',songs.WORSHIP_MAIN_3)+
+                secRow_('敬拜 / Main 4','WORSHIP_MAIN_4',songs.WORSHIP_MAIN_4)+
+                secRow_('回應 / Response 1','WORSHIP_RESPONSE_1',songs.WORSHIP_RESPONSE_1)+
+                secRow_('回應 / Response 2','WORSHIP_RESPONSE_2',songs.WORSHIP_RESPONSE_2)+
               '</tbody></table>'+
             '</section>';
           }).join('');

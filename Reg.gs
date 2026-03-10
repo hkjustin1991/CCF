@@ -1489,6 +1489,7 @@ function api_reg_self_worship_song_save_public(qrPayload, payload){
     const sh = reg_ensureWorshipPlanningSheet_();
     const last = sh.getLastRow();
     const now = new Date();
+    const nowStamp = Utilities.formatDate(now, 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
     const actor = auth.parsed.id;
     let targetRow = 0;
     let old = { songTitle:'', songKey:'', capo:'', versionNote:'', linkUrl:'', linkTitle:'' };
@@ -1514,7 +1515,7 @@ function api_reg_self_worship_song_save_public(qrPayload, payload){
       const yt = reg_tryFetchYoutubeMeta_(next.linkUrl);
       if (yt.ok && yt.title){
         next.linkTitle = yt.title;
-        if (!next.songTitle) next.songTitle = yt.title;
+        next.songTitle = yt.title;
       }
     }
     const row = [ev, section, next.songTitle, next.songKey, next.capo, next.versionNote, next.linkUrl, next.linkTitle, now, actor];
@@ -1524,7 +1525,7 @@ function api_reg_self_worship_song_save_public(qrPayload, payload){
     const auditRows = [];
     ['songTitle','songKey','capo','versionNote','linkUrl','linkTitle'].forEach(function(k){
       if (String(old[k]||'') === String(next[k]||'')) return;
-      auditRows.push([now, actor, ev, 'SONG', section + '.' + k, String(old[k]||''), String(next[k]||''), 'SELF_WORSHIP_SONG_SAVE', '']);
+      auditRows.push([nowStamp, actor, ev, 'SONG', section + '.' + k, String(old[k]||''), String(next[k]||''), 'SELF_WORSHIP_SONG_SAVE', '']);
     });
     reg_writeWorshipAuditRows_(auditRows);
     return { ok:true, eventKey:ev, songSection:section, saved:next };
@@ -1567,7 +1568,7 @@ function api_reg_self_worship_rota_gl_save_public(qrPayload, eventKey, rows, ove
     if (!token) return { ok:false, code:'E403', zh:'授權失敗', en:'Authorization failed.' };
     const res = api_admin_serving_event_save(token, eventKey, cleaned, overrideAway, 'WORSHIP');
     if (!res || !res.ok) return res;
-    const now = new Date();
+    const now = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
     const auditRows = cleaned.map(function(r){ return [now, auth.parsed.id, String(eventKey||''), 'ROTA', String(r.position||''), '', String(r.value||''), 'SELF_WORSHIP_GL_SAVE', '']; });
     reg_writeWorshipAuditRows_(auditRows);
     return res;
