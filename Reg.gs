@@ -1554,11 +1554,20 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
 
 function api_admin_worship_bootstrap(token){
   try{
-    const auth = requireSession_(token);
-    if (!auth || !auth.ok) return auth || { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+    let actor = null;
+    if (typeof admin_requireSession_ === 'function'){
+      const a = admin_requireSession_(token);
+      if (a && a.ok) actor = a.actor || null;
+      else if (a && a.code && a.code !== 'E401') return a;
+    }
+    if (!actor && typeof requireSession_ === 'function'){
+      const s = requireSession_(token);
+      if (s && s.ok) actor = (s.sess && s.sess.staff) ? s.sess.staff : null;
+      else if (s && s.code && s.code !== 'E401') return s;
+    }
+    if (!actor) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
 
-    const staff = (auth.sess && auth.sess.staff) ? auth.sess.staff : {};
-    const id = String(staff.id || '').trim().toUpperCase();
+    const id = String(actor.id || '').trim().toUpperCase();
     if (!id || id === 'SUPERUSER') return { ok:false, code:'E403', zh:'未能識別會員身份', en:'Unable to identify member account.' };
 
     regRefreshMembersCachesForSelfPortal_();
