@@ -1225,6 +1225,68 @@ function reg_ensureWorshipPlanningSheet_(){
   return sh;
 }
 
+
+function reg_worshipSectionOrder_(section){
+  const sec = String(section || '').trim().toUpperCase();
+  const idx = REG_WORSHIP_SECTIONS.indexOf(sec);
+  return idx >= 0 ? idx : 999;
+}
+
+function reg_worshipEventDateSortKey_(eventKey){
+  const ev = String(eventKey || '').trim();
+  const m = ev.match(/(\d{4}-\d{2}-\d{2})$/);
+  return m ? m[1] : '9999-99-99';
+}
+
+function reg_sortAndDedupWorshipPlanningSheet_(sh){
+  const sheet = sh || reg_ensureWorshipPlanningSheet_();
+  const last = sheet.getLastRow();
+  if (last < 2) return;
+  const rows = sheet.getRange(2, 1, last - 1, 10).getValues();
+
+  const dedup = {};
+  rows.forEach(function(r, idx){
+    const ev = String(r[0] || '').trim();
+    const sec = String(r[1] || '').trim().toUpperCase();
+    if (!ev || REG_WORSHIP_SECTIONS.indexOf(sec) < 0) return;
+    const key = ev + '|' + sec;
+    dedup[key] = {
+      row: [
+        ev,
+        sec,
+        String(r[2] || '').trim(),
+        String(r[3] || '').trim(),
+        String(r[4] || '').trim(),
+        String(r[5] || '').trim(),
+        String(r[6] || '').trim(),
+        String(r[7] || '').trim(),
+        r[8],
+        String(r[9] || '').trim().toUpperCase()
+      ],
+      idx: idx
+    };
+  });
+
+  const merged = Object.keys(dedup).map(function(k){ return dedup[k]; });
+  merged.sort(function(a, b){
+    const ar = a.row, br = b.row;
+    const da = reg_worshipEventDateSortKey_(ar[0]);
+    const db = reg_worshipEventDateSortKey_(br[0]);
+    if (da < db) return -1;
+    if (da > db) return 1;
+    if (String(ar[0]) < String(br[0])) return -1;
+    if (String(ar[0]) > String(br[0])) return 1;
+    const sa = reg_worshipSectionOrder_(ar[1]);
+    const sb = reg_worshipSectionOrder_(br[1]);
+    if (sa !== sb) return sa - sb;
+    return a.idx - b.idx;
+  });
+
+  const out = merged.map(function(x){ return x.row; });
+  if (last > 1) sheet.getRange(2, 1, last - 1, 10).clearContent();
+  if (out.length) sheet.getRange(2, 1, out.length, 10).setValues(out);
+}
+
 function reg_ensureWorshipAuditSheet_(){
   const ss = reg_openSsForWorship_();
   if (!ss) throw new Error('Spreadsheet unavailable');
@@ -1534,7 +1596,6 @@ function api_reg_self_worship_song_save_public(qrPayload, payload){
         if (String(vals[i][0]||'').trim() === ev && String(vals[i][1]||'').trim().toUpperCase() === section){
           targetRow = i + 2;
           old = { songTitle:String(vals[i][2]||''), songKey:String(vals[i][3]||''), capo:String(vals[i][4]||''), versionNote:String(vals[i][5]||''), linkUrl:String(vals[i][6]||''), linkTitle:String(vals[i][7]||'') };
-          break;
         }
       }
     }
@@ -1559,6 +1620,7 @@ function api_reg_self_worship_song_save_public(qrPayload, payload){
     const row = [ev, section, next.songTitle, next.songKey, next.capo, next.versionNote, next.linkUrl, next.linkTitle, now, actor];
     if (targetRow){ sh.getRange(targetRow,1,1,10).setValues([row]); }
     else { sh.getRange(sh.getLastRow()+1,1,1,10).setValues([row]); }
+    reg_sortAndDedupWorshipPlanningSheet_(sh);
 
     const auditRows = [];
     ['songTitle','songKey','capo','versionNote','linkUrl','linkTitle'].forEach(function(k){
