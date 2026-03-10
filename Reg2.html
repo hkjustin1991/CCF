@@ -675,6 +675,7 @@
       worshipRenderCache: null,
       worshipMembers: [],
       worshipMembersLoaded: false,
+      worshipMembersFetchedAt: 0,
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -2123,17 +2124,21 @@
       if ($('btnSelfWorship')) $('btnSelfWorship').onclick = function(){
         if (isPending){ showPendingActivationMessage(); return; }
         $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
-        State.worshipMembers = [];
-        State.worshipMembersLoaded = false;
         callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){
           if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
           State.lastResult = res;
           State.view = 'selfWorship';
           render();
+          var now = Date.now();
+          var staleMs = 5 * 60 * 1000;
+          if (State.worshipMembersLoaded && State.worshipMembersFetchedAt && (now - State.worshipMembersFetchedAt) < staleMs){
+            return;
+          }
           return callApi('api_reg_self_worship_members_public', State.authQrPayload).then(function(mr){
             if (mr && mr.ok){
               State.worshipMembers = Array.isArray(mr.members) ? mr.members : [];
               State.worshipMembersLoaded = true;
+              State.worshipMembersFetchedAt = Date.now();
               if (State.view === 'selfWorship') render();
             }
           });
