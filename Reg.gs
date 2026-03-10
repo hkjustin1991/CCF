@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg104
+ * v2026-03-09.reg105
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg104';
+const REG_VERSION = '2026-03-09.reg105';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1172,7 +1172,7 @@ const REG_WORSHIP_IMPORT_HEADERS = [
   'ResponseSong1Title','ResponseSong1Key','ResponseSong1Capo','ResponseSong1Version','ResponseSong1Link',
   'ResponseSong2Title','ResponseSong2Key','ResponseSong2Capo','ResponseSong2Version','ResponseSong2Link'
 ];
-const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
+const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_MAIN_3','WORSHIP_MAIN_4','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
 
 
 function reg_openSsForWorship_(){
@@ -1404,6 +1404,7 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
           nameZh: m.nameZh || '',
           nameEn: m.nameEn || '',
           preferredName: m.preferredName || '',
+          gender: m.gender || '',
           servingGroups: m.servingGroups || [],
           servingGLGroups: m.servingGLGroups || []
         };
@@ -1436,7 +1437,7 @@ function api_reg_self_worship_page_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
-    return reg_buildWorshipPagePayload_(auth, false);
+    return reg_buildWorshipPagePayload_(auth, true);
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
