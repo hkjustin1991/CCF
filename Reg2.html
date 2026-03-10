@@ -1476,12 +1476,25 @@
         if (en.toUpperCase().indexOf(zh.toUpperCase()) >= 0) return en;
         return zh + ' / ' + en;
       }
+      var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
       var blocks = Object.keys(groups).map(function(g){
         var rows = groups[g].map(function(r){
           return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>';
         }).join('');
+        var songsHtml = '';
+        if (normalizedGroupKey(g) === 'worship'){
+          var filledSongs = worshipSongs.filter(function(song){ return String((song && song.songTitle) || '').trim(); });
+          if (filledSongs.length){
+            songsHtml = '<div style="margin-top:8px;"><b>本週詩歌 / Songs this week</b><ul style="margin:6px 0 0 18px;">'+
+              filledSongs.map(function(song){
+                var label = [String(song.labelZh||''), String(song.labelEn||'')].filter(Boolean).join(' / ');
+                return '<li>' + escapeHtml(label) + ' · ' + escapeHtml(String(song.songTitle||'')) + '</li>';
+              }).join('')+
+              '</ul></div>';
+          }
+        }
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
-        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul></div>';
+        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul>'+songsHtml+'</div>';
       }).join('');
       return '<div class="card"><div class="big">📡 聚會資訊 / Service information</div>'+
         '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+

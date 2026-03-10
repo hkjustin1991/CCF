@@ -1152,11 +1152,34 @@ function api_reg_self_live_service_public(qrPayload){
       };
     });
 
+    const worshipSongsThisWeek = [];
+    if (next){
+      const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
+      const songs = planningMap[next] || {};
+      [
+        { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
+        { section:'WORSHIP_MAIN_2', labelZh:'敬拜 2', labelEn:'Main 2' },
+        { section:'WORSHIP_MAIN_3', labelZh:'敬拜 3', labelEn:'Main 3' },
+        { section:'WORSHIP_MAIN_4', labelZh:'敬拜 4', labelEn:'Main 4' },
+        { section:'WORSHIP_RESPONSE_1', labelZh:'回應 1', labelEn:'Response 1' },
+        { section:'WORSHIP_RESPONSE_2', labelZh:'回應 2', labelEn:'Response 2' }
+      ].forEach(function(meta){
+        const sec = songs[meta.section] || {};
+        worshipSongsThisWeek.push({
+          section: meta.section,
+          labelZh: meta.labelZh,
+          labelEn: meta.labelEn,
+          songTitle: String(sec.songTitle || '').trim()
+        });
+      });
+    }
+
     return {
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
-      servingThisWeek: serving
+      servingThisWeek: serving,
+      worshipSongsThisWeek: worshipSongsThisWeek
     };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
