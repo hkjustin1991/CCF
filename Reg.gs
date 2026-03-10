@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-09.reg105
+ * v2026-03-09.reg106
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-09.reg105';
+const REG_VERSION = '2026-03-09.reg106';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1511,7 +1511,10 @@ function api_reg_self_worship_song_save_public(qrPayload, payload){
       linkUrl: String(p.linkUrl || '').trim(),
       linkTitle: String(p.linkTitle || '').trim()
     };
-    if (next.linkUrl && !next.linkTitle){
+    if (!next.linkTitle) next.linkTitle = String(old.linkTitle || '').trim();
+    const linkChanged = String(next.linkUrl || '') !== String(old.linkUrl || '');
+    const forceTitleFromLink = !!(p && p.forceTitleFromLink === true);
+    if (next.linkUrl && (linkChanged || forceTitleFromLink)){
       const yt = reg_tryFetchYoutubeMeta_(next.linkUrl);
       if (yt.ok && yt.title){
         next.linkTitle = yt.title;

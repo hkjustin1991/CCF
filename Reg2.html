@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg105
+  UI VERSION TAG: reg2-ui-2026-03-09.reg106
   ============================================================
 
   Changes (reg2-ui2):
@@ -184,7 +184,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg105</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg106</span></div>
     </header>
 
     <main id="app"></main>
@@ -2147,6 +2147,32 @@
         var songs = (e && e.songs) || {};
         return String((((songs[sec]||{})[key]) || ''));
       }
+      function worshipPosLabel_(pos){
+        var l = SERVING_POSITION_LABELS_REG2[pos] || {};
+        return (l.zh||pos) + ' / ' + (l.en||pos);
+      }
+      function worshipMemberLabel_(id){
+        var list = (State.lastResult && Array.isArray(State.lastResult.members)) ? State.lastResult.members : [];
+        var up = String(id||'').toUpperCase();
+        for (var i=0;i<list.length;i++){
+          var m=list[i]||{};
+          if (String(m.id||'').toUpperCase()===up){
+            var n = m.preferredName || m.nameZh || m.nameEn || '';
+            return up + (n?(' '+n):'');
+          }
+        }
+        return up;
+      }
+      function worshipDupDetailHtml_(res, nowPos){
+        var dups = Array.isArray((res||{}).duplicates) ? res.duplicates : [];
+        if (!dups.length) return (res&&res.detail)?('<div class="small">'+escapeHtml(String(res.detail||''))+'</div>'):'';
+        return dups.map(function(d){
+          var who = worshipMemberLabel_(d.memberId||'');
+          var current = (d.positions||[]).map(worshipPosLabel_).join('、');
+          var now = worshipPosLabel_(nowPos||'');
+          return '<div class="small">'+escapeHtml('成員: '+who+'｜現有崗位: '+current+'｜本次變更: '+now+' / Member: '+who+' | Current: '+current+' | Now: '+now)+'</div>';
+        }).join('');
+      }
 
       var backBtn = $('btnWorshipBack');
       if (backBtn) backBtn.onclick = function(){ State.authQrPayload = null; State.lastResult = null; State.view = 'home'; render(); };
@@ -2190,7 +2216,7 @@
             if (inp) inp.value = v;
             var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
             callApi('api_reg_self_worship_song_save_public', State.authQrPayload, {
-              eventKey:ev, songSection:sec, songTitle:songFieldVal_(ev, sec, 'songTitle'), songKey:songFieldVal_(ev, sec, 'songKey'), capo:'', versionNote:songFieldVal_(ev, sec, 'versionNote'), linkUrl:v, linkTitle:''
+              eventKey:ev, songSection:sec, songTitle:songFieldVal_(ev, sec, 'songTitle'), songKey:songFieldVal_(ev, sec, 'songKey'), capo:'', versionNote:songFieldVal_(ev, sec, 'versionNote'), linkUrl:v, linkTitle:'', forceTitleFromLink:true
             }).then(function(r){
               if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
               if (r.saved){
@@ -2221,7 +2247,7 @@
             var chips = tokens.map(function(tok, idx){
               var selectedCls = (idx===selectedSlot) ? ' slotSelected' : '';
               if (!tok || /^vacant$/i.test(tok)) return '<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-slot="'+idx+'">空缺 '+(idx+1)+' / Vacant '+(idx+1)+'</span>';
-              if (/^closed$/i.test(tok)) return '<span class="quickBubble'+selectedCls+'" data-slot="'+idx+'">🔒 關閉 / Closed</span>';
+              if (/^closed$/i.test(tok)) return '<span class="quickBubble quickBubbleVacancy'+selectedCls+'" data-slot="'+idx+'">🔒 崗位關閉 / Position closed</span>';
               if (/^n\/a$/i.test(tok)) return '<span class="quickBubble'+selectedCls+'" data-slot="'+idx+'">N/A</span>';
               return '<span class="quickBubble'+selectedCls+'" data-slot="'+idx+'"><span style="white-space:normal">'+escapeHtml(tok)+'</span><button type="button" data-remove-slot="'+idx+'">×</button></span>';
             }).join('');
@@ -2233,7 +2259,7 @@
             '<div class="small">'+escapeHtml(ev)+' · '+escapeHtml(pos)+'</div>'+
             '<div id="wRotaSlots">'+renderSlots_()+'</div>'+
             '<input id="wRotaVal" value="" list="worshipMemberOptions" placeholder="搜尋成員並替換所選位置 / Search member for selected slot" />'+
-            '<div class="miniBtnRow"><button id="wRotaApply" class="alt">替換所選位置 / Apply to selected slot</button><button id="wRotaClosed" class="alt">關閉 / Closed</button><button id="wRotaNA" class="alt">不適用 / N/A</button><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
+            '<div class="miniBtnRow"><button id="wRotaClosed" class="alt quickBubbleVacancy">🔒 崗位關閉 / Position closed</button><button id="wRotaNA" class="alt">不適用 / N/A</button><button id="wRotaSave" class="btnWorship">確認並儲存 / Confirm save</button><button id="wRotaCancel" class="danger">取消 / Cancel</button></div>'
           );
 
           function bindSlots_(){
@@ -2247,15 +2273,14 @@
           bindSlots_();
 
           modal.querySelector('#wRotaCancel').onclick = function(){ closeModal(modal); };
-          modal.querySelector('#wRotaApply').onclick = function(){
+          modal.querySelector('#wRotaVal').oninput = function(){
             var vRaw = modal.querySelector('#wRotaVal').value.trim();
             if (!vRaw) return;
             var m = vRaw.match(/CCF\d{4}/i);
             tokens[selectedSlot] = m ? m[0].toUpperCase() : vRaw;
-            modal.querySelector('#wRotaVal').value = '';
             modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_();
           };
-          modal.querySelector('#wRotaClosed').onclick = function(){ tokens = ['Closed']; selectedSlot = 0; modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
+                    modal.querySelector('#wRotaClosed').onclick = function(){ tokens = ['Closed']; selectedSlot = 0; modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
           modal.querySelector('#wRotaNA').onclick = function(){ tokens = ['N/A']; selectedSlot = 0; modal.querySelector('#wRotaSlots').innerHTML = renderSlots_(); bindSlots_(); };
           modal.querySelector('#wRotaSave').onclick = function(){
             var v = tokens.map(function(t){ return String(t||'').trim(); }).filter(function(t){ return !!t; }).join(', ');
@@ -2263,7 +2288,7 @@
             closeModal(modal);
             var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
             callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v }], false).then(function(r){
-              if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
+              if(!r || !r.ok){ if (msgEl){ if (r && r.code==='E409' && r.subCode==='DUPLICATE_ASSIGNMENT'){ msgEl.innerHTML = showBox('warn','同一會員重覆崗位','Duplicate serving assignment', worshipDupDetailHtml_(r, pos)); } else { msgEl.innerHTML = showServerErr(r); } } return; }
               if (msgEl) msgEl.innerHTML = showBox('ok','已更新排更','Rota updated');
               return callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){ if(res&&res.ok){ State.lastResult=res; render(); } });
             }).catch(function(err){ showWorshipErr_('更新失敗','Update failed', err); });
