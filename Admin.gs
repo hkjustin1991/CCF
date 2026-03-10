@@ -246,6 +246,16 @@ function doGetAdmin_(e){
   return out;
 }
 
+
+function admin_actorFlagsForMember_(member){
+  const serving = Array.isArray(member && member.servingGroups) ? member.servingGroups : [];
+  const gl = Array.isArray(member && member.servingGLGroups) ? member.servingGLGroups : [];
+  const merged = serving.concat(gl).map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
+  const canAccessWorshipPlanning = merged.indexOf('worship') >= 0;
+  const canEditWorshipRota = gl.map(function(g){ return admin_normalizeServingGroup_(g); }).indexOf('worship') >= 0;
+  return { canAccessWorshipPlanning: canAccessWorshipPlanning, canEditWorshipRota: canEditWorshipRota };
+}
+
 /**
  * Admin portal login:
  * - QR: must be STAFF or ADMIN (DISABLED/ACTIVE/etc rejected)
@@ -307,7 +317,13 @@ function api_admin_login(input){
   }
 
   const role = (st === 'STAFF' || st === 'ADMIN') ? st : 'GL';
-  const actor = { id:m.id, role:role };
+  const actor = {
+    id:m.id,
+    role:role,
+    servingGroups: Array.isArray(m.servingGroups) ? m.servingGroups : [],
+    servingGLGroups: Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [],
+    flags: admin_actorFlagsForMember_(m)
+  };
   if (role === 'GL') actor.glGroups = glGroups;
   const token = admin_newSession_(actor);
   admin_audit_(actor, 'LOGIN', JSON.stringify({ via:'QR' }), '');
@@ -2842,18 +2858,27 @@ function admin_getMembersIndex_(){
 // Actor name enrichment
 function admin_getActorNames_(actor){
   const a = { id: String(actor.id||''), role: String(actor.role||'') };
-  if (a.id === 'SUPERUSER') return { id:'SUPERUSER', role:'SUPERUSER', nameZh:'', nameEn:'SUPERUSER' };
+  if (a.id === 'SUPERUSER') return {
+    id:'SUPERUSER', role:'SUPERUSER', nameZh:'', nameEn:'SUPERUSER',
+    servingGroups:[], servingGLGroups:[],
+    flags:{ canAccessWorshipPlanning:false, canEditWorshipRota:false }
+  };
 
   const mi = admin_getMembersIndex_();
   const m = mi.byId[String(a.id||'').toUpperCase()];
+  const servingGroups = m ? (Array.isArray(m.servingGroups) ? m.servingGroups : []) : (Array.isArray(actor.servingGroups) ? actor.servingGroups : []);
+  const servingGLGroups = m ? (Array.isArray(m.servingGLGroups) ? m.servingGLGroups : []) : (Array.isArray(actor.servingGLGroups) ? actor.servingGLGroups : []);
   const out = {
     id: a.id,
     role: a.role,
     nameZh: m ? (m.nameZh||'') : '',
-    nameEn: m ? (m.nameEn||'') : ''
+    nameEn: m ? (m.nameEn||'') : '',
+    servingGroups: servingGroups,
+    servingGLGroups: servingGLGroups,
+    flags: m ? admin_actorFlagsForMember_(m) : (actor.flags || admin_actorFlagsForMember_({ servingGroups:servingGroups, servingGLGroups:servingGLGroups }))
   };
   if (String(a.role||'').toUpperCase() === 'GL'){
-    out.glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
+    out.glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : servingGLGroups;
   }
   return out;
 }

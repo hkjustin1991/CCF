@@ -402,7 +402,11 @@
       servingGroupOverview:null,
       servingPlanTimer:null,
       selectedServingGroup:null,
-      glBackGuardArmed:false
+      glBackGuardArmed:false,
+      worshipMonth:'',
+      worshipEventExpanded:{},
+      worshipRenderCache:null,
+      worshipMembers:[]
     };
 
     function $(id){ return document.getElementById(id); }
@@ -835,82 +839,99 @@
       if (!lines.length) return '';
       return lines.map(function(it){
         var bubble = renderServingGroupBubble_(it.group || '');
-        return '<div class="small"><b>'+escapeHtml(it.memberLabel||'')+'</b> is NOT a member of '+bubble+'</div>';
+        return '<div class="small"><b>'+escapeHtml(it.memberLabel||'')+'</b> 不屬於該事奉組別 / is NOT a member of '+bubble+'</div>';
       }).join('');
     }
 
     function normalizeErrResForRender_(res){
-      if (!res) return { code:'E500', zh:'系統錯誤', en:'System error' };
-      if (typeof res === 'string') return { code:'E500', zh:'系統錯誤', en:String(res) };
-      var out = (res && typeof res === 'object') ? Object.assign({}, res) : { code:'E500', zh:'系統錯誤', en:String(res) };
-      if (out && typeof out === 'object'){
-        if (!out.code) out.code = 'E500';
-        if (!out.zh && out.zhMessage) out.zh = String(out.zhMessage);
-        if (!out.en && out.enMessage) out.en = String(out.enMessage);
-        if (!out.en && out.message) out.en = String(out.message);
-        if (!out.en && !out.zh) out.en = 'System error';
-        if (!out.detail && out.message && out.message !== out.en) out.detail = String(out.message);
-        if (!out.detail && out.details != null) out.detail = String(out.details);
+      if (!res) return { ok:false, code:'E500', zh:'系統錯誤', en:'System error' };
+      if (typeof res === 'string') return { ok:false, code:'E500', zh:'系統錯誤', en:'System error', detailEn:String(res) };
+      var out;
+      if (res instanceof Error){
+        out = {
+          ok:false,
+          code: res.code || 'E500',
+          zh: res.zh || '',
+          en: res.en || '',
+          detailEn: String(res.message || ''),
+          detailZh: String(res.zhDetail || ''),
+          detail: String(res.message || ''),
+          subCode: res.subCode || '',
+          detailHtml: res.detailHtml,
+          trustedDetailHtml: !!res.trustedDetailHtml
+        };
+      } else if (res && typeof res === 'object'){
+        out = {
+          ok: !!res.ok,
+          code: res.code || 'E500',
+          zh: res.zh || res.zhMessage || '',
+          en: res.en || res.enMessage || '',
+          detailZh: res.detailZh || '',
+          detailEn: res.detailEn || '',
+          detail: (res.detail != null) ? String(res.detail) : '',
+          detailHtml: res.detailHtml,
+          trustedDetailHtml: !!res.trustedDetailHtml,
+          subCode: res.subCode || ''
+        };
+        if (!out.detail && res.message) out.detail = String(res.message);
+      } else {
+        out = { ok:false, code:'E500', zh:'系統錯誤', en:'System error', detailEn:String(res) };
       }
+      if (!out.zh && !out.en){ out.zh = '系統錯誤'; out.en = 'System error'; }
+      if (!out.code) out.code = 'E500';
       return out;
     }
-    function normalizeMessageText_(v){
-      return String(v == null ? '' : v).trim();
-    }
-    function looksBilingualCombined_(text){
-      var t = normalizeMessageText_(text);
-      return !!(t && (t.indexOf(' / ') >= 0 || t.indexOf('/') >= 0));
+    function normalizeMessageText_(v){ return String(v == null ? '' : v).trim(); }
+    function looksBilingualCombined_(text){ var t = normalizeMessageText_(text); return !!(t && (t.indexOf(' / ') >= 0 || t.indexOf('/') >= 0)); }
+    function errFallbackByCode_(res){
+      var code = String((res && res.code) || '').toUpperCase();
+      var sub = String((res && res.subCode) || '').toUpperCase();
+      if (code === 'E401') return { zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+      if (code === 'E403') return { zh:'你沒有權限執行此操作', en:'No permission to perform this action.' };
+      if (sub === 'MEMBER_NOT_IN_SERVING_GROUP') return { zh:'成員不屬於該事奉組別', en:'Member is NOT a member of this serving group.' };
+      return { zh:'系統錯誤', en:'System error' };
     }
     function toBilingualText_(res, fallbackZh, fallbackEn){
       var r = normalizeErrResForRender_(res);
-      var zh = normalizeMessageText_(r.zh || fallbackZh || '');
-      var en = normalizeMessageText_(r.en || fallbackEn || '');
-      if (zh && en){
-        if (zh === en || looksBilingualCombined_(zh)) en = '';
-      } else if (!zh && en){
-        zh = en;
-        en = '';
-      } else if (!en && zh && looksBilingualCombined_(zh)){
-        en = '';
+      var fb = errFallbackByCode_(r);
+      var zh = normalizeMessageText_(r.zh || fallbackZh || fb.zh || '系統錯誤');
+      var en = normalizeMessageText_(r.en || fallbackEn || fb.en || 'System error');
+      if (zh && en && (zh === en || looksBilingualCombined_(zh))) en = '';
+      if (!zh) zh = normalizeMessageText_(fallbackZh || fb.zh || '系統錯誤');
+      if (!en) en = normalizeMessageText_(fallbackEn || fb.en || 'System error');
+      return { zh:zh, en:en };
+    }
+    function buildErrDetailHtml_(res){
+      if (!res) return { html:'', allow:false };
+      if (res.trustedDetailHtml && res.detailHtml) return { html:String(res.detailHtml||''), allow:true };
+      if (res.subCode === 'MEMBER_NOT_IN_SERVING_GROUP' && res.detail) return { html:formatServingGroupMismatchDetailHtml_(res.detail), allow:true };
+      if (res.subCode === 'HOLIDAY_OVERLAP' && res.detail){
+        var holidayLines = parseHolidayDetailLines_(res.detail);
+        if (holidayLines.length){
+          return {
+            html: holidayLines.map(function(c){
+              var who = String(c.memberId||'');
+              return escapeHtml(who + '（假期: ' + c.from + ' - ' + c.to + '） / ' + who + ' on holiday from ' + c.from + ' to ' + c.to);
+            }).join('<br/>'),
+            allow:true
+          };
+        }
       }
-      return { zh: zh || String(fallbackZh || ''), en: en || '' };
+      var dZh = normalizeMessageText_(res.detailZh || '');
+      var dEn = normalizeMessageText_(res.detailEn || '');
+      var d = normalizeMessageText_(res.detail || '');
+      if (!dZh && !dEn && d) dEn = d;
+      var lines = [];
+      if (dZh) lines.push('<div class="small">'+escapeHtml(dZh)+'</div>');
+      if (dEn && dEn !== dZh) lines.push('<div class="small">'+escapeHtml(dEn)+'</div>');
+      return { html: lines.join(''), allow: lines.length > 0 };
     }
 
     function showErr(targetId, res){
       res = normalizeErrResForRender_(res);
       var titles = toBilingualText_(res, '系統錯誤', 'System error');
-      var detail = '';
-      var allowHtmlDetail = false;
-      if (res && res.trustedDetailHtml && res.detailHtml){
-        detail = String(res.detailHtml||'');
-        allowHtmlDetail = true;
-      } else if (res && res.subCode === 'MEMBER_NOT_IN_SERVING_GROUP' && res.detail){
-        detail = formatServingGroupMismatchDetailHtml_(res.detail);
-        allowHtmlDetail = true;
-      } else if (res && res.subCode === 'HOLIDAY_OVERLAP' && res.detail){
-        var holidayLines = parseHolidayDetailLines_(res.detail);
-        if (holidayLines.length){
-          detail = holidayLines.map(function(c){
-            var who = String(c.memberId||'');
-            return escapeHtml(who + '（假期: ' + c.from + ' - ' + c.to + '） / ' + who + ' on holiday from ' + c.from + ' to ' + c.to);
-          }).join('<br/>');
-          allowHtmlDetail = true;
-        } else {
-          detail = '<div class="small">'+escapeHtml(res.detail)+'</div>';
-          allowHtmlDetail = true;
-        }
-      } else if (res && res.detail){
-        detail = '<div class="small">'+escapeHtml(res.detail)+'</div>';
-        allowHtmlDetail = true;
-      }
-      showBox(
-        targetId,
-        'err',
-        withErrorCodeTag_(titles.zh, res),
-        titles.en,
-        detail,
-        allowHtmlDetail
-      );
+      var detailObj = buildErrDetailHtml_(res);
+      showBox(targetId,'err',withErrorCodeTag_(titles.zh, res),titles.en,detailObj.html,detailObj.allow);
     }
 
 
@@ -1016,6 +1037,20 @@
     function roleIsGl(){
       if(!App.actor) return false;
       return String(App.actor.role||'').toUpperCase() === 'GL';
+    }
+
+
+    function actorCanAccessWorshipPlanning_(){
+      var a = App.actor || {};
+      if (a.flags && typeof a.flags.canAccessWorshipPlanning === 'boolean') return !!a.flags.canAccessWorshipPlanning;
+      var groups = (Array.isArray(a.servingGroups) ? a.servingGroups : []).concat(Array.isArray(a.servingGLGroups) ? a.servingGLGroups : []);
+      return groups.some(function(g){ return normalizeServingGroupKey_(g) === 'worship'; });
+    }
+    function actorCanEditWorshipRota_(){
+      var a = App.actor || {};
+      if (a.flags && typeof a.flags.canEditWorshipRota === 'boolean') return !!a.flags.canEditWorshipRota;
+      var gl = Array.isArray(a.servingGLGroups) ? a.servingGLGroups : [];
+      return gl.some(function(g){ return normalizeServingGroupKey_(g) === 'worship'; });
     }
 
     function getTodayYmdUk(){
@@ -2310,7 +2345,7 @@ function eventDateYmdFromKey(ev){
             '<div class="menuGrid">'+
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
-              '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>'+
+              (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
             '</div>'+
             '<div class="divider"></div>'+
             '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
@@ -2346,7 +2381,7 @@ function eventDateYmdFromKey(ev){
             '<button id="goGroupMembersAdmin" class="btnLookup">👥 管理事奉組員 / Manage serving group members</button>'+
             '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
-            '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>'+
+            (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
           '</div>'+
           '<div class="divider"></div>'+
@@ -2388,23 +2423,8 @@ function eventDateYmdFromKey(ev){
       var goWorshipPlan = $('goWorshipPlan');
       if (goWorshipPlan){
         goWorshipPlan.onclick = function(){
-          var msgId = 'menuMsg';
-          showBox(msgId,'warn','載入中…','Loading…');
-          callApi('api_admin_worship_bootstrap', App.token).then(function(res){
-            if(!res || !res.ok){ showErr(msgId, res || {code:'E500', zh:'未能開啟敬拜排期', en:'Unable to open worship planning.'}); return; }
-            var url = window.location.origin + window.location.pathname + '?mode=reg&autoqr=' + encodeURIComponent(String(res.qrPayload||'')) + '&autoview=selfWorship';
-            logAction('OPEN_WORSHIP_PLAN','', 'nav');
-            var win = null;
-            try{ win = window.open('about:blank', '_blank'); }catch(e){ win = null; }
-            if (!win){
-              showBox(msgId,'warn','彈出視窗被封鎖，請允許彈出視窗後再試','Popup blocked. Please allow popups and retry.');
-              return;
-            }
-            try{ win.location.replace(url); }catch(e){ try{ win.location.href = url; }catch(e2){} }
-            showBox(msgId,'ok','已開啟敬拜排期','Worship planning opened');
-          }).catch(function(err){
-            showErr(msgId, err || {code:'E500', zh:'系統錯誤', en:'System error'});
-          });
+          logAction('OPEN_WORSHIP_PLAN','', 'nav');
+          loadAdminWorshipPlan_();
         };
       }
       $('btnLogout').onclick = function(){
@@ -2413,6 +2433,114 @@ function eventDateYmdFromKey(ev){
         App.view='login';
         render();
       };
+    }
+
+    function worshipSongInputId_(eventKey, sec, key){
+      return 'aw_' + String(eventKey||'').replace(/[^A-Za-z0-9_\-]/g,'_') + '_' + String(sec||'').replace(/[^A-Za-z0-9_\-]/g,'_') + '_' + String(key||'').replace(/[^A-Za-z0-9_\-]/g,'_');
+    }
+    function viewWorshipPlan(){
+      var payload = App.worshipPayload || {};
+      var viewer = payload.viewer || {};
+      var perm = payload.permission || {};
+      var events = Array.isArray(payload.events) ? payload.events : [];
+      var months = [];
+      var monthMap = {};
+      events.forEach(function(ev){
+        var m = String(ev.dateYmd||'').slice(0,7);
+        if (!m) m = 'ALL';
+        if (months.indexOf(m) < 0) months.push(m);
+        if (!monthMap[m]) monthMap[m] = [];
+        monthMap[m].push(ev);
+      });
+      months.sort();
+      var selectedMonth = (months.indexOf(App.worshipMonth) >= 0) ? App.worshipMonth : (months[0] || '');
+      App.worshipMonth = selectedMonth;
+      var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth] : events;
+      App.worshipRenderCache = { month:selectedMonth, events:monthEvents };
+
+      function g(songMap, sec, k){ return ((songMap[sec] || {})[k]) || ''; }
+      function songRow(ev, sec, label, songMap){
+        return '<tr><td>'+label+'</td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'songTitle')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="songTitle" value="'+escapeHtml(g(songMap,sec,'songTitle'))+'" /></td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'songKey')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="songKey" value="'+escapeHtml(g(songMap,sec,'songKey'))+'" /></td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'versionNote')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="versionNote" value="'+escapeHtml(g(songMap,sec,'versionNote'))+'" /></td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'linkUrl')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="linkUrl" value="'+escapeHtml(g(songMap,sec,'linkUrl'))+'" /></td></tr>';
+      }
+      var monthOpts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+      var canEditRota = !!perm.canGlRotaEdit;
+      var html = ''+
+        '<div class="card"><div class="topRow"><div class="big">🎵 敬拜排期 / Worship planning</div><button id="btnWorshipPlanBack" class="btnDanger">⬅️ 返回 / Back</button></div>'+
+        '<div class="small">CCF ID: <b>'+escapeHtml(viewer.id||'')+'</b></div>'+
+        '<div class="small">月份 / Month</div><select id="worshipMonthSelect">'+(monthOpts||'<option value="">ALL</option>')+'</select>'+
+        '<div id="worshipPlanMsg"></div></div>';
+      if (!monthEvents.length) return html + '<div class="card"><div class="msgBox warn">此月份沒有敬拜活動 / No worship events in selected month.</div></div>';
+
+      monthEvents.forEach(function(ev){
+        var expanded = !!App.worshipEventExpanded[ev.eventKey];
+        var rota = ev.rota || {};
+        var songs = ev.songs || {};
+        html += '<div class="card"><div style="cursor:pointer" data-toggle-worship="1" data-ev="'+escapeHtml(ev.eventKey)+'"><b>'+(expanded?'▼ ':'▶ ')+escapeHtml(ev.eventKey||'')+'</b></div>'+
+          '<div style="display:'+(expanded?'block':'none')+'">'+
+          '<div class="small">Lead: '+escapeHtml(rota.Worship_Lead||'')+'</div>'+
+          '<div class="small">Singer: '+escapeHtml(rota.Worship_Singer||'')+'</div>'+
+          '<div class="small">Pianist: '+escapeHtml(rota.Worship_Pianist||'')+'</div>'+
+          '<div class="small">Drum: '+escapeHtml(rota.Worship_Drum||'')+'</div>'+
+          '<div class="small">Instrument: '+escapeHtml(rota.Worship_Instrument||'')+'</div>'+
+          (canEditRota ? '<div class="miniBtnRow"><button class="btnWorship" data-quick-rota="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="Worship_Lead">Edit Lead</button><button class="btnWorship" data-quick-rota="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="Worship_Singer">Edit Singer</button></div>' : '')+
+          '<div class="tableWrap"><table><tr><th>Section</th><th>Title</th><th>Key</th><th>Note</th><th>Link</th></tr>'+
+          songRow(ev,'WORSHIP_MAIN_1','Main 1',songs)+songRow(ev,'WORSHIP_MAIN_2','Main 2',songs)+songRow(ev,'WORSHIP_MAIN_3','Main 3',songs)+songRow(ev,'WORSHIP_MAIN_4','Main 4',songs)+songRow(ev,'WORSHIP_RESPONSE_1','Response 1',songs)+songRow(ev,'WORSHIP_RESPONSE_2','Response 2',songs)+
+          '</table></div></div></div>';
+      });
+      return html;
+    }
+
+    function bindWorshipPlan(){
+      if ($('btnWorshipPlanBack')) $('btnWorshipPlanBack').onclick = function(){ App.view='menu'; render(); };
+      if ($('worshipMonthSelect')) $('worshipMonthSelect').onchange = function(){ App.worshipMonth = String(this.value||''); render(); };
+      Array.prototype.slice.call(document.querySelectorAll('[data-toggle-worship]')).forEach(function(el){
+        el.onclick = function(){ var ev=String(el.getAttribute('data-ev')||''); App.worshipEventExpanded[ev] = !App.worshipEventExpanded[ev]; render(); };
+      });
+      Array.prototype.slice.call(document.querySelectorAll('[data-quick-rota]')).forEach(function(btn){
+        btn.onclick = function(){
+          var ev = String(btn.getAttribute('data-ev')||'');
+          var pos = String(btn.getAttribute('data-pos')||'');
+          var v = prompt('新值 / New value');
+          if (v == null) return;
+          callApi('api_admin_worship_rota_gl_save', App.token, ev, [{ position:pos, value:String(v).trim() }], false).then(function(r){
+            if(!r || !r.ok){ showErr('worshipPlanMsg', r); return; }
+            return loadAdminWorshipPlan_();
+          }).catch(function(err){ showErr('worshipPlanMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+        };
+      });
+      var autoTimers = {};
+      function autoSave(ev, sec){
+        function val(k){ var el = $(worshipSongInputId_(ev, sec, k)); return el ? el.value : ''; }
+        return callApi('api_admin_worship_song_save', App.token, { eventKey:ev, songSection:sec, songTitle:val('songTitle'), songKey:val('songKey'), capo:'', versionNote:val('versionNote'), linkUrl:val('linkUrl'), linkTitle:'' }).then(function(r){
+          if(!r || !r.ok){ showErr('worshipPlanMsg', r); return; }
+          showBox('worshipPlanMsg','ok','已自動儲存','Auto-saved');
+        }).catch(function(err){ showErr('worshipPlanMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+      }
+      Array.prototype.slice.call(document.querySelectorAll('[data-auto-song]')).forEach(function(inp){
+        inp.oninput = function(){
+          var ev = String(inp.getAttribute('data-ev')||'');
+          var sec = String(inp.getAttribute('data-sec')||'');
+          var key = ev+'|'+sec;
+          if (autoTimers[key]) clearTimeout(autoTimers[key]);
+          autoTimers[key] = setTimeout(function(){ autoSave(ev, sec); }, 5000);
+        };
+      });
+    }
+
+    function loadAdminWorshipPlan_(){
+      var msgId = (App.view === 'worshipPlan') ? 'worshipPlanMsg' : 'menuMsg';
+      showBox(msgId,'warn','載入中…','Loading…');
+      return Promise.all([
+        callApi('api_admin_worship_page', App.token),
+        callApi('api_admin_worship_members', App.token)
+      ]).then(function(rr){
+        var page = rr[0], members = rr[1];
+        if(!page || !page.ok){ showErr(msgId, page || {code:'E500', zh:'未能載入敬拜排期', en:'Unable to load worship planning.'}); return; }
+        App.worshipPayload = page;
+        App.worshipMembers = (members && members.ok && Array.isArray(members.members)) ? members.members : [];
+        App.view = 'worshipPlan';
+        render();
+      }).catch(function(err){ showErr(msgId, err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
     }
 
     function viewAttendanceHome(){
@@ -4736,6 +4864,7 @@ function eventDateYmdFromKey(ev){
       if(App.view==='memberLookup'){ root.innerHTML = viewMemberLookup(); bindMemberLookup(); attachScrollControls_(root); return; }
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
       if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
+      if(App.view==='worshipPlan'){ root.innerHTML = viewWorshipPlan(); bindWorshipPlan(); attachScrollControls_(root); return; }
     }
 
     /* init */
