@@ -67,7 +67,7 @@
     .btnLookup{background:#fff6e6;border-color:rgba(200,132,0,0.35)}        /* light amber */
     .btnStats{background:#eefbf7;border-color:rgba(26,168,108,0.18)}        /* light mint */
     .btnPeriod{background:#f3f0ff;border-color:rgba(110,80,200,0.18)}       /* light purple */
-    .btnWorship{background:#ffe8ee;border-color:rgba(217,60,94,0.30)}      /* light red */
+    .btnWorship{background:#ffe3e8 !important;border-color:rgba(217,60,94,0.35) !important;color:#8a1230 !important}      /* light red */
     .btnBack{background:#eef4ff;border-color:rgba(40,90,200,0.18)}          /* blue-ish */
     .btnDanger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}        /* red-ish */
     .btnNa{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
@@ -2392,9 +2392,15 @@ function eventDateYmdFromKey(ev){
           showBox(msgId,'warn','載入中…','Loading…');
           callApi('api_admin_worship_bootstrap', App.token).then(function(res){
             if(!res || !res.ok){ showErr(msgId, res || {code:'E500', zh:'未能開啟敬拜排期', en:'Unable to open worship planning.'}); return; }
-            var url = '?mode=reg&autoqr=' + encodeURIComponent(String(res.qrPayload||'')) + '&autoview=selfWorship';
+            var url = window.location.origin + window.location.pathname + '?mode=reg&autoqr=' + encodeURIComponent(String(res.qrPayload||'')) + '&autoview=selfWorship';
             logAction('OPEN_WORSHIP_PLAN','', 'nav');
-            window.open(url, '_blank', 'noopener');
+            var win = null;
+            try{ win = window.open('about:blank', '_blank'); }catch(e){ win = null; }
+            if (!win){
+              showBox(msgId,'warn','彈出視窗被封鎖，請允許彈出視窗後再試','Popup blocked. Please allow popups and retry.');
+              return;
+            }
+            try{ win.location.replace(url); }catch(e){ try{ win.location.href = url; }catch(e2){} }
             showBox(msgId,'ok','已開啟敬拜排期','Worship planning opened');
           }).catch(function(err){
             showErr(msgId, err || {code:'E500', zh:'系統錯誤', en:'System error'});
