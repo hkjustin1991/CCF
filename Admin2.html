@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-07.admin107
-  For Admin.gs: v2026-03-07.admin107
+  UI VERSION TAG: admin2-ui-2026-03-10.admin108
+  For Admin.gs: v2026-03-10.admin108
   PR REFRESH: admin107 follow-up submission
   ============================================================
   -->
@@ -67,6 +67,7 @@
     .btnLookup{background:#fff6e6;border-color:rgba(200,132,0,0.35)}        /* light amber */
     .btnStats{background:#eefbf7;border-color:rgba(26,168,108,0.18)}        /* light mint */
     .btnPeriod{background:#f3f0ff;border-color:rgba(110,80,200,0.18)}       /* light purple */
+    .btnWorship{background:#ffe3e8 !important;border-color:rgba(217,60,94,0.35) !important;color:#8a1230 !important}      /* light red */
     .btnBack{background:#eef4ff;border-color:rgba(40,90,200,0.18)}          /* blue-ish */
     .btnDanger{background:#ffeef2;border-color:rgba(217,60,94,0.25)}        /* red-ish */
     .btnNa{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
@@ -1716,7 +1717,7 @@ function eventDateYmdFromKey(ev){
     function formatCcfidLine_(memberId){
       var id = String(memberId||'').trim().toUpperCase();
       var m = id.match(/^CCF(\d{4})$/);
-      return m ? ('CCF ID ' + m[1]) : (id || 'CCF ID —');
+      return m ? ('CCF' + m[1]) : (id || 'CCF----');
     }
     function servingPersonLines_(m){
       var o = m || {};
@@ -2309,9 +2310,11 @@ function eventDateYmdFromKey(ev){
             '<div class="menuGrid">'+
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
+              '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>'+
             '</div>'+
             '<div class="divider"></div>'+
             '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+            '<div id="menuMsg"></div>'+
           '</div>';
       }
 
@@ -2343,10 +2346,12 @@ function eventDateYmdFromKey(ev){
             '<button id="goGroupMembersAdmin" class="btnLookup">👥 管理事奉組員 / Manage serving group members</button>'+
             '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
+            '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>'+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
           '</div>'+
           '<div class="divider"></div>'+
           '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
+          '<div id="menuMsg"></div>'+
         '</div>';
     }
 
@@ -2378,6 +2383,29 @@ function eventDateYmdFromKey(ev){
       var goAttendance = $('goAttendance');
       if (goAttendance){
         goAttendance.onclick = function(){ logAction('OPEN_ATT_HOME','', 'nav'); App.view='attendanceHome'; render(); };
+      }
+
+      var goWorshipPlan = $('goWorshipPlan');
+      if (goWorshipPlan){
+        goWorshipPlan.onclick = function(){
+          var msgId = 'menuMsg';
+          showBox(msgId,'warn','載入中…','Loading…');
+          callApi('api_admin_worship_bootstrap', App.token).then(function(res){
+            if(!res || !res.ok){ showErr(msgId, res || {code:'E500', zh:'未能開啟敬拜排期', en:'Unable to open worship planning.'}); return; }
+            var url = window.location.origin + window.location.pathname + '?mode=reg&autoqr=' + encodeURIComponent(String(res.qrPayload||'')) + '&autoview=selfWorship';
+            logAction('OPEN_WORSHIP_PLAN','', 'nav');
+            var win = null;
+            try{ win = window.open('about:blank', '_blank'); }catch(e){ win = null; }
+            if (!win){
+              showBox(msgId,'warn','彈出視窗被封鎖，請允許彈出視窗後再試','Popup blocked. Please allow popups and retry.');
+              return;
+            }
+            try{ win.location.replace(url); }catch(e){ try{ win.location.href = url; }catch(e2){} }
+            showBox(msgId,'ok','已開啟敬拜排期','Worship planning opened');
+          }).catch(function(err){
+            showErr(msgId, err || {code:'E500', zh:'系統錯誤', en:'System error'});
+          });
+        };
       }
       $('btnLogout').onclick = function(){
         logAction('LOGOUT','', 'nav');
@@ -3099,8 +3127,8 @@ function eventDateYmdFromKey(ev){
                   var titleZh = titlePair.zh;
                   var titleEn = titlePair.en;
                   if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
-                    titleZh = '同一會員重覆崗位';
-                    titleEn = 'They are already serving this position.';
+                    titleZh = '同一會員於同日重覆崗位';
+                    titleEn = 'The same member is assigned to multiple positions on the same day.';
                   } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
                     titleZh = '事奉安排與離開期重疊';
                     titleEn = 'Serving assignment overlaps holiday period.';
@@ -3121,8 +3149,8 @@ function eventDateYmdFromKey(ev){
                     detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                   }
                   if (res2.duplicates && res2.duplicates.length){
-                    titleZh = '同一會員重覆崗位';
-                    titleEn = 'They are already serving this position.';
+                    titleZh = '同一會員於同日重覆崗位';
+                    titleEn = 'The same member is assigned to multiple positions on the same day.';
                     detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
                       var posLabelsZh = (d.positions||[]).map(function(p){
                         var label = SERVING_POSITION_LABELS[p] || {};
@@ -3252,8 +3280,8 @@ function eventDateYmdFromKey(ev){
                 var titleZh = titlePair.zh;
                 var titleEn = titlePair.en;
                 if (res2.subCode === 'DUPLICATE_ASSIGNMENT'){
-                  titleZh = '同一會員重覆崗位';
-                  titleEn = 'They are already serving this position.';
+                  titleZh = '同一會員於同日重覆崗位';
+                  titleEn = 'The same member is assigned to multiple positions on the same day.';
                 } else if (res2.subCode === 'HOLIDAY_OVERLAP'){
                   titleZh = '事奉安排與離開期重疊';
                   titleEn = 'Serving assignment overlaps holiday period.';
@@ -3274,8 +3302,8 @@ function eventDateYmdFromKey(ev){
                   detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                 }
                 if (res2.duplicates && res2.duplicates.length){
-                  titleZh = '同一會員重覆崗位';
-                  titleEn = 'They are already serving this position.';
+                  titleZh = '同一會員於同日重覆崗位';
+                  titleEn = 'The same member is assigned to multiple positions on the same day.';
                   detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
                     var posLabelsZh = (d.positions||[]).map(function(p){
                       var label = SERVING_POSITION_LABELS[p] || {};
