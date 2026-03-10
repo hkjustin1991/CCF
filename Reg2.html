@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-09.reg106
+  UI VERSION TAG: reg2-ui-2026-03-09.reg107
   ============================================================
 
   Changes (reg2-ui2):
@@ -184,7 +184,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg106</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-09.reg107</span></div>
     </header>
 
     <main id="app"></main>
@@ -1400,7 +1400,7 @@
           rotaLine('樂器 / Instrument', 'Worship_Instrument')
         ].join('');
         if (!rotaHtml) rotaHtml = '<div class="small">全部崗位已關閉 / All positions are closed.</div>';
-        html += '<div class="card"><div class="worshipCardHead"><div><b>'+escapeHtml(eventLabel)+'</b><div class="small">'+escapeHtml(String(ev.eventKey||''))+'</div></div><button class="alt worshipToggleBtn" data-toggle-event="1" data-ev="'+escapeHtml(ev.eventKey)+'">'+(expanded?'收合 / Collapse':'展開 / Expand')+'</button></div>'+
+        html += '<div class="card"><div class="worshipCardHead" data-toggle-event="1" data-ev="'+escapeHtml(ev.eventKey)+'" style="cursor:pointer"><div><b>'+(expanded?'▼ ':'▶ ')+escapeHtml(eventLabel)+'</b><div class="small">'+escapeHtml(String(ev.eventKey||''))+'</div></div></div>'+
           '<div style="display:'+(expanded?'block':'none')+'">'+
           '<div class="rotaStack">'+rotaHtml+'</div>'+
           '<div class="worshipTableWrap"><table class="worshipTable worshipCols" style="width:100%;border-collapse:collapse;"><colgroup><col class="colSection"/><col/><col class="colKey"/><col/><col class="colLink"/><col class="colAction"/></colgroup><tr><th>段落 / Section</th><th>歌名 / Title</th><th>Key</th><th>Note</th><th>連結 / Link</th><th>更新 / Updated</th></tr>'+
@@ -2163,14 +2163,19 @@
         }
         return up;
       }
-      function worshipDupDetailHtml_(res, nowPos){
+      function worshipDupDetailHtml_(res, nowPos, eventKey){
         var dups = Array.isArray((res||{}).duplicates) ? res.duplicates : [];
         if (!dups.length) return (res&&res.detail)?('<div class="small">'+escapeHtml(String(res.detail||''))+'</div>'):'';
         return dups.map(function(d){
           var who = worshipMemberLabel_(d.memberId||'');
-          var current = (d.positions||[]).map(worshipPosLabel_).join('、');
           var now = worshipPosLabel_(nowPos||'');
-          return '<div class="small">'+escapeHtml('成員: '+who+'｜現有崗位: '+current+'｜本次變更: '+now+' / Member: '+who+' | Current: '+current+' | Now: '+now)+'</div>';
+          var current = (d.positions||[]).filter(function(p){ return String(p||'') !== String(nowPos||''); }).map(worshipPosLabel_).join('、');
+          var evk = String(eventKey || res.eventKey || '').trim();
+          return ''+
+            '<div class="small">'+escapeHtml('成員: '+who)+'</div>'+
+            '<div class="small">'+escapeHtml('現有崗位/Already - '+(current||'—'))+'</div>'+
+            '<div class="small">'+escapeHtml('重覆崗位/Duplicate - '+now)+'</div>'+
+            '<div class="small">'+escapeHtml('EventKey - '+(evk||'—'))+'</div>';
         }).join('');
       }
 
@@ -2288,7 +2293,7 @@
             closeModal(modal);
             var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','儲存中…','Saving...');
             callApi('api_reg_self_worship_rota_gl_save_public', State.authQrPayload, ev, [{ position:pos, value:v }], false).then(function(r){
-              if(!r || !r.ok){ if (msgEl){ if (r && r.code==='E409' && r.subCode==='DUPLICATE_ASSIGNMENT'){ msgEl.innerHTML = showBox('warn','同一會員重覆崗位','Duplicate serving assignment', worshipDupDetailHtml_(r, pos)); } else { msgEl.innerHTML = showServerErr(r); } } return; }
+              if(!r || !r.ok){ if (msgEl){ if (r && r.code==='E409' && r.subCode==='DUPLICATE_ASSIGNMENT'){ msgEl.innerHTML = showBox('warn','同一會員重覆崗位','Duplicate serving assignment', worshipDupDetailHtml_(r, pos, ev)); } else { msgEl.innerHTML = showServerErr(r); } } return; }
               if (msgEl) msgEl.innerHTML = showBox('ok','已更新排更','Rota updated');
               return callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){ if(res&&res.ok){ State.lastResult=res; render(); } });
             }).catch(function(err){ showWorshipErr_('更新失敗','Update failed', err); });
@@ -2360,7 +2365,11 @@
           function secRow_(label, sec, song){
             song = song || {};
             var rowColor = sec.indexOf('RESPONSE') >= 0 ? '#f4fffa' : '#fff5f7';
-            return '<tr style="background:'+rowColor+'"><td>'+escapeHtml(label)+'</td><td>'+escapeHtml(String(song.songTitle||''))+'</td><td>'+escapeHtml(String(song.songKey||''))+'</td><td>'+escapeHtml(String(song.versionNote||''))+'</td><td>'+escapeHtml(String(song.linkUrl||''))+'</td></tr>';
+            return '<tr style="background:'+rowColor+'"><td>'+escapeHtml(label)+'</td><td>'+escapeHtml(String(song.songTitle||''))+'</td><td>'+escapeHtml(String(song.songKey||''))+'</td><td>'+escapeHtml(String(song.versionNote||''))+'</td></tr>';
+          }
+          function cleanRotaName_(v){
+            var x = String(v||'').replace(/CCF\d{4}/ig,'').replace(/[()]/g,' ').replace(/\s+/g,' ').replace(/^\s*[,:-]?\s*/,'').trim();
+            return x || 'Vacant';
           }
           var content = events.map(function(ev){
             ev = ev || {};
@@ -2373,13 +2382,13 @@
               ['鼓手 / Drum', rota.Worship_Drum],
               ['樂器 / Instrument', rota.Worship_Instrument]
             ].filter(function(x){ return !/^closed$/i.test(String(x[1]||'')); })
-             .map(function(x){ return '<span style="display:inline-block;background:#e9f2ff;border:1px solid #cad9ff;border-radius:999px;padding:4px 10px;margin:2px 6px 2px 0">'+escapeHtml(x[0])+': '+escapeHtml(String(x[1]||'Vacant'))+'</span>'; })
+             .map(function(x){ return '<span style="display:inline-block;background:#e9f2ff;border:1px solid #cad9ff;border-radius:999px;padding:4px 10px;margin:2px 6px 2px 0">'+escapeHtml(x[0])+': '+escapeHtml(cleanRotaName_(x[1]))+'</span>'; })
              .join('');
             if (!rotaLine) rotaLine = '<span style="color:#777">全部崗位已關閉 / All positions are closed.</span>';
             return '<section style="margin:14px 0;padding:12px;border:1px solid #d3d8ea;border-radius:10px;background:#fcfdff">'+
               '<h3 style="margin:0;color:#163b7a">'+escapeHtml(String(ev.eventKey||''))+'</h3>'+
               '<div style="margin-top:8px">'+rotaLine+'</div>'+
-              '<table style="width:100%;border-collapse:collapse;margin-top:8px"><thead><tr><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">段落 / Section</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">歌名 / Title</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">Key</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">Note</th><th style="border:1px solid #d3d8ea;padding:8px;background:#f0f5ff;color:#163b7a">連結 / Link</th></tr></thead><tbody>'+
+              '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px"><thead><tr><th style="border:1px solid #d3d8ea;padding:7px;background:#f0f5ff;color:#163b7a">段落 / Section</th><th style="border:1px solid #d3d8ea;padding:7px;background:#f0f5ff;color:#163b7a">歌名 / Title</th><th style="border:1px solid #d3d8ea;padding:7px;background:#f0f5ff;color:#163b7a">Key</th><th style="border:1px solid #d3d8ea;padding:7px;background:#f0f5ff;color:#163b7a">Note</th></tr></thead><tbody>'+
                 secRow_('敬拜 / Main 1','WORSHIP_MAIN_1',songs.WORSHIP_MAIN_1)+
                 secRow_('敬拜 / Main 2','WORSHIP_MAIN_2',songs.WORSHIP_MAIN_2)+
                 secRow_('敬拜 / Main 3','WORSHIP_MAIN_3',songs.WORSHIP_MAIN_3)+
@@ -2392,7 +2401,7 @@
 
           var win = window.open('', '_blank');
           if (!win) throw new Error('Popup blocked');
-          win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Worship '+escapeHtml(month)+'</title></head><body style="font-family:Arial,sans-serif;padding:16px;color:#1a2a44"><h2 style="margin:0 0 8px 0">Worship Plan / 敬拜排期 · '+escapeHtml(month)+'</h2>'+content+'</body></html>');
+          win.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Worship '+escapeHtml(month)+'</title></head><body style="font-family:Arial,sans-serif;padding:16px;color:#1a2a44"><h2 style="margin:0 0 6px 0">Worship Plan / 敬拜排期 · '+escapeHtml(month)+'</h2><div style="font-size:12px;color:#555;margin-bottom:10px">Uncontrolled when printed. Please refer to portal for latest version.</div>'+content+'</body></html>');
           win.document.close();
           win.focus();
           setTimeout(function(){ try{ win.print(); }catch(e){} }, 250);
