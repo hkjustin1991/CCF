@@ -150,7 +150,8 @@
     .worshipCols .colKey{width:90px}
     .worshipCols .colLink{width:110px}
     .worshipCols .colAction{width:120px}
-    .autosaveHint{font-size:12px;color:var(--muted)}
+    .autosaveHint{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .autosaveStatusBtn{width:auto;min-height:auto;padding:4px 8px;border-radius:10px;font-size:12px;line-height:1;}
     .worshipMonthSelect{font-size:18px;font-weight:900;min-height:52px}
     .selfMainBtn{min-height:52px;font-size:15px}
     .selfMainGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
@@ -1370,7 +1371,7 @@
       var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''));
       var memberOptions = members.map(function(m){ return '<option value="'+escapeHtml(memberOption_(m))+'"></option>'; }).join('');
 
-      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存已啟用 / Auto-save enabled</div></div><div><button id="btnWorshipImportMenu" class="btnWorship worshipExportBtn">📥 匯入 / Import</button><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
+      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存（5秒延遲） / Auto-save (5s delay) <button id="btnWorshipAutoSaveNow" class="alt autosaveStatusBtn" type="button" title="立即儲存目前編輯段落 / Save current edited section now">💾❌</button></div></div><div><button id="btnWorshipImportMenu" class="btnWorship worshipExportBtn">📥 匯入 / Import</button><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
         '<datalist id="worshipMemberOptions">'+memberOptions+'</datalist>'+
         '<div class="hide"><button id="btnWorshipExportXlsx" class="btnWorship">x</button><button id="btnWorshipExportPdf" class="btnWorship">x</button></div>'+
         '<div class="label" style="margin-top:10px;">月份 / Month</div>'+
@@ -2386,26 +2387,47 @@
 
 
       var autoTimers = {};
+      var lastEditedAutoKey = '';
+      function setAutoSaveIcon_(state){
+        var btn = $('btnWorshipAutoSaveNow');
+        if (!btn) return;
+        if (state === 'saving'){ btn.textContent = '💾…'; btn.title = '自動儲存中 / Auto-saving'; return; }
+        if (state === 'saved'){ btn.textContent = '💾✅'; btn.title = '已儲存 / Saved'; return; }
+        btn.textContent = '💾❌';
+        btn.title = '有未儲存變更，可按此立即儲存 / Unsaved changes, click to save now';
+      }
       function autoSaveSection_(ev, sec){
         function val(k){ var el = $(worshipSongInputId_(ev, sec, k)); return el ? el.value : ''; }
         var msgEl = worshipMsgEl_(); if (msgEl) msgEl.innerHTML = showBox('warn','自動儲存中…','Auto-saving...');
+        setAutoSaveIcon_('saving');
         return callApi('api_reg_self_worship_song_save_public', State.authQrPayload, {
           eventKey:ev, songSection:sec, songTitle:val('songTitle'), songKey:val('songKey'), capo:'', versionNote:val('versionNote'), linkUrl:val('linkUrl'), linkTitle:''
         }).then(function(r){
-          if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); return; }
+          if(!r || !r.ok){ if (msgEl) msgEl.innerHTML = showServerErr(r); setAutoSaveIcon_('dirty'); return; }
           if (r.saved && r.saved.songTitle && $(worshipSongInputId_(ev, sec, 'songTitle'))) $(worshipSongInputId_(ev, sec, 'songTitle')).value = r.saved.songTitle;
           if (msgEl) msgEl.innerHTML = showBox('ok','已自動儲存','Auto-saved');
-        }).catch(function(err){ showWorshipErr_('自動儲存失敗','Auto-save failed', err); });
+          setAutoSaveIcon_('saved');
+        }).catch(function(err){ setAutoSaveIcon_('dirty'); showWorshipErr_('自動儲存失敗','Auto-save failed', err); });
       }
       Array.prototype.slice.call(document.querySelectorAll('[data-auto-song]')).forEach(function(inp){
         inp.oninput = function(){
           var ev = String(inp.getAttribute('data-ev')||'');
           var sec = String(inp.getAttribute('data-sec')||'');
           var key = ev + '|' + sec;
+          lastEditedAutoKey = key;
+          setAutoSaveIcon_('dirty');
           if (autoTimers[key]) clearTimeout(autoTimers[key]);
-          autoTimers[key] = setTimeout(function(){ autoSaveSection_(ev, sec); }, 500);
+          autoTimers[key] = setTimeout(function(){ autoSaveSection_(ev, sec); }, 5000);
         };
       });
+      var autoSaveBtn = $('btnWorshipAutoSaveNow');
+      if (autoSaveBtn) autoSaveBtn.onclick = function(){
+        if (!lastEditedAutoKey) return;
+        var p = lastEditedAutoKey.split('|');
+        var key = p[0] + '|' + p[1];
+        if (autoTimers[key]) clearTimeout(autoTimers[key]);
+        autoSaveSection_(p[0], p[1]);
+      };
 
       // import handled in modal
 
