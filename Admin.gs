@@ -442,6 +442,41 @@ function api_admin_sermon_save(token, payload){
   return { ok:true, row: row };
 }
 
+
+function api_admin_sermon_speaker_suggest(token, speakerName){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
+    return admin_err_('E403','沒有權限','No permission');
+  }
+
+  const q = String(speakerName || '').trim();
+  if (!q) return { ok:true, query:'', matches:[] };
+  const qLower = q.toLowerCase();
+  const mi = admin_getMembersIndex_();
+  const all = Array.isArray(mi && mi.all) ? mi.all : [];
+
+  const matches = all.filter(function(m){
+    const id = String(m.id || '').trim().toUpperCase();
+    if (!/^CCF\d{4}$/.test(id)) return false;
+    const names = [m.nameZh, m.nameEn, m.preferredName].map(function(v){ return String(v || '').trim(); }).filter(Boolean);
+    return names.some(function(n){
+      const lower = n.toLowerCase();
+      return lower === qLower || lower.indexOf(qLower) >= 0;
+    });
+  }).slice(0, 5).map(function(m){
+    return {
+      ccfId: String(m.id || '').trim().toUpperCase(),
+      nameZh: String(m.nameZh || '').trim(),
+      nameEn: String(m.nameEn || '').trim(),
+      preferredName: String(m.preferredName || '').trim()
+    };
+  });
+
+  return { ok:true, query:q, matches:matches };
+}
+
 /**
  * Serving planning: upcoming Sunday event keys.
  */
