@@ -412,6 +412,7 @@ function api_admin_sermon_save(token, payload){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
   const dateYmd = m[1];
+  const speakerCcfId = String(p.speakerCcfId || '').trim().toUpperCase();
   const speaker = String(p.speaker || '').trim();
   const title = String(p.title || '').trim();
   const sermonPassage = String(p.sermonPassage || '').trim();
@@ -421,19 +422,20 @@ function api_admin_sermon_save(token, payload){
   const colMap = admin_getSermonColMap_(sh);
   let rowNumber = admin_findSermonRowByEventKey_(sh, eventKey);
   if (!rowNumber){
-    sh.appendRow([eventKey, dateYmd, '', '', '', '', '', '', '']);
+    sh.appendRow([eventKey, dateYmd, '', '', '', '', '', '', '', '']);
     rowNumber = sh.getLastRow();
   }
 
   sh.getRange(rowNumber, colMap['EventKey'] || 1).setValue(eventKey);
   sh.getRange(rowNumber, colMap['DateYmd'] || 2).setValue(dateYmd);
-  sh.getRange(rowNumber, colMap['講員'] || 3).setValue(speaker);
-  sh.getRange(rowNumber, colMap['講題'] || 4).setValue(title);
-  sh.getRange(rowNumber, colMap['講道經文'] || 5).setValue(sermonPassage);
-  sh.getRange(rowNumber, colMap['回應經文'] || 6).setValue(responsePassage);
-  sh.getRange(rowNumber, colMap['UpdatedAt'] || 7).setValue(admin_nowIso_());
-  sh.getRange(rowNumber, colMap['UpdatedBy'] || 8).setValue(String(s.actor.id || ''));
-  sh.getRange(rowNumber, colMap['UpdatedRole'] || 9).setValue(String(s.actor.role || ''));
+  sh.getRange(rowNumber, colMap['講員CCFID'] || 3).setValue(speakerCcfId);
+  sh.getRange(rowNumber, colMap['講員'] || 4).setValue(speaker);
+  sh.getRange(rowNumber, colMap['講題'] || 5).setValue(title);
+  sh.getRange(rowNumber, colMap['講道經文'] || 6).setValue(sermonPassage);
+  sh.getRange(rowNumber, colMap['回應經文'] || 7).setValue(responsePassage);
+  sh.getRange(rowNumber, colMap['UpdatedAt'] || 8).setValue(admin_nowIso_());
+  sh.getRange(rowNumber, colMap['UpdatedBy'] || 9).setValue(String(s.actor.id || ''));
+  sh.getRange(rowNumber, colMap['UpdatedRole'] || 10).setValue(String(s.actor.role || ''));
 
   const row = admin_getSermonRecordByEventKey_(eventKey);
   admin_audit_(s.actor, 'SERMON_SAVE', JSON.stringify({ eventKey: eventKey, actorId: String(s.actor.id || '') }), 'sermon_info');
@@ -1217,6 +1219,7 @@ function api_admin_event_detail(token, eventKey){
     lists:{ newMembers: newMembers, existingMembers: existingMembers },
     extras:{
       sermon:{
+        speakerCcfId: String(sermon.speakerCcfId || '').trim(),
         speaker: String(sermon.speaker || '').trim(),
         title: String(sermon.title || '').trim(),
         sermonPassage: String(sermon.sermonPassage || '').trim(),
@@ -1871,7 +1874,7 @@ function admin_getSermonSheet_(){
 function admin_ensureSermonSheet_(){
   const ss = admin_openSs_();
   let sh = ss.getSheetByName(ADMIN_SERMON_SHEET_NAME);
-  const headers = ['EventKey','DateYmd','講員','講題','講道經文','回應經文','UpdatedAt','UpdatedBy','UpdatedRole'];
+  const headers = ['EventKey','DateYmd','講員CCFID','講員','講題','講道經文','回應經文','UpdatedAt','UpdatedBy','UpdatedRole'];
   if (!sh){
     sh = ss.insertSheet(ADMIN_SERMON_SHEET_NAME);
   }
@@ -1888,7 +1891,7 @@ function admin_ensureSermonSheet_(){
   return sh;
 }
 function admin_getSermonColMap_(sh){
-  const lastCol = Math.max(sh.getLastColumn(), 9);
+  const lastCol = Math.max(sh.getLastColumn(), 10);
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
   const map = {};
   headers.forEach(function(h, idx){ if (h) map[h] = idx + 1; });
@@ -1945,10 +1948,10 @@ function admin_ensureSermonRowsForMonth_(sh, ym){
   const toAppend = [];
   events.forEach(function(ev){
     if (existing[ev.eventKey]) return;
-    toAppend.push([ev.eventKey, ev.dateYmd, '', '', '', '', '', '', '']);
+    toAppend.push([ev.eventKey, ev.dateYmd, '', '', '', '', '', '', '', '']);
   });
   if (toAppend.length){
-    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 9).setValues(toAppend);
+    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 10).setValues(toAppend);
   }
   return events;
 }
@@ -1958,6 +1961,7 @@ function admin_sermonBlankFromEventKey_(eventKey){
   return {
     eventKey: ev,
     dateYmd: m ? m[1] : '',
+    speakerCcfId: '',
     speaker: '',
     title: '',
     sermonPassage: '',
@@ -1974,17 +1978,18 @@ function admin_getSermonRecordByEventKey_(eventKey){
   const rowNumber = admin_findSermonRowByEventKey_(sh, blank.eventKey);
   if (!rowNumber) return blank;
   const colMap = admin_getSermonColMap_(sh);
-  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 9)).getValues()[0];
+  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 10)).getValues()[0];
   return {
     eventKey: String(row[(colMap['EventKey'] || 1) - 1] || '').trim() || blank.eventKey,
     dateYmd: String(row[(colMap['DateYmd'] || 2) - 1] || '').trim() || blank.dateYmd,
-    speaker: String(row[(colMap['講員'] || 3) - 1] || '').trim(),
-    title: String(row[(colMap['講題'] || 4) - 1] || '').trim(),
-    sermonPassage: String(row[(colMap['講道經文'] || 5) - 1] || '').trim(),
-    responsePassage: String(row[(colMap['回應經文'] || 6) - 1] || '').trim(),
-    updatedAt: String(row[(colMap['UpdatedAt'] || 7) - 1] || '').trim(),
-    updatedBy: String(row[(colMap['UpdatedBy'] || 8) - 1] || '').trim(),
-    updatedRole: String(row[(colMap['UpdatedRole'] || 9) - 1] || '').trim()
+    speakerCcfId: String(row[(colMap['講員CCFID'] || 3) - 1] || '').trim(),
+    speaker: String(row[(colMap['講員'] || 4) - 1] || '').trim(),
+    title: String(row[(colMap['講題'] || 5) - 1] || '').trim(),
+    sermonPassage: String(row[(colMap['講道經文'] || 6) - 1] || '').trim(),
+    responsePassage: String(row[(colMap['回應經文'] || 7) - 1] || '').trim(),
+    updatedAt: String(row[(colMap['UpdatedAt'] || 8) - 1] || '').trim(),
+    updatedBy: String(row[(colMap['UpdatedBy'] || 9) - 1] || '').trim(),
+    updatedRole: String(row[(colMap['UpdatedRole'] || 10) - 1] || '').trim()
   };
 }
 function admin_getSermonMapByEventKeys_(eventKeys){
@@ -1997,20 +2002,21 @@ function admin_getSermonMapByEventKeys_(eventKeys){
   const wanted = {};
   keys.forEach(function(ev){ wanted[ev] = true; });
   const colMap = admin_getSermonColMap_(sh);
-  const rows = sh.getRange(2,1,sh.getLastRow()-1,Math.max(sh.getLastColumn(),9)).getValues();
+  const rows = sh.getRange(2,1,sh.getLastRow()-1,Math.max(sh.getLastColumn(),10)).getValues();
   rows.forEach(function(row){
     const ev = String(row[(colMap['EventKey'] || 1) - 1] || '').trim();
     if (!wanted[ev]) return;
     out[ev] = {
       eventKey: ev,
       dateYmd: String(row[(colMap['DateYmd'] || 2) - 1] || '').trim() || ((ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/)||[])[1] || ''),
-      speaker: String(row[(colMap['講員'] || 3) - 1] || '').trim(),
-      title: String(row[(colMap['講題'] || 4) - 1] || '').trim(),
-      sermonPassage: String(row[(colMap['講道經文'] || 5) - 1] || '').trim(),
-      responsePassage: String(row[(colMap['回應經文'] || 6) - 1] || '').trim(),
-      updatedAt: String(row[(colMap['UpdatedAt'] || 7) - 1] || '').trim(),
-      updatedBy: String(row[(colMap['UpdatedBy'] || 8) - 1] || '').trim(),
-      updatedRole: String(row[(colMap['UpdatedRole'] || 9) - 1] || '').trim()
+      speakerCcfId: String(row[(colMap['講員CCFID'] || 3) - 1] || '').trim(),
+      speaker: String(row[(colMap['講員'] || 4) - 1] || '').trim(),
+      title: String(row[(colMap['講題'] || 5) - 1] || '').trim(),
+      sermonPassage: String(row[(colMap['講道經文'] || 6) - 1] || '').trim(),
+      responsePassage: String(row[(colMap['回應經文'] || 7) - 1] || '').trim(),
+      updatedAt: String(row[(colMap['UpdatedAt'] || 8) - 1] || '').trim(),
+      updatedBy: String(row[(colMap['UpdatedBy'] || 9) - 1] || '').trim(),
+      updatedRole: String(row[(colMap['UpdatedRole'] || 10) - 1] || '').trim()
     };
   });
   return out;

@@ -1134,13 +1134,13 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
 
 function reg_getSermonByEventKey_(eventKey){
   const ev = String(eventKey || '').trim();
-  const out = { speaker:'', title:'', sermonPassage:'', responsePassage:'' };
+  const out = { speakerCcfId:'', speaker:'', title:'', sermonPassage:'', responsePassage:'' };
   if (!/^SundayService_\d{4}-\d{2}-\d{2}$/.test(ev)) return out;
   try{
     const ss = SpreadsheetApp.openById((typeof SPREADSHEET_ID !== 'undefined') ? SPREADSHEET_ID : ADMIN_SPREADSHEET_ID);
     const sh = ss.getSheetByName(REG_SERMON_SHEET);
     if (!sh || sh.getLastRow() < 2) return out;
-    const lastCol = Math.max(sh.getLastColumn(), 9);
+    const lastCol = Math.max(sh.getLastColumn(), 10);
     const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
     const map = {};
     headers.forEach(function(h, i){ if (h) map[h] = i; });
@@ -1149,10 +1149,11 @@ function reg_getSermonByEventKey_(eventKey){
       const row = rows[i];
       const k = String(row[map['EventKey'] != null ? map['EventKey'] : 0] || '').trim();
       if (k !== ev) continue;
-      out.speaker = String(row[map['講員'] != null ? map['講員'] : 2] || '').trim();
-      out.title = String(row[map['講題'] != null ? map['講題'] : 3] || '').trim();
-      out.sermonPassage = String(row[map['講道經文'] != null ? map['講道經文'] : 4] || '').trim();
-      out.responsePassage = String(row[map['回應經文'] != null ? map['回應經文'] : 5] || '').trim();
+      out.speakerCcfId = String(row[map['講員CCFID'] != null ? map['講員CCFID'] : 2] || '').trim();
+      out.speaker = String(row[map['講員'] != null ? map['講員'] : 3] || '').trim();
+      out.title = String(row[map['講題'] != null ? map['講題'] : 4] || '').trim();
+      out.sermonPassage = String(row[map['講道經文'] != null ? map['講道經文'] : 5] || '').trim();
+      out.responsePassage = String(row[map['回應經文'] != null ? map['回應經文'] : 6] || '').trim();
       return out;
     }
   }catch(e){}
