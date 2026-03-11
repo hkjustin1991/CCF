@@ -2381,6 +2381,7 @@ function eventDateYmdFromKey(ev){
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
               (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
+              '<button id="goSermonInfo" class="btnPeriod">📖 Set Sermon info / 設定講道資料</button>'+
             '</div>'+
             '<div class="divider"></div>'+
             '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
@@ -2600,11 +2601,10 @@ function eventDateYmdFromKey(ev){
         var ev = String(r.eventKey||'').trim();
         return '<tr>'+
           '<td>'+escapeHtml(String(r.dateYmd||''))+'</td>'+
-          '<td>'+escapeHtml(ev)+'</td>'+
-          '<td><input class="inputMini" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="speaker" value="'+escapeHtml(String(r.speaker||''))+'" /></td>'+
-          '<td><input class="inputMini" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="title" value="'+escapeHtml(String(r.title||''))+'" /></td>'+
-          '<td><input class="inputMini" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonPassage" value="'+escapeHtml(String(r.sermonPassage||''))+'" /></td>'+
-          '<td><input class="inputMini" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="responsePassage" value="'+escapeHtml(String(r.responsePassage||''))+'" /></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="speaker">'+escapeHtml(String(r.speaker||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="title">'+escapeHtml(String(r.title||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonPassage">'+escapeHtml(String(r.sermonPassage||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="responsePassage">'+escapeHtml(String(r.responsePassage||''))+'</textarea></td>'+
         '</tr>';
       }).join('');
       return ''+
@@ -2617,8 +2617,8 @@ function eventDateYmdFromKey(ev){
           '<div id="sermonInfoMsg" class="small" style="margin-top:8px;"></div>'+
         '</div>'+
         '<div class="card">'+
-          '<div class="tableWrap"><table><thead><tr><th>日期 / Date</th><th>EventKey</th><th>講員 / Speaker</th><th>講題 / Title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
-          (tableRows || '<tr><td colspan="6" class="muted">No rows</td></tr>')+
+          '<div class="tableWrap"><table><thead><tr><th>日期 / Date (YYYY-MM-DD)</th><th>講員 / Speaker</th><th>講題 / Title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
+          (tableRows || '<tr><td colspan="5" class="muted">No rows</td></tr>')+
           '</tbody></table></div>'+
         '</div>';
     }

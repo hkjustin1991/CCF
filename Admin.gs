@@ -373,7 +373,7 @@ function api_admin_sermon_page(token, ym){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')){
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
@@ -401,7 +401,7 @@ function api_admin_sermon_save(token, payload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')){
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
