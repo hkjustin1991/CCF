@@ -2737,6 +2737,98 @@ function eventDateYmdFromKey(ev){
       setSaveState_('❌', '未儲存', 'Not saved');
     }
 
+
+    function viewSermonInfo(){
+      var payload = App.sermonPayload || {};
+      var months = Array.isArray(payload.months) ? payload.months : [];
+      var rows = Array.isArray(payload.rows) ? payload.rows : [];
+      var month = String(payload.month || App.sermonMonth || '').trim();
+      var opts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===month?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+      var tableRows = rows.map(function(r){
+        var ev = String(r.eventKey||'').trim();
+        var m = ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+        var serviceDate = m ? m[1] : String(r.dateYmd||'').trim();
+        return '<tr>'+
+          '<td>'+escapeHtml(serviceDate)+'</td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="speaker">'+escapeHtml(String(r.speaker||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="title">'+escapeHtml(String(r.title||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonPassage">'+escapeHtml(String(r.sermonPassage||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="responsePassage">'+escapeHtml(String(r.responsePassage||''))+'</textarea></td>'+
+        '</tr>';
+      }).join('');
+      return ''+
+        '<div class="card">'+
+          '<div class="big">Set Sermon info / 設定講道資料</div>'+
+          '<div class="miniBtnRow" style="align-items:flex-end;">'+
+            '<div class="monthPick"><div class="small">月份 / Month</div><select id="sermonMonthSelect">'+opts+'</select></div>'+
+            '<button id="btnSermonBack" class="btnBack btnSmall">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="sermonInfoMsg" class="small" style="margin-top:8px;"></div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div class="tableWrap"><table><thead><tr><th>Service Date<br/>YYYY-MM-DD</th><th>講員 / Speaker</th><th>講題 / Title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
+          (tableRows || '<tr><td colspan="5" class="muted">No rows</td></tr>')+
+          '</tbody></table></div>'+
+        '</div>';
+    }
+
+    function bindSermonInfo(){
+      function findRow_(ev){
+        var rows = ((App.sermonPayload||{}).rows)||[];
+        for (var i=0;i<rows.length;i++) if (String(rows[i].eventKey||'')===ev) return rows[i];
+        return null;
+      }
+      function saveRow_(ev){
+        var row = findRow_(ev);
+        if (!row) return Promise.resolve();
+        App.sermonDirty[ev] = false;
+        return callApi('api_admin_sermon_save', App.token, {
+          eventKey: ev,
+          speaker: String(row.speaker||''),
+          title: String(row.title||''),
+          sermonPassage: String(row.sermonPassage||''),
+          responsePassage: String(row.responsePassage||'')
+        }).then(function(res){
+          if(!res||!res.ok){ showBox('sermonInfoMsg','err','儲存失敗','Save failed'); return; }
+          if (res.row){
+            for (var i=0;i<App.sermonPayload.rows.length;i++){
+              if (String(App.sermonPayload.rows[i].eventKey||'')===ev){ App.sermonPayload.rows[i]=res.row; break; }
+            }
+          }
+          showBox('sermonInfoMsg','ok','已自動儲存','Auto-saved');
+        }).catch(function(){ showBox('sermonInfoMsg','err','儲存失敗','Save failed'); });
+      }
+
+      if ($('btnSermonBack')) $('btnSermonBack').onclick = function(){ App.view='menu'; render(); };
+      if ($('sermonMonthSelect')) $('sermonMonthSelect').onchange = function(){
+        App.sermonMonth = String(this.value||'');
+        callApi('api_admin_sermon_page', App.token, App.sermonMonth).then(function(res){
+          if(!res||!res.ok){ showErr('sermonInfoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          App.sermonPayload = res;
+          App.sermonMonth = res.month || App.sermonMonth;
+          render();
+        }).catch(function(err){ showErr('sermonInfoMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+      };
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-sermon-input]')).forEach(function(el){
+        el.oninput = function(){
+          var ev = String(el.getAttribute('data-ev')||'');
+          var key = String(el.getAttribute('data-key')||'');
+          var row = findRow_(ev);
+          if (!row || !key) return;
+          row[key] = el.value;
+          App.sermonDirty[ev] = true;
+          if (App.sermonAutoTimers[ev]) clearTimeout(App.sermonAutoTimers[ev]);
+          App.sermonAutoTimers[ev] = setTimeout(function(){ saveRow_(ev); }, 650);
+        };
+        el.onblur = function(){
+          var ev = String(el.getAttribute('data-ev')||'');
+          if (App.sermonAutoTimers[ev]){ clearTimeout(App.sermonAutoTimers[ev]); App.sermonAutoTimers[ev]=null; }
+          if (App.sermonDirty[ev]) saveRow_(ev);
+        };
+      });
+    }
+
     function viewAttendanceHome(){
       return ''+
         '<div class="card" style="border-color:rgba(26,168,108,0.25);background:#f6fffb;">'+
