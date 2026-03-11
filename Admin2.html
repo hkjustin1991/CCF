@@ -2599,8 +2599,10 @@ function eventDateYmdFromKey(ev){
       var opts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===month?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
       var tableRows = rows.map(function(r){
         var ev = String(r.eventKey||'').trim();
+        var m = ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+        var serviceDate = m ? m[1] : String(r.dateYmd||'').trim();
         return '<tr>'+
-          '<td>'+escapeHtml(String(r.dateYmd||''))+'</td>'+
+          '<td>'+escapeHtml(serviceDate)+'</td>'+
           '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="speaker">'+escapeHtml(String(r.speaker||''))+'</textarea></td>'+
           '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="title">'+escapeHtml(String(r.title||''))+'</textarea></td>'+
           '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonPassage">'+escapeHtml(String(r.sermonPassage||''))+'</textarea></td>'+
@@ -2617,7 +2619,7 @@ function eventDateYmdFromKey(ev){
           '<div id="sermonInfoMsg" class="small" style="margin-top:8px;"></div>'+
         '</div>'+
         '<div class="card">'+
-          '<div class="tableWrap"><table><thead><tr><th>日期 / Date (YYYY-MM-DD)</th><th>講員 / Speaker</th><th>講題 / Title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
+          '<div class="tableWrap"><table><thead><tr><th>Service Date<br/>YYYY-MM-DD</th><th>講員 / Speaker</th><th>講題 / Title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
           (tableRows || '<tr><td colspan="5" class="muted">No rows</td></tr>')+
           '</tbody></table></div>'+
         '</div>';
@@ -4992,7 +4994,7 @@ function eventDateYmdFromKey(ev){
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
-      var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan');
+      var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan' || App.view === 'sermonInfo');
       setServingRotaMode_(servingRotaMode);
       if (App.view !== 'servingPlan' && App.servingPlanTimer){
         clearInterval(App.servingPlanTimer);
