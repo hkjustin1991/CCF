@@ -652,7 +652,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const valueRaw = String(r.value||'').trim();
     if (!position && !valueRaw) continue;
     if (!allowed.has(position)) continue;
-    cleaned.push({ position, value: valueRaw });
+    const normalizedValue = admin_normalizeServingValue_(valueRaw, ADMIN_SERVING_POSITION_MAX[position] || 1);
+    cleaned.push({ position, value: normalizedValue });
   }
 
   const duplicateMap = {};
@@ -2255,6 +2256,38 @@ function admin_splitServingValues_(raw){
   return s.split(',').map(x => String(x||'').trim()).filter(Boolean);
 }
 
+function admin_extractCanonicalMemberId_(text){
+  const s = String(text || '').trim().toUpperCase();
+  if (!s) return '';
+  const m = s.match(/\bCCF(?:\s*ID)?\s*[-: ]?(\d{4})\b/i);
+  return m ? ('CCF' + m[1]) : '';
+}
+
+function admin_normalizeServingToken_(token){
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  if (admin_isServingClosedValue_(raw)) return 'CLOSED';
+  if (admin_isServingNaValue_(raw)) return 'N/A';
+
+  const canonicalId = admin_extractCanonicalMemberId_(raw);
+  if (canonicalId) return canonicalId;
+
+  return raw;
+}
+
+function admin_normalizeServingValue_(raw, maxSlots){
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (admin_isServingClosedValue_(s)) return 'CLOSED';
+
+  const normalized = admin_splitServingValues_(s)
+    .map(admin_normalizeServingToken_)
+    .filter(Boolean);
+
+  const max = Math.max(1, Number(maxSlots || 1));
+  return normalized.slice(0, max).join(', ');
+}
+
 function admin_countServingFilledSlots_(raw){
   return admin_splitServingValues_(raw).filter(function(v){
     const token = String(v||'').trim();
@@ -2270,9 +2303,8 @@ function admin_extractMemberIdsFromServingValue_(raw){
     const token = String(v||'').trim();
     if (!token) return '';
     if (admin_isServingNaValue_(token)) return '';
-    const matched = token.match(/CCF\d{4}/i);
-    if (matched && matched[0]) return matched[0].toUpperCase();
-    return '';
+    if (admin_isServingClosedValue_(token)) return '';
+    return admin_extractCanonicalMemberId_(token);
   }).filter(Boolean);
 }
 function admin_normalizeServingGroup_(g){
@@ -2403,20 +2435,19 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
     const raw = String(row[pos.colIndex-1] || '').trim();
     const values = raw ? admin_splitServingValues_(raw) : [];
     values.forEach(function(val, valueIdx){
-      const rawUpper = String(val||'').trim().toUpperCase();
-      const ids = admin_extractMemberIdsFromServingValue_(val);
-      const memberId = ids && ids.length ? ids[0] : rawUpper;
+      const token = String(val||'').trim();
+      const canonicalId = admin_extractCanonicalMemberId_(token);
       const entry = {
         eventKey: eventKey,
         group: pos.group,
         position: pos.position,
         slot: String(valueIdx + 1),
-        memberId: memberId,
-        rawValue: val,
-        checkedIn: checkedInSet && !!(ids && ids.length) && checkedInSet.has(memberId)
+        memberId: canonicalId || '',
+        rawValue: token,
+        checkedIn: !!canonicalId && checkedInSet && checkedInSet.has(canonicalId)
       };
-      if (!includeNa && admin_isServingNaValue_(rawUpper)) return;
-      const m = membersById[memberId] || {};
+      if (!includeNa && admin_isServingNaValue_(token)) return;
+      const m = canonicalId ? (membersById[canonicalId] || {}) : {};
       entry.nameZh = String(m.nameZh || '');
       entry.nameEn = String(m.nameEn || '');
       entry.preferredName = String(m.preferredName || '');
@@ -2489,6 +2520,47 @@ function admin_getDuplicatePositionMapFromValues_(valuesByPos){
   }
   return out;
 }
+
+function admin_normalizeServingSheetData_(){
+  const sh = admin_getServingSheet_();
+  if (!sh) return { ok:true, rows:0, changedCells:0 };
+
+  admin_ensureServingHeaders_(sh);
+
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 2) return { ok:true, rows:0, changedCells:0 };
+
+  const headerMap = admin_getServingMatrixHeaderMap_(sh);
+  const data = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  let changedCells = 0;
+
+  data.forEach(function(row){
+    ADMIN_SERVING_POSITIONS.forEach(function(pos){
+      const colIdx = headerMap[pos];
+      if (!colIdx) return;
+
+      const oldVal = String(row[colIdx - 1] || '').trim();
+      const newVal = admin_normalizeServingValue_(
+        oldVal,
+        ADMIN_SERVING_POSITION_MAX[pos] || 1
+      );
+
+      if (newVal !== oldVal){
+        row[colIdx - 1] = newVal;
+        changedCells++;
+      }
+    });
+  });
+
+  if (changedCells > 0){
+    sh.getRange(2, 1, data.length, lastCol).setValues(data);
+  }
+
+  return { ok:true, rows:data.length, changedCells:changedCells };
+}
+
 function admin_getServingPlanMatrix_(events){
   const eventList = Array.isArray(events) ? events : [];
   const eventKeys = eventList.map(e => e.eventKey);
@@ -2550,14 +2622,14 @@ function admin_getServingPlanMatrix_(events){
       const values = admin_splitServingValues_(raw);
       values.forEach(function(val){
         const token = String(val||'').trim();
-        const matched = token.match(/CCF\d{4}/i);
-        const memberId = matched ? matched[0].toUpperCase() : '';
-        const member = memberId ? (byId[memberId] || {}) : {};
+        const canonicalId = admin_extractCanonicalMemberId_(token);
+        const member = canonicalId ? (byId[canonicalId] || {}) : {};
         const entry = {
-          memberId: memberId,
-          rawValue: val,
+          memberId: canonicalId || '',
+          rawValue: token,
           nameZh: String(member.nameZh || ''),
           nameEn: String(member.nameEn || ''),
+          preferredName: String(member.preferredName || ''),
           slot: ''
         };
         if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
