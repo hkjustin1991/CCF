@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-10.admin110
+ * v2026-03-11.admin111
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-10.admin110';
+const ADMIN_VERSION = '2026-03-11.admin111';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -91,6 +91,7 @@ const ADMIN_GL_HELPER_ALLOWED_GROUPS = ['MEDIA','LOGISTIC','SUPPORT','WORSHIP'];
 const ADMIN_SERVING_MONTHS_AHEAD = 7;
 const ADMIN_SERVING_SHEET_NAME = 'Serving';
 const ADMIN_SERVING_AWAY_SHEET_NAME = 'Serving_Away';
+const ADMIN_SERMON_SHEET_NAME = 'Sermon_Info';
 const ADMIN_SERVING_POSITIONS = [
   'Worship_Lead',
   'Worship_Singer',
@@ -365,6 +366,80 @@ function api_admin_log(token, action, details, context){
 
   admin_audit_(s.actor, String(action||''), String(details||''), String(context||''));
   return { ok:true };
+}
+
+
+function api_admin_sermon_page(token, ym){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
+    return admin_err_('E403','沒有權限','No permission');
+  }
+
+  let month = String(ym || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) month = admin_fmtYm_(admin_parseYmd_(admin_todayUkYmd_()) || new Date());
+
+  const sh = admin_ensureSermonSheet_();
+  const events = admin_ensureSermonRowsForMonth_(sh, month);
+  const map = admin_getSermonMapByEventKeys_(events.map(function(ev){ return ev.eventKey; }));
+
+  const base = admin_parseYmd_(admin_todayUkYmd_()) || new Date();
+  const months = [];
+  for (let i=0;i<=ADMIN_SERVING_MONTHS_AHEAD;i++){
+    months.push(admin_fmtYm_(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, 1))));
+  }
+  if (months.indexOf(month) < 0){ months.unshift(month); }
+
+  const rows = events.map(function(ev){ return map[ev.eventKey] || admin_sermonBlankFromEventKey_(ev.eventKey); });
+  const viewer = admin_getActorNames_(s.actor);
+  admin_audit_(s.actor, 'SERMON_PAGE', JSON.stringify({ month: month, rows: rows.length }), 'sermon_info');
+  return { ok:true, viewer: viewer, month: month, months: months, rows: rows };
+}
+
+function api_admin_sermon_save(token, payload){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
+    return admin_err_('E403','沒有權限','No permission');
+  }
+
+  const p = payload || {};
+  const eventKey = String(p.eventKey || '').trim();
+  const m = eventKey.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+  if (!m){
+    return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
+  }
+  const dateYmd = m[1];
+  const speakerCcfId = String(p.speakerCcfId || '').trim().toUpperCase();
+  const speaker = String(p.speaker || '').trim();
+  const title = String(p.title || '').trim();
+  const sermonPassage = String(p.sermonPassage || '').trim();
+  const responsePassage = String(p.responsePassage || '').trim();
+
+  const sh = admin_ensureSermonSheet_();
+  const colMap = admin_getSermonColMap_(sh);
+  let rowNumber = admin_findSermonRowByEventKey_(sh, eventKey);
+  if (!rowNumber){
+    sh.appendRow([eventKey, dateYmd, '', '', '', '', '', '', '', '']);
+    rowNumber = sh.getLastRow();
+  }
+
+  sh.getRange(rowNumber, colMap['EventKey'] || 1).setValue(eventKey);
+  sh.getRange(rowNumber, colMap['DateYmd'] || 2).setValue(dateYmd);
+  sh.getRange(rowNumber, colMap['講員CCFID'] || 3).setValue(speakerCcfId);
+  sh.getRange(rowNumber, colMap['講員'] || 4).setValue(speaker);
+  sh.getRange(rowNumber, colMap['講題'] || 5).setValue(title);
+  sh.getRange(rowNumber, colMap['講道經文'] || 6).setValue(sermonPassage);
+  sh.getRange(rowNumber, colMap['回應經文'] || 7).setValue(responsePassage);
+  sh.getRange(rowNumber, colMap['UpdatedAt'] || 8).setValue(admin_nowIso_());
+  sh.getRange(rowNumber, colMap['UpdatedBy'] || 9).setValue(String(s.actor.id || ''));
+  sh.getRange(rowNumber, colMap['UpdatedRole'] || 10).setValue(String(s.actor.role || ''));
+
+  const row = admin_getSermonRecordByEventKey_(eventKey);
+  admin_audit_(s.actor, 'SERMON_SAVE', JSON.stringify({ eventKey: eventKey, actorId: String(s.actor.id || '') }), 'sermon_info');
+  return { ok:true, row: row };
 }
 
 /**
@@ -1132,6 +1207,7 @@ function api_admin_event_detail(token, eventKey){
   const existingCount = Math.max(0, total - newCount);
 
   const servingRows = admin_getServingForEvent_(ev, mi.byId, set);
+  const sermon = admin_getSermonRecordByEventKey_(ev);
 
   admin_audit_(s.actor, 'EVENT_DETAIL', JSON.stringify({eventKey: ev, total, new: newCount, existing: existingCount}), 'event');
 
@@ -1142,6 +1218,13 @@ function api_admin_event_detail(token, eventKey){
     counts:{ total: total, new: newCount, existing: existingCount },
     lists:{ newMembers: newMembers, existingMembers: existingMembers },
     extras:{
+      sermon:{
+        speakerCcfId: String(sermon.speakerCcfId || '').trim(),
+        speaker: String(sermon.speaker || '').trim(),
+        title: String(sermon.title || '').trim(),
+        sermonPassage: String(sermon.sermonPassage || '').trim(),
+        responsePassage: String(sermon.responsePassage || '').trim()
+      },
       offering: null,
       serving: servingRows
     }
@@ -1783,6 +1866,161 @@ function admin_getUpcomingSundayEventKeys_(fromDateYmd, monthsAhead){
   return out;
 }
 
+
+function admin_getSermonSheet_(){
+  const ss = admin_openSs_();
+  return ss.getSheetByName(ADMIN_SERMON_SHEET_NAME) || null;
+}
+function admin_ensureSermonSheet_(){
+  const ss = admin_openSs_();
+  let sh = ss.getSheetByName(ADMIN_SERMON_SHEET_NAME);
+  const headers = ['EventKey','DateYmd','講員CCFID','講員','講題','講道經文','回應經文','UpdatedAt','UpdatedBy','UpdatedRole'];
+  if (!sh){
+    sh = ss.insertSheet(ADMIN_SERMON_SHEET_NAME);
+  }
+  const existingCols = Math.max(sh.getLastColumn(), headers.length);
+  const existing = existingCols > 0 ? sh.getRange(1,1,1,existingCols).getValues()[0].map(function(v){ return String(v||'').trim(); }) : [];
+  let needsHeader = false;
+  for (let i=0;i<headers.length;i++){
+    if (existing[i] !== headers[i]){ needsHeader = true; break; }
+  }
+  if (needsHeader || sh.getLastRow() === 0){
+    sh.getRange(1,1,1,headers.length).setValues([headers]);
+  }
+  sh.getRange(1,1,1,headers.length).setFontWeight('bold');
+  return sh;
+}
+function admin_getSermonColMap_(sh){
+  const lastCol = Math.max(sh.getLastColumn(), 10);
+  const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
+  const map = {};
+  headers.forEach(function(h, idx){ if (h) map[h] = idx + 1; });
+  return map;
+}
+function admin_findSermonRowByEventKey_(sh, eventKey){
+  const ev = String(eventKey || '').trim();
+  if (!ev) return null;
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+  const colMap = admin_getSermonColMap_(sh);
+  const evCol = colMap['EventKey'] || 1;
+  const values = sh.getRange(2, evCol, lastRow - 1, 1).getValues();
+  for (let i=0;i<values.length;i++){
+    if (String((values[i] && values[i][0]) || '').trim() === ev) return i + 2;
+  }
+  return null;
+}
+function admin_getMonthSundayEvents_(ym){
+  const v = String(ym || '').trim();
+  const m = v.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return [];
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  if (!(mo >= 1 && mo <= 12)) return [];
+  const first = new Date(Date.UTC(y, mo - 1, 1));
+  const nextMonth = new Date(Date.UTC(y, mo, 1));
+  const out = [];
+  let cursor = new Date(first.getTime());
+  while (cursor.getUTCDay() !== 0){ cursor.setUTCDate(cursor.getUTCDate() + 1); }
+  for (let i=0;i<6;i++){
+    if (cursor.getTime() >= nextMonth.getTime()) break;
+    const ymd = admin_fmtYmd_(cursor);
+    out.push({ eventKey:'SundayService_' + ymd, dateYmd: ymd });
+    cursor = new Date(cursor.getTime());
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return out;
+}
+function admin_ensureSermonRowsForMonth_(sh, ym){
+  const events = admin_getMonthSundayEvents_(ym);
+  if (!events.length) return [];
+  const colMap = admin_getSermonColMap_(sh);
+  const lastRow = sh.getLastRow();
+  const eventCol = colMap['EventKey'] || 1;
+  const existing = {};
+  if (lastRow >= 2){
+    const values = sh.getRange(2, eventCol, lastRow - 1, 1).getValues();
+    values.forEach(function(row){
+      const ev = String((row && row[0]) || '').trim();
+      if (ev) existing[ev] = true;
+    });
+  }
+  const toAppend = [];
+  events.forEach(function(ev){
+    if (existing[ev.eventKey]) return;
+    toAppend.push([ev.eventKey, ev.dateYmd, '', '', '', '', '', '', '', '']);
+  });
+  if (toAppend.length){
+    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 10).setValues(toAppend);
+  }
+  return events;
+}
+function admin_sermonBlankFromEventKey_(eventKey){
+  const ev = String(eventKey || '').trim();
+  const m = ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+  return {
+    eventKey: ev,
+    dateYmd: m ? m[1] : '',
+    speakerCcfId: '',
+    speaker: '',
+    title: '',
+    sermonPassage: '',
+    responsePassage: '',
+    updatedAt: '',
+    updatedBy: '',
+    updatedRole: ''
+  };
+}
+function admin_getSermonRecordByEventKey_(eventKey){
+  const blank = admin_sermonBlankFromEventKey_(eventKey);
+  const sh = admin_getSermonSheet_();
+  if (!sh) return blank;
+  const rowNumber = admin_findSermonRowByEventKey_(sh, blank.eventKey);
+  if (!rowNumber) return blank;
+  const colMap = admin_getSermonColMap_(sh);
+  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 10)).getValues()[0];
+  return {
+    eventKey: String(row[(colMap['EventKey'] || 1) - 1] || '').trim() || blank.eventKey,
+    dateYmd: String(row[(colMap['DateYmd'] || 2) - 1] || '').trim() || blank.dateYmd,
+    speakerCcfId: String(row[(colMap['講員CCFID'] || 3) - 1] || '').trim(),
+    speaker: String(row[(colMap['講員'] || 4) - 1] || '').trim(),
+    title: String(row[(colMap['講題'] || 5) - 1] || '').trim(),
+    sermonPassage: String(row[(colMap['講道經文'] || 6) - 1] || '').trim(),
+    responsePassage: String(row[(colMap['回應經文'] || 7) - 1] || '').trim(),
+    updatedAt: String(row[(colMap['UpdatedAt'] || 8) - 1] || '').trim(),
+    updatedBy: String(row[(colMap['UpdatedBy'] || 9) - 1] || '').trim(),
+    updatedRole: String(row[(colMap['UpdatedRole'] || 10) - 1] || '').trim()
+  };
+}
+function admin_getSermonMapByEventKeys_(eventKeys){
+  const out = {};
+  const keys = Array.isArray(eventKeys) ? eventKeys.map(function(ev){ return String(ev||'').trim(); }).filter(Boolean) : [];
+  keys.forEach(function(ev){ out[ev] = admin_sermonBlankFromEventKey_(ev); });
+  if (!keys.length) return out;
+  const sh = admin_getSermonSheet_();
+  if (!sh || sh.getLastRow() < 2) return out;
+  const wanted = {};
+  keys.forEach(function(ev){ wanted[ev] = true; });
+  const colMap = admin_getSermonColMap_(sh);
+  const rows = sh.getRange(2,1,sh.getLastRow()-1,Math.max(sh.getLastColumn(),10)).getValues();
+  rows.forEach(function(row){
+    const ev = String(row[(colMap['EventKey'] || 1) - 1] || '').trim();
+    if (!wanted[ev]) return;
+    out[ev] = {
+      eventKey: ev,
+      dateYmd: String(row[(colMap['DateYmd'] || 2) - 1] || '').trim() || ((ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/)||[])[1] || ''),
+      speakerCcfId: String(row[(colMap['講員CCFID'] || 3) - 1] || '').trim(),
+      speaker: String(row[(colMap['講員'] || 4) - 1] || '').trim(),
+      title: String(row[(colMap['講題'] || 5) - 1] || '').trim(),
+      sermonPassage: String(row[(colMap['講道經文'] || 6) - 1] || '').trim(),
+      responsePassage: String(row[(colMap['回應經文'] || 7) - 1] || '').trim(),
+      updatedAt: String(row[(colMap['UpdatedAt'] || 8) - 1] || '').trim(),
+      updatedBy: String(row[(colMap['UpdatedBy'] || 9) - 1] || '').trim(),
+      updatedRole: String(row[(colMap['UpdatedRole'] || 10) - 1] || '').trim()
+    };
+  });
+  return out;
+}
 function admin_getServingSheet_(){
   const ss = admin_openSs_();
   return ss.getSheetByName(ADMIN_SERVING_SHEET_NAME) || null;
