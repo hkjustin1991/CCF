@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-10.admin110
-  For Admin.gs: v2026-03-10.admin110
+  UI VERSION TAG: admin2-ui-2026-03-11.admin111
+  For Admin.gs: v2026-03-11.admin111
   PR REFRESH: admin107 follow-up submission
   ============================================================
   -->
@@ -406,7 +406,11 @@
       worshipMonth:'',
       worshipEventExpanded:{},
       worshipRenderCache:null,
-      worshipMembers:[]
+      worshipMembers:[],
+      sermonMonth:'',
+      sermonPayload:null,
+      sermonAutoTimers:{},
+      sermonDirty:{}
     };
 
     function $(id){ return document.getElementById(id); }
@@ -2377,6 +2381,7 @@ function eventDateYmdFromKey(ev){
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
               (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
+              '<button id="goSermonInfo" class="btnPeriod">📖 Set Sermon info / 設定講道資料</button>'+
             '</div>'+
             '<div class="divider"></div>'+
             '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
@@ -2413,6 +2418,7 @@ function eventDateYmdFromKey(ev){
             '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
             (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
+            '<button id="goSermonInfo" class="btnPeriod">📖 Set Sermon info / 設定講道資料</button>'+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
           '</div>'+
           '<div class="divider"></div>'+
@@ -2456,6 +2462,16 @@ function eventDateYmdFromKey(ev){
         goWorshipPlan.onclick = function(){
           logAction('OPEN_WORSHIP_PLAN','', 'nav');
           loadAdminWorshipPlan_();
+        };
+      }
+
+      var goSermonInfo = $('goSermonInfo');
+      if (goSermonInfo){
+        goSermonInfo.onclick = function(){
+          logAction('OPEN_SERMON_INFO','', 'nav');
+          App.sermonPayload = null;
+          App.view='sermonInfo';
+          render();
         };
       }
       $('btnLogout').onclick = function(){
@@ -2572,6 +2588,98 @@ function eventDateYmdFromKey(ev){
         App.view = 'worshipPlan';
         render();
       }).catch(function(err){ showErr(msgId, err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+    }
+
+
+    function viewSermonInfo(){
+      var payload = App.sermonPayload || {};
+      var months = Array.isArray(payload.months) ? payload.months : [];
+      var rows = Array.isArray(payload.rows) ? payload.rows : [];
+      var month = String(payload.month || App.sermonMonth || '').trim();
+      var opts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===month?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+      var tableRows = rows.map(function(r){
+        var ev = String(r.eventKey||'').trim();
+        var m = ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+        var serviceDate = m ? m[1] : String(r.dateYmd||'').trim();
+        return '<tr>'+
+          '<td>'+escapeHtml(serviceDate)+'</td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="speaker">'+escapeHtml(String(r.speaker||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="title">'+escapeHtml(String(r.title||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonPassage">'+escapeHtml(String(r.sermonPassage||''))+'</textarea></td>'+
+          '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="responsePassage">'+escapeHtml(String(r.responsePassage||''))+'</textarea></td>'+
+        '</tr>';
+      }).join('');
+      return ''+
+        '<div class="card">'+
+          '<div class="big">Set Sermon info / 設定講道資料</div>'+
+          '<div class="miniBtnRow" style="align-items:flex-end;">'+
+            '<div class="monthPick"><div class="small">月份 / Month</div><select id="sermonMonthSelect">'+opts+'</select></div>'+
+            '<button id="btnSermonBack" class="btnBack btnSmall">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<div id="sermonInfoMsg" class="small" style="margin-top:8px;"></div>'+
+        '</div>'+
+        '<div class="card">'+
+          '<div class="tableWrap"><table><thead><tr><th>Service Date<br/>YYYY-MM-DD</th><th>講員 / Speaker</th><th>講題 / Title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
+          (tableRows || '<tr><td colspan="5" class="muted">No rows</td></tr>')+
+          '</tbody></table></div>'+
+        '</div>';
+    }
+
+    function bindSermonInfo(){
+      function findRow_(ev){
+        var rows = ((App.sermonPayload||{}).rows)||[];
+        for (var i=0;i<rows.length;i++) if (String(rows[i].eventKey||'')===ev) return rows[i];
+        return null;
+      }
+      function saveRow_(ev){
+        var row = findRow_(ev);
+        if (!row) return Promise.resolve();
+        App.sermonDirty[ev] = false;
+        return callApi('api_admin_sermon_save', App.token, {
+          eventKey: ev,
+          speaker: String(row.speaker||''),
+          title: String(row.title||''),
+          sermonPassage: String(row.sermonPassage||''),
+          responsePassage: String(row.responsePassage||'')
+        }).then(function(res){
+          if(!res||!res.ok){ showBox('sermonInfoMsg','err','儲存失敗','Save failed'); return; }
+          if (res.row){
+            for (var i=0;i<App.sermonPayload.rows.length;i++){
+              if (String(App.sermonPayload.rows[i].eventKey||'')===ev){ App.sermonPayload.rows[i]=res.row; break; }
+            }
+          }
+          showBox('sermonInfoMsg','ok','已自動儲存','Auto-saved');
+        }).catch(function(){ showBox('sermonInfoMsg','err','儲存失敗','Save failed'); });
+      }
+
+      if ($('btnSermonBack')) $('btnSermonBack').onclick = function(){ App.view='menu'; render(); };
+      if ($('sermonMonthSelect')) $('sermonMonthSelect').onchange = function(){
+        App.sermonMonth = String(this.value||'');
+        callApi('api_admin_sermon_page', App.token, App.sermonMonth).then(function(res){
+          if(!res||!res.ok){ showErr('sermonInfoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          App.sermonPayload = res;
+          App.sermonMonth = res.month || App.sermonMonth;
+          render();
+        }).catch(function(err){ showErr('sermonInfoMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+      };
+
+      Array.prototype.slice.call(document.querySelectorAll('[data-sermon-input]')).forEach(function(el){
+        el.oninput = function(){
+          var ev = String(el.getAttribute('data-ev')||'');
+          var key = String(el.getAttribute('data-key')||'');
+          var row = findRow_(ev);
+          if (!row || !key) return;
+          row[key] = el.value;
+          App.sermonDirty[ev] = true;
+          if (App.sermonAutoTimers[ev]) clearTimeout(App.sermonAutoTimers[ev]);
+          App.sermonAutoTimers[ev] = setTimeout(function(){ saveRow_(ev); }, 650);
+        };
+        el.onblur = function(){
+          var ev = String(el.getAttribute('data-ev')||'');
+          if (App.sermonAutoTimers[ev]){ clearTimeout(App.sermonAutoTimers[ev]); App.sermonAutoTimers[ev]=null; }
+          if (App.sermonDirty[ev]) saveRow_(ev);
+        };
+      });
     }
 
     function viewAttendanceHome(){
@@ -4204,6 +4312,19 @@ function eventDateYmdFromKey(ev){
               arr.map(renderNameItem_).join('')+
             '</div>';
         }
+        function renderSermonBlock_(sermon){
+          var s = sermon || {};
+          var entries = [
+            { label:'講員 / Speaker', value:String(s.speaker||'').trim() },
+            { label:'講題 / Title', value:String(s.title||'').trim() },
+            { label:'講道經文 / Sermon passage', value:String(s.sermonPassage||'').trim() },
+            { label:'回應經文 / Response passage', value:String(s.responsePassage||'').trim() }
+          ].filter(function(it){ return it.value; });
+          if (!entries.length) return '<div class="msgBox warn" style="margin-top:10px;"><div class="small">未設定講道資料 / Sermon info not set.</div></div>';
+          var body = entries.map(function(it){ return '<div class="nameItem"><div class="zh">'+escapeHtml(it.label)+'</div><div class="en">'+escapeHtml(it.value)+'</div></div>'; }).join('');
+          return '<div class="listWrap" style="margin-top:10px;">'+body+'</div>';
+        }
+
         function renderServingList_(rows){
           if (!rows || !rows.length){
             return '<div class="msgBox warn" style="margin-top:10px;"><div class="big warn">暫無事奉資料 / No serving rows</div></div>';
@@ -4248,7 +4369,9 @@ function eventDateYmdFromKey(ev){
         var btnEx = (c.existing > 0)
           ? '<button id="btnEx" class="btnLookup">👥 舊朋友名單 / Existing list ('+c.existing+')</button>'
           : '';
+        var sermon = (res.extras && res.extras.sermon) ? res.extras.sermon : {};
         var servingRows = (res.extras && res.extras.serving) ? res.extras.serving : [];
+        var btnSermon = '<button id="btnSermon" class="btnPeriod">📖 講道資料 / Sermon info</button>';
         var btnServing = '<button id="btnServing" class="btnPeriod">🧩 事奉名單 / Serving list</button>';
 
         m.querySelector('.modal').innerHTML =
@@ -4259,9 +4382,10 @@ function eventDateYmdFromKey(ev){
             '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(c.existing||0))+'</b></div>'+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
-            btnNew + btnEx + btnServing +
+            btnNew + btnEx + btnSermon + btnServing +
           '</div>'+
           '<div id="listBox"></div>'+
+          '<div id="sermonBox"></div>'+
           '<div id="servingBox"></div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             '<button id="c" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -4272,17 +4396,25 @@ function eventDateYmdFromKey(ev){
         if (c.new > 0){
           m.querySelector('#btnNew').onclick = function(){
             m.querySelector('#listBox').innerHTML = renderList_(newList);
+            m.querySelector('#sermonBox').innerHTML = '';
             m.querySelector('#servingBox').innerHTML = '';
           };
         }
         if (c.existing > 0){
           m.querySelector('#btnEx').onclick = function(){
             m.querySelector('#listBox').innerHTML = renderList_(exList);
+            m.querySelector('#sermonBox').innerHTML = '';
             m.querySelector('#servingBox').innerHTML = '';
           };
         }
+        m.querySelector('#btnSermon').onclick = function(){
+          m.querySelector('#listBox').innerHTML = '';
+          m.querySelector('#sermonBox').innerHTML = renderSermonBlock_(sermon);
+          m.querySelector('#servingBox').innerHTML = '';
+        };
         m.querySelector('#btnServing').onclick = function(){
           m.querySelector('#listBox').innerHTML = '';
+          m.querySelector('#sermonBox').innerHTML = renderSermonBlock_(sermon);
           m.querySelector('#servingBox').innerHTML = renderServingList_(servingRows);
         };
 
@@ -4862,7 +4994,7 @@ function eventDateYmdFromKey(ev){
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
-      var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan');
+      var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan' || App.view === 'sermonInfo');
       setServingRotaMode_(servingRotaMode);
       if (App.view !== 'servingPlan' && App.servingPlanTimer){
         clearInterval(App.servingPlanTimer);
@@ -4880,6 +5012,20 @@ function eventDateYmdFromKey(ev){
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
       if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
       if(App.view==='worshipPlan'){ root.innerHTML = viewWorshipPlan(); bindWorshipPlan(); attachScrollControls_(root); return; }
+      if(App.view==='sermonInfo'){
+        if (!App.sermonPayload){
+          root.innerHTML = '<div class="card"><div class="big">Set Sermon info / 設定講道資料</div><div id="sermonInfoMsg"></div></div>';
+          showBox('sermonInfoMsg','warn','載入中…','Loading…');
+          callApi('api_admin_sermon_page', App.token, App.sermonMonth || '').then(function(res){
+            if(!res || !res.ok){ showErr('sermonInfoMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            App.sermonPayload = res;
+            App.sermonMonth = res.month || App.sermonMonth;
+            render();
+          }).catch(function(err){ showErr('sermonInfoMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+          attachScrollControls_(root); return;
+        }
+        root.innerHTML = viewSermonInfo(); bindSermonInfo(); attachScrollControls_(root); return;
+      }
     }
 
     /* init */

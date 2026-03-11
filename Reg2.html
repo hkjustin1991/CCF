@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-10.reg111
+  UI VERSION TAG: reg2-ui-2026-03-11.reg112
   ============================================================
 
   Changes (reg2-ui2):
@@ -186,7 +186,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-10.reg111</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-11.reg112</span></div>
     </header>
 
     <main id="app"></main>
@@ -1478,6 +1478,16 @@
         return zh + ' / ' + en;
       }
       var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
+      var sermon = res.sermon || {};
+      var sermonEntries = [
+        { label:'講員 / Speaker', value:String(sermon.speaker||'').trim() },
+        { label:'講題 / Title', value:String(sermon.title||'').trim() },
+        { label:'講道經文 / Sermon passage', value:String(sermon.sermonPassage||'').trim() },
+        { label:'回應經文 / Response passage', value:String(sermon.responsePassage||'').trim() }
+      ].filter(function(it){ return !!it.value; });
+      var sermonHtml = sermonEntries.length
+        ? '<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+sermonEntries.map(function(it){ return '<li>'+escapeHtml(it.label)+' · '+escapeHtml(it.value)+'</li>'; }).join('')+'</ul></div>'
+        : '';
       var blocks = Object.keys(groups).map(function(g){
         var rows = groups[g].map(function(r){
           return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>';
@@ -1500,6 +1510,7 @@
       return '<div class="card"><div class="big">📡 聚會資訊 / Service information</div>'+
         '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
         '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
+        sermonHtml+
         '<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>'+
         (blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>')+
         '<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>';

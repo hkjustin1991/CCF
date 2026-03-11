@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-10.reg111
+ * v2026-03-11.reg112
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-10.reg111';
+const REG_VERSION = '2026-03-11.reg112';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -51,6 +51,7 @@ const REG_EXTRA_HEADERS = [
 ];
 
 const REG_ACTIVITY_SHEET = 'Reg_Activity';
+const REG_SERMON_SHEET = 'Sermon_Info';
 
 /******** Entry ********/
 function doGetReg_(e){
@@ -1130,6 +1131,34 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
   }
 }
 
+
+function reg_getSermonByEventKey_(eventKey){
+  const ev = String(eventKey || '').trim();
+  const out = { speaker:'', title:'', sermonPassage:'', responsePassage:'' };
+  if (!/^SundayService_\d{4}-\d{2}-\d{2}$/.test(ev)) return out;
+  try{
+    const ss = SpreadsheetApp.openById((typeof SPREADSHEET_ID !== 'undefined') ? SPREADSHEET_ID : ADMIN_SPREADSHEET_ID);
+    const sh = ss.getSheetByName(REG_SERMON_SHEET);
+    if (!sh || sh.getLastRow() < 2) return out;
+    const lastCol = Math.max(sh.getLastColumn(), 9);
+    const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
+    const map = {};
+    headers.forEach(function(h, i){ if (h) map[h] = i; });
+    const rows = sh.getRange(2,1,sh.getLastRow()-1,lastCol).getValues();
+    for (let i=0;i<rows.length;i++){
+      const row = rows[i];
+      const k = String(row[map['EventKey'] != null ? map['EventKey'] : 0] || '').trim();
+      if (k !== ev) continue;
+      out.speaker = String(row[map['講員'] != null ? map['講員'] : 2] || '').trim();
+      out.title = String(row[map['講題'] != null ? map['講題'] : 3] || '').trim();
+      out.sermonPassage = String(row[map['講道經文'] != null ? map['講道經文'] : 4] || '').trim();
+      out.responsePassage = String(row[map['回應經文'] != null ? map['回應經文'] : 5] || '').trim();
+      return out;
+    }
+  }catch(e){}
+  return out;
+}
+
 function api_reg_self_live_service_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
@@ -1203,6 +1232,7 @@ function api_reg_self_live_service_public(qrPayload){
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
+      sermon: reg_getSermonByEventKey_(next),
       servingThisWeek: serving,
       worshipSongsThisWeek: worshipSongsThisWeek
     };
