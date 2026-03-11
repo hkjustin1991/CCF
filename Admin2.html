@@ -1768,8 +1768,10 @@ function eventDateYmdFromKey(ev){
     }
 
     function extractMemberId_(token){
-      var m = String(token||'').match(/CCF\d{4}/i);
-      return m ? String(m[0]||'').toUpperCase() : '';
+      var s = String(token || '').trim().toUpperCase();
+      if (!s) return '';
+      var m = s.match(/\bCCF(?:\s*ID)?\s*[-: ]?(\d{4})\b/i);
+      return m ? ('CCF' + m[1]) : '';
     }
     function preferredNameForSheet_(m){
       if (!m) return '';
@@ -1780,9 +1782,8 @@ function eventDateYmdFromKey(ev){
       return String(m.nameZh||'').trim();
     }
     function formatCcfidLine_(memberId){
-      var id = String(memberId||'').trim().toUpperCase();
-      var m = id.match(/^CCF(\d{4})$/);
-      return m ? ('CCF ID ' + m[1]) : (id || 'CCF ID —');
+      var id = extractMemberId_(memberId) || String(memberId || '').trim().toUpperCase();
+      return id || 'CCF—';
     }
     function servingPersonLines_(m){
       var o = m || {};
@@ -1809,8 +1810,8 @@ function eventDateYmdFromKey(ev){
       return [lines.id, lines.zh, lines.en].filter(Boolean).join(' · ');
     }
     function formatServingToken_(memberMap, memberId){
-      var id = extractMemberId_(memberId) || String(memberId||'').trim().toUpperCase();
-      return id || String(memberId||'').trim();
+      var id = extractMemberId_(memberId) || String(memberId || '').trim().toUpperCase();
+      return id || String(memberId || '').trim();
     }
     function renderServingTokenDisplayHtml_(token, memberMap){
       var raw = String(token||'').trim();
@@ -2886,7 +2887,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openServingEditModal(eventKey, groupKey){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var filterGroupKey = String(groupKey||'').trim();
       if (filterGroupKey && !canManageServingGroup_(filterGroupKey)) return;
@@ -3370,7 +3370,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openServingQuickEdit_(eventKey, position, entryIndex, entryRaw, groupKey){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       var ev = String(eventKey||'').trim();
       var pos = String(position||'').trim();
       var idx = parseInt(String(entryIndex||'0'), 10);
@@ -4601,16 +4600,7 @@ function eventDateYmdFromKey(ev){
         showErr('app', err || {code:'E500', zh:'系統錯誤', en:'System error'});
       });
     }
-
-
-    function isEmbeddedBlocked_(){
-      try{ return window.top !== window.self; }catch(e){ return true; }
-    }
-    function ensureNotEmbeddedForSensitive_(){
-      return true;
-    }
     function openContactFlow_(memberId){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_CONTACT', memberId, 'contact');
 
       var m = openModal(
@@ -4634,7 +4624,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openRemoveFromGroupFlow_(memberId, removableGroups, onDone){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_REMOVE_GROUP', memberId, 'serving_group_remove');
 
       var groups = Array.isArray(removableGroups) ? removableGroups.filter(Boolean) : [];
@@ -4689,7 +4678,6 @@ function eventDateYmdFromKey(ev){
     }
 
     function openStatusFlow_(memberId, currentStatus){
-      if(!ensureNotEmbeddedForSensitive_()) return;
       logAction('CLICK_STATUS', memberId, 'status');
 
       var options = '';
@@ -4874,7 +4862,7 @@ function eventDateYmdFromKey(ev){
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
       var root = $('app');
-      var servingRotaMode = (App.view === 'servingPlan');
+      var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan');
       setServingRotaMode_(servingRotaMode);
       if (App.view !== 'servingPlan' && App.servingPlanTimer){
         clearInterval(App.servingPlanTimer);
