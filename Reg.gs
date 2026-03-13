@@ -1281,6 +1281,8 @@ function api_reg_self_live_service_public(qrPayload){
         position: r.position,
         positionZh: admin_servingPositionZh_(r.position || ''),
         positionEn: admin_servingPositionLabel_(r.position || ''),
+        rawValue: String(r.rawValue || ''),
+        memberId: String(r.memberId || ''),
         nameZh: nameZh,
         nameEn: nameEn,
         suffixZh: suffixZh,

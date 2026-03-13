@@ -1474,8 +1474,26 @@
 
       function normalizedGroupKey(g){ return String(g||'').trim().toLowerCase(); }
       function badgeCls(g){ var k = normalizedGroupKey(g); return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : ''; }
-      function memberNameZh_(r){ var nm=String((r&&r.nameZh)||'').trim(); var sx=String((r&&r.suffixZh)||'').trim(); return nm ? (sx ? (nm+' '+sx) : nm) : ''; }
-      function memberNameEn_(r){ var nm=String((r&&r.nameEn)||'').trim(); var sx=String((r&&r.suffixEn)||'').trim(); return nm ? (sx ? (nm+' '+sx) : nm) : ''; }
+      function memberNameZh_(r){
+        var nmZh = String((r&&r.nameZh)||'').trim();
+        var nmEn = String((r&&r.nameEn)||'').trim();
+        var sx = String((r&&r.suffixZh)||'').trim();
+        var base = nmZh || nmEn;
+        return base ? (sx ? (base+' '+sx) : base) : '';
+      }
+      function memberNameEn_(r){
+        var nmEn = String((r&&r.nameEn)||'').trim();
+        var nmZh = String((r&&r.nameZh)||'').trim();
+        var base = nmEn || nmZh;
+        return base || '';
+      }
+      function isHiddenServingRow_(r){
+        var raw = String((r && r.rawValue) || '').trim().toUpperCase();
+        if (!raw) return true;
+        if (raw === 'N/A' || raw === 'NA') return true;
+        if (raw === 'CLOSED' || raw === '__CLOSED__' || raw.indexOf('CLOSED') === 0) return true;
+        return false;
+      }
 
       (res.servingThisWeek||[]).forEach(function(r){
         var g = normalizedGroupKey(r.group) || 'other';
@@ -1499,7 +1517,8 @@
 
       function renderGroupBlock_(g){
         var rowsByPos = {};
-        (groups[g] || []).forEach(function(r){
+        var visibleRows = (groups[g] || []).filter(function(r){ return !isHiddenServingRow_(r); });
+        visibleRows.forEach(function(r){
           var pos = String(r.position || '').trim() || 'OTHER';
           if (!rowsByPos[pos]) rowsByPos[pos] = { sample:r, items:[] };
           rowsByPos[pos].items.push(r);
@@ -1534,6 +1553,7 @@
           }
         }
 
+        if (!rows) return '';
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
         return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 0;padding-left:0;">'+rows+'</ul>'+songsHtml+'</div>';
       }
@@ -1544,7 +1564,15 @@
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>');
       pieces.push(renderSermonHtml_());
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
-      var blocks = Object.keys(groups).map(renderGroupBlock_).join('');
+      var groupOrder = ['worship','media','logistic','support','finance'];
+      var orderedKeys = Object.keys(groups).sort(function(a,b){
+        var ia = groupOrder.indexOf(a), ib = groupOrder.indexOf(b);
+        if (ia === -1 && ib === -1) return a.localeCompare(b);
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+      var blocks = orderedKeys.map(renderGroupBlock_).filter(Boolean).join('');
       pieces.push(blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>');
       pieces.push('<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>');
       return pieces.join('');
@@ -1681,7 +1709,7 @@ function viewSelfHoliday(m){
       return ''+
         '<div class="card">'+
           '<div class="big">📷 掃描 QR</div>'+
-          '<div class="small">掃描你的 QR 以使用自助功能（只作登記，不會自動簽到）。</div>'+
+          '<div class="small">請選擇「啟動相機」掃描 QR，或「上傳 QR 圖片」登入（只作登記，不會自動簽到）。</div>'+
           '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
@@ -1950,25 +1978,7 @@ function viewSelfHoliday(m){
         });
       };
 
-      setHtml_('scanMsg', showBox('warn','優先使用外置掃描器…','Starting external scanner…'));
-      openExternalScanner_(onCaptured, function(status){
-        if(status === 'success') return;
-        if(status === 'timeout'){
-          setHtml_('scanMsg', showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.'));
-          return;
-        }
-        if(status === 'cancel' || status === 'popup_closed'){
-          setHtml_('scanMsg', showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.'));
-          return;
-        }
-        if(status === 'blocked'){
-          setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.'));
-          return;
-        }
-        if(status === 'config_invalid'){
-          setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
-        }
-      });
+      setHtml_('scanMsg', showBox('warn','請選擇：掃描 QR 或上傳 QR 圖片','Choose: Scan QR or Upload QR image'));
     }
 
     function bindSelfHome(){
