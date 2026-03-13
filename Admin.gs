@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-11.admin111
+ * v2026-03-11.admin112
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-11.admin111';
+const ADMIN_VERSION = '2026-03-11.admin112';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -373,16 +373,16 @@ function api_admin_sermon_page(token, ym){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
   let month = String(ym || '').trim();
   if (!/^\d{4}-\d{2}$/.test(month)) month = admin_fmtYm_(admin_parseYmd_(admin_todayUkYmd_()) || new Date());
 
-  const sh = admin_ensureSermonSheet_();
+  const sh = admin_ensureSermonInfoSheet_();
   const events = admin_ensureSermonRowsForMonth_(sh, month);
-  const map = admin_getSermonMapByEventKeys_(events.map(function(ev){ return ev.eventKey; }));
+  const map = admin_getSermonInfoForMonth_(events.map(function(ev){ return ev.eventKey; }));
 
   const base = admin_parseYmd_(admin_todayUkYmd_()) || new Date();
   const months = [];
@@ -401,7 +401,7 @@ function api_admin_sermon_save(token, payload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
@@ -412,32 +412,28 @@ function api_admin_sermon_save(token, payload){
     return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
   }
   const dateYmd = m[1];
-  const speakerCcfId = String(p.speakerCcfId || '').trim().toUpperCase();
   const speaker = String(p.speaker || '').trim();
-  const title = String(p.title || '').trim();
-  const sermonPassage = String(p.sermonPassage || '').trim();
-  const responsePassage = String(p.responsePassage || '').trim();
-
-  const sh = admin_ensureSermonSheet_();
-  const colMap = admin_getSermonColMap_(sh);
-  let rowNumber = admin_findSermonRowByEventKey_(sh, eventKey);
-  if (!rowNumber){
-    sh.appendRow([eventKey, dateYmd, '', '', '', '', '', '', '', '']);
-    rowNumber = sh.getLastRow();
-  }
-
-  sh.getRange(rowNumber, colMap['EventKey'] || 1).setValue(eventKey);
-  sh.getRange(rowNumber, colMap['DateYmd'] || 2).setValue(dateYmd);
-  sh.getRange(rowNumber, colMap['講員CCFID'] || 3).setValue(speakerCcfId);
-  sh.getRange(rowNumber, colMap['講員'] || 4).setValue(speaker);
-  sh.getRange(rowNumber, colMap['講題'] || 5).setValue(title);
-  sh.getRange(rowNumber, colMap['講道經文'] || 6).setValue(sermonPassage);
-  sh.getRange(rowNumber, colMap['回應經文'] || 7).setValue(responsePassage);
-  sh.getRange(rowNumber, colMap['UpdatedAt'] || 8).setValue(admin_nowIso_());
-  sh.getRange(rowNumber, colMap['UpdatedBy'] || 9).setValue(String(s.actor.id || ''));
-  sh.getRange(rowNumber, colMap['UpdatedRole'] || 10).setValue(String(s.actor.role || ''));
-
-  const row = admin_getSermonRecordByEventKey_(eventKey);
+  const sermonTitle = String(p.sermonTitle || p.title || '').trim();
+  const sermonPassageRaw = String(p.sermonPassageRaw || p.sermonPassage || '').trim();
+  const responsePassageRaw = String(p.responsePassageRaw || p.responsePassage || '').trim();
+  const sermonParsed = bible_parseReference_(sermonPassageRaw);
+  const responseParsed = bible_parseReference_(responsePassageRaw);
+  const row = admin_upsertSermonInfoRow_(eventKey, {
+    Speaker: speaker,
+    SermonTitle: sermonTitle,
+    SermonPassageRaw: sermonPassageRaw,
+    SermonPassageCanonical: sermonParsed.canonical || '',
+    SermonPassageStatus: sermonParsed.status || 'EMPTY',
+    ResponsePassageRaw: responsePassageRaw,
+    ResponsePassageCanonical: responseParsed.canonical || '',
+    ResponsePassageStatus: responseParsed.status || 'EMPTY',
+    UpdatedAt: admin_nowIso_(),
+    UpdatedBy: String(s.actor.id || ''),
+    UpdatedRole: String(s.actor.role || '')
+  });
+  row.dateYmd = dateYmd;
+  row.sermonParsed = sermonParsed;
+  row.responseParsed = responseParsed;
   admin_audit_(s.actor, 'SERMON_SAVE', JSON.stringify({ eventKey: eventKey, actorId: String(s.actor.id || '') }), 'sermon_info');
   return { ok:true, row: row };
 }
@@ -1254,11 +1250,10 @@ function api_admin_event_detail(token, eventKey){
     lists:{ newMembers: newMembers, existingMembers: existingMembers },
     extras:{
       sermon:{
-        speakerCcfId: String(sermon.speakerCcfId || '').trim(),
         speaker: String(sermon.speaker || '').trim(),
-        title: String(sermon.title || '').trim(),
-        sermonPassage: String(sermon.sermonPassage || '').trim(),
-        responsePassage: String(sermon.responsePassage || '').trim()
+        title: String(sermon.sermonTitle || '').trim(),
+        sermonPassage: String(sermon.sermonPassageCanonical || sermon.sermonPassageRaw || '').trim(),
+        responsePassage: String(sermon.responsePassageCanonical || sermon.responsePassageRaw || '').trim()
       },
       offering: null,
       serving: servingRows
@@ -1902,47 +1897,46 @@ function admin_getUpcomingSundayEventKeys_(fromDateYmd, monthsAhead){
 }
 
 
-function admin_getSermonSheet_(){
+function admin_getSermonInfoSheet_(){
   const ss = admin_openSs_();
   return ss.getSheetByName(ADMIN_SERMON_SHEET_NAME) || null;
 }
-function admin_ensureSermonSheet_(){
+function admin_ensureSermonInfoSheet_(){
   const ss = admin_openSs_();
   let sh = ss.getSheetByName(ADMIN_SERMON_SHEET_NAME);
-  const headers = ['EventKey','DateYmd','講員CCFID','講員','講題','講道經文','回應經文','UpdatedAt','UpdatedBy','UpdatedRole'];
-  if (!sh){
-    sh = ss.insertSheet(ADMIN_SERMON_SHEET_NAME);
-  }
+  const headers = [
+    'EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus',
+    'ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole'
+  ];
+  if (!sh) sh = ss.insertSheet(ADMIN_SERMON_SHEET_NAME);
   const existingCols = Math.max(sh.getLastColumn(), headers.length);
   const existing = existingCols > 0 ? sh.getRange(1,1,1,existingCols).getValues()[0].map(function(v){ return String(v||'').trim(); }) : [];
-  let needsHeader = false;
-  for (let i=0;i<headers.length;i++){
-    if (existing[i] !== headers[i]){ needsHeader = true; break; }
+  let needsHeader = (sh.getLastRow() === 0);
+  if (!needsHeader){
+    for (let i=0;i<headers.length;i++){
+      if (existing[i] !== headers[i]){ needsHeader = true; break; }
+    }
   }
-  if (needsHeader || sh.getLastRow() === 0){
-    sh.getRange(1,1,1,headers.length).setValues([headers]);
-  }
+  if (needsHeader) sh.getRange(1,1,1,headers.length).setValues([headers]);
   sh.getRange(1,1,1,headers.length).setFontWeight('bold');
   return sh;
 }
-function admin_getSermonColMap_(sh){
-  const lastCol = Math.max(sh.getLastColumn(), 10);
+function admin_getSermonInfoHeaderMap_(sh){
+  const lastCol = Math.max((sh && sh.getLastColumn()) || 0, 12);
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
   const map = {};
   headers.forEach(function(h, idx){ if (h) map[h] = idx + 1; });
   return map;
 }
-function admin_findSermonRowByEventKey_(sh, eventKey){
+function admin_findSermonInfoRowByEventKey_(sh, eventKey){
   const ev = String(eventKey || '').trim();
   if (!ev) return null;
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return null;
-  const colMap = admin_getSermonColMap_(sh);
+  const colMap = admin_getSermonInfoHeaderMap_(sh);
   const evCol = colMap['EventKey'] || 1;
   const values = sh.getRange(2, evCol, lastRow - 1, 1).getValues();
-  for (let i=0;i<values.length;i++){
-    if (String((values[i] && values[i][0]) || '').trim() === ev) return i + 2;
-  }
+  for (let i=0;i<values.length;i++) if (String((values[i] && values[i][0]) || '').trim() === ev) return i + 2;
   return null;
 }
 function admin_getMonthSundayEvents_(ym){
@@ -1969,25 +1963,19 @@ function admin_getMonthSundayEvents_(ym){
 function admin_ensureSermonRowsForMonth_(sh, ym){
   const events = admin_getMonthSundayEvents_(ym);
   if (!events.length) return [];
-  const colMap = admin_getSermonColMap_(sh);
+  const colMap = admin_getSermonInfoHeaderMap_(sh);
   const lastRow = sh.getLastRow();
   const eventCol = colMap['EventKey'] || 1;
   const existing = {};
   if (lastRow >= 2){
     const values = sh.getRange(2, eventCol, lastRow - 1, 1).getValues();
-    values.forEach(function(row){
-      const ev = String((row && row[0]) || '').trim();
-      if (ev) existing[ev] = true;
-    });
+    values.forEach(function(row){ const ev = String((row && row[0]) || '').trim(); if (ev) existing[ev] = true; });
   }
   const toAppend = [];
   events.forEach(function(ev){
-    if (existing[ev.eventKey]) return;
-    toAppend.push([ev.eventKey, ev.dateYmd, '', '', '', '', '', '', '', '']);
+    if (!existing[ev.eventKey]) toAppend.push([ev.eventKey,'','','','','','','','','','','']);
   });
-  if (toAppend.length){
-    sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 10).setValues(toAppend);
-  }
+  if (toAppend.length) sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 12).setValues(toAppend);
   return events;
 }
 function admin_sermonBlankFromEventKey_(eventKey){
@@ -1996,66 +1984,230 @@ function admin_sermonBlankFromEventKey_(eventKey){
   return {
     eventKey: ev,
     dateYmd: m ? m[1] : '',
-    speakerCcfId: '',
     speaker: '',
-    title: '',
-    sermonPassage: '',
-    responsePassage: '',
+    sermonTitle: '',
+    sermonPassageRaw: '',
+    sermonPassageCanonical: '',
+    sermonPassageStatus: 'EMPTY',
+    responsePassageRaw: '',
+    responsePassageCanonical: '',
+    responsePassageStatus: 'EMPTY',
     updatedAt: '',
     updatedBy: '',
     updatedRole: ''
   };
 }
-function admin_getSermonRecordByEventKey_(eventKey){
-  const blank = admin_sermonBlankFromEventKey_(eventKey);
-  const sh = admin_getSermonSheet_();
-  if (!sh) return blank;
-  const rowNumber = admin_findSermonRowByEventKey_(sh, blank.eventKey);
-  if (!rowNumber) return blank;
-  const colMap = admin_getSermonColMap_(sh);
-  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 10)).getValues()[0];
+function admin_rowToSermonInfo_(row, colMap, fallbackEventKey){
+  const ev = String(row[(colMap['EventKey'] || 1) - 1] || '').trim() || String(fallbackEventKey || '').trim();
+  const blank = admin_sermonBlankFromEventKey_(ev);
   return {
-    eventKey: String(row[(colMap['EventKey'] || 1) - 1] || '').trim() || blank.eventKey,
-    dateYmd: String(row[(colMap['DateYmd'] || 2) - 1] || '').trim() || blank.dateYmd,
-    speakerCcfId: String(row[(colMap['講員CCFID'] || 3) - 1] || '').trim(),
-    speaker: String(row[(colMap['講員'] || 4) - 1] || '').trim(),
-    title: String(row[(colMap['講題'] || 5) - 1] || '').trim(),
-    sermonPassage: String(row[(colMap['講道經文'] || 6) - 1] || '').trim(),
-    responsePassage: String(row[(colMap['回應經文'] || 7) - 1] || '').trim(),
-    updatedAt: String(row[(colMap['UpdatedAt'] || 8) - 1] || '').trim(),
-    updatedBy: String(row[(colMap['UpdatedBy'] || 9) - 1] || '').trim(),
-    updatedRole: String(row[(colMap['UpdatedRole'] || 10) - 1] || '').trim()
+    eventKey: ev,
+    dateYmd: blank.dateYmd,
+    speaker: String(row[(colMap['Speaker'] || 2) - 1] || '').trim(),
+    sermonTitle: String(row[(colMap['SermonTitle'] || 3) - 1] || '').trim(),
+    sermonPassageRaw: String(row[(colMap['SermonPassageRaw'] || 4) - 1] || '').trim(),
+    sermonPassageCanonical: String(row[(colMap['SermonPassageCanonical'] || 5) - 1] || '').trim(),
+    sermonPassageStatus: String(row[(colMap['SermonPassageStatus'] || 6) - 1] || '').trim() || 'EMPTY',
+    responsePassageRaw: String(row[(colMap['ResponsePassageRaw'] || 7) - 1] || '').trim(),
+    responsePassageCanonical: String(row[(colMap['ResponsePassageCanonical'] || 8) - 1] || '').trim(),
+    responsePassageStatus: String(row[(colMap['ResponsePassageStatus'] || 9) - 1] || '').trim() || 'EMPTY',
+    updatedAt: String(row[(colMap['UpdatedAt'] || 10) - 1] || '').trim(),
+    updatedBy: String(row[(colMap['UpdatedBy'] || 11) - 1] || '').trim(),
+    updatedRole: String(row[(colMap['UpdatedRole'] || 12) - 1] || '').trim()
   };
 }
-function admin_getSermonMapByEventKeys_(eventKeys){
+function admin_getSermonRecordByEventKey_(eventKey){
+  const blank = admin_sermonBlankFromEventKey_(eventKey);
+  const sh = admin_getSermonInfoSheet_();
+  if (!sh) return blank;
+  const rowNumber = admin_findSermonInfoRowByEventKey_(sh, blank.eventKey);
+  if (!rowNumber) return blank;
+  const colMap = admin_getSermonInfoHeaderMap_(sh);
+  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 12)).getValues()[0];
+  return admin_rowToSermonInfo_(row, colMap, blank.eventKey);
+}
+function admin_upsertSermonInfoRow_(eventKey, fields){
+  const sh = admin_ensureSermonInfoSheet_();
+  const colMap = admin_getSermonInfoHeaderMap_(sh);
+  let rowNumber = admin_findSermonInfoRowByEventKey_(sh, eventKey);
+  if (!rowNumber){
+    sh.appendRow([String(eventKey||'').trim(),'','','','','','','','','','','']);
+    rowNumber = sh.getLastRow();
+  }
+  const allFields = fields || {};
+  ['EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus','ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole'].forEach(function(k){
+    if (!Object.prototype.hasOwnProperty.call(allFields, k) && k !== 'EventKey') return;
+    const v = (k === 'EventKey') ? String(eventKey||'').trim() : String(allFields[k] || '').trim();
+    sh.getRange(rowNumber, colMap[k] || 1).setValue(v);
+  });
+  return admin_getSermonRecordByEventKey_(eventKey);
+}
+function admin_getSermonInfoForMonth_(eventKeys){
   const out = {};
   const keys = Array.isArray(eventKeys) ? eventKeys.map(function(ev){ return String(ev||'').trim(); }).filter(Boolean) : [];
   keys.forEach(function(ev){ out[ev] = admin_sermonBlankFromEventKey_(ev); });
   if (!keys.length) return out;
-  const sh = admin_getSermonSheet_();
+  const sh = admin_getSermonInfoSheet_();
   if (!sh || sh.getLastRow() < 2) return out;
   const wanted = {};
   keys.forEach(function(ev){ wanted[ev] = true; });
-  const colMap = admin_getSermonColMap_(sh);
-  const rows = sh.getRange(2,1,sh.getLastRow()-1,Math.max(sh.getLastColumn(),10)).getValues();
+  const colMap = admin_getSermonInfoHeaderMap_(sh);
+  const rows = sh.getRange(2,1,sh.getLastRow()-1,Math.max(sh.getLastColumn(),12)).getValues();
   rows.forEach(function(row){
     const ev = String(row[(colMap['EventKey'] || 1) - 1] || '').trim();
     if (!wanted[ev]) return;
-    out[ev] = {
-      eventKey: ev,
-      dateYmd: String(row[(colMap['DateYmd'] || 2) - 1] || '').trim() || ((ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/)||[])[1] || ''),
-      speakerCcfId: String(row[(colMap['講員CCFID'] || 3) - 1] || '').trim(),
-      speaker: String(row[(colMap['講員'] || 4) - 1] || '').trim(),
-      title: String(row[(colMap['講題'] || 5) - 1] || '').trim(),
-      sermonPassage: String(row[(colMap['講道經文'] || 6) - 1] || '').trim(),
-      responsePassage: String(row[(colMap['回應經文'] || 7) - 1] || '').trim(),
-      updatedAt: String(row[(colMap['UpdatedAt'] || 8) - 1] || '').trim(),
-      updatedBy: String(row[(colMap['UpdatedBy'] || 9) - 1] || '').trim(),
-      updatedRole: String(row[(colMap['UpdatedRole'] || 10) - 1] || '').trim()
-    };
+    out[ev] = admin_rowToSermonInfo_(row, colMap, ev);
   });
   return out;
 }
+// Backward compatibility wrappers
+function admin_getSermonSheet_(){ return admin_getSermonInfoSheet_(); }
+function admin_ensureSermonSheet_(){ return admin_ensureSermonInfoSheet_(); }
+function admin_getSermonColMap_(sh){ return admin_getSermonInfoHeaderMap_(sh); }
+function admin_findSermonRowByEventKey_(sh, eventKey){ return admin_findSermonInfoRowByEventKey_(sh, eventKey); }
+function admin_getSermonMapByEventKeys_(eventKeys){ return admin_getSermonInfoForMonth_(eventKeys); }
+
+// sermon-info-v1 + bible-parser-v1
+function bible_normalizeReferenceInput_(raw){
+  return String(raw || '')
+    .replace(/[：﹕]/g, ':')
+    .replace(/[；︔]/g, ';')
+    .replace(/[，]/g, ',')
+    .replace(/[–—−~～]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function bible_buildBookAliasMap_(){
+  if (typeof __BIBLE_ALIAS_CACHE !== 'undefined' && __BIBLE_ALIAS_CACHE) return __BIBLE_ALIAS_CACHE;
+  var books = [
+    ['GEN','創世記','Genesis',['創','創世記','gen','ge','gn']],['EXO','出埃及記','Exodus',['出','出埃及記','exo','ex']],['LEV','利未記','Leviticus',['利','利未記','lev']],
+    ['NUM','民數記','Numbers',['民','民數記','num','nu']],['DEU','申命記','Deuteronomy',['申','申命記','deu','dt']],['JOS','約書亞記','Joshua',['書','約書亞記','jos']],
+    ['JDG','士師記','Judges',['士','士師記','jdg']],['RUT','路得記','Ruth',['得','路得記','rut']],['1SA','撒母耳記上','1 Samuel',['撒上','1sa','1 sam']],['2SA','撒母耳記下','2 Samuel',['撒下','2sa','2 sam']],
+    ['1KI','列王紀上','1 Kings',['王上','1ki','1 kgs']],['2KI','列王紀下','2 Kings',['王下','2ki','2 kgs']],['1CH','歷代志上','1 Chronicles',['代上','1ch']],['2CH','歷代志下','2 Chronicles',['代下','2ch']],
+    ['EZR','以斯拉記','Ezra',['拉','ezr']],['NEH','尼希米記','Nehemiah',['尼','neh']],['EST','以斯帖記','Esther',['斯','est']],['JOB','約伯記','Job',['伯','job']],
+    ['PSA','詩篇','Psalm',['詩','詩篇','psalm','psalms','ps']],['PRO','箴言','Proverbs',['箴','proverbs','prov','pro']],['ECC','傳道書','Ecclesiastes',['傳','ecc']],['SNG','雅歌','Song of Songs',['歌','雅歌','song of songs','song']],
+    ['ISA','以賽亞書','Isaiah',['賽','isa']],['JER','耶利米書','Jeremiah',['耶','jer']],['LAM','耶利米哀歌','Lamentations',['哀','lam']],['EZK','以西結書','Ezekiel',['結','ezk']],['DAN','但以理書','Daniel',['但','dan']],
+    ['HOS','何西阿書','Hosea',['何','hos']],['JOL','約珥書','Joel',['珥','jol']],['AMO','阿摩司書','Amos',['摩','amo']],['OBA','俄巴底亞書','Obadiah',['俄','oba']],['JON','約拿書','Jonah',['拿','jon']],
+    ['MIC','彌迦書','Micah',['彌','mic']],['NAM','那鴻書','Nahum',['鴻','nam']],['HAB','哈巴谷書','Habakkuk',['哈','hab']],['ZEP','西番雅書','Zephaniah',['番','zep']],['HAG','哈該書','Haggai',['該','hag']],
+    ['ZEC','撒迦利亞書','Zechariah',['亞','zec']],['MAL','瑪拉基書','Malachi',['瑪','mal']],['MAT','馬太福音','Matthew',['太','馬太福音','matthew','matt','mt']],['MRK','馬可福音','Mark',['可','馬可福音','mark','mk']],
+    ['LUK','路加福音','Luke',['路','路加福音','luke','lk']],['JHN','約翰福音','John',['約','約翰福音','john','jn']],['ACT','使徒行傳','Acts',['徒','使徒行傳','acts','ac']],['ROM','羅馬書','Romans',['羅','羅馬書','romans','rom']],
+    ['1CO','哥林多前書','1 Corinthians',['林前','1co','1 cor']],['2CO','哥林多後書','2 Corinthians',['林後','2co','2 cor']],['GAL','加拉太書','Galatians',['加','gal']],['EPH','以弗所書','Ephesians',['弗','eph']],['PHP','腓立比書','Philippians',['腓','php','phil']],
+    ['COL','歌羅西書','Colossians',['西','col']],['1TH','帖撒羅尼迦前書','1 Thessalonians',['帖前','1th']],['2TH','帖撒羅尼迦後書','2 Thessalonians',['帖後','2th']],['1TI','提摩太前書','1 Timothy',['提前','1ti']],['2TI','提摩太後書','2 Timothy',['提後','2ti']],
+    ['TIT','提多書','Titus',['多','tit']],['PHM','腓利門書','Philemon',['門','phm']],['HEB','希伯來書','Hebrews',['來','heb']],['JAS','雅各書','James',['雅','jas']],['1PE','彼得前書','1 Peter',['彼前','1pe']],
+    ['2PE','彼得後書','2 Peter',['彼後','2pe']],['1JN','約翰一書','1 John',['約一','1jn']],['2JN','約翰二書','2 John',['約二','2jn']],['3JN','約翰三書','3 John',['約三','3jn']],['JUD','猶大書','Jude',['猶','jud']],['REV','啟示錄','Revelation',['啟','啟示錄','revelation','rev']]
+  ];
+  var map = {};
+  books.forEach(function(b){
+    var meta = { key:b[0], zh:b[1], en:b[2] };
+    [b[1], b[2]].concat(b[3]||[]).forEach(function(a){
+      var k = String(a||'').trim().toLowerCase();
+      if (!k) return;
+      map[k] = meta;
+      map[k.replace(/\s+/g,'')] = meta;
+    });
+  });
+  __BIBLE_ALIAS_CACHE = map;
+  return map;
+}
+var __BIBLE_ALIAS_CACHE = null;
+function bible_parseReference_(raw){
+  var src = String(raw||'');
+  var normalized = bible_normalizeReferenceInput_(src);
+  if (!normalized) return { ok:true, status:'EMPTY', code:'', raw:src, canonical:'', segments:[], reasonZh:'', reasonEn:'' };
+  var alias = bible_buildBookAliasMap_();
+  var pieces = normalized.split(';').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+  if (!pieces.length) return { ok:true, status:'EMPTY', code:'', raw:src, canonical:'', segments:[], reasonZh:'', reasonEn:'' };
+  var segments = [];
+  var prevBook = null, prevChapter = null;
+  for (var i=0;i<pieces.length;i++){
+    var piece = pieces[i];
+    var m = piece.match(/^([^\d]+?)\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)$/) || piece.match(/^([^\d]+?)\s*(\d+)\s*:\s*(\d+)$/);
+    var mInheritChapter = piece.match(/^(\d+)\s*-\s*(\d+)$/);
+    var bookMeta = null, chapter = null, v1 = null, v2 = null;
+    if (m){
+      var bookRaw = String(m[1]||'').trim().toLowerCase().replace(/\s+/g,'');
+      bookMeta = alias[bookRaw] || alias[String(m[1]||'').trim().toLowerCase()];
+      if (!bookMeta){
+        if (i === 0) return { ok:false, status:'INVALID', code:'E711', raw:src, canonical:'', segments:segments, reasonZh:'無法識別卷名', reasonEn:'Unknown Bible book.' };
+        if (!/\d/.test(String(m[1]||''))){ bookMeta = prevBook; }
+      }
+      chapter = parseInt(m[2],10); v1 = parseInt(m[3],10); v2 = m[4] ? parseInt(m[4],10) : v1;
+    } else if (mInheritChapter){
+      if (!prevBook || !prevChapter) return { ok:false, status:'AMBIGUOUS', code:'E712', raw:src, canonical:'', segments:segments, reasonZh:'後段缺少卷名或章節', reasonEn:'Later segment missing book/chapter context.' };
+      bookMeta = prevBook; chapter = prevChapter; v1 = parseInt(mInheritChapter[1],10); v2 = parseInt(mInheritChapter[2],10);
+    } else {
+      return { ok:false, status:'INVALID', code:'E713', raw:src, canonical:'', segments:segments, reasonZh:'章節格式不正確', reasonEn:'Invalid chapter/verse format.' };
+    }
+    if (!bookMeta) return { ok:false, status:'INVALID', code:'E711', raw:src, canonical:'', segments:segments, reasonZh:'無法識別卷名', reasonEn:'Unknown Bible book.' };
+    if (!(chapter > 0 && v1 > 0 && v2 > 0 && v2 >= v1)) return { ok:false, status:'INVALID', code:'E713', raw:src, canonical:'', segments:segments, reasonZh:'章節範圍不正確', reasonEn:'Invalid chapter/verse range.' };
+    if (v2 - v1 > 176) return { ok:false, status:'AMBIGUOUS', code:'E712', raw:src, canonical:'', segments:segments, reasonZh:'經文範圍過大或不明確', reasonEn:'Verse range too broad or ambiguous.' };
+    segments.push({ bookKey:bookMeta.key, bookZh:bookMeta.zh, bookEn:bookMeta.en, chapter:chapter, verseStart:v1, verseEnd:v2 });
+    prevBook = bookMeta; prevChapter = chapter;
+  }
+  var canonical = segments.map(function(seg, idx){
+    var core = seg.chapter + ':' + seg.verseStart + (seg.verseEnd !== seg.verseStart ? ('-' + seg.verseEnd) : '');
+    return idx === 0 ? (seg.bookZh + ' ' + core) : core;
+  }).join('; ');
+  return { ok:true, status:'OK', code:'', raw:src, canonical:canonical, segments:segments, reasonZh:'', reasonEn:'' };
+}
+function bible_expandCanonicalSegments_(parsed){
+  return parsed && Array.isArray(parsed.segments) ? parsed.segments : [];
+}
+function bible_bookShortZhByKey_(bookKey){
+  var key = String(bookKey || '').trim().toUpperCase();
+  var map = {
+    GEN:'創',EXO:'出',LEV:'利',NUM:'民',DEU:'申',JOS:'書',JDG:'士',RUT:'得',
+    '1SA':'撒上','2SA':'撒下','1KI':'王上','2KI':'王下','1CH':'代上','2CH':'代下',
+    EZR:'拉',NEH:'尼',EST:'斯',JOB:'伯',PSA:'詩',PRO:'箴',ECC:'傳',SNG:'歌',
+    ISA:'賽',JER:'耶',LAM:'哀',EZK:'結',DAN:'但',HOS:'何',JOL:'珥',AMO:'摩',OBA:'俄',JON:'拿',MIC:'彌',NAM:'鴻',HAB:'哈',ZEP:'番',HAG:'該',ZEC:'亞',MAL:'瑪',
+    MAT:'太',MRK:'可',LUK:'路',JHN:'約',ACT:'徒',ROM:'羅',
+    '1CO':'林前','2CO':'林後',GAL:'加',EPH:'弗',PHP:'腓',COL:'西','1TH':'帖前','2TH':'帖後','1TI':'提前','2TI':'提後',TIT:'多',PHM:'門',HEB:'來',JAS:'雅','1PE':'彼前','2PE':'彼後','1JN':'約一','2JN':'約二','3JN':'約三',JUD:'猶',REV:'啟'
+  };
+  return map[key] || '';
+}
+
+function bible_fetchReferenceText_(canonicalRef, version){
+  var vRaw = String(version || 'unv').trim().toLowerCase();
+  var v = (vRaw === 'rcuv' || vRaw === 'unv') ? vRaw : 'unv';
+  var parsed = bible_parseReference_(canonicalRef);
+  if (!parsed.ok || parsed.status !== 'OK') return { ok:false, code:'E713', zh:'經文格式錯誤', en:'Invalid reference format.', canonical:canonicalRef, version:v, verses:[] };
+  var segs = bible_expandCanonicalSegments_(parsed);
+  var verses = [];
+  try{
+    segs.forEach(function(seg){
+      var shortZh = bible_bookShortZhByKey_(seg.bookKey) || seg.bookZh;
+      var secRange = (Number(seg.verseEnd || 0) > Number(seg.verseStart || 0))
+        ? (String(seg.verseStart) + '-' + String(seg.verseEnd))
+        : String(seg.verseStart);
+      var url = 'https://bible.fhl.net/json/qb.php?chineses='+encodeURIComponent(shortZh)+'&chap='+encodeURIComponent(seg.chapter)+'&sec='+encodeURIComponent(secRange)+'&version='+encodeURIComponent(v)+'&strong=0&gb=0';
+      var resp = UrlFetchApp.fetch(url, { muteHttpExceptions:true, followRedirects:true });
+      if (resp.getResponseCode() < 200 || resp.getResponseCode() >= 300) throw new Error('http_'+resp.getResponseCode());
+      var data = JSON.parse(resp.getContentText() || '{}');
+      var rec = Array.isArray(data.record) ? data.record : [];
+      if (!rec.length){
+        var fallbackUrl = 'https://bible.fhl.net/json/qsb.php?chineses='+encodeURIComponent(shortZh)+'&chap='+encodeURIComponent(seg.chapter)+'&sec='+encodeURIComponent(secRange)+'&version='+encodeURIComponent(v)+'&strong=0&gb=0';
+        var fallbackResp = UrlFetchApp.fetch(fallbackUrl, { muteHttpExceptions:true, followRedirects:true });
+        if (fallbackResp.getResponseCode() >= 200 && fallbackResp.getResponseCode() < 300){
+          var fallbackData = JSON.parse(fallbackResp.getContentText() || '{}');
+          rec = Array.isArray(fallbackData.record) ? fallbackData.record : [];
+        }
+      }
+      rec.forEach(function(r){
+        verses.push({
+          bookZh: seg.bookZh,
+          chapter: Number(r.chap || seg.chapter),
+          verse: Number(r.sec || 0),
+          text: String(r.bible_text || '').trim()
+        });
+      });
+    });
+    if (!verses.length) return { ok:false, code:'E716', zh:'找不到經文內容', en:'No verses returned.', canonical:parsed.canonical, version:v, verses:[] };
+    return { ok:true, canonical:parsed.canonical, version:v, verses:verses };
+  }catch(e){
+    return { ok:false, code:'E715', zh:'抓取經文失敗', en:'Bible fetch failed.', detail:String(e&&e.message||e), canonical:parsed.canonical, version:v, verses:[] };
+  }
+}
+
 function admin_getServingSheet_(){
   const ss = admin_openSs_();
   return ss.getSheetByName(ADMIN_SERVING_SHEET_NAME) || null;
