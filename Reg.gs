@@ -514,6 +514,18 @@ function api_reg_self_lookup_public(qrPayload){
 }
 
 
+
+function api_reg_self_bootstrap_public(qrPayload){
+  try{
+    const lookup = api_reg_self_lookup_public(qrPayload);
+    if (!lookup || !lookup.ok) return lookup || { ok:false, code:'E500', zh:'系統錯誤', en:'System error.' };
+    const snapshot = api_reg_self_portal_snapshot_public(qrPayload);
+    return { ok: !!(snapshot && snapshot.ok), member: lookup.member, snapshot: (snapshot && snapshot.ok) ? snapshot : null, error: (snapshot && snapshot.ok) ? null : snapshot };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
 function regGetCheckinsDataMinimal_(){
   const check = (typeof admin_getCheckinsData_ === 'function') ? admin_getCheckinsData_() : null;
   if (!check || !check.ok) return check || { ok:false, code:'E500', zh:'讀取簽到資料失敗', en:'Failed to read checkins.' };
@@ -778,7 +790,6 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     if (!auth.ok) return auth;
 
     const id = auth.parsed.id;
-    regRefreshMembersCachesForSelfPortal_();
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
     const rowServing = regServingGroupsFromRow_(auth.row);
@@ -822,6 +833,8 @@ function api_reg_self_portal_snapshot_public(qrPayload){
       ? rowServing.gl
       : (member ? reg_mergeServingGroups_(member.servingGLGroups, []) : []);
 
+    const memberSinceEarliest = regSelfMemberSinceEarliestYmd_(id, memberSinceRaw);
+
     return {
       ok:true,
       member:{
@@ -835,11 +848,11 @@ function api_reg_self_portal_snapshot_public(qrPayload){
         servingGLGroups: glGroupsMerged,
         isGl: !!(glGroupsMerged.length || statusNorm === 'GL'),
         away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
-        memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw)
+        memberSinceEarliest: memberSinceEarliest
       },
       attendance: att.stats,
       attendanceEvents: att.attendance,
-      memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw),
+      memberSinceEarliest: memberSinceEarliest,
       upcoming4: upcoming4
     };
   }catch(e){
@@ -855,7 +868,6 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
     const key = admin_normalizeServingGroup_(groupKey);
     if (!key) return { ok:false, code:'E416', zh:'組別格式錯誤', en:'Invalid group key.' };
 
-    regRefreshMembersCachesForSelfPortal_();
     const mi = admin_getMembersIndex_();
     const byId = (mi && mi.byId) ? mi.byId : {};
     const selfMember = byId[auth.parsed.id] || null;
@@ -906,7 +918,6 @@ function api_reg_self_serving_data_public(qrPayload){
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
     const id = auth.parsed.id;
-    regRefreshMembersCachesForSelfPortal_();
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
     const rowServing = regServingGroupsFromRow_(auth.row);
@@ -1208,6 +1219,13 @@ function api_reg_bible_text(canonicalRef, version){
   }
 }
 
+function reg_liveCacheGet_(key){
+  try{ var v = CacheService.getScriptCache().get(key); return v ? JSON.parse(v) : null; }catch(e){ return null; }
+}
+function reg_liveCachePut_(key, val, ttlSec){
+  try{ CacheService.getScriptCache().put(key, JSON.stringify(val), Number(ttlSec||30)); }catch(e){}
+}
+
 function api_reg_self_live_service_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
@@ -1224,14 +1242,23 @@ function api_reg_self_live_service_public(qrPayload){
     const next = (events && events.length) ? events[0].eventKey : '';
     const last = prevYmd ? ('SundayService_' + prevYmd) : '';
 
-    const check = admin_getCheckinsData_();
     const countByEvent = {};
-    if (check && check.ok){
-      check.rows.forEach(function(r){
-        if (!admin_isSundayServiceKey_(r.eventKey)) return;
-        if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
-        countByEvent[r.eventKey].add(r.memberId);
-      });
+    const liveCountCacheKey = 'reg_live_counts_' + String(next || '') + '_' + String(last || '');
+    const cachedCounts = reg_liveCacheGet_(liveCountCacheKey);
+    if (cachedCounts && typeof cachedCounts.nextCount === 'number' && typeof cachedCounts.lastCount === 'number'){
+      countByEvent[next] = { size: cachedCounts.nextCount };
+      countByEvent[last] = { size: cachedCounts.lastCount };
+    }else{
+      const check = admin_getCheckinsData_();
+      if (check && check.ok){
+        check.rows.forEach(function(r){
+          if (!admin_isSundayServiceKey_(r.eventKey)) return;
+          if (r.eventKey !== next && r.eventKey !== last) return;
+          if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
+          countByEvent[r.eventKey].add(r.memberId);
+        });
+      }
+      reg_liveCachePut_(liveCountCacheKey, { nextCount: (countByEvent[next] ? countByEvent[next].size : 0), lastCount: (countByEvent[last] ? countByEvent[last].size : 0) }, 30);
     }
 
     const mi = admin_getMembersIndex_() || {};
@@ -1257,8 +1284,13 @@ function api_reg_self_live_service_public(qrPayload){
 
     const worshipSongsThisWeek = [];
     if (next){
-      const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
-      const songs = planningMap[next] || {};
+      const worshipCacheKey = 'reg_live_worship_' + next;
+      var songs = reg_liveCacheGet_(worshipCacheKey);
+      if (!songs){
+        const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
+        songs = planningMap[next] || {};
+        reg_liveCachePut_(worshipCacheKey, songs, 45);
+      }
       [
         { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
         { section:'WORSHIP_MAIN_2', labelZh:'敬拜 2', labelEn:'Main 2' },
@@ -1281,7 +1313,14 @@ function api_reg_self_live_service_public(qrPayload){
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
-      sermonBlock: reg_buildCurrentServiceSermonBlock_(next),
+      sermonBlock: (function(){
+        var sermonCacheKey = 'reg_live_sermon_' + String(next || '');
+        var hit = reg_liveCacheGet_(sermonCacheKey);
+        if (hit) return hit;
+        var built = reg_buildCurrentServiceSermonBlock_(next);
+        reg_liveCachePut_(sermonCacheKey, built, 45);
+        return built;
+      })(),
       servingThisWeek: serving,
       worshipSongsThisWeek: worshipSongsThisWeek
     };
@@ -1501,7 +1540,6 @@ function reg_assertWorshipDeps_(){
 
 function reg_buildWorshipPagePayload_(auth, includeMembers){
   reg_assertWorshipDeps_();
-  regRefreshMembersCachesForSelfPortal_();
 
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
