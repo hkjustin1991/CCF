@@ -1267,9 +1267,12 @@ function api_reg_self_live_service_public(qrPayload){
     const serving = servingRaw.map(function(r){
       const m = byId[String(r.memberId||'').trim().toUpperCase()] || {};
       const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
-      const suffix = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄 / Brother'
-        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹 / Sister' : '');
-      const zhEnName = [String(r.nameZh||'').trim(), String(r.nameEn||'').trim()].filter(Boolean).join(' / ');
+      const suffixZh = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄'
+        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹' : '');
+      const suffixEn = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? 'Brother'
+        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? 'Sister' : '');
+      const nameZh = String(r.nameZh||'').trim();
+      const nameEn = String(r.nameEn||'').trim();
       return {
         eventKey: r.eventKey,
         group: admin_normalizeServingGroup_(r.group || ''),
@@ -1278,7 +1281,11 @@ function api_reg_self_live_service_public(qrPayload){
         position: r.position,
         positionZh: admin_servingPositionZh_(r.position || ''),
         positionEn: admin_servingPositionLabel_(r.position || ''),
-        displayName: zhEnName + (suffix ? (' · ' + suffix) : '')
+        nameZh: nameZh,
+        nameEn: nameEn,
+        suffixZh: suffixZh,
+        suffixEn: suffixEn,
+        displayName: [nameZh, nameEn].filter(Boolean).join(' / ') + (suffixZh || suffixEn ? (' · ' + [suffixZh, suffixEn].filter(Boolean).join(' / ')) : '')
       };
     });
 

@@ -1465,7 +1465,16 @@
       function normalizedGroupKey(g){ return String(g||'').trim().toLowerCase(); }
       function badgeCls(g){ var k = normalizedGroupKey(g); return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : ''; }
       function livePosLabel_(r){ var zh=String(r.positionZh||'').trim(), en=String(r.positionEn||'').trim(); if(!en) return zh; if(!zh) return en; return (en.toUpperCase().indexOf(zh.toUpperCase())>=0)?en:(zh+' / '+en); }
-      (res.servingThisWeek||[]).forEach(function(r){ var displayName = String((r && r.displayName) || '').trim(); if (!displayName) return; var g = normalizedGroupKey(r.group) || 'other'; if (!groups[g]) groups[g] = []; groups[g].push(r); });
+      function memberNameZh_(r){ var nm=String((r&&r.nameZh)||'').trim(); var sx=String((r&&r.suffixZh)||'').trim(); return nm ? (sx ? (nm+' '+sx) : nm) : ''; }
+      function memberNameEn_(r){ var nm=String((r&&r.nameEn)||'').trim(); var sx=String((r&&r.suffixEn)||'').trim(); return nm ? (sx ? (nm+' '+sx) : nm) : ''; }
+      (res.servingThisWeek||[]).forEach(function(r){
+        var zhName = memberNameZh_(r);
+        var enName = memberNameEn_(r);
+        if (!zhName && !enName && !String((r && r.displayName) || '').trim()) return;
+        var g = normalizedGroupKey(r.group) || 'other';
+        if (!groups[g]) groups[g] = [];
+        groups[g].push(r);
+      });
       var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
       var sermonBlock = res.sermonBlock || { hasData:false, entries:[] };
       var pieces = [];
@@ -1485,6 +1494,33 @@
       }
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
       var blocks = Object.keys(groups).map(function(g){
+        var byPos = {};
+        groups[g].forEach(function(r){
+          var p = String(r.position || '').trim() || 'OTHER';
+          if (!byPos[p]) byPos[p] = { sample:r, rows:[] };
+          byPos[p].rows.push(r);
+        });
+        var rows = Object.keys(byPos).map(function(p){
+          var bucket = byPos[p];
+          var sample = bucket.sample || {};
+          var zhNames = bucket.rows.map(function(r){ return memberNameZh_(r); }).filter(Boolean);
+          var enNames = bucket.rows.map(function(r){ return memberNameEn_(r); }).filter(Boolean);
+          if (!zhNames.length && !enNames.length){
+            var fallback = bucket.rows.map(function(r){ return String(r.displayName||'').trim(); }).filter(Boolean);
+            zhNames = fallback;
+          }
+          var zhLine = escapeHtml(String(sample.positionZh || '')) + ' · ' + escapeHtml(zhNames.join(' & '));
+          var enLabel = String(sample.positionEn || '').replace(/^.*?\s*\/\s*/, '');
+          var enLine = escapeHtml(enLabel) + ' · ' + escapeHtml((enNames.length ? enNames : zhNames).join(' & '));
+          return '<li style="list-style:none;margin:8px 0 0 0;">'+
+            '<div>'+zhLine+'</div>'+
+            '<div class="small" style="margin-top:2px;">'+enLine+'</div>'+
+          '</li>';
+        }).join('');
+        pieces.push('<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+lines+'</ul></div>');
+      }
+      pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
+      var blocks = Object.keys(groups).map(function(g){
         var rows = groups[g].map(function(r){ return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>'; }).join('');
         var songsHtml = '';
         if (normalizedGroupKey(g) === 'worship'){
@@ -1494,7 +1530,7 @@
           }
         }
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
-        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul>'+songsHtml+'</div>';
+        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 0;padding-left:0;">'+rows+'</ul>'+songsHtml+'</div>';
       }).join('');
       pieces.push(blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>');
       pieces.push('<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>');
@@ -3028,14 +3064,11 @@ function regBootSmokeTest_(){
       startGlobalClock_();
       try{ regBootSmokeTest_(); }catch(e){ showBootError_(e); return; }
       try{ render(); }catch(e){ showBootError_(e); return; }
-
-      setTimeout(function(){
-        tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
-          console.error('[auto-entry-fail]', e);
-          var msgEl = $('msg') || $('selfMsg') || $('worshipMsg');
-          if (msgEl){ msgEl.innerHTML = showBox('warn','自動進入失敗，已留在主頁','Auto-entry failed; staying on home page'); }
-        });
-      }, 0);
+      tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
+        console.error('[auto-entry-fail]', e);
+        var msgEl = $('msg') || $('selfMsg') || $('worshipMsg');
+        if (msgEl){ msgEl.innerHTML = showBox('warn','自動進入失敗，已回到主頁','Auto-entry failed, returned to home'); }
+      });
     }
 
     bootRegPortal_();
