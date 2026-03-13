@@ -191,7 +191,20 @@
       <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-13.reg115</span></div>
     </header>
 
-    <main id="app"></main>
+    <main id="app">
+      <div class="card" data-static-home="1">
+        <div class="big">📌 歡迎 / Welcome</div>
+        <div class="small" style="margin-top:8px;">
+          歡迎來到 CCF 自助服務平台！請先登入開始，若你是新朋友請先登記。我們期待在其中一個主日崇拜見到你！<br/>
+          Welcome to the CCF Self Service portal! Please login to get started, or register if you are new to us. We look forward to seeing you in one of our Sunday services!
+        </div>
+        <div class="miniBtnRow" style="margin-top:12px;">
+          <button id="btnLogin" class="alt btnLoginMain" type="button">🔐 登入 / Login</button>
+          <button id="btnNew" class="primary btnRegisterMain" type="button">🆕 註冊 / Register</button>
+        </div>
+      </div>
+      <div id="msg"></div>
+    </main>
 
     <footer class="small" style="padding:8px 4px;">
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>

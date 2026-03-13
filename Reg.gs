@@ -1782,7 +1782,6 @@ function reg_worship_song_save_with_auth_(auth, payload, actionSource){
 }
 
 function reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway, actionSource){
-  regRefreshMembersCachesForSelfPortal_();
   const mi = admin_getMembersIndex_();
   const actorId = String((auth && auth.parsed && auth.parsed.id) || '').toUpperCase();
   const member = (mi && mi.byId) ? mi.byId[actorId] : null;
@@ -1808,6 +1807,7 @@ function reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway,
   if (!token) return { ok:false, code:'E403', zh:'授權失敗', en:'Authorization failed.' };
   const res = api_admin_serving_event_save(token, eventKey, cleaned, overrideAway, 'WORSHIP');
   if (!res || !res.ok) return res;
+  regRefreshMembersCachesForSelfPortal_();
   const now = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
   const auditRows = cleaned.map(function(r){ return [now, actorId, String(eventKey||''), 'ROTA', String(r.position||''), '', String(r.value||''), String(actionSource || 'SELF_WORSHIP_GL_SAVE'), '']; });
   reg_writeWorshipAuditRows_(auditRows);
