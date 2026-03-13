@@ -1813,7 +1813,8 @@ function viewSelfHoliday(m){
 
         if(State.view === 'home'){
           $('app').innerHTML = viewHome();
-              return;
+          bindHomeCtas_();
+          return;
         }
 
         if(State.view === 'scan'){ $('app').innerHTML = viewScan(); bindScan(); return; }
@@ -3065,7 +3066,6 @@ function regBootSmokeTest_(){
     function bootRegPortal_(){
       startGlobalClock_();
       try{ regBootSmokeTest_(); }catch(e){ showBootError_(e); return; }
-      bindHomeCtas_();
       try{ render(); }catch(e){ showBootError_(e); return; }
       tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
         console.error('[auto-entry-fail]', e);
