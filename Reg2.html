@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-13.reg114
+  UI VERSION TAG: reg2-ui-2026-03-13.reg115
   ============================================================
 
   Changes (reg2-ui2):
@@ -188,7 +188,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-13.reg114</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-13.reg115</span></div>
     </header>
 
     <main id="app">
@@ -1705,6 +1705,21 @@ function viewSelfHoliday(m){
         '</div>';
     }
 
+    function viewScanChoice(){
+      return ''+
+        '<div class="card">'+
+          '<div class="big">🔐 登入 / Login</div>'+
+          '<div class="small">請選擇登入方式 / Choose login method</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="btnChoiceScan" class="primary" type="button">📷 掃描 QR / Scan QR</button>'+
+            '<button id="btnChoiceUpload" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<button id="btnChoiceBack" class="danger" type="button">⬅️ 返回 / Back</button>'+
+          '</div>'+
+          '<input id="choiceQrImageInput" type="file" accept="image/*" class="hide" />'+
+          '<div id="scanChoiceMsg"></div>'+
+        '</div>';
+    }
+
     function viewScan(){
       return ''+
         '<div class="card">'+
@@ -1824,7 +1839,7 @@ function viewSelfHoliday(m){
       };
       var btnLogin = $('btnLogin');
       if (btnLogin) btnLogin.onclick = function(){
-        State.view = 'scan';
+        State.view = 'scanChoice';
         render();
       };
     }
@@ -1845,6 +1860,7 @@ function viewSelfHoliday(m){
           return;
         }
 
+        if(State.view === 'scanChoice'){ $('app').innerHTML = viewScanChoice(); bindScanChoice(); return; }
         if(State.view === 'scan'){ $('app').innerHTML = viewScan(); bindScan(); return; }
         if(State.view === 'selfHome'){ $('app').innerHTML = viewSelfHome(State.prefill || {}); bindSelfHome(); return; }
         if(State.view === 'selfAttendance'){ $('app').innerHTML = viewAttendance(State.lastResult || {}); bindAttendance(); return; }
@@ -1894,6 +1910,31 @@ function viewSelfHoliday(m){
         var msg = (err && err.message) ? err.message : String(err||'');
         if (target) target.innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
       });
+    }
+
+    function bindScanChoice(){
+      if ($('btnChoiceBack')) $('btnChoiceBack').onclick = function(){ State.view='home'; render(); };
+      if ($('btnChoiceScan')) $('btnChoiceScan').onclick = function(){ State.view='scan'; render(); };
+      if ($('btnChoiceUpload') && $('choiceQrImageInput')){
+        $('btnChoiceUpload').onclick = function(){
+          var input = $('choiceQrImageInput');
+          input.value = '';
+          input.click();
+        };
+        $('choiceQrImageInput').onchange = function(ev){
+          var f = ev && ev.target && ev.target.files && ev.target.files[0];
+          if(!f) return;
+          setHtml_('scanChoiceMsg', showBox('warn','讀取圖片中…','Reading image…'));
+          decodeQrImageFile_(f).then(function(payload){
+            handleScanPayload_(payload, 'scanChoiceMsg');
+          }).catch(function(err){
+            setHtml_('scanChoiceMsg', showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'}));
+          }).finally(function(){
+            ev.target.value = '';
+          });
+        };
+      }
+      setHtml_('scanChoiceMsg', showBox('warn','請選擇：掃描 QR 或上傳 QR 圖片','Choose: Scan QR or Upload QR image'));
     }
 
     function bindScan(){
@@ -1978,7 +2019,29 @@ function viewSelfHoliday(m){
         });
       };
 
-      setHtml_('scanMsg', showBox('warn','請選擇：掃描 QR 或上傳 QR 圖片','Choose: Scan QR or Upload QR image'));
+      setHtml_('scanMsg', showBox('warn','優先使用外置掃描器…','Starting external scanner…'));
+      if (EXTERNAL_SCANNER_CONFIG.ok){
+        openExternalScanner_(onCaptured, function(status){
+          if(status === 'success') return;
+          if(status === 'timeout'){
+            setHtml_('scanMsg', showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.'));
+            return;
+          }
+          if(status === 'cancel' || status === 'popup_closed'){
+            setHtml_('scanMsg', showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.'));
+            return;
+          }
+          if(status === 'blocked'){
+            setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.'));
+            return;
+          }
+          if(status === 'config_invalid'){
+            setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
+          }
+        });
+      } else {
+        setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
+      }
     }
 
     function bindSelfHome(){
