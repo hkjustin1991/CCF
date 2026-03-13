@@ -2153,20 +2153,53 @@ function bible_parseReference_(raw){
 function bible_expandCanonicalSegments_(parsed){
   return parsed && Array.isArray(parsed.segments) ? parsed.segments : [];
 }
+function bible_bookShortZhByKey_(bookKey){
+  var key = String(bookKey || '').trim().toUpperCase();
+  var map = {
+    GEN:'創',EXO:'出',LEV:'利',NUM:'民',DEU:'申',JOS:'書',JDG:'士',RUT:'得',
+    '1SA':'撒上','2SA':'撒下','1KI':'王上','2KI':'王下','1CH':'代上','2CH':'代下',
+    EZR:'拉',NEH:'尼',EST:'斯',JOB:'伯',PSA:'詩',PRO:'箴',ECC:'傳',SNG:'歌',
+    ISA:'賽',JER:'耶',LAM:'哀',EZK:'結',DAN:'但',HOS:'何',JOL:'珥',AMO:'摩',OBA:'俄',JON:'拿',MIC:'彌',NAM:'鴻',HAB:'哈',ZEP:'番',HAG:'該',ZEC:'亞',MAL:'瑪',
+    MAT:'太',MRK:'可',LUK:'路',JHN:'約',ACT:'徒',ROM:'羅',
+    '1CO':'林前','2CO':'林後',GAL:'加',EPH:'弗',PHP:'腓',COL:'西','1TH':'帖前','2TH':'帖後','1TI':'提前','2TI':'提後',TIT:'多',PHM:'門',HEB:'來',JAS:'雅','1PE':'彼前','2PE':'彼後','1JN':'約一','2JN':'約二','3JN':'約三',JUD:'猶',REV:'啟'
+  };
+  return map[key] || '';
+}
+
 function bible_fetchReferenceText_(canonicalRef, version){
-  var v = String(version || 'unv').trim().toLowerCase() || 'unv';
+  var vRaw = String(version || 'unv').trim().toLowerCase();
+  var v = (vRaw === 'rcuv' || vRaw === 'unv') ? vRaw : 'unv';
   var parsed = bible_parseReference_(canonicalRef);
   if (!parsed.ok || parsed.status !== 'OK') return { ok:false, code:'E713', zh:'經文格式錯誤', en:'Invalid reference format.', canonical:canonicalRef, version:v, verses:[] };
   var segs = bible_expandCanonicalSegments_(parsed);
   var verses = [];
   try{
     segs.forEach(function(seg){
-      var url = 'https://bible.fhl.net/json/qsb.php?chineses='+encodeURIComponent(seg.bookZh)+'&chap='+encodeURIComponent(seg.chapter)+'&sec='+encodeURIComponent(seg.verseStart)+'-'+encodeURIComponent(seg.verseEnd)+'&version='+encodeURIComponent(v)+'&strong=0&gb=0';
+      var shortZh = bible_bookShortZhByKey_(seg.bookKey) || seg.bookZh;
+      var secRange = (Number(seg.verseEnd || 0) > Number(seg.verseStart || 0))
+        ? (String(seg.verseStart) + '-' + String(seg.verseEnd))
+        : String(seg.verseStart);
+      var url = 'https://bible.fhl.net/json/qb.php?chineses='+encodeURIComponent(shortZh)+'&chap='+encodeURIComponent(seg.chapter)+'&sec='+encodeURIComponent(secRange)+'&version='+encodeURIComponent(v)+'&strong=0&gb=0';
       var resp = UrlFetchApp.fetch(url, { muteHttpExceptions:true, followRedirects:true });
       if (resp.getResponseCode() < 200 || resp.getResponseCode() >= 300) throw new Error('http_'+resp.getResponseCode());
       var data = JSON.parse(resp.getContentText() || '{}');
       var rec = Array.isArray(data.record) ? data.record : [];
-      rec.forEach(function(r){ verses.push({ bookZh:seg.bookZh, chapter:Number(r.chap||seg.chapter), verse:Number(r.sec||0), text:String(r.bible_text||'').trim() }); });
+      if (!rec.length){
+        var fallbackUrl = 'https://bible.fhl.net/json/qsb.php?chineses='+encodeURIComponent(shortZh)+'&chap='+encodeURIComponent(seg.chapter)+'&sec='+encodeURIComponent(secRange)+'&version='+encodeURIComponent(v)+'&strong=0&gb=0';
+        var fallbackResp = UrlFetchApp.fetch(fallbackUrl, { muteHttpExceptions:true, followRedirects:true });
+        if (fallbackResp.getResponseCode() >= 200 && fallbackResp.getResponseCode() < 300){
+          var fallbackData = JSON.parse(fallbackResp.getContentText() || '{}');
+          rec = Array.isArray(fallbackData.record) ? fallbackData.record : [];
+        }
+      }
+      rec.forEach(function(r){
+        verses.push({
+          bookZh: seg.bookZh,
+          chapter: Number(r.chap || seg.chapter),
+          verse: Number(r.sec || 0),
+          text: String(r.bible_text || '').trim()
+        });
+      });
     });
     if (!verses.length) return { ok:false, code:'E716', zh:'找不到經文內容', en:'No verses returned.', canonical:parsed.canonical, version:v, verses:[] };
     return { ok:true, canonical:parsed.canonical, version:v, verses:verses };
