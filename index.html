@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CCF Live Service Portal / 粵語基督徒團契</title>
+  <title>粵語基督徒團契 主日崇拜同工專頁</title>
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
@@ -167,7 +167,8 @@
   <div class="wrap">
     <header class="topbar">
       <div>
-        <div class="title">CCF Live Service Portal / 粵語基督徒團契</div>
+        <div class="title">粵語基督徒團契 主日崇拜同工專頁</div>
+        <div class="sub" style="font-size:var(--fs-small);font-weight:600;">CCF Live Service Portal</div>
         <div class="sub">同工專用 / Staff only</div>
         <div class="hint">
           請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
@@ -596,8 +597,20 @@
       var v = String(value || '').trim().toUpperCase();
       return (v === 'N/A' || v === 'NA');
     }
+    function isServingClosedValue_(value){
+      var v = String(value || '').trim().toUpperCase();
+      if (!v) return false;
+      return (v === 'CLOSED' || v === '__CLOSED__' || v.indexOf('CLOSED') === 0);
+    }
     function isServingNaRow_(row){
-      return isServingNaValue_(row.position) || isServingNaValue_(row.slot) || isServingNaValue_(row.memberId);
+      return isServingNaValue_(row.position) || isServingNaValue_(row.slot) || isServingNaValue_(row.memberId) || isServingNaValue_(row.rawValue);
+    }
+    function isServingHiddenRow_(row){
+      if (!row) return true;
+      if (isServingNaRow_(row)) return true;
+      if (isServingClosedValue_(row.rawValue) || isServingClosedValue_(row.memberId)) return true;
+      if (!String(row.memberId || '').trim()) return true;
+      return false;
     }
 
     function buildBoxHtml_(kind, titleZh, titleEn, detailHtml){
@@ -2390,7 +2403,8 @@ if (btnC) {
         if(!box) return;
 
         var list = (res && res.servingToday) ? res.servingToday : [];
-        if(!list.length){
+        var visibleList = list.filter(function(r){ return !isServingHiddenRow_(r); });
+        if(!visibleList.length){
           box.innerHTML =
             '<div class="big">🧩 事奉 / Serving today</div>' +
             '<div class="msgBox warn" style="margin-top:10px;">' +
@@ -2399,15 +2413,20 @@ if (btnC) {
           return;
         }
 
-        var groupKeys = Object.keys(SERVING_GROUP_LABELS).filter(function(key){
-          return list.some(function(r){ return String(r.group||'').toUpperCase() === key; });
+        var groupOrder = ['WORSHIP','MEDIA','LOGISTIC','SUPPORT','FINANCE'];
+        var groupKeys = groupOrder.filter(function(key){
+          return visibleList.some(function(r){ return String(r.group||'').toUpperCase() === key; });
+        });
+        visibleList.forEach(function(r){
+          var k = String(r.group||'').toUpperCase();
+          if (k && groupKeys.indexOf(k) === -1) groupKeys.push(k);
         });
         var openGroup = App.servingOpenGroup;
         var summaryHtml =
           '<div class="chipRow" style="margin-top:8px;">' +
           groupKeys.map(function(key){
-            var rows = list.filter(function(r){ return String(r.group||'').toUpperCase() === key; });
-            var applicable = rows.filter(function(r){ return !isServingNaRow_(r); });
+            var rows = visibleList.filter(function(r){ return String(r.group||'').toUpperCase() === key; });
+            var applicable = rows;
             var allOk = applicable.every(function(r){ return !!r.checkedIn; });
             var cls = allOk ? 'good' : 'bad';
             var icon = allOk ? '✅' : '❌';
@@ -2420,17 +2439,14 @@ if (btnC) {
 
         var expandedHtml = '';
         if (openGroup){
-          var groupRows = list.filter(function(r){ return String(r.group||'').toUpperCase() === openGroup; });
+          var groupRows = visibleList.filter(function(r){ return String(r.group||'').toUpperCase() === openGroup; });
           expandedHtml =
             '<div class="listWrap" style="margin-top:10px;">'+
               (groupRows.length
                 ? groupRows.map(function(row){
                     var nameLine = [row.nameZh, row.nameEn].filter(Boolean).join(' · ');
                     var roleLine = getServingPositionLabel_(row.position);
-                    var isNa = isServingNaRow_(row);
-                    var statusChip = isNa
-                      ? '<span class="chip warn">N/A</span>'
-                      : (row.checkedIn
+                    var statusChip = (row.checkedIn
                         ? '<span class="chip goodLight">✅ 已簽到 / Checked-in</span>'
                         : '<span class="chip bad">❌ 未簽到 / Not yet</span>');
                     return ''+
@@ -2446,7 +2462,7 @@ if (btnC) {
 
         box.innerHTML =
           '<div class="big">🧩 事奉 / Serving today</div>' +
-          '<div class="small">共 ' + list.length + ' 位 / Total ' + list.length + '</div>' +
+          '<div class="small">共 ' + visibleList.length + ' 位 / Total ' + visibleList.length + '</div>' +
           summaryHtml +
           expandedHtml;
         attachScrollControls_(box);
