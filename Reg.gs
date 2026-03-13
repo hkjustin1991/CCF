@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-11.reg112
+ * v2026-03-11.reg113
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-11.reg112';
+const REG_VERSION = '2026-03-11.reg113';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -52,6 +52,9 @@ const REG_EXTRA_HEADERS = [
 
 const REG_ACTIVITY_SHEET = 'Reg_Activity';
 const REG_SERMON_SHEET = 'Sermon_Info';
+const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
+const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
+
 
 /******** Entry ********/
 function doGetReg_(e){
@@ -1132,32 +1135,77 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
 }
 
 
-function reg_getSermonByEventKey_(eventKey){
+function reg_getSermonInfoByEventKey_(eventKey){
   const ev = String(eventKey || '').trim();
-  const out = { speakerCcfId:'', speaker:'', title:'', sermonPassage:'', responsePassage:'' };
+  const out = {
+    eventKey: ev,
+    speaker:'',
+    sermonTitle:'',
+    sermonPassageRaw:'',
+    sermonPassageCanonical:'',
+    sermonPassageStatus:'EMPTY',
+    responsePassageRaw:'',
+    responsePassageCanonical:'',
+    responsePassageStatus:'EMPTY'
+  };
   if (!/^SundayService_\d{4}-\d{2}-\d{2}$/.test(ev)) return out;
   try{
-    const ss = SpreadsheetApp.openById((typeof SPREADSHEET_ID !== 'undefined') ? SPREADSHEET_ID : ADMIN_SPREADSHEET_ID);
-    const sh = ss.getSheetByName(REG_SERMON_SHEET);
-    if (!sh || sh.getLastRow() < 2) return out;
-    const lastCol = Math.max(sh.getLastColumn(), 10);
-    const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
-    const map = {};
-    headers.forEach(function(h, i){ if (h) map[h] = i; });
-    const rows = sh.getRange(2,1,sh.getLastRow()-1,lastCol).getValues();
-    for (let i=0;i<rows.length;i++){
-      const row = rows[i];
-      const k = String(row[map['EventKey'] != null ? map['EventKey'] : 0] || '').trim();
-      if (k !== ev) continue;
-      out.speakerCcfId = String(row[map['講員CCFID'] != null ? map['講員CCFID'] : 2] || '').trim();
-      out.speaker = String(row[map['講員'] != null ? map['講員'] : 3] || '').trim();
-      out.title = String(row[map['講題'] != null ? map['講題'] : 4] || '').trim();
-      out.sermonPassage = String(row[map['講道經文'] != null ? map['講道經文'] : 5] || '').trim();
-      out.responsePassage = String(row[map['回應經文'] != null ? map['回應經文'] : 6] || '').trim();
+    if (typeof admin_getSermonRecordByEventKey_ === 'function'){
+      const rec = admin_getSermonRecordByEventKey_(ev) || {};
+      out.speaker = String(rec.speaker || '').trim();
+      out.sermonTitle = String(rec.sermonTitle || '').trim();
+      out.sermonPassageRaw = String(rec.sermonPassageRaw || '').trim();
+      out.sermonPassageCanonical = String(rec.sermonPassageCanonical || '').trim();
+      out.sermonPassageStatus = String(rec.sermonPassageStatus || '').trim() || 'EMPTY';
+      out.responsePassageRaw = String(rec.responsePassageRaw || '').trim();
+      out.responsePassageCanonical = String(rec.responsePassageCanonical || '').trim();
+      out.responsePassageStatus = String(rec.responsePassageStatus || '').trim() || 'EMPTY';
       return out;
     }
   }catch(e){}
   return out;
+}
+function reg_buildCurrentServiceSermonBlock_(eventKey){
+  const info = reg_getSermonInfoByEventKey_(eventKey);
+  const entries = [];
+  if (info.speaker) entries.push({ key:'speaker', labelZh:'講員', labelEn:'Speaker', text:info.speaker, clickable:false });
+  if (info.sermonTitle) entries.push({ key:'sermonTitle', labelZh:'講題', labelEn:'Sermon title', text:info.sermonTitle, clickable:false });
+  if (info.sermonPassageCanonical && info.sermonPassageStatus === 'OK') entries.push({ key:'sermonPassage', labelZh:'講道經文', labelEn:'Sermon passage', text:info.sermonPassageCanonical, canonical:info.sermonPassageCanonical, clickable:true });
+  else if (info.sermonPassageRaw) entries.push({ key:'sermonPassage', labelZh:'講道經文', labelEn:'Sermon passage', text:info.sermonPassageRaw, clickable:false });
+  if (info.responsePassageCanonical && info.responsePassageStatus === 'OK') entries.push({ key:'responsePassage', labelZh:'回應經文', labelEn:'Response passage', text:info.responsePassageCanonical, canonical:info.responsePassageCanonical, clickable:true });
+  else if (info.responsePassageRaw) entries.push({ key:'responsePassage', labelZh:'回應經文', labelEn:'Response passage', text:info.responsePassageRaw, clickable:false });
+  return { hasData: entries.length > 0, entries: entries, raw: info };
+}
+function api_reg_sermon_info(eventKey){
+  try{
+    const b = reg_buildCurrentServiceSermonBlock_(eventKey);
+    return { ok:true, eventKey:String(eventKey||''), hasData:b.hasData, entries:b.entries, sermon:b.raw };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+function reg_bibleCacheKey_(canonicalRef, version){
+  return REG_BIBLE_CACHE_PREFIX + encodeURIComponent(String(version||'unv').toLowerCase()) + '_' + Utilities.base64EncodeWebSafe(String(canonicalRef||''));
+}
+function api_reg_bible_text(canonicalRef, version){
+  try{
+    const ref = String(canonicalRef || '').trim();
+    const ver = String(version || 'unv').trim().toLowerCase() || 'unv';
+    if (!ref) return { ok:false, code:'E713', zh:'經文格式錯誤', en:'Invalid reference format.', canonical:'', version:ver, verses:[] };
+    const cache = CacheService.getScriptCache();
+    const key = reg_bibleCacheKey_(ref, ver);
+    const hit = cache.get(key);
+    if (hit){
+      const parsed = JSON.parse(hit);
+      parsed.cached = true;
+      return parsed;
+    }
+    const fetched = bible_fetchReferenceText_(ref, ver);
+    if (fetched && fetched.ok) cache.put(key, JSON.stringify(fetched), REG_BIBLE_CACHE_TTL);
+    return fetched;
+  }catch(e){
+    return { ok:false, code:'E715', zh:'抓取經文失敗', en:'Bible fetch failed.', detail:String(e&&e.message||e), canonical:String(canonicalRef||''), version:String(version||'unv'), verses:[] };
+  }
 }
 
 function api_reg_self_live_service_public(qrPayload){
@@ -1233,7 +1281,7 @@ function api_reg_self_live_service_public(qrPayload){
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
-      sermon: reg_getSermonByEventKey_(next),
+      sermonBlock: reg_buildCurrentServiceSermonBlock_(next),
       servingThisWeek: serving,
       worshipSongsThisWeek: worshipSongsThisWeek
     };

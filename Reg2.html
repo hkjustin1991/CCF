@@ -677,6 +677,8 @@
       worshipMembers: [],
       worshipMembersLoaded: false,
       worshipMembersFetchedAt: 0,
+      sermonExpandState: {},
+      sermonTextCache: {},
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -1455,53 +1457,38 @@
       var cur = res.currentAttendance || {};
       var last = res.lastAttendance || {};
       var groups = {};
-      function normalizedGroupKey(g){
-        return String(g||'').trim().toLowerCase();
-      }
+      function normalizedGroupKey(g){ return String(g||'').trim().toLowerCase(); }
       (res.servingThisWeek||[]).forEach(function(r){
-        var displayName = String((r && r.displayName) || '').trim();
-        if (!displayName) return;
-        var g = normalizedGroupKey(r.group) || 'other';
-        if (!groups[g]) groups[g] = [];
-        groups[g].push(r);
+        var displayName = String((r && r.displayName) || '').trim(); if (!displayName) return;
+        var g = normalizedGroupKey(r.group) || 'other'; if (!groups[g]) groups[g] = []; groups[g].push(r);
       });
-      function badgeCls(g){
-        var k = normalizedGroupKey(g);
-        return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : '';
-      }
-      function livePosLabel_(r){
-        var zh = String(r.positionZh||'').trim();
-        var en = String(r.positionEn||'').trim();
-        if (!en) return zh;
-        if (!zh) return en;
-        if (en.toUpperCase().indexOf(zh.toUpperCase()) >= 0) return en;
-        return zh + ' / ' + en;
-      }
+      function badgeCls(g){ var k = normalizedGroupKey(g); return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : ''; }
+      function livePosLabel_(r){ var zh=String(r.positionZh||'').trim(), en=String(r.positionEn||'').trim(); if(!en) return zh; if(!zh) return en; return (en.toUpperCase().indexOf(zh.toUpperCase())>=0)?en:(zh+' / '+en); }
       var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
-      var sermon = res.sermon || {};
-      var sermonEntries = [
-        { label:'講員 / Speaker', value:String(sermon.speaker||'').trim() },
-        { label:'講題 / Title', value:String(sermon.title||'').trim() },
-        { label:'講道經文 / Sermon passage', value:String(sermon.sermonPassage||'').trim() },
-        { label:'回應經文 / Response passage', value:String(sermon.responsePassage||'').trim() }
-      ].filter(function(it){ return !!it.value; });
-      var sermonHtml = sermonEntries.length
-        ? '<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+sermonEntries.map(function(it){ return '<li>'+escapeHtml(it.label)+' · '+escapeHtml(it.value)+'</li>'; }).join('')+'</ul></div>'
-        : '';
-      var blocks = Object.keys(groups).map(function(g){
-        var rows = groups[g].map(function(r){
-          return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>';
+      var sermonBlock = res.sermonBlock || { hasData:false, entries:[] };
+      var sermonHtml = '';
+      if (sermonBlock.hasData){
+        var lines = (sermonBlock.entries||[]).map(function(it){
+          var val = escapeHtml(String(it.text||''));
+          if (it.clickable && it.canonical){
+            var key = String(it.key||'');
+            val = '<button class="btnLookup btnSmall" data-sermon-toggle="1" data-sermon-key="'+escapeHtml(key)+'" data-canonical="'+escapeHtml(String(it.canonical||''))+'">'+val+'</button>'+
+              '<div id="sermonText_'+escapeHtml(key)+'" class="small" style="margin-top:6px;"></div>';
+          }
+          return '<li><b>'+escapeHtml(String(it.labelZh||'')+' / '+String(it.labelEn||''))+'</b> · '+val+'</li>';
         }).join('');
+        sermonHtml = '<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+lines+'</ul></div>';
+      }
+      var blocks = Object.keys(groups).map(function(g){
+        var rows = groups[g].map(function(r){ return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>'; }).join('');
         var songsHtml = '';
         if (normalizedGroupKey(g) === 'worship'){
           var filledSongs = worshipSongs.filter(function(song){ return String((song && song.songTitle) || '').trim(); });
           if (filledSongs.length){
-            songsHtml = '<div style="margin-top:8px;"><b>本週詩歌 / Songs this week</b><ul style="margin:6px 0 0 18px;">'+
-              filledSongs.map(function(song){
-                var label = [String(song.labelZh||''), String(song.labelEn||'')].filter(Boolean).join(' / ');
-                return '<li>' + escapeHtml(label) + ' · ' + escapeHtml(String(song.songTitle||'')) + '</li>';
-              }).join('')+
-              '</ul></div>';
+            songsHtml = '<div style="margin-top:8px;"><b>本週詩歌 / Songs this week</b><ul style="margin:6px 0 0 18px;">'+filledSongs.map(function(song){
+              var label = [String(song.labelZh||''), String(song.labelEn||'')].filter(Boolean).join(' / ');
+              return '<li>' + escapeHtml(label) + ' · ' + escapeHtml(String(song.songTitle||'')) + '</li>';
+            }).join('')+'</ul></div>';
           }
         }
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
@@ -1509,15 +1496,14 @@
       }).join('');
       return '<div class="card"><div class="big">📡 聚會資訊 / Service information</div>'+
         '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
-        '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
+        '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week's attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
         sermonHtml+
         '<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>'+
         (blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>')+
         '<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>';
     }
 
-
-    function viewSelfHoliday(m){
+function viewSelfHoliday(m){
       m = m || {}; var a = m.away || {};
       return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
         '<div class="label">假期 1 From</div><input id="hFrom1" type="date" value="'+escapeHtml(a.from1||'')+'" />'+
@@ -2613,7 +2599,35 @@
       });
     }
 
-    function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
+    function bindLive(){
+      if ($('btnLiveBack')) $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); };
+      Array.prototype.slice.call(document.querySelectorAll('[data-sermon-toggle]')).forEach(function(btn){
+        btn.onclick = function(){
+          var key = String(btn.getAttribute('data-sermon-key')||'');
+          var canonical = String(btn.getAttribute('data-canonical')||'');
+          var target = $('sermonText_' + key);
+          if (!target || !canonical) return;
+          var expanded = !!State.sermonExpandState[key];
+          if (expanded){ State.sermonExpandState[key] = false; target.innerHTML = ''; return; }
+          State.sermonExpandState[key] = true;
+          if (State.sermonTextCache[canonical]){
+            var c = State.sermonTextCache[canonical];
+            target.innerHTML = c;
+            return;
+          }
+          target.innerHTML = showBox('warn','載入經文中…','Loading verses...');
+          callApi('api_reg_bible_text', canonical, 'unv').then(function(r){
+            if(!r || !r.ok){ target.innerHTML = showBox('err','載入經文失敗','Failed to load Bible text'); return; }
+            var verses = Array.isArray(r.verses) ? r.verses : [];
+            var vhtml = '<div class="msgBox"><div><b>'+escapeHtml(String(r.canonical||canonical))+'</b> <span class="small">'+escapeHtml(String(r.version||'unv'))+'</span></div>' +
+              verses.map(function(v){ return '<div style="margin-top:4px;">'+escapeHtml(String(v.chapter||''))+':'+escapeHtml(String(v.verse||''))+' '+escapeHtml(String(v.text||''))+'</div>'; }).join('') +
+              '</div>';
+            State.sermonTextCache[canonical] = vhtml;
+            target.innerHTML = vhtml;
+          }).catch(function(){ target.innerHTML = showBox('err','載入經文失敗','Failed to load Bible text'); });
+        };
+      });
+    }
 
     function bindHoliday(){
       var holidayMsgEl = $('holidayMsg');
