@@ -1475,7 +1475,7 @@
       var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
       var sermonBlock = res.sermonBlock || { hasData:false, entries:[] };
       var pieces = [];
-      pieces.push('<div class="card"><div class="big">CCF Sunday Service Service Portal for staff</div><div class="small" style="margin-top:4px;">粵語基督徒團契 主日崇拜同工專頁</div>');
+      pieces.push('<div class="card"><div class="big">📡 聚會資訊 / Service information</div>');
       pieces.push('<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>');
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>');
       if (sermonBlock.hasData){
@@ -1514,6 +1514,11 @@
             '<div class="small" style="margin-top:2px;">'+enLine+'</div>'+
           '</li>';
         }).join('');
+        pieces.push('<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+lines+'</ul></div>');
+      }
+      pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
+      var blocks = Object.keys(groups).map(function(g){
+        var rows = groups[g].map(function(r){ return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>'; }).join('');
         var songsHtml = '';
         if (normalizedGroupKey(g) === 'worship'){
           var filledSongs = worshipSongs.filter(function(song){ return String((song && song.songTitle) || '').trim(); });
