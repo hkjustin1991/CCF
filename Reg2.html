@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CCF會員登記及自助服務平台 / CCF registration and self service portal</title>
+  <title>CCF會員登記及自助服務平台</title>
 
   <!--
   ============================================================
@@ -181,15 +181,20 @@
   <div class="wrap">
     <header class="topbar">
       <div>
-        <div class="title">CCF會員登記及自助服務平台 / CCF registration and self service portal</div>
-        <div class="sub">會員登記及自助服務 / Member registration and self service</div>
+        <div class="title">CCF會員登記及自助服務平台</div>
+        <div class="sub">CCF registration and self service portal</div>
         <div id="globalClock" class="sub"></div>
         
       </div>
       <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-11.reg112</span></div>
     </header>
 
-    <main id="app"></main>
+    <main id="app">
+  <div class="card">
+    <div class="big">載入中… / Loading…</div>
+    <div class="small">如畫面沒有自動顯示，請重新整理。 / If the page does not appear automatically, please refresh.</div>
+  </div>
+</main>
 
     <footer class="small" style="padding:8px 4px;">
       <div>如問題持續，請聯絡影音同工 / Contact Media team if issue persists</div>
@@ -677,6 +682,8 @@
       worshipMembers: [],
       worshipMembersLoaded: false,
       worshipMembersFetchedAt: 0,
+      sermonExpandState: {},
+      sermonTextCache: {},
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -991,18 +998,15 @@
       return ''+
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
-            '<div class="big">📌 選擇 / Choose</div>'+
+            '<div class="big">📌 歡迎 / Welcome</div>'+
           '</div>'+
-          '<div class="miniBtnRow">'+
-            '<button id="btnNew" class="primary">🆕 新註冊 / New registration</button>'+
-            '<button id="btnScan" class="alt">📷 掃描 QR / Scan QR</button>'+
-            '<button id="btnUploadHomeQr" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
-            '<input id="homeQrImageInput" type="file" accept="image/*" class="hide" />'+
+          '<div class="small" style="margin-top:8px;">'+
+            '歡迎來到 CCF 自助服務平台！請先登入開始，若你是新朋友請先登記。我們期待在其中一個主日崇拜見到你！<br/>'+
+            'Welcome to the CCF Self Service portal! Please login to get started, or register if you are new to us. We look forward to seeing you in one of our Sunday services!'+
           '</div>'+
-          '<div class="small" style="margin-top:10px;">'+
-            '掃描 QR 可查看/更改資料、查閱自己出席記錄。<br/>'+
-            'Scan QR to check/change details and view your own attendance.<br/>'+
-            'If camera does not open, tap again.'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="btnLogin" class="alt">🔐 登入 / Login</button>'+
+            '<button id="btnNew" class="primary">🆕 註冊 / Register</button>'+
           '</div>'+
         '</div>'+
         '<div id="msg"></div>';
@@ -1429,7 +1433,7 @@
           row_('回應 / Response 1','WORSHIP_RESPONSE_1')+
           row_('回應 / Response 2','WORSHIP_RESPONSE_2')+
           '</table></div>'+
-          '</div>'+          ''+
+          '</div>'+
           '</div>';
       });
       return html;
@@ -1455,69 +1459,77 @@
       var cur = res.currentAttendance || {};
       var last = res.lastAttendance || {};
       var groups = {};
-      function normalizedGroupKey(g){
-        return String(g||'').trim().toLowerCase();
-      }
+      function normalizedGroupKey(g){ return String(g||'').trim().toLowerCase(); }
+      function badgeCls(g){ var k = normalizedGroupKey(g); return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : ''; }
+      function livePosLabel_(r){ var zh=String(r.positionZh||'').trim(), en=String(r.positionEn||'').trim(); if(!en) return zh; if(!zh) return en; return (en.toUpperCase().indexOf(zh.toUpperCase())>=0)?en:(zh+' / '+en); }
+      function memberNameZh_(r){ var nm=String((r&&r.nameZh)||'').trim(); var sx=String((r&&r.suffixZh)||'').trim(); return nm ? (sx ? (nm+' '+sx) : nm) : ''; }
+      function memberNameEn_(r){ var nm=String((r&&r.nameEn)||'').trim(); var sx=String((r&&r.suffixEn)||'').trim(); return nm ? (sx ? (nm+' '+sx) : nm) : ''; }
       (res.servingThisWeek||[]).forEach(function(r){
-        var displayName = String((r && r.displayName) || '').trim();
-        if (!displayName) return;
+        var zhName = memberNameZh_(r);
+        var enName = memberNameEn_(r);
+        if (!zhName && !enName && !String((r && r.displayName) || '').trim()) return;
         var g = normalizedGroupKey(r.group) || 'other';
         if (!groups[g]) groups[g] = [];
         groups[g].push(r);
       });
-      function badgeCls(g){
-        var k = normalizedGroupKey(g);
-        return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : '';
-      }
-      function livePosLabel_(r){
-        var zh = String(r.positionZh||'').trim();
-        var en = String(r.positionEn||'').trim();
-        if (!en) return zh;
-        if (!zh) return en;
-        if (en.toUpperCase().indexOf(zh.toUpperCase()) >= 0) return en;
-        return zh + ' / ' + en;
-      }
       var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
-      var sermon = res.sermon || {};
-      var sermonEntries = [
-        { label:'講員 / Speaker', value:String(sermon.speaker||'').trim() },
-        { label:'講題 / Title', value:String(sermon.title||'').trim() },
-        { label:'講道經文 / Sermon passage', value:String(sermon.sermonPassage||'').trim() },
-        { label:'回應經文 / Response passage', value:String(sermon.responsePassage||'').trim() }
-      ].filter(function(it){ return !!it.value; });
-      var sermonHtml = sermonEntries.length
-        ? '<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+sermonEntries.map(function(it){ return '<li>'+escapeHtml(it.label)+' · '+escapeHtml(it.value)+'</li>'; }).join('')+'</ul></div>'
-        : '';
+      var sermonBlock = res.sermonBlock || { hasData:false, entries:[] };
+      var pieces = [];
+      pieces.push('<div class="card"><div class="big">CCF Sunday Service Service Portal for staff</div><div class="small" style="margin-top:4px;">粵語基督徒團契 主日崇拜同工專頁</div>');
+      pieces.push('<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>');
+      pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>');
+      if (sermonBlock.hasData){
+        var lines = (sermonBlock.entries||[]).map(function(it){
+          var val = escapeHtml(String(it.text||''));
+          if (it.clickable && it.canonical){
+            var key = String(it.key||'');
+            val = '<button class="btnLookup btnSmall" data-sermon-toggle="1" data-sermon-key="'+escapeHtml(key)+'" data-canonical="'+escapeHtml(String(it.canonical||''))+'">'+val+'</button><div id="sermonText_'+escapeHtml(key)+'" class="small" style="margin-top:6px;"></div>';
+          }
+          return '<li><b>'+escapeHtml(String(it.labelZh||'')+' / '+String(it.labelEn||''))+'</b> · '+val+'</li>';
+        }).join('');
+        pieces.push('<div class="msgBox" style="margin-top:8px;"><b>講道資料 / Sermon info</b><ul style="margin:6px 0 0 18px;">'+lines+'</ul></div>');
+      }
+      pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
       var blocks = Object.keys(groups).map(function(g){
-        var rows = groups[g].map(function(r){
-          return '<li>'+escapeHtml(livePosLabel_(r))+' · '+escapeHtml(r.displayName||'')+'</li>';
+        var byPos = {};
+        groups[g].forEach(function(r){
+          var p = String(r.position || '').trim() || 'OTHER';
+          if (!byPos[p]) byPos[p] = { sample:r, rows:[] };
+          byPos[p].rows.push(r);
+        });
+        var rows = Object.keys(byPos).map(function(p){
+          var bucket = byPos[p];
+          var sample = bucket.sample || {};
+          var zhNames = bucket.rows.map(function(r){ return memberNameZh_(r); }).filter(Boolean);
+          var enNames = bucket.rows.map(function(r){ return memberNameEn_(r); }).filter(Boolean);
+          if (!zhNames.length && !enNames.length){
+            var fallback = bucket.rows.map(function(r){ return String(r.displayName||'').trim(); }).filter(Boolean);
+            zhNames = fallback;
+          }
+          var zhLine = escapeHtml(String(sample.positionZh || '')) + ' · ' + escapeHtml(zhNames.join(' & '));
+          var enLabel = String(sample.positionEn || '').replace(/^.*?\s*\/\s*/, '');
+          var enLine = escapeHtml(enLabel) + ' · ' + escapeHtml((enNames.length ? enNames : zhNames).join(' & '));
+          return '<li style="list-style:none;margin:8px 0 0 0;">'+
+            '<div>'+zhLine+'</div>'+
+            '<div class="small" style="margin-top:2px;">'+enLine+'</div>'+
+          '</li>';
         }).join('');
         var songsHtml = '';
         if (normalizedGroupKey(g) === 'worship'){
           var filledSongs = worshipSongs.filter(function(song){ return String((song && song.songTitle) || '').trim(); });
           if (filledSongs.length){
-            songsHtml = '<div style="margin-top:8px;"><b>本週詩歌 / Songs this week</b><ul style="margin:6px 0 0 18px;">'+
-              filledSongs.map(function(song){
-                var label = [String(song.labelZh||''), String(song.labelEn||'')].filter(Boolean).join(' / ');
-                return '<li>' + escapeHtml(label) + ' · ' + escapeHtml(String(song.songTitle||'')) + '</li>';
-              }).join('')+
-              '</ul></div>';
+            songsHtml = '<div style="margin-top:8px;"><b>本週詩歌 / Songs this week</b><ul style="margin:6px 0 0 18px;">'+filledSongs.map(function(song){ var label=[String(song.labelZh||''), String(song.labelEn||'')].filter(Boolean).join(' / '); return '<li>'+escapeHtml(label)+' · '+escapeHtml(String(song.songTitle||''))+'</li>'; }).join('')+'</ul></div>';
           }
         }
         var title = ((groups[g][0]&&groups[g][0].groupZh)||g)+' / '+((groups[g][0]&&groups[g][0].groupEn)||g);
-        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 18px;">'+rows+'</ul>'+songsHtml+'</div>';
+        return '<div class="msgBox" style="margin-top:8px;"><div><span class="groupBadge '+badgeCls(g)+'">'+escapeHtml(title)+'</span></div><ul style="margin:6px 0 0 0;padding-left:0;">'+rows+'</ul>'+songsHtml+'</div>';
       }).join('');
-      return '<div class="card"><div class="big">📡 聚會資訊 / Service information</div>'+
-        '<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>'+
-        '<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>'+
-        sermonHtml+
-        '<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>'+
-        (blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>')+
-        '<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>';
+      pieces.push(blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>');
+      pieces.push('<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>');
+      return pieces.join('');
     }
 
-
-    function viewSelfHoliday(m){
+function viewSelfHoliday(m){
       m = m || {}; var a = m.away || {};
       return '<div class="card"><div class="big">🏖️ 請假 / Absence</div>'+
         '<div class="label">假期 1 From</div><input id="hFrom1" type="date" value="'+escapeHtml(a.from1||'')+'" />'+
@@ -1752,162 +1764,74 @@
     }
 
     function render(){
-      stopScan();
-      document.body.classList.toggle('worshipWide', State.view === 'selfWorship');
-      if (State.view !== 'selfServing' && State.servingRefreshTimer){
-        clearInterval(State.servingRefreshTimer);
-        State.servingRefreshTimer = null;
-      }
+      try{
+        stopScan();
+        document.body.classList.toggle('worshipWide', State.view === 'selfWorship');
 
-      if(State.view === 'home'){
-        $('app').innerHTML = viewHome();
-        applyExternalScannerGuard_('msg', []);
-        $('btnNew').onclick = function(){
-          State.view = 'form';
-          State.flow = 'create';
-          State.prefill = null;
-          State.authQrPayload = null;
-          State.keepExistingQr = false;
-          render();
-        };
-        $('btnScan').onclick = function(){
-          $('msg').innerHTML = showBox('warn','正在打開掃描器…','Opening scanner…');
-          var opened = openExternalScanner_({
-            flow:'reg',
-            onPayload:function(payload){
-              State.view = 'scan';
-              render();
-              handleScanPayload_(payload);
-            },
-            onCancel:function(){
-              $('msg').innerHTML = showBox('warn','已取消掃描','Scan cancelled.');
-            },
-            onError:function(detail){
-              State.view = 'scan';
-              render();
-              setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error', '<div class="small">'+escapeHtml(String(detail||''))+'</div>'));
-            },
-            onPopupBlocked:function(){
-              State.view = 'scan';
-              render();
-              setHtml_('scanMsg', showBox('warn','未能打開彈出視窗，已切換內置掃描器','Popup blocked; switched to built-in scanner.','<div class="small">If camera does not open, tap again.</div>'));
-            }
-          });
-          if(opened){ $('msg').innerHTML = showBox('warn','請在彈出視窗完成掃描','Complete scanning in the popup.'); }
-        };
-        if($('btnUploadHomeQr') && $('homeQrImageInput')){
-          $('btnUploadHomeQr').onclick = function(){
-            $('msg').innerHTML = '';
-            var input = $('homeQrImageInput');
-            input.value = '';
-            input.click();
-          };
-          $('homeQrImageInput').onchange = function(ev){
-            var f = ev && ev.target && ev.target.files && ev.target.files[0];
-            if(!f) return;
-            $('msg').innerHTML = showBox('warn','讀取圖片中…','Reading image…');
-            decodeQrImageFile_(f).then(function(payload){
-              handleScanPayload_(payload, 'msg');
-            }).catch(function(err){
-              $('msg').innerHTML = showServerErr(err || {code:'E500', zh:'系統錯誤', en:'System error'});
-            }).finally(function(){
-              ev.target.value = '';
-            });
-          };
+        if (State.view !== 'selfServing' && State.servingRefreshTimer){
+          clearInterval(State.servingRefreshTimer);
+          State.servingRefreshTimer = null;
         }
-        return;
-      }
 
-      if(State.view === 'scan'){
-        $('app').innerHTML = viewScan();
-        bindScan();
-        return;
-      }
+        if(State.view === 'home'){
+          $('app').innerHTML = viewHome();
+          $('btnNew').onclick = function(){
+            State.view = 'form';
+            State.flow = 'create';
+            State.prefill = null;
+            State.authQrPayload = null;
+            State.keepExistingQr = false;
+            render();
+          };
+          $('btnLogin').onclick = function(){ State.view = 'scan'; render(); };
+          return;
+        }
 
-      if(State.view === 'selfHome'){
-        $('app').innerHTML = viewSelfHome(State.prefill || {});
-        bindSelfHome();
-        return;
-      }
-
-      if(State.view === 'selfAttendance'){
-        $('app').innerHTML = viewAttendance(State.lastResult || {});
-        bindAttendance();
-        return;
-      }
-
-      if(State.view === 'selfServing'){
-        $('app').innerHTML = viewSelfServing(State.lastResult || {});
-        bindServing();
-        return;
-      }
-
-      if(State.view === 'selfLive'){
-        $('app').innerHTML = viewSelfLive(State.lastResult || {});
-        bindLive();
-        return;
-      }
-
-      if(State.view === 'selfHoliday'){
-        $('app').innerHTML = viewSelfHoliday((State.snapshot && State.snapshot.member) ? State.snapshot.member : {});
-        bindHoliday();
-        return;
-      }
-
-      if(State.view === 'selfWorship'){
-        $('app').innerHTML = viewSelfWorship(State.lastResult || {});
-        bindSelfWorship();
-        return;
-      }
-
-      if(State.view === 'form'){
-        $('app').innerHTML = viewForm(State.prefill || {});
-        bindForm();
-        return;
-      }
-
-      if(State.view === 'success'){
-        $('app').innerHTML = viewSuccess(State.lastResult || {});
-        try{ drawQr('qrTarget', (State.lastResult||{}).qrPayload ); }catch(e){}
-        $('btnHome').onclick = function(){
-          State.view='home';
-          State.lastResult=null;
-          State.lastSubmit=null;
-          State.prefill=null;
-          State.authQrPayload=null;
-          State.keepExistingQr=false;
-          render();
-        };
-        return;
+        if(State.view === 'scan'){ $('app').innerHTML = viewScan(); bindScan(); return; }
+        if(State.view === 'selfHome'){ $('app').innerHTML = viewSelfHome(State.prefill || {}); bindSelfHome(); return; }
+        if(State.view === 'selfAttendance'){ $('app').innerHTML = viewAttendance(State.lastResult || {}); bindAttendance(); return; }
+        if(State.view === 'selfServing'){ $('app').innerHTML = viewSelfServing(State.lastResult || {}); bindServing(); return; }
+        if(State.view === 'selfLive'){ $('app').innerHTML = viewSelfLive(State.lastResult || {}); bindLive(); return; }
+        if(State.view === 'selfHoliday'){ $('app').innerHTML = viewSelfHoliday((State.snapshot && State.snapshot.member) ? State.snapshot.member : {}); bindHoliday(); return; }
+        if(State.view === 'selfWorship'){ $('app').innerHTML = viewSelfWorship(State.lastResult || {}); bindSelfWorship(); return; }
+        if(State.view === 'form'){ $('app').innerHTML = viewForm(State.prefill || {}); bindForm(); return; }
+        if(State.view === 'success'){
+          $('app').innerHTML = viewSuccess(State.lastResult || {});
+          try{ drawQr('qrTarget', (State.lastResult||{}).qrPayload ); }catch(e){}
+          $('btnHome').onclick = function(){ State.view='home'; State.lastResult=null; State.lastSubmit=null; State.prefill=null; State.authQrPayload=null; State.keepExistingQr=false; render(); };
+          return;
+        }
+      }catch(e){
+        console.error('[render-fail]', e);
+        showBootError_(e);
       }
     }
 
-    /******** Bindings ********/
+/******** Bindings ********/
+    function applySelfBootstrapResult_(text, boot, targetId){
+      var target = $(targetId || 'scanMsg');
+      if(!boot || !boot.ok){
+        if (target) target.innerHTML = showServerErr((boot && boot.error) || boot || {code:'E500', zh:'系統錯誤', en:'System error'});
+        return false;
+      }
+      stopScan();
+      State.view = 'selfHome';
+      State.flow = 'self_update';
+      State.authQrPayload = text;
+      State.prefill = boot.member || null;
+      State.lastResult = null;
+      State.snapshot = boot.snapshot || null;
+      render();
+      return true;
+    }
+
     function handleScanPayload_(text, msgElId){
       var targetId = msgElId || 'scanMsg';
       var target = $(targetId);
       if (target) target.innerHTML = showBox('warn','讀取中…','Loading…');
 
-      callApi('api_reg_self_lookup_public', text).then(function(res){
-        if(!res || !res.ok){
-          if (target) target.innerHTML = showServerErr(res);
-          return;
-        }
-
-        stopScan();
-        State.view = 'selfHome';
-        State.flow = 'self_update';
-        State.authQrPayload = text;
-        State.prefill = res.member;
-        State.lastResult = null;
-        callApi('api_reg_self_portal_snapshot_public', text).then(function(snap){
-          State.snapshot = (snap && snap.ok) ? snap : null;
-          render();
-        }).catch(function(){
-          State.snapshot = null;
-          render();
-        });
-
+      callApi('api_reg_self_bootstrap_public', text).then(function(boot){
+        if (!applySelfBootstrapResult_(text, boot, targetId)) return;
       }).catch(function(err){
         var msg = (err && err.message) ? err.message : String(err||'');
         if (target) target.innerHTML = showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '');
@@ -1963,26 +1887,8 @@
       function onCaptured(text, source){
         setHtml_('scanMsg', showBox('warn','讀取中…','Loading…'));
 
-        callApi('api_reg_self_lookup_public', text).then(function(res){
-          if(!res || !res.ok){
-            setHtml_('scanMsg', showServerErr(res));
-            return;
-          }
-
-          stopScan();
-          State.view = 'selfHome';
-          State.flow = 'self_update';
-          State.authQrPayload = text;
-          State.prefill = res.member;
-          State.lastResult = null;
-          callApi('api_reg_self_portal_snapshot_public', text).then(function(snap){
-            State.snapshot = (snap && snap.ok) ? snap : null;
-            render();
-          }).catch(function(){
-            State.snapshot = null;
-            render();
-          });
-
+        callApi('api_reg_self_bootstrap_public', text).then(function(boot){
+          if (!applySelfBootstrapResult_(text, boot, 'scanMsg')) return;
         }).catch(function(err){
           var msg = (err && err.message) ? err.message : String(err||'');
           setHtml_('scanMsg', showBox('err','系統錯誤','System error', msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : ''));
@@ -2613,7 +2519,35 @@
       });
     }
 
-    function bindLive(){ $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); }; }
+    function bindLive(){
+      if ($('btnLiveBack')) $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); };
+      Array.prototype.slice.call(document.querySelectorAll('[data-sermon-toggle]')).forEach(function(btn){
+        btn.onclick = function(){
+          var key = String(btn.getAttribute('data-sermon-key')||'');
+          var canonical = String(btn.getAttribute('data-canonical')||'');
+          var target = $('sermonText_' + key);
+          if (!target || !canonical) return;
+          var expanded = !!State.sermonExpandState[key];
+          if (expanded){ State.sermonExpandState[key] = false; target.innerHTML = ''; return; }
+          State.sermonExpandState[key] = true;
+          if (State.sermonTextCache[canonical]){
+            var c = State.sermonTextCache[canonical];
+            target.innerHTML = c;
+            return;
+          }
+          target.innerHTML = showBox('warn','載入經文中…','Loading verses...');
+          callApi('api_reg_bible_text', canonical, 'unv').then(function(r){
+            if(!r || !r.ok){ target.innerHTML = showBox('err','載入經文失敗','Failed to load Bible text'); return; }
+            var verses = Array.isArray(r.verses) ? r.verses : [];
+            var vhtml = '<div class="msgBox"><div><b>'+escapeHtml(String(r.canonical||canonical))+'</b> <span class="small">'+escapeHtml(String(r.version||'unv'))+'</span></div>' +
+              verses.map(function(v){ return '<div style="margin-top:4px;">'+escapeHtml(String(v.chapter||''))+':'+escapeHtml(String(v.verse||''))+' '+escapeHtml(String(v.text||''))+'</div>'; }).join('') +
+              '</div>';
+            State.sermonTextCache[canonical] = vhtml;
+            target.innerHTML = vhtml;
+          }).catch(function(){ target.innerHTML = showBox('err','載入經文失敗','Failed to load Bible text'); });
+        };
+      });
+    }
 
     function bindHoliday(){
       var holidayMsgEl = $('holidayMsg');
@@ -3093,12 +3027,24 @@
       }catch(e){ return Promise.resolve(false); }
     }
 
-// init
-    startGlobalClock_();
-    tryAutoEntryFromQuery_().then(function(ok){
-      if (ok) return;
-      try { render(); } catch (e) { showBootError_(e); }
-    });
+function regBootSmokeTest_(){
+      if (!$('app')) throw new Error('#app not found');
+      if (typeof viewHome !== 'function') throw new Error('viewHome missing');
+      if (typeof render !== 'function') throw new Error('render missing');
+    }
+
+    function bootRegPortal_(){
+      startGlobalClock_();
+      try{ regBootSmokeTest_(); }catch(e){ showBootError_(e); return; }
+      try{ render(); }catch(e){ showBootError_(e); return; }
+      tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
+        console.error('[auto-entry-fail]', e);
+        var msgEl = $('msg') || $('selfMsg') || $('worshipMsg');
+        if (msgEl){ msgEl.innerHTML = showBox('warn','自動進入失敗，已回到主頁','Auto-entry failed, returned to home'); }
+      });
+    }
+
+    bootRegPortal_();
   </script>
 </body>
 </html>
