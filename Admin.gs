@@ -2123,6 +2123,7 @@ function bible_parseReference_(raw){
     var piece = pieces[i];
     var m = piece.match(/^([^\d]+?)\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)$/) || piece.match(/^([^\d]+?)\s*(\d+)\s*:\s*(\d+)$/);
     var mInheritChapter = piece.match(/^(\d+)\s*-\s*(\d+)$/);
+    var mInheritBookWithChapter = piece.match(/^(\d+)\s*:\s*(\d+)\s*-\s*(\d+)$/) || piece.match(/^(\d+)\s*:\s*(\d+)$/);
     var bookMeta = null, chapter = null, v1 = null, v2 = null;
     if (m){
       var bookRaw = String(m[1]||'').trim().toLowerCase().replace(/\s+/g,'');
@@ -2135,6 +2136,12 @@ function bible_parseReference_(raw){
     } else if (mInheritChapter){
       if (!prevBook || !prevChapter) return { ok:false, status:'AMBIGUOUS', code:'E712', raw:src, canonical:'', segments:segments, reasonZh:'後段缺少卷名或章節', reasonEn:'Later segment missing book/chapter context.' };
       bookMeta = prevBook; chapter = prevChapter; v1 = parseInt(mInheritChapter[1],10); v2 = parseInt(mInheritChapter[2],10);
+    } else if (mInheritBookWithChapter){
+      if (!prevBook) return { ok:false, status:'AMBIGUOUS', code:'E712', raw:src, canonical:'', segments:segments, reasonZh:'後段缺少卷名', reasonEn:'Later segment missing book context.' };
+      bookMeta = prevBook;
+      chapter = parseInt(mInheritBookWithChapter[1],10);
+      v1 = parseInt(mInheritBookWithChapter[2],10);
+      v2 = mInheritBookWithChapter[3] ? parseInt(mInheritBookWithChapter[3],10) : v1;
     } else {
       return { ok:false, status:'INVALID', code:'E713', raw:src, canonical:'', segments:segments, reasonZh:'章節格式不正確', reasonEn:'Invalid chapter/verse format.' };
     }
