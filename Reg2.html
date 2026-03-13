@@ -3028,11 +3028,14 @@ function regBootSmokeTest_(){
       startGlobalClock_();
       try{ regBootSmokeTest_(); }catch(e){ showBootError_(e); return; }
       try{ render(); }catch(e){ showBootError_(e); return; }
-      tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
-        console.error('[auto-entry-fail]', e);
-        var msgEl = $('msg') || $('selfMsg') || $('worshipMsg');
-        if (msgEl){ msgEl.innerHTML = showBox('warn','自動進入失敗，已回到主頁','Auto-entry failed, returned to home'); }
-      });
+
+      setTimeout(function(){
+        tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
+          console.error('[auto-entry-fail]', e);
+          var msgEl = $('msg') || $('selfMsg') || $('worshipMsg');
+          if (msgEl){ msgEl.innerHTML = showBox('warn','自動進入失敗，已留在主頁','Auto-entry failed; staying on home page'); }
+        });
+      }, 0);
     }
 
     bootRegPortal_();
