@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CCF會員登記及自助服務平台</title>
+  <title>粵語基督徒團契 會員登記及自助服務平台</title>
 
   <!--
   ============================================================
@@ -68,6 +68,8 @@
     button:disabled{opacity:.55;cursor:not-allowed}
     .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
     .miniBtnRow button{flex:1 1 180px}
+    .btnLoginMain{flex:1.35 1 240px;font-size:calc(var(--fs-input) + 1px);}
+    .btnRegisterMain{flex:0.85 1 160px;font-size:calc(var(--fs-input) - 1px);}
     .btnSmall{width:auto;min-height:auto;padding:8px 12px;font-size:13px;border-radius:999px;flex:0 0 auto}
     .btnSignupSquare{border-radius:10px!important}
     .chip{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;color:var(--text);font-size:13px}
@@ -181,7 +183,7 @@
   <div class="wrap">
     <header class="topbar">
       <div>
-        <div class="title">CCF會員登記及自助服務平台</div>
+        <div class="title">粵語基督徒團契 會員登記及自助服務平台</div>
         <div class="sub">CCF registration and self service portal</div>
         <div id="globalClock" class="sub"></div>
         
@@ -197,8 +199,8 @@
           Welcome to the CCF Self Service portal! Please login to get started, or register if you are new to us. We look forward to seeing you in one of our Sunday services!
         </div>
         <div class="miniBtnRow" style="margin-top:12px;">
-          <button id="btnLogin" class="alt" type="button">🔐 登入 / Login</button>
-          <button id="btnNew" class="primary" type="button">🆕 註冊 / Register</button>
+          <button id="btnLogin" class="alt btnLoginMain" type="button">🔐 登入 / Login</button>
+          <button id="btnNew" class="primary btnRegisterMain" type="button">🆕 註冊 / Register</button>
         </div>
       </div>
       <div id="msg"></div>
@@ -1013,8 +1015,8 @@
             'Welcome to the CCF Self Service portal! Please login to get started, or register if you are new to us. We look forward to seeing you in one of our Sunday services!'+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
-            '<button id="btnLogin" class="alt">🔐 登入 / Login</button>'+
-            '<button id="btnNew" class="primary">🆕 註冊 / Register</button>'+
+            '<button id="btnLogin" class="alt btnLoginMain">🔐 登入 / Login</button>'+
+            '<button id="btnNew" class="primary btnRegisterMain">🆕 註冊 / Register</button>'+
           '</div>'+
         '</div>'+
         '<div id="msg"></div>';
@@ -1776,6 +1778,23 @@ function viewSelfHoliday(m){
         '</div>';
     }
 
+    function bindHomeCtas_(){
+      var btnNew = $('btnNew');
+      if (btnNew) btnNew.onclick = function(){
+        State.view = 'form';
+        State.flow = 'create';
+        State.prefill = null;
+        State.authQrPayload = null;
+        State.keepExistingQr = false;
+        render();
+      };
+      var btnLogin = $('btnLogin');
+      if (btnLogin) btnLogin.onclick = function(){
+        State.view = 'scan';
+        render();
+      };
+    }
+
     function render(){
       try{
         stopScan();
@@ -1788,15 +1807,7 @@ function viewSelfHoliday(m){
 
         if(State.view === 'home'){
           $('app').innerHTML = viewHome();
-          $('btnNew').onclick = function(){
-            State.view = 'form';
-            State.flow = 'create';
-            State.prefill = null;
-            State.authQrPayload = null;
-            State.keepExistingQr = false;
-            render();
-          };
-          $('btnLogin').onclick = function(){ State.view = 'scan'; render(); };
+          bindHomeCtas_();
           return;
         }
 
@@ -3049,6 +3060,7 @@ function regBootSmokeTest_(){
     function bootRegPortal_(){
       startGlobalClock_();
       try{ regBootSmokeTest_(); }catch(e){ showBootError_(e); return; }
+      bindHomeCtas_();
       try{ render(); }catch(e){ showBootError_(e); return; }
       tryAutoEntryFromQuery_().then(function(ok){ if (!ok) return; }).catch(function(e){
         console.error('[auto-entry-fail]', e);
