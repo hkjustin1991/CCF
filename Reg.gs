@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-11.reg112
+ * v2026-03-13.reg114
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-11.reg112';
+const REG_VERSION = '2026-03-13.reg114';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -52,6 +52,9 @@ const REG_EXTRA_HEADERS = [
 
 const REG_ACTIVITY_SHEET = 'Reg_Activity';
 const REG_SERMON_SHEET = 'Sermon_Info';
+const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
+const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
+
 
 /******** Entry ********/
 function doGetReg_(e){
@@ -511,6 +514,18 @@ function api_reg_self_lookup_public(qrPayload){
 }
 
 
+
+function api_reg_self_bootstrap_public(qrPayload){
+  try{
+    const lookup = api_reg_self_lookup_public(qrPayload);
+    if (!lookup || !lookup.ok) return lookup || { ok:false, code:'E500', zh:'系統錯誤', en:'System error.' };
+    const snapshot = api_reg_self_portal_snapshot_public(qrPayload);
+    return { ok: !!(snapshot && snapshot.ok), member: lookup.member, snapshot: (snapshot && snapshot.ok) ? snapshot : null, error: (snapshot && snapshot.ok) ? null : snapshot };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
 function regGetCheckinsDataMinimal_(){
   const check = (typeof admin_getCheckinsData_ === 'function') ? admin_getCheckinsData_() : null;
   if (!check || !check.ok) return check || { ok:false, code:'E500', zh:'讀取簽到資料失敗', en:'Failed to read checkins.' };
@@ -775,7 +790,6 @@ function api_reg_self_portal_snapshot_public(qrPayload){
     if (!auth.ok) return auth;
 
     const id = auth.parsed.id;
-    regRefreshMembersCachesForSelfPortal_();
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
     const rowServing = regServingGroupsFromRow_(auth.row);
@@ -819,6 +833,8 @@ function api_reg_self_portal_snapshot_public(qrPayload){
       ? rowServing.gl
       : (member ? reg_mergeServingGroups_(member.servingGLGroups, []) : []);
 
+    const memberSinceEarliest = regSelfMemberSinceEarliestYmd_(id, memberSinceRaw);
+
     return {
       ok:true,
       member:{
@@ -832,11 +848,11 @@ function api_reg_self_portal_snapshot_public(qrPayload){
         servingGLGroups: glGroupsMerged,
         isGl: !!(glGroupsMerged.length || statusNorm === 'GL'),
         away:{ from1: away.fromYmd || '', to1: away.toYmd || '', from2: away.from2Ymd || '', to2: away.to2Ymd || '' },
-        memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw)
+        memberSinceEarliest: memberSinceEarliest
       },
       attendance: att.stats,
       attendanceEvents: att.attendance,
-      memberSinceEarliest: regSelfMemberSinceEarliestYmd_(id, memberSinceRaw),
+      memberSinceEarliest: memberSinceEarliest,
       upcoming4: upcoming4
     };
   }catch(e){
@@ -852,7 +868,6 @@ function api_reg_self_serving_group_stats_public(qrPayload, groupKey){
     const key = admin_normalizeServingGroup_(groupKey);
     if (!key) return { ok:false, code:'E416', zh:'組別格式錯誤', en:'Invalid group key.' };
 
-    regRefreshMembersCachesForSelfPortal_();
     const mi = admin_getMembersIndex_();
     const byId = (mi && mi.byId) ? mi.byId : {};
     const selfMember = byId[auth.parsed.id] || null;
@@ -903,7 +918,6 @@ function api_reg_self_serving_data_public(qrPayload){
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
     const id = auth.parsed.id;
-    regRefreshMembersCachesForSelfPortal_();
     const mIndex = admin_getMembersIndex_();
     const member = (mIndex && mIndex.byId) ? mIndex.byId[id] : null;
     const rowServing = regServingGroupsFromRow_(auth.row);
@@ -1132,32 +1146,84 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
 }
 
 
-function reg_getSermonByEventKey_(eventKey){
+function reg_getSermonInfoByEventKey_(eventKey){
   const ev = String(eventKey || '').trim();
-  const out = { speakerCcfId:'', speaker:'', title:'', sermonPassage:'', responsePassage:'' };
+  const out = {
+    eventKey: ev,
+    speaker:'',
+    sermonTitle:'',
+    sermonPassageRaw:'',
+    sermonPassageCanonical:'',
+    sermonPassageStatus:'EMPTY',
+    responsePassageRaw:'',
+    responsePassageCanonical:'',
+    responsePassageStatus:'EMPTY'
+  };
   if (!/^SundayService_\d{4}-\d{2}-\d{2}$/.test(ev)) return out;
   try{
-    const ss = SpreadsheetApp.openById((typeof SPREADSHEET_ID !== 'undefined') ? SPREADSHEET_ID : ADMIN_SPREADSHEET_ID);
-    const sh = ss.getSheetByName(REG_SERMON_SHEET);
-    if (!sh || sh.getLastRow() < 2) return out;
-    const lastCol = Math.max(sh.getLastColumn(), 10);
-    const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
-    const map = {};
-    headers.forEach(function(h, i){ if (h) map[h] = i; });
-    const rows = sh.getRange(2,1,sh.getLastRow()-1,lastCol).getValues();
-    for (let i=0;i<rows.length;i++){
-      const row = rows[i];
-      const k = String(row[map['EventKey'] != null ? map['EventKey'] : 0] || '').trim();
-      if (k !== ev) continue;
-      out.speakerCcfId = String(row[map['講員CCFID'] != null ? map['講員CCFID'] : 2] || '').trim();
-      out.speaker = String(row[map['講員'] != null ? map['講員'] : 3] || '').trim();
-      out.title = String(row[map['講題'] != null ? map['講題'] : 4] || '').trim();
-      out.sermonPassage = String(row[map['講道經文'] != null ? map['講道經文'] : 5] || '').trim();
-      out.responsePassage = String(row[map['回應經文'] != null ? map['回應經文'] : 6] || '').trim();
+    if (typeof admin_getSermonRecordByEventKey_ === 'function'){
+      const rec = admin_getSermonRecordByEventKey_(ev) || {};
+      out.speaker = String(rec.speaker || '').trim();
+      out.sermonTitle = String(rec.sermonTitle || '').trim();
+      out.sermonPassageRaw = String(rec.sermonPassageRaw || '').trim();
+      out.sermonPassageCanonical = String(rec.sermonPassageCanonical || '').trim();
+      out.sermonPassageStatus = String(rec.sermonPassageStatus || '').trim() || 'EMPTY';
+      out.responsePassageRaw = String(rec.responsePassageRaw || '').trim();
+      out.responsePassageCanonical = String(rec.responsePassageCanonical || '').trim();
+      out.responsePassageStatus = String(rec.responsePassageStatus || '').trim() || 'EMPTY';
       return out;
     }
   }catch(e){}
   return out;
+}
+function reg_buildCurrentServiceSermonBlock_(eventKey){
+  const info = reg_getSermonInfoByEventKey_(eventKey);
+  const entries = [];
+  if (info.speaker) entries.push({ key:'speaker', labelZh:'講員', labelEn:'Speaker', text:info.speaker, clickable:false });
+  if (info.sermonTitle) entries.push({ key:'sermonTitle', labelZh:'講題', labelEn:'Sermon title', text:info.sermonTitle, clickable:false });
+  if (info.sermonPassageCanonical && info.sermonPassageStatus === 'OK') entries.push({ key:'sermonPassage', labelZh:'講道經文', labelEn:'Sermon passage', text:info.sermonPassageCanonical, canonical:info.sermonPassageCanonical, clickable:true });
+  else if (info.sermonPassageRaw) entries.push({ key:'sermonPassage', labelZh:'講道經文', labelEn:'Sermon passage', text:info.sermonPassageRaw, clickable:false });
+  if (info.responsePassageCanonical && info.responsePassageStatus === 'OK') entries.push({ key:'responsePassage', labelZh:'回應經文', labelEn:'Response passage', text:info.responsePassageCanonical, canonical:info.responsePassageCanonical, clickable:true });
+  else if (info.responsePassageRaw) entries.push({ key:'responsePassage', labelZh:'回應經文', labelEn:'Response passage', text:info.responsePassageRaw, clickable:false });
+  return { hasData: entries.length > 0, entries: entries, raw: info };
+}
+function api_reg_sermon_info(eventKey){
+  try{
+    const b = reg_buildCurrentServiceSermonBlock_(eventKey);
+    return { ok:true, eventKey:String(eventKey||''), hasData:b.hasData, entries:b.entries, sermon:b.raw };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+function reg_bibleCacheKey_(canonicalRef, version){
+  return REG_BIBLE_CACHE_PREFIX + encodeURIComponent(String(version||'unv').toLowerCase()) + '_' + Utilities.base64EncodeWebSafe(String(canonicalRef||''));
+}
+function api_reg_bible_text(canonicalRef, version){
+  try{
+    const ref = String(canonicalRef || '').trim();
+    const ver = String(version || 'unv').trim().toLowerCase() || 'unv';
+    if (!ref) return { ok:false, code:'E713', zh:'經文格式錯誤', en:'Invalid reference format.', canonical:'', version:ver, verses:[] };
+    const cache = CacheService.getScriptCache();
+    const key = reg_bibleCacheKey_(ref, ver);
+    const hit = cache.get(key);
+    if (hit){
+      const parsed = JSON.parse(hit);
+      parsed.cached = true;
+      return parsed;
+    }
+    const fetched = bible_fetchReferenceText_(ref, ver);
+    if (fetched && fetched.ok) cache.put(key, JSON.stringify(fetched), REG_BIBLE_CACHE_TTL);
+    return fetched;
+  }catch(e){
+    return { ok:false, code:'E715', zh:'抓取經文失敗', en:'Bible fetch failed.', detail:String(e&&e.message||e), canonical:String(canonicalRef||''), version:String(version||'unv'), verses:[] };
+  }
+}
+
+function reg_liveCacheGet_(key){
+  try{ var v = CacheService.getScriptCache().get(key); return v ? JSON.parse(v) : null; }catch(e){ return null; }
+}
+function reg_liveCachePut_(key, val, ttlSec){
+  try{ CacheService.getScriptCache().put(key, JSON.stringify(val), Number(ttlSec||30)); }catch(e){}
 }
 
 function api_reg_self_live_service_public(qrPayload){
@@ -1176,14 +1242,23 @@ function api_reg_self_live_service_public(qrPayload){
     const next = (events && events.length) ? events[0].eventKey : '';
     const last = prevYmd ? ('SundayService_' + prevYmd) : '';
 
-    const check = admin_getCheckinsData_();
     const countByEvent = {};
-    if (check && check.ok){
-      check.rows.forEach(function(r){
-        if (!admin_isSundayServiceKey_(r.eventKey)) return;
-        if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
-        countByEvent[r.eventKey].add(r.memberId);
-      });
+    const liveCountCacheKey = 'reg_live_counts_' + String(next || '') + '_' + String(last || '');
+    const cachedCounts = reg_liveCacheGet_(liveCountCacheKey);
+    if (cachedCounts && typeof cachedCounts.nextCount === 'number' && typeof cachedCounts.lastCount === 'number'){
+      countByEvent[next] = { size: cachedCounts.nextCount };
+      countByEvent[last] = { size: cachedCounts.lastCount };
+    }else{
+      const check = admin_getCheckinsData_();
+      if (check && check.ok){
+        check.rows.forEach(function(r){
+          if (!admin_isSundayServiceKey_(r.eventKey)) return;
+          if (r.eventKey !== next && r.eventKey !== last) return;
+          if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
+          countByEvent[r.eventKey].add(r.memberId);
+        });
+      }
+      reg_liveCachePut_(liveCountCacheKey, { nextCount: (countByEvent[next] ? countByEvent[next].size : 0), lastCount: (countByEvent[last] ? countByEvent[last].size : 0) }, 30);
     }
 
     const mi = admin_getMembersIndex_() || {};
@@ -1192,9 +1267,12 @@ function api_reg_self_live_service_public(qrPayload){
     const serving = servingRaw.map(function(r){
       const m = byId[String(r.memberId||'').trim().toUpperCase()] || {};
       const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
-      const suffix = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄 / Brother'
-        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹 / Sister' : '');
-      const zhEnName = [String(r.nameZh||'').trim(), String(r.nameEn||'').trim()].filter(Boolean).join(' / ');
+      const suffixZh = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄'
+        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹' : '');
+      const suffixEn = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? 'Brother'
+        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? 'Sister' : '');
+      const nameZh = String(r.nameZh||'').trim();
+      const nameEn = String(r.nameEn||'').trim();
       return {
         eventKey: r.eventKey,
         group: admin_normalizeServingGroup_(r.group || ''),
@@ -1203,14 +1281,23 @@ function api_reg_self_live_service_public(qrPayload){
         position: r.position,
         positionZh: admin_servingPositionZh_(r.position || ''),
         positionEn: admin_servingPositionLabel_(r.position || ''),
-        displayName: zhEnName + (suffix ? (' · ' + suffix) : '')
+        nameZh: nameZh,
+        nameEn: nameEn,
+        suffixZh: suffixZh,
+        suffixEn: suffixEn,
+        displayName: [nameZh, nameEn].filter(Boolean).join(' / ') + (suffixZh || suffixEn ? (' · ' + [suffixZh, suffixEn].filter(Boolean).join(' / ')) : '')
       };
     });
 
     const worshipSongsThisWeek = [];
     if (next){
-      const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
-      const songs = planningMap[next] || {};
+      const worshipCacheKey = 'reg_live_worship_' + next;
+      var songs = reg_liveCacheGet_(worshipCacheKey);
+      if (!songs){
+        const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
+        songs = planningMap[next] || {};
+        reg_liveCachePut_(worshipCacheKey, songs, 45);
+      }
       [
         { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
         { section:'WORSHIP_MAIN_2', labelZh:'敬拜 2', labelEn:'Main 2' },
@@ -1233,7 +1320,14 @@ function api_reg_self_live_service_public(qrPayload){
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
-      sermon: reg_getSermonByEventKey_(next),
+      sermonBlock: (function(){
+        var sermonCacheKey = 'reg_live_sermon_' + String(next || '');
+        var hit = reg_liveCacheGet_(sermonCacheKey);
+        if (hit) return hit;
+        var built = reg_buildCurrentServiceSermonBlock_(next);
+        reg_liveCachePut_(sermonCacheKey, built, 45);
+        return built;
+      })(),
       servingThisWeek: serving,
       worshipSongsThisWeek: worshipSongsThisWeek
     };
@@ -1453,7 +1547,6 @@ function reg_assertWorshipDeps_(){
 
 function reg_buildWorshipPagePayload_(auth, includeMembers){
   reg_assertWorshipDeps_();
-  regRefreshMembersCachesForSelfPortal_();
 
   const mi = admin_getMembersIndex_();
   const byId = (mi && mi.byId) ? mi.byId : {};
