@@ -247,6 +247,11 @@ function isServingNaValue_(value){
   const v = String(value || '').trim().toUpperCase();
   return (v === 'N/A' || v === 'NA');
 }
+function isServingClosedValue_(value){
+  const v = String(value || '').trim().toUpperCase();
+  if (!v) return false;
+  return (v === 'CLOSED' || v === '__CLOSED__' || v.indexOf('CLOSED') === 0);
+}
 
 // Staff secret from Script Properties (NEW)
 function getStaffBypassCode_(){
@@ -577,22 +582,24 @@ function getServingForEvent_(eventKey, membersById, checkedInSet){
   matrix.positions.forEach(function(pos){
     const raw = String(row[pos.colIndex-1] || '').trim();
     if (!raw) return;
-    if (isServingNaValue_(raw)) return;
+    if (isServingNaValue_(raw) || isServingClosedValue_(raw)) return;
     const entries = parseServingMemberIds_(raw);
     if (!entries.length) return;
     entries.forEach(function(entry){
       if (!entry) return;
-      if (isServingNaValue_(entry)) return;
+      if (isServingNaValue_(entry) || isServingClosedValue_(entry)) return;
       const matched = String(entry || '').trim().match(/CCF\d{4}/i);
       const memberId = matched ? matched[0].toUpperCase() : String(entry || '').trim().toUpperCase();
       if (!memberId) return;
       const m = membersById[memberId] || {};
+      if (!String(m.id || memberId).trim()) return;
       out.push({
         eventKey: eventKey,
         group: pos.group,
         position: pos.position,
         slot: '',
         memberId: memberId || entry,
+        rawValue: String(entry || '').trim(),
         nameZh: String(m.nameZh || ''),
         nameEn: String(m.nameEn || ''),
         checkedIn: checkedInSet.has(memberId)
