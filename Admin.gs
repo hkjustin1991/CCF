@@ -154,6 +154,7 @@ const ADMIN_SERVING_POSITION_GROUP = {
 };
 const ADMIN_SERVING_POSITION_MAX = {
   Worship_Singer: 2,
+  Worship_Pianist: 2,
   Worship_Instrument: 2,
   Media_AV: 2,
   Media_PPTBuild: 2,
@@ -165,6 +166,7 @@ const ADMIN_SERVING_POSITION_MAX = {
   Finance_Offering: 3
 };
 const ADMIN_SERVING_POSITION_MIN = {
+  Worship_Pianist: 1,
   Finance_Offering: 2,
   Support_Communion: 2,
   Logistic_Refreshment: 2
