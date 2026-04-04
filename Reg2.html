@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-03-13.reg117
+  UI VERSION TAG: reg2-ui-2026-03-30.reg118
   ============================================================
 
   Changes (reg2-ui2):
@@ -188,7 +188,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-13.reg117</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-03-30.reg118</span></div>
     </header>
 
     <main id="app">
@@ -1468,6 +1468,7 @@
       res = res || {};
       var cur = res.currentAttendance || {};
       var last = res.lastAttendance || {};
+      var lastOffering = res.lastOffering || {};
       var groups = {};
       var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
       var sermonBlock = res.sermonBlock || { hasData:false, entries:[] };
@@ -1562,6 +1563,7 @@
       pieces.push('<div class="card"><div class="big">📡 聚會資訊 / Service information</div>');
       pieces.push('<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>');
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>');
+      pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週奉獻 / Last week\'s offering</b>: '+escapeHtml((typeof lastOffering.amount === 'number') ? ('£'+Number(lastOffering.amount).toFixed(2)) : '—')+' ('+escapeHtml(String(lastOffering.eventKey||last.eventKey||''))+')</div>');
       pieces.push(renderSermonHtml_());
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
       var groupOrder = ['worship','media','logistic','support','finance'];

@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-11.admin111
-  For Admin.gs: v2026-03-11.admin111
+  UI VERSION TAG: admin2-ui-2026-03-30.admin113
+  For Admin.gs: v2026-03-30.admin113
   PR REFRESH: admin107 follow-up submission
   ============================================================
   -->
@@ -369,7 +369,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?></span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-03-30.admin113</span></div>
     </header>
 
     <main id="app"></main>
@@ -388,7 +388,7 @@
     var App = {
       token:null,
       actor:null, // {id, role, nameZh, nameEn}
-      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan | glGroupMembers | adminGroupMembers
+      view:'login', // login | menu | attendanceHome | matrix | memberLookup | stats | period | servingPlan | glGroupMembers | adminGroupMembers | financeHome | financeOffering
       debounceT:null,
       clockTimer:null,
 
@@ -412,7 +412,10 @@
       sermonAutoTimers:{},
       sermonDirty:{},
       sermonRowRev:{},
-      sermonRowInflight:{}
+      sermonRowInflight:{},
+      financeRows:[],
+      financeCanEdit:false,
+      financeSaveTimers:{}
     };
 
     function $(id){ return document.getElementById(id); }
@@ -1089,6 +1092,13 @@
       if (a.flags && typeof a.flags.canEditWorshipRota === 'boolean') return !!a.flags.canEditWorshipRota;
       var gl = Array.isArray(a.servingGLGroups) ? a.servingGLGroups : [];
       return gl.some(function(g){ return normalizeServingGroupKey_(g) === 'worship'; });
+    }
+    function actorInFinanceGroup_(){
+      var a = App.actor || {};
+      var groups = (Array.isArray(a.servingGroups) ? a.servingGroups : [])
+        .concat(Array.isArray(a.servingGLGroups) ? a.servingGLGroups : [])
+        .concat(Array.isArray(a.glGroups) ? a.glGroups : []);
+      return groups.some(function(g){ return normalizeServingGroupKey_(g) === 'finance'; });
     }
 
     function getTodayYmdUk(){
@@ -2384,6 +2394,7 @@ function eventDateYmdFromKey(ev){
             '<div class="menuGrid">'+
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
+              (actorInFinanceGroup_() ? '<button id="goFinance" class="btnMain">💷 財務 / Finance</button>' : '')+
               (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
             '</div>'+
             '<div class="divider"></div>'+
@@ -2418,7 +2429,7 @@ function eventDateYmdFromKey(ev){
           '<div class="menuGrid">'+
             '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
             '<button id="goGroupMembersAdmin" class="btnLookup">👥 管理事奉組員 / Manage serving group members</button>'+
-            '<button class="btnGhost" disabled>💷 財務 / Finance（coming soon）</button>'+
+            '<button id="goFinance" class="btnMain">💷 財務 / Finance</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
             (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
             '<button id="goSermonInfo" class="btnPeriod">📖 Set Sermon info / 設定講道資料</button>'+
@@ -2474,6 +2485,14 @@ function eventDateYmdFromKey(ev){
           logAction('OPEN_SERMON_INFO','', 'nav');
           App.sermonPayload = null;
           App.view='sermonInfo';
+          render();
+        };
+      }
+      var goFinance = $('goFinance');
+      if (goFinance){
+        goFinance.onclick = function(){
+          logAction('OPEN_FINANCE_HOME','', 'nav');
+          App.view='financeHome';
           render();
         };
       }
@@ -4206,6 +4225,131 @@ function viewAttendanceHome(){
         '</div>';
     }
 
+    function viewFinanceHome(){
+      return ''+
+        '<div class="card" style="border-color:rgba(202,155,0,0.35);background:#fffdf3;">'+
+          '<div class="big">💷 財務 / Finance</div>'+
+          '<div class="small">請選擇功能 / Choose a function</div>'+
+          '<div class="menuGrid" style="margin-top:10px;">'+
+            '<button id="goFinanceOffering" class="btnMain">💰 Offering</button>'+
+            '<button class="btnGhost" disabled>🧾 Expenditure (Coming Soon)</button>'+
+          '</div>'+
+          '<div class="divider"></div>'+
+          '<button id="backFinanceHome" class="btnBack">⬅️ 返回 / Back</button>'+
+        '</div>';
+    }
+    function bindFinanceHome(){
+      $('goFinanceOffering').onclick = function(){
+        logAction('OPEN_FINANCE_OFFERING','', 'finance');
+        App.view = 'financeOffering';
+        render();
+      };
+      $('backFinanceHome').onclick = function(){ App.view='menu'; render(); };
+    }
+    function viewFinanceOffering(){
+      return ''+
+        '<div class="card" style="border-color:rgba(202,155,0,0.35);background:#fffdf3;">'+
+          '<div class="topRow"><div class="big">💰 Offering</div><button id="backFinanceOffering" class="btnBack">⬅️ 返回 / Back</button></div>'+
+          '<div class="small">SundayService 活動清單（每行可自動儲存）/ Sunday service event IDs (row auto-save enabled)</div>'+
+          '<div class="miniBtnRow" style="margin-top:8px;">'+
+            '<button id="btnFinanceSaveAll" class="btnMain">💾 儲存全部 / Save all</button>'+
+            '<button id="btnFinanceReload" class="btnLookup">🔄 重新載入 / Reload</button>'+
+          '</div>'+
+          '<div id="financeOfferingMsg"></div>'+
+          '<div id="financeOfferingOut" style="margin-top:10px;"></div>'+
+        '</div>';
+    }
+    function bindFinanceOffering(){
+      $('backFinanceOffering').onclick = function(){ App.view='financeHome'; render(); };
+      $('btnFinanceReload').onclick = function(){ loadFinanceOffering_(); };
+      $('btnFinanceSaveAll').onclick = function(){ saveAllFinanceOffering_(); };
+      loadFinanceOffering_();
+    }
+    function loadFinanceOffering_(){
+      showStatus('financeOfferingMsg','warn','WORKING');
+      $('financeOfferingOut').innerHTML = '';
+      callApi('api_admin_finance_offering_list', App.token).then(function(res){
+        if(!res || !res.ok){ showErr('financeOfferingMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+        clear('financeOfferingMsg');
+        App.financeRows = Array.isArray(res.rows) ? res.rows : [];
+        App.financeCanEdit = !!res.canEdit;
+        var body = App.financeRows.map(function(r, idx){
+          var val = (typeof r.amount === 'number') ? Number(r.amount).toFixed(2) : '';
+          return '<tr>'+
+            '<td>'+escapeHtml(String(r.eventKey||''))+'</td>'+
+            '<td><input id="finAmt_'+idx+'" data-fin-idx="'+idx+'" data-fin-ev="'+escapeHtml(String(r.eventKey||''))+'" value="'+escapeHtml(val)+'" placeholder="0.00" '+(App.financeCanEdit?'':'disabled')+' /></td>'+
+          '</tr>';
+        }).join('');
+        $('financeOfferingOut').innerHTML =
+          '<div class="tableWrap"><table><thead><tr><th>Event ID</th><th>Offering amount</th></tr></thead><tbody>'+
+          (body || '<tr><td colspan="2">No SundayService events</td></tr>')+
+          '</tbody></table></div>'+
+          (App.financeCanEdit ? '' : '<div class="msgBox warn" style="margin-top:10px;">只有財務同工/GL可修改 / Only finance members/GL can edit.</div>');
+
+        Array.prototype.slice.call($('financeOfferingOut').querySelectorAll('[data-fin-idx]')).forEach(function(el){
+          var fn = function(){ queueFinanceAutoSave_(el); };
+          el.addEventListener('change', fn);
+          el.addEventListener('blur', fn);
+        });
+      }).catch(function(err){
+        showErr('financeOfferingMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+      });
+    }
+    function normalizeFinanceAmount_(v){
+      var raw = String(v||'').trim();
+      if (!raw) return { ok:false, msg:'請輸入金額 / Enter an amount' };
+      if (!/^\d+(\.\d{1,2})?$/.test(raw)) return { ok:false, msg:'格式需為非負數，最多兩位小數 / Non-negative with max 2 decimals' };
+      var n = Number(raw);
+      if (!isFinite(n) || n < 0) return { ok:false, msg:'金額必須為非負數 / Amount must be non-negative' };
+      return { ok:true, amount:n.toFixed(2) };
+    }
+    function queueFinanceAutoSave_(inputEl){
+      if (!App.financeCanEdit || !inputEl) return;
+      var ev = String(inputEl.getAttribute('data-fin-ev') || '').trim();
+      if (!ev) return;
+      var timerKey = 'fin_' + ev;
+      if (App.financeSaveTimers[timerKey]) clearTimeout(App.financeSaveTimers[timerKey]);
+      App.financeSaveTimers[timerKey] = setTimeout(function(){
+        saveFinanceRow_(ev, inputEl, true);
+      }, 450);
+    }
+    function saveFinanceRow_(eventKey, inputEl, quiet){
+      var parsed = normalizeFinanceAmount_(inputEl.value);
+      if (!parsed.ok){
+        if (!quiet) showBox('financeOfferingMsg','err', parsed.msg, parsed.msg);
+        return Promise.resolve(false);
+      }
+      inputEl.value = parsed.amount;
+      return callApi('api_admin_finance_offering_save', App.token, { eventKey:eventKey, amount:parsed.amount }).then(function(res){
+        if (!res || !res.ok){
+          if (!quiet) showErr('financeOfferingMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          return false;
+        }
+        if (!quiet) showBox('financeOfferingMsg','ok','已儲存 / Saved','Saved');
+        return true;
+      }).catch(function(err){
+        if (!quiet) showErr('financeOfferingMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+        return false;
+      });
+    }
+    function saveAllFinanceOffering_(){
+      if (!App.financeCanEdit){
+        showBox('financeOfferingMsg','warn','沒有修改權限','No edit permission');
+        return;
+      }
+      var inputs = Array.prototype.slice.call(($('financeOfferingOut')||document).querySelectorAll('[data-fin-idx]'));
+      if (!inputs.length){ showBox('financeOfferingMsg','warn','沒有可儲存項目','No rows to save'); return; }
+      showStatus('financeOfferingMsg','warn','WORKING');
+      Promise.all(inputs.map(function(el){
+        var ev = String(el.getAttribute('data-fin-ev') || '').trim();
+        return saveFinanceRow_(ev, el, true);
+      })).then(function(results){
+        var okCount = results.filter(Boolean).length;
+        if (okCount === results.length) showBox('financeOfferingMsg','ok','全部已儲存 / All saved','All rows saved');
+        else showBox('financeOfferingMsg','warn','部分儲存失敗，請檢查格式 / Some rows failed validation','Some rows failed validation');
+      });
+    }
+
     function bindPeriod(){
       $('from4').value = App.from;
       $('to4').value = App.to || getTodayYmdUk();
@@ -4401,6 +4545,7 @@ function viewAttendanceHome(){
             '<div>總出席 / Total</div><div><b>'+escapeHtml(String(c.total||0))+'</b></div>'+
             '<div>新朋友 / New</div><div><b>'+escapeHtml(String(c.new||0))+'</b></div>'+
             '<div>舊朋友 / Existing</div><div><b>'+escapeHtml(String(c.existing||0))+'</b></div>'+
+            '<div>奉獻 / Offering</div><div><b>'+escapeHtml((typeof res.extras.offering === 'number') ? ('£' + Number(res.extras.offering).toFixed(2)) : '—')+'</b></div>'+
           '</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
             btnNew + btnEx + btnSermon + btnServing +
@@ -5033,6 +5178,8 @@ function viewAttendanceHome(){
       if(App.view==='stats'){ root.innerHTML = viewStats(); bindStats(); attachScrollControls_(root); return; }
       if(App.view==='period'){ root.innerHTML = viewPeriod(); bindPeriod(); attachScrollControls_(root); return; }
       if(App.view==='worshipPlan'){ root.innerHTML = viewWorshipPlan(); bindWorshipPlan(); attachScrollControls_(root); return; }
+      if(App.view==='financeHome'){ root.innerHTML = viewFinanceHome(); bindFinanceHome(); attachScrollControls_(root); return; }
+      if(App.view==='financeOffering'){ root.innerHTML = viewFinanceOffering(); bindFinanceOffering(); attachScrollControls_(root); return; }
       if(App.view==='sermonInfo'){
         if (!App.sermonPayload){
           root.innerHTML = '<div class="card"><div class="big">Set Sermon info / 設定講道資料</div><div id="sermonInfoMsg"></div></div>';
