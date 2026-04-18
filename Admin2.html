@@ -415,7 +415,8 @@
       sermonRowInflight:{},
       financeRows:[],
       financeCanEdit:false,
-      financeSaveTimers:{}
+      financeSaveTimers:{},
+      statsShowOffering:false
     };
 
     function $(id){ return document.getElementById(id); }
@@ -4060,6 +4061,10 @@ function viewAttendanceHome(){
           '<div class="miniBtnRow">'+
             '<button id="btnLoadStats" class="btnStats">🔄 載入 / Load</button>'+
             (roleIsAdmin() ? '<button id="btnRebuild" class="btnPeriod">🔄 重建 / Rebuild</button>' : '')+
+            '<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;">'+
+              '<input id="toggleShowOffering" type="checkbox" />'+
+              '<span>顯示奉獻線 / Show offering line</span>'+
+            '</label>'+
             '<button id="backAttendance3" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="statsMsg"></div>'+
@@ -4072,9 +4077,23 @@ function viewAttendanceHome(){
       $('from3').value = App.from;
       $('to3').value = App.to || getTodayYmdUk();
       $('backAttendance3').onclick = function(){ App.view='attendanceHome'; render(); };
+      if ($('toggleShowOffering')){
+        $('toggleShowOffering').checked = !!App.statsShowOffering;
+      }
 
       $('btnLoadStats').onclick = function(){ loadStats(false); };
       if ($('btnRebuild')) $('btnRebuild').onclick = function(){ loadStats(true); };
+      var lastStatsEvents = [];
+      if ($('toggleShowOffering')){
+        $('toggleShowOffering').onchange = function(){
+          App.statsShowOffering = !!$('toggleShowOffering').checked;
+          if (lastStatsEvents.length){
+            drawStatsChart_(lastStatsEvents);
+          } else {
+            drawEmptyChart_();
+          }
+        };
+      }
 
       loadStats(false);
 
@@ -4105,10 +4124,12 @@ function viewAttendanceHome(){
 
           if(!res.events || !res.events.length){
             showBox('statsMsg','warn','此範圍沒有數據','No data in this range.');
+            lastStatsEvents = [];
             drawEmptyChart_();
             $('statsOut').innerHTML = '';
             return;
           }
+          lastStatsEvents = Array.isArray(res.events) ? res.events : [];
           drawStatsChart_(res.events);
           $('statsOut').innerHTML = renderStatsTable_(res.events);
 
@@ -4134,15 +4155,18 @@ function viewAttendanceHome(){
               '<th>新朋友 / New</th>'+
               '<th>舊朋友 / Existing</th>'+
               '<th>假期中人數 / On holiday</th>'+
+              '<th>奉獻 / Offering</th>'+
             '</tr></thead><tbody>';
         events.forEach(function(r){
           var ymd = eventDateYmdFromKey(r.eventKey) || String(r.eventKey||'');
+          var offeringText = (typeof r.offering === 'number') ? ('£' + Number(r.offering).toFixed(2)) : '—';
           html += '<tr>'+
             '<td><span class="chip">'+escapeHtml(String(ymd))+'</span></td>'+
             '<td>'+escapeHtml(String(r.total||0))+'</td>'+
             '<td>'+escapeHtml(String(r.new||0))+'</td>'+
             '<td>'+escapeHtml(String(r.existing||0))+'</td>'+
             '<td>'+escapeHtml(String(r.holiday||0))+'</td>'+
+            '<td>'+escapeHtml(offeringText)+'</td>'+
           '</tr>';
         });
         html += '</tbody></table></div></div>';
@@ -4162,6 +4186,28 @@ function viewAttendanceHome(){
         var labels = events.map(function(x){ return eventDateYmdFromKey(x.eventKey) || x.eventKey; });
         var existing = events.map(function(x){ return x.existing; });
         var nnew = events.map(function(x){ return x.new; });
+        var showOffering = !!App.statsShowOffering;
+        var offering = events.map(function(x){ return (typeof x.offering === 'number') ? x.offering : null; });
+        var datasets = [
+          { label: '舊朋友 / Existing', data: existing, stack: 'stack1' },
+          { label: '新朋友 / New', data: nnew, stack: 'stack1' }
+        ];
+        if (showOffering){
+          datasets.push({
+            type:'line',
+            label:'奉獻 / Offering (£)',
+            data: offering,
+            yAxisID: 'y1',
+            borderColor:'#d48806',
+            backgroundColor:'#d48806',
+            borderWidth:2,
+            tension:0.15,
+            spanGaps:false,
+            pointRadius:4,
+            pointHoverRadius:5,
+            pointStyle:'circle'
+          });
+        }
 
         try{
           var ctx = $('statsChart').getContext('2d');
@@ -4171,15 +4217,27 @@ function viewAttendanceHome(){
             type: 'bar',
             data: {
               labels: labels,
-              datasets: [
-                { label: '舊朋友 / Existing', data: existing, stack: 'stack1' },
-                { label: '新朋友 / New', data: nnew, stack: 'stack1' }
-              ]
+              datasets: datasets
             },
             options: {
               responsive:true,
               maintainAspectRatio:false,
-              plugins:{ legend:{ display:true } },
+              plugins:{
+                legend:{ display:true },
+                tooltip:{
+                  callbacks:{
+                    label:function(ctx){
+                      var lbl = String(ctx.dataset && ctx.dataset.label || '');
+                      var val = ctx.raw;
+                      if (lbl.indexOf('Offering') >= 0 || lbl.indexOf('奉獻') >= 0){
+                        if (typeof val === 'number') return lbl + ': £' + Number(val).toFixed(2);
+                        return lbl + ': —';
+                      }
+                      return lbl + ': ' + String(val == null ? '—' : val);
+                    }
+                  }
+                }
+              },
               // ✅ Click bar segments still works (tooltip)
               // ✅ Clicking the x-axis label opens service stats dialog
               onClick: function(evt, elements, chart){
@@ -4216,7 +4274,14 @@ function viewAttendanceHome(){
               },
               scales:{
                 x:{ stacked:true, ticks:{ maxRotation:0, minRotation:0 } },
-                y:{ stacked:true, beginAtZero:true, stacked:true }
+                y:{ stacked:true, beginAtZero:true, stacked:true, title:{ display:true, text:'Attendance' } },
+                y1:{
+                  display: showOffering,
+                  position:'right',
+                  beginAtZero:true,
+                  grid:{ drawOnChartArea:false },
+                  title:{ display: showOffering, text:'Offering (£)' }
+                }
               }
             }
           });
@@ -4631,6 +4696,7 @@ function viewAttendanceHome(){
         var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
         var low = res.lowAttendance || {};
         var away = res.away || {};
+        var awayHistory = Array.isArray(res.awayHistory) ? res.awayHistory : [];
         var servingInsights = res.servingInsights || {};
 
         var statusDisplay = displayMemberStatusLabel(m.status||'');
@@ -4681,10 +4747,22 @@ function viewAttendanceHome(){
           }
           awaySummary = '<div class="small">'+lines.join('<br/>')+'</div>';
         }
+        var awayHistoryHtml = '';
+        if (awayHistory.length){
+          var histLines = awayHistory.map(function(p){
+            var from = ymdToDmy_(String((p && p.from) || '').trim()) || '';
+            var to = ymdToDmy_(String((p && p.to) || '').trim()) || '';
+            return '• ' + escapeHtml(from + ' - ' + to);
+          });
+          awayHistoryHtml = '<div class="small" style="margin-top:8px;">'+
+            '<b>歷史假期 / Holiday history</b><br/>'+histLines.join('<br/>')+
+          '</div>';
+        }
         var awayCard =
           '<div class="msgBox warn" style="margin-top:10px;">'+
             '<div class="big warn">🏖️ 請假 / Absence</div>'+
             awaySummary+
+            awayHistoryHtml+
             '<div class="miniBtnRow">'+
               '<button id="btnAbsence" class="btnPeriod">請假 / Absence</button>'+
             '</div>'+

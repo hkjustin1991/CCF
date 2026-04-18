@@ -1290,12 +1290,18 @@ function api_admin_stats(token, fromDate, toDate){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
-  const allMemberIds = new Set();
-  for (const ev of events){
-    const set = evAttendees.get(ev) || new Set();
-    set.forEach(function(mid){ allMemberIds.add(mid); });
+  const mi = admin_getMembersIndex_();
+  const holidayEligibleIds = [];
+  for (let i=0;i<mi.all.length;i++){
+    const m = mi.all[i];
+    if (!m || !m.id) continue;
+    const st = admin_normStatus_(m.status || '');
+    if (st === 'DISABLED') continue;
+    holidayEligibleIds.push(m.id);
   }
-  const awayMap = admin_getAwayPeriodsMap_(Array.from(allMemberIds));
+  const awayMap = admin_getEffectiveAwayPeriodsMap_(holidayEligibleIds);
+  const holidayTrackedIds = Object.keys(awayMap);
+  const offeringMap = admin_getOfferingMap_();
 
   const out = [];
   for (const ev of events){
@@ -1309,11 +1315,16 @@ function api_admin_stats(token, fromDate, toDate){
       for (const mid of set){
         const fev = firstSeen[mid];
         if (fev && fev === ev) newCount++;
-        if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
       }
     }
+    for (let i=0;i<holidayTrackedIds.length;i++){
+      const mid = holidayTrackedIds[i];
+      if (set && set.has(mid)) continue;
+      if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
+    }
     const existing = Math.max(0, total - newCount);
-    out.push({ eventKey: ev, total: total, new: newCount, existing: existing, holiday: holidayCount });
+    const offering = (typeof offeringMap[ev] === 'number') ? offeringMap[ev] : null;
+    out.push({ eventKey: ev, total: total, new: newCount, existing: existing, holiday: holidayCount, offering: offering });
   }
 
   admin_audit_(s.actor, 'STATS_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), events: out.length}), 'stats');
@@ -1633,21 +1644,12 @@ function api_admin_matrix(token, fromDate, toDate, q){
   members.sort((a,b)=> a.id.localeCompare(b.id));
 
   const away = {};
-  const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
+  const awayMap = admin_getEffectiveAwayPeriodsMap_(members.map(function(m){ return m.id; }));
   events.forEach(function(ev){
     const d = admin_eventDateFromKey_(ev);
     if (!d) return;
     members.forEach(function(m){
-      const ap = admin_getAwayPeriodForMember_(m.id);
-      var periods = (ap && ap.periods) ? ap.periods.slice() : [];
-      var hist = historyMap[m.id] || [];
-      periods = periods.concat(hist);
-      const hit = periods.some(function(p){
-        const from = admin_parseYmd_(p.fromYmd || p.from || '');
-        const to = admin_parseYmd_(p.toYmd || p.to || '');
-        if (!from || !to) return false;
-        return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
-      });
+      const hit = admin_isInAwayOnDate_(awayMap[m.id], d);
       if (!hit) return;
       if (!away[m.id]) away[m.id] = {};
       away[m.id][ev] = 1;
@@ -1788,6 +1790,12 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
   const lowEnabled = !!low.enabled;
   const lowFlag = !!low.flagById[id];
   const away = admin_getAwayPeriodForMember_(id);
+  const awayHistory = ((admin_getAwayHistoryPeriodsMap_([id]) || {})[id] || []).map(function(p){
+    return {
+      from: String((p && p.fromYmd) || '').trim(),
+      to: String((p && p.toYmd) || '').trim()
+    };
+  }).filter(function(p){ return p.from && p.to; });
   const servingInsights = admin_getServingInsightsForMember_(id);
 
   admin_audit_(s.actor, 'MEMBER_DETAIL', JSON.stringify({id:id, from:String(fromDate||''), to:String(toDate||'')}), 'member_detail');
@@ -1822,6 +1830,7 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       from2: away.from2Ymd || '',
       to2: away.to2Ymd || ''
     },
+    awayHistory: awayHistory,
     servingInsights: servingInsights
   };
 }
@@ -2610,6 +2619,35 @@ function admin_getAwayPeriodsMap_(memberIds){
       periods: [p1, p2].filter(p => p.fromYmd || p.toYmd)
     };
   });
+  return out;
+}
+function admin_getEffectiveAwayPeriodsMap_(memberIds){
+  const ids = (Array.isArray(memberIds) ? memberIds : [])
+    .map(function(x){ return String(x||'').trim().toUpperCase(); })
+    .filter(Boolean);
+  if (!ids.length) return {};
+
+  const currentMap = admin_getAwayPeriodsMap_(ids);
+  const historyMap = admin_getAwayHistoryPeriodsMap_(ids);
+  const out = {};
+
+  ids.forEach(function(id){
+    const all = [];
+    const seen = {};
+    const curr = (currentMap[id] && Array.isArray(currentMap[id].periods)) ? currentMap[id].periods : [];
+    const hist = Array.isArray(historyMap[id]) ? historyMap[id] : [];
+    curr.concat(hist).forEach(function(p){
+      const from = String((p && (p.fromYmd || p.from)) || '').trim();
+      const to = String((p && (p.toYmd || p.to)) || '').trim();
+      if (!from || !to) return;
+      const key = from + '|' + to;
+      if (seen[key]) return;
+      seen[key] = 1;
+      all.push({ fromYmd: from, toYmd: to });
+    });
+    if (all.length) out[id] = { periods: all };
+  });
+
   return out;
 }
 function admin_getServingInsightsForMember_(memberId){
