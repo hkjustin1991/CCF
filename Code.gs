@@ -111,8 +111,15 @@ const SERVING_POSITION_GROUPS = {
 };
 
 /******** Web App Router ********/
+function getWebMode_(e){
+  const pMode = (e && e.parameter && e.parameter.mode) || '';
+  const psMode = (e && e.parameters && e.parameters.mode && e.parameters.mode[0]) || '';
+  const pathMode = (e && e.pathInfo) ? String(e.pathInfo || '').split('/')[0] : '';
+  return String(pMode || psMode || pathMode || '').trim().toLowerCase();
+}
+
 function doGet(e) {
-  const mode = String((e && e.parameter && e.parameter.mode) || '').toLowerCase();
+  const mode = getWebMode_(e);
 
   // Public health ping for uptime/deployment checks (NEW)
   if (mode === 'healthping') {
@@ -128,6 +135,7 @@ function doGet(e) {
 
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
+  if (mode === 'rota') return doGetRotaPublic_(e);
 
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
@@ -138,6 +146,137 @@ function doGet(e) {
   return t.evaluate()
     .setTitle('CCF Live Service Portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+
+function doGetRotaPublic_(e){
+  const t = HtmlService.createTemplateFromFile('RotaPublic');
+  t.APP_VERSION = APP_VERSION;
+  return t.evaluate()
+    .setTitle('CCF Public Rota')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function getRotaPublicPassword_(){
+  try{
+    const p = PropertiesService.getScriptProperties();
+    return String(p.getProperty('ROTA_PUBLIC_PASSWORD') || '').trim();
+  }catch(e){
+    return '';
+  }
+}
+
+function createRotaPublicSession_(){
+  const token = Utilities.getUuid();
+  CacheService.getScriptCache().put('rota_pub_' + token, JSON.stringify({ createdAt: Date.now() }), 2 * 60 * 60);
+  return token;
+}
+function requireRotaPublicSession_(token){
+  const t = String(token || '').trim();
+  if (!t) return { ok:false, code:'E401', zh:'請先登入', en:'Please login first.' };
+  const cache = CacheService.getScriptCache();
+  const k = 'rota_pub_' + t;
+  const raw = cache.get(k);
+  if (!raw) return { ok:false, code:'E401', zh:'登入已過期，請重新輸入密碼', en:'Session expired. Please re-enter password.' };
+  cache.put(k, raw, 2 * 60 * 60);
+  return { ok:true };
+}
+
+function api_rota_public_verify(password){
+  const pass = String(password || '').trim();
+  const expected = getRotaPublicPassword_();
+  if (!expected) return { ok:false, code:'E503', zh:'系統未設定公開排期密碼', en:'Public rota password is not configured.' };
+  if (!pass || pass !== expected) return { ok:false, code:'E401', zh:'密碼不正確', en:'Incorrect password.' };
+  return { ok:true, token: createRotaPublicSession_() };
+}
+
+function rotaPublicParseEventDate_(eventKey){
+  const m = String(eventKey || '').trim().match(/(\d{4}-\d{2}-\d{2})$/);
+  if (!m) return null;
+  const d = new Date(m[1] + 'T00:00:00');
+  return isNaN(d.getTime()) ? null : d;
+}
+function rotaPublicMonthRange_(){
+  const now = nowUk_();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+  first.setHours(0,0,0,0);
+  end.setHours(23,59,59,999);
+  return { from:first, to:end };
+}
+function rotaPublicLabel_(value){
+  const s = String(value || '').trim();
+  return s ? s : '—';
+}
+
+function api_rota_public_current_next_month(token){
+  const auth = requireRotaPublicSession_(token);
+  if (!auth.ok) return auth;
+
+  const sh = getServingSheet_();
+  if (!sh) return { ok:true, range:{}, events:[] };
+
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 2 || lastCol < 2) return { ok:true, range:{}, events:[] };
+
+  const range = rotaPublicMonthRange_();
+  const matrix = getServingMatrix_(sh);
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const membersById = getMembersIndex_({ ensureOptional: false }).byId || {};
+  const events = [];
+
+  for (var i = 0; i < rows.length; i++){
+    const row = rows[i];
+    const eventKey = String(row[0] || '').trim();
+    if (!eventKey) continue;
+    const eventDate = rotaPublicParseEventDate_(eventKey);
+    if (!eventDate) continue;
+    if (eventDate.getTime() < range.from.getTime() || eventDate.getTime() > range.to.getTime()) continue;
+
+    const assignments = [];
+    for (var p = 0; p < matrix.positions.length; p++){
+      const pos = matrix.positions[p];
+      const raw = String(row[pos.colIndex - 1] || '').trim();
+      if (!raw || isServingNaValue_(raw) || isServingClosedValue_(raw)) continue;
+      const tokens = parseServingMemberIds_(raw).filter(function(t){
+        return !isServingNaValue_(t) && !isServingClosedValue_(t);
+      });
+      if (!tokens.length) continue;
+
+      const names = tokens.map(function(t){
+        const matched = String(t || '').trim().match(/CCF\d{4}/i);
+        const memberId = matched ? matched[0].toUpperCase() : '';
+        const m = memberId ? membersById[memberId] : null;
+        const display = m ? (m.nameZh || m.nameEn || memberId) : (memberId || String(t || '').trim());
+        return rotaPublicLabel_(display);
+      }).filter(Boolean);
+
+      if (!names.length) continue;
+      assignments.push({
+        group: rotaPublicLabel_(pos.group),
+        position: rotaPublicLabel_(pos.position),
+        members: names.join(' / ')
+      });
+    }
+
+    events.push({
+      eventKey: eventKey,
+      eventDate: fmtUk_(eventDate, 'yyyy-MM-dd'),
+      eventDateLabel: fmtUk_(eventDate, 'EEE, d MMM yyyy'),
+      assignments: assignments
+    });
+  }
+
+  events.sort(function(a, b){ return String(a.eventDate).localeCompare(String(b.eventDate)); });
+  return {
+    ok:true,
+    range: {
+      from: fmtUk_(range.from, 'yyyy-MM-dd'),
+      to: fmtUk_(range.to, 'yyyy-MM-dd')
+    },
+    events: events
+  };
 }
 
 function getExternalScannerConfig_(){
