@@ -815,8 +815,17 @@
       el.innerHTML = buildMsgHtml_(kind, res);
     }
 
-    function showBox(targetId, kind, titleZh, titleEn, detailHtml, allowHtmlDetail){
-      var payload = { code:(kind==='err'?'E500':'S100'), zh:String(titleZh||''), en:String(titleEn||''), detailHtml:detailHtml||'', trustedDetailHtml:!!allowHtmlDetail };
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml, allowHtmlDetail, meta){
+      var m = (meta && typeof meta === 'object') ? meta : {};
+      var payload = {
+        code:String(m.code || (kind==='err'?'E500':'S100')),
+        subCode:String(m.subCode || ''),
+        subGroup:String(m.subGroup || ''),
+        zh:String(titleZh||''),
+        en:String(titleEn||''),
+        detailHtml:detailHtml||'',
+        trustedDetailHtml:!!allowHtmlDetail
+      };
       if (!allowHtmlDetail && detailHtml) payload.detailEn = String(detailHtml||'');
       renderMsg_(targetId, kind, payload);
     }
@@ -874,6 +883,20 @@
         var parts = String(line||'').split('→').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
         if (!parts.length) return null;
         return { memberLabel: parts[0] || '', position: parts[1] || '', group: normalizeServingGroupKey_(parts[2] || '') };
+      }).filter(Boolean);
+    }
+    function parseDuplicateAssignmentDetailLines_(detailText){
+      var raw = String(detailText||'').trim();
+      if (!raw) return [];
+      return raw.split('|').map(function(line){
+        var parts = String(line||'').split(':');
+        if (parts.length < 2) return null;
+        var memberLabel = String(parts.shift() || '').trim();
+        var positionsRaw = String(parts.join(':') || '').trim();
+        if (!memberLabel || !positionsRaw) return null;
+        var positions = positionsRaw.split(/[、,]/).map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+        if (positions.length < 2) return null;
+        return { memberLabel:memberLabel, positions:positions };
       }).filter(Boolean);
     }
     function formatServingGroupMismatchDetailHtml_(detailText){
@@ -959,6 +982,17 @@
           };
         }
       }
+      if (res.subCode === 'DUPLICATE_ASSIGNMENT' && res.detail){
+        var dupLines = parseDuplicateAssignmentDetailLines_(res.detail);
+        if (dupLines.length){
+          return {
+            html: dupLines.map(function(row){
+              return '<div class="small"><b>'+escapeHtml(row.memberLabel||'')+'</b>：'+escapeHtml((row.positions||[]).join('、'))+'</div>';
+            }).join(''),
+            allow:true
+          };
+        }
+      }
       var dZh = normalizeMessageText_(res.detailZh || '');
       var dEn = normalizeMessageText_(res.detailEn || '');
       var d = normalizeMessageText_(res.detail || '');
@@ -973,7 +1007,7 @@
       res = normalizeErrResForRender_(res);
       var titles = toBilingualText_(res, '系統錯誤', 'System error');
       var detailObj = buildErrDetailHtml_(res);
-      showBox(targetId,'err',withErrorCodeTag_(titles.zh, res),titles.en,detailObj.html,detailObj.allow);
+      showBox(targetId,'err',titles.zh,titles.en,detailObj.html,detailObj.allow,res);
     }
 
 
@@ -3443,7 +3477,7 @@ function viewAttendanceHome(){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
                   var mismatchTitle = toBilingualText_(res2, '成員不屬於該事奉組別', 'Member is NOT a member of this serving group.');
-                  showBox('servingEditMsg','err',withErrorCodeTag_(mismatchTitle.zh, res2), mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
+                  showBox('servingEditMsg','err',mismatchTitle.zh, mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true, res2);
                   return;
                 }
                 if (res2 && res2.code === 'E409' && res2.canOverride){
@@ -3482,10 +3516,10 @@ function viewAttendanceHome(){
                         return label.zh || p;
                       });
                       var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
+                      return escapeHtml((d.memberLabel || d.memberId || '') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                     }).join('<br/>');
                   }
-                showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
+                showBox('servingEditMsg','warn', titleZh, titleEn, detail, true, res2);
                   var btnRow = document.createElement('div');
                   btnRow.className = 'miniBtnRow';
                   var btn = document.createElement('button');
@@ -3594,7 +3628,7 @@ function viewAttendanceHome(){
             if (!res2 || !res2.ok){
               if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
                 var mismatchTitle = toBilingualText_(res2, '成員不屬於該事奉組別', 'Member is NOT a member of this serving group.');
-                showBox('quickMsg','err',withErrorCodeTag_(mismatchTitle.zh, res2), mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
+                showBox('quickMsg','err',mismatchTitle.zh, mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true, res2);
                 return;
               }
               if (res2 && res2.code === 'E409' && res2.canOverride){
@@ -3633,10 +3667,10 @@ function viewAttendanceHome(){
                       return label.zh || p;
                     });
                     var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
+                    return escapeHtml((d.memberLabel || d.memberId || '') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                   }).join('<br/>');
                 }
-                showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
+                showBox('quickMsg','warn', titleZh, titleEn, detail, true, res2);
                 var btnRow = document.createElement('div');
                 btnRow.className = 'miniBtnRow';
                 var btn = document.createElement('button');
