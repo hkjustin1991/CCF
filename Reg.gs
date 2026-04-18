@@ -1690,16 +1690,27 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
 
   function rotaStats_(eventKey, position){
     const list = getCellList_(eventKey, position);
-    if (!Array.isArray(list) || !list.length) return { totalSlots:0, vacantSlots:0 };
+    const configuredMax = (typeof ADMIN_SERVING_POSITION_MAX === 'object' && ADMIN_SERVING_POSITION_MAX)
+      ? Number(ADMIN_SERVING_POSITION_MAX[position] || 0)
+      : 0;
+    if (!Array.isArray(list) || !list.length) {
+      return { totalSlots: Math.max(0, configuredMax), vacantSlots: Math.max(0, configuredMax) };
+    }
     let total = 0;
     let vacant = 0;
+    let hasClosed = false;
     list.forEach(function(it){
       const raw = String((it && it.rawValue) || '').trim();
       const up = raw.toUpperCase();
       if (!raw || up === 'VACANT') { total += 1; vacant += 1; return; }
-      if (up === 'CLOSED') return;
+      if (up === 'CLOSED') { hasClosed = true; return; }
       total += 1;
     });
+    if (hasClosed) return { totalSlots:0, vacantSlots:0 };
+    if (configuredMax > total){
+      vacant += (configuredMax - total);
+      total = configuredMax;
+    }
     return { totalSlots: total, vacantSlots: vacant };
   }
 
