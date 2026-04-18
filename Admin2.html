@@ -4249,8 +4249,8 @@ function viewAttendanceHome(){
           '<div class="big">💷 財務 / Finance</div>'+
           '<div class="small">請選擇功能 / Choose a function</div>'+
           '<div class="menuGrid" style="margin-top:10px;">'+
-            '<button id="goFinanceOffering" class="btnMain">💰 Offering</button>'+
-            '<button class="btnGhost" disabled>🧾 Expenditure (Coming Soon)</button>'+
+            '<button id="goFinanceOffering" class="btnMain">💰 奉獻 / Offering</button>'+
+            '<button class="btnGhost" disabled>🧾 支出 / Expenditure（即將推出 / Coming soon）</button>'+
           '</div>'+
           '<div class="divider"></div>'+
           '<button id="backFinanceHome" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -4267,7 +4267,7 @@ function viewAttendanceHome(){
     function viewFinanceOffering(){
       return ''+
         '<div class="card" style="border-color:rgba(202,155,0,0.35);background:#fffdf3;">'+
-          '<div class="topRow"><div class="big">💰 Offering</div><button id="backFinanceOffering" class="btnBack">⬅️ 返回 / Back</button></div>'+
+          '<div class="topRow"><div class="big">💰 奉獻 / Offering</div><button id="backFinanceOffering" class="btnBack">⬅️ 返回 / Back</button></div>'+
           '<div class="small">SundayService 活動清單（每行可自動儲存）/ Sunday service event IDs (row auto-save enabled)</div>'+
           '<div class="miniBtnRow" style="margin-top:8px;">'+
             '<button id="btnFinanceSaveAll" class="btnMain">💾 儲存全部 / Save all</button>'+
@@ -4299,8 +4299,8 @@ function viewAttendanceHome(){
           '</tr>';
         }).join('');
         $('financeOfferingOut').innerHTML =
-          '<div class="tableWrap"><table><thead><tr><th>Event ID</th><th>Offering amount</th></tr></thead><tbody>'+
-          (body || '<tr><td colspan="2">No SundayService events</td></tr>')+
+          '<div class="tableWrap"><table><thead><tr><th>活動 ID / Event ID</th><th>奉獻金額 / Offering amount</th></tr></thead><tbody>'+
+          (body || '<tr><td colspan="2">沒有 SundayService 活動 / No SundayService events</td></tr>')+
           '</tbody></table></div>'+
           (App.financeCanEdit ? '' : '<div class="msgBox warn" style="margin-top:10px;">只有財務同工/GL可修改 / Only finance members/GL can edit.</div>');
 
@@ -4343,7 +4343,7 @@ function viewAttendanceHome(){
           if (!quiet) showErr('financeOfferingMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
           return false;
         }
-        if (!quiet) showBox('financeOfferingMsg','ok','已儲存 / Saved','Saved');
+        if (!quiet) showBox('financeOfferingMsg','ok','已儲存 / Saved','已儲存 / Saved');
         return true;
       }).catch(function(err){
         if (!quiet) showErr('financeOfferingMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
@@ -4352,19 +4352,19 @@ function viewAttendanceHome(){
     }
     function saveAllFinanceOffering_(){
       if (!App.financeCanEdit){
-        showBox('financeOfferingMsg','warn','沒有修改權限','No edit permission');
+        showBox('financeOfferingMsg','warn','沒有修改權限 / No edit permission','沒有修改權限 / No edit permission');
         return;
       }
       var inputs = Array.prototype.slice.call(($('financeOfferingOut')||document).querySelectorAll('[data-fin-idx]'));
-      if (!inputs.length){ showBox('financeOfferingMsg','warn','沒有可儲存項目','No rows to save'); return; }
+      if (!inputs.length){ showBox('financeOfferingMsg','warn','沒有可儲存項目 / No rows to save','沒有可儲存項目 / No rows to save'); return; }
       showStatus('financeOfferingMsg','warn','WORKING');
       Promise.all(inputs.map(function(el){
         var ev = String(el.getAttribute('data-fin-ev') || '').trim();
         return saveFinanceRow_(ev, el, true);
       })).then(function(results){
         var okCount = results.filter(Boolean).length;
-        if (okCount === results.length) showBox('financeOfferingMsg','ok','全部已儲存 / All saved','All rows saved');
-        else showBox('financeOfferingMsg','warn','部分儲存失敗，請檢查格式 / Some rows failed validation','Some rows failed validation');
+        if (okCount === results.length) showBox('financeOfferingMsg','ok','全部已儲存 / All saved','全部已儲存 / All saved');
+        else showBox('financeOfferingMsg','warn','部分儲存失敗，請檢查格式 / Some rows failed validation','部分儲存失敗，請檢查格式 / Some rows failed validation');
       });
     }
 
