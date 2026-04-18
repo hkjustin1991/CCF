@@ -334,6 +334,58 @@ function api_admin_login(input){
   return { ok:true, token, actor: actor };
 }
 
+function api_admin_login_with_handoff(handoffToken){
+  const consume = (typeof reg_consumeAdminHandoffToken_ === 'function')
+    ? reg_consumeAdminHandoffToken_(handoffToken)
+    : { ok:false, code:'E500', zh:'系統設定錯誤', en:'Handoff helper unavailable.' };
+  if (!consume || !consume.ok) return consume || admin_err_('E401','登入已過期，請重新登入','Session expired. Please login again.');
+
+  const id = String(consume.memberId || '').trim().toUpperCase();
+  if (!id) return admin_err_('E401','登入已過期，請重新登入','Session expired. Please login again.');
+
+  const mi = admin_getMembersIndex_();
+  const m = mi.byId[id];
+  if (!m) return admin_err_('E412','找不到此 ID','Member not found.');
+
+  let st = admin_normStatus_(m.status);
+  if (st === 'DISABLED') return admin_err_('E414','此帳號已停用','Account disabled.');
+
+  if (m.roleExpires){
+    const exp = admin_safeToDate_(m.roleExpires);
+    if (exp && exp.getTime() < Date.now()){
+      const ms = admin_findMembersSheet_();
+      const col = admin_getMembersColMap_(ms);
+      const rowNumber = m.rowNumber || admin_findMemberRowById_(ms, col, id);
+      if (rowNumber){
+        ms.getRange(rowNumber, col.Status+1).setValue('ACTIVE');
+        const roleCol = admin_ensureRoleExpiresColumn_(ms, col);
+        if (roleCol !== null) ms.getRange(rowNumber, roleCol+1).setValue('');
+      }
+      admin_clearMembersCache_();
+      st = 'ACTIVE';
+    }
+  }
+
+  const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
+  if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
+    return admin_err_('E403','此管理平台只限已授權同工使用','Admin portal for authorised staff only.');
+  }
+
+  const role = (st === 'STAFF' || st === 'ADMIN') ? st : 'GL';
+  const actor = {
+    id:m.id,
+    role:role,
+    servingGroups: Array.isArray(m.servingGroups) ? m.servingGroups : [],
+    servingGLGroups: glGroups,
+    flags: admin_actorFlagsForMember_(m)
+  };
+  if (role === 'GL') actor.glGroups = glGroups;
+
+  const token = admin_newSession_(actor);
+  admin_audit_(actor, 'LOGIN', JSON.stringify({ via:'HANDOFF', source:consume.source || '' }), '');
+  return { ok:true, token, actor: actor };
+}
+
 
 function api_admin_log_scanner_e420_public(payload){
   try{
