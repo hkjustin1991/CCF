@@ -23,70 +23,84 @@
         background:linear-gradient(160deg,var(--purple-bg) 0%,var(--purple-bg-soft) 100%);
         color:var(--text);
       }
-      .screen{
-        min-height:100vh;
-        width:100vw;
-        padding:14px;
-      }
+      .screen{min-height:100vh;width:100vw;padding:6px}
       .card{
         background:var(--card);
-        border-radius:14px;
-        padding:14px;
-        box-shadow:0 10px 30px rgba(10,6,30,0.22);
-      }
-      .header{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:10px}
-      .title{font-weight:900;font-size:22px;color:#2b1755}
-      .versionChip{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:#ede9fe;color:#4c1d95;font-weight:800;font-size:12px}
-      .small{font-size:12px;color:var(--muted)}
-      .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-      input[type="password"]{
-        min-width:260px;
-        border:1px solid #c4b5fd;
         border-radius:10px;
-        padding:10px 12px;
-        font-size:15px;
+        padding:8px;
+        box-shadow:0 6px 18px rgba(10,6,30,0.18);
+      }
+      .header{display:flex;gap:6px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px}
+      .title{font-weight:900;font-size:16px;line-height:1.15;color:#2b1755}
+      .versionChip{display:inline-flex;align-items:center;padding:3px 7px;border-radius:999px;background:#ede9fe;color:#4c1d95;font-weight:800;font-size:10px}
+      .small{font-size:10px;color:var(--muted);line-height:1.25}
+      .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+      input[type="password"]{
+        min-width:180px;
+        border:1px solid #c4b5fd;
+        border-radius:8px;
+        padding:6px 8px;
+        font-size:12px;
       }
       button{
         border:0;
-        border-radius:10px;
+        border-radius:8px;
         background:#6d28d9;
         color:#fff;
         font-weight:800;
-        padding:10px 14px;
+        padding:6px 9px;
+        font-size:11px;
         cursor:pointer;
       }
       button:hover{filter:brightness(1.06)}
-      .msg{margin-top:10px;font-size:14px}
+      .msg{margin-top:6px;font-size:11px}
       .msg.err{color:#b91c1c}
       .hide{display:none!important}
       .tableWrap{
-        margin-top:10px;
+        margin-top:6px;
         width:100%;
         overflow:auto;
         border:1px solid var(--line);
-        border-radius:12px;
+        border-radius:8px;
+        max-height:calc(100vh - 120px);
       }
       table{
         width:max-content;
         min-width:100%;
         border-collapse:collapse;
         background:#fff;
+        font-size:10px;
+        line-height:1.2;
       }
       th,td{
         border:1px solid var(--line);
-        padding:8px;
+        padding:3px 4px;
         vertical-align:top;
         text-align:left;
-        white-space:nowrap;
+        white-space:normal;
+        word-break:break-word;
       }
-      th{position:sticky;top:0;background:#f5f3ff;z-index:1}
-      th:first-child,td:first-child{position:sticky;left:0;background:#faf5ff;z-index:2;min-width:130px}
-      .stack{display:flex;flex-wrap:wrap;gap:6px;max-width:320px;white-space:normal}
-      .bubble{display:inline-flex;align-items:center;border-radius:999px;padding:4px 10px;border:1px solid #d1d5db;background:#fff;font-size:12px}
+      th{position:sticky;top:0;background:#f5f3ff;z-index:1;font-size:10px}
+      th:first-child,td:first-child{position:sticky;left:0;background:#faf5ff;z-index:2;min-width:78px}
+      .stack{display:flex;flex-wrap:wrap;gap:3px;max-width:180px;white-space:normal}
+      .bubble{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;border:1px solid #d1d5db;background:#fff;font-size:9px;line-height:1.15}
       .bubble.vacancy{background:var(--vac-bg);color:var(--vac-text);border-color:var(--vac-border);font-weight:800}
       .dash{color:#6b7280;font-weight:700}
-      .legend{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
-      .legend .bubble{font-size:11px}
+      .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
+      .legend .bubble{font-size:9px}
+
+      @media (max-width: 720px){
+        .screen{padding:4px}
+        .card{padding:6px;border-radius:8px}
+        .title{font-size:14px}
+        .versionChip{font-size:9px;padding:2px 6px}
+        input[type="password"]{min-width:140px;font-size:11px;padding:5px 6px}
+        button{padding:5px 8px;font-size:10px}
+        table{font-size:9px}
+        th,td{padding:2px 3px}
+        .stack{max-width:130px;gap:2px}
+        .bubble{font-size:8px;padding:1px 5px}
+      }
     </style>
   </head>
   <body>
