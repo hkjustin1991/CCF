@@ -97,7 +97,12 @@
             .withFailureHandler(function(err){
               reject(err && err.message ? new Error(err.message) : new Error('RPC failed'));
             });
-          runner.api_rpc(fn, args);
+          var target = runner && runner[fn];
+          if (typeof target !== 'function'){
+            reject(new Error('RPC function unavailable: ' + fn));
+            return;
+          }
+          target.apply(runner, args);
         });
       }
 
