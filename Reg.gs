@@ -83,6 +83,113 @@ function doGetRotaPublic_(e){
 
 function api_reg_ping_public(){ return { ok:true, regVersion: REG_VERSION }; }
 
+function api_public_serving_rota(password){
+  try{
+    const provided = String(password || '');
+    const expected = (function(){
+      try{
+        return String(PropertiesService.getScriptProperties().getProperty('ROTA_PUBLIC_PASSWORD') || '');
+      }catch(e){
+        return '';
+      }
+    })();
+    if (!provided || !expected || provided !== expected){
+      return { ok:false, code:'E401', zh:'認證失敗', en:'Authentication failed.' };
+    }
+
+    const todayYmd = admin_todayUkYmd_();
+    const today = admin_parseYmd_(todayYmd) || new Date();
+    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const endExclusive = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 2, 1));
+    let startSunday = new Date(monthStart.getTime());
+    if (!admin_isSunday_(startSunday)) startSunday = admin_nextSunday_(startSunday);
+
+    const events = [];
+    for (let d = new Date(startSunday.getTime()); d.getTime() < endExclusive.getTime(); d.setUTCDate(d.getUTCDate() + 7)){
+      if (!admin_isSunday_(d)) continue;
+      const ymd = admin_fmtYmd_(d);
+      events.push({ eventKey:'SundayService_' + ymd, dateYmd: ymd });
+    }
+
+    const matrix = admin_getServingPlanMatrix_(events);
+    const positions = Array.isArray(matrix.positions) ? matrix.positions : [];
+    const cells = matrix.cells || {};
+
+    function monthForEvent_(eventObj){
+      return admin_fmtYm_(admin_parseYmd_(eventObj.dateYmd) || monthStart);
+    }
+    function normalizeCell_(entry){
+      const raw = String((entry && entry.rawValue) || '').trim();
+      const upper = raw.toUpperCase();
+      if (!raw || upper === 'VACANT' || upper === 'VACANCY'){
+        return { text:'', isVacancy:true };
+      }
+      if (admin_isServingNaValue_(raw) || admin_isServingClosedValue_(raw)){
+        return { text:'-', isVacancy:false };
+      }
+      const display = String((entry && (entry.preferredName || entry.nameZh || entry.nameEn || entry.memberId)) || '').trim();
+      return display ? { text:display, isVacancy:false } : { text:'', isVacancy:true };
+    }
+
+    const monthsMap = {};
+    const monthOrder = [];
+    events.forEach(function(ev){
+      const ym = monthForEvent_(ev);
+      if (!monthsMap[ym]){
+        monthsMap[ym] = { month:ym, events:[], groupsMap:{} };
+        monthOrder.push(ym);
+      }
+      monthsMap[ym].events.push({ eventKey:ev.eventKey, dateYmd:ev.dateYmd });
+    });
+
+    positions.forEach(function(pos){
+      const groupKey = admin_normalizeServingGroup_(pos.group || '') || 'other';
+      monthOrder.forEach(function(ym){
+        const bucket = monthsMap[ym];
+        if (!bucket.groupsMap[groupKey]){
+          bucket.groupsMap[groupKey] = {
+            group: groupKey,
+            groupZh: getServingGroupLabelZh_(groupKey),
+            groupEn: getServingGroupLabelEn_(groupKey),
+            positions:[]
+          };
+        }
+        const byEvent = {};
+        bucket.events.forEach(function(ev){
+          const list = (((cells[ev.eventKey] || {})[pos.key]) || []).map(normalizeCell_);
+          const maxSlots = Math.max(1, Number(ADMIN_SERVING_POSITION_MAX[pos.position] || 1));
+          while (list.length < maxSlots){
+            list.push({ text:'', isVacancy:true });
+          }
+          byEvent[ev.eventKey] = list.slice(0, maxSlots);
+        });
+        bucket.groupsMap[groupKey].positions.push({
+          position: pos.position,
+          positionZh: admin_servingPositionZh_(pos.position || ''),
+          slotsByEvent: byEvent
+        });
+      });
+    });
+
+    const groupOrder = ['worship','media','support','logistic','finance','other'];
+    const months = monthOrder.map(function(ym){
+      const b = monthsMap[ym];
+      const groups = Object.keys(b.groupsMap).sort(function(a,b2){
+        return groupOrder.indexOf(a) - groupOrder.indexOf(b2);
+      }).map(function(g){
+        const x = b.groupsMap[g];
+        x.positions.sort(function(a,b2){ return String(a.position||'').localeCompare(String(b2.position||'')); });
+        return x;
+      });
+      return { month:b.month, events:b.events, groups:groups };
+    });
+
+    return { ok:true, months:months };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
 
 function api_reg_log_scanner_e420_public(payload){
   try{
