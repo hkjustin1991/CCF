@@ -85,6 +85,12 @@
       .stack{display:flex;flex-wrap:wrap;gap:3px;max-width:180px;white-space:normal}
       .bubble{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;border:1px solid #d1d5db;background:#fff;font-size:9px;line-height:1.15}
       .bubble.vacancy{background:var(--vac-bg);color:var(--vac-text);border-color:var(--vac-border);font-weight:800}
+      .grp-worship{background:#f3e8ff!important;border-color:#c4b5fd!important;color:#5b21b6!important}
+      .grp-media{background:#e0f2fe!important;border-color:#7dd3fc!important;color:#075985!important}
+      .grp-logistic{background:#dcfce7!important;border-color:#86efac!important;color:#166534!important}
+      .grp-support{background:#fef9c3!important;border-color:#fde047!important;color:#854d0e!important}
+      .grp-finance{background:#ffe4e6!important;border-color:#fda4af!important;color:#9f1239!important}
+      .grp-other{background:#e5e7eb!important;border-color:#cbd5e1!important;color:#374151!important}
       .dash{color:#6b7280;font-weight:700}
       .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
       .legend .bubble{font-size:9px}
@@ -157,6 +163,9 @@
         if (!(window.google && google.script && google.script.run)){
           return Promise.reject(new Error('頁面通訊初始化失敗，請重新開啟連結。 / Portal bridge not ready. Please reopen this page from the Apps Script link.'));
         }
+        if (fn !== 'api_public_rota_view'){
+          return Promise.reject(new Error('Unsupported API: ' + String(fn || '')));
+        }
         return new Promise(function(resolve, reject){
           try{
             var runner = google.script.run
@@ -164,7 +173,7 @@
               .withFailureHandler(function(err){
                 reject(new Error((err && err.message) ? err.message : String(err || 'API failed')));
               });
-            runner[fn].apply(runner, args);
+            runner.api_public_rota_view(String(args[0] || ''));
           }catch(e){
             reject(e);
           }
@@ -190,6 +199,11 @@
       function renderTable(data){
         var positions = Array.isArray(data.positions) ? data.positions : [];
         var rows = Array.isArray(data.rows) ? data.rows : [];
+        function groupClass_(g){
+          var key = String(g || '').trim().toLowerCase();
+          if (!key) return 'grp-other';
+          return 'grp-' + key;
+        }
         var header = [
           '<th>'+esc(t('日期','Date'))+'</th>',
           '<th>'+esc(t('講題','Sermon title'))+'</th>',
@@ -198,7 +212,8 @@
           '<th>'+esc(t('回應經文','Response passage'))+'</th>'
         ];
         positions.forEach(function(p){
-          header.push('<th>'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
+          var gcls = groupClass_(p.group);
+          header.push('<th class="'+gcls+'">'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
         });
 
         var body = rows.map(function(r){
@@ -217,7 +232,9 @@
               html = '<span class="dash">-</span>';
             } else {
               html = '<div class="stack">' + list.map(function(it){
-                var cls = 'bubble' + (it && it.isVacancy ? ' vacancy' : '');
+                var cls = 'bubble';
+                if (it && it.isVacancy) cls += ' vacancy';
+                else cls += ' ' + groupClass_(p.group);
                 var text = (State.lang === 'zh') ? (it && it.textZh) : (it && it.textEn);
                 return '<span class="'+cls+'">'+esc(text || '-')+'</span>';
               }).join('') + '</div>';
