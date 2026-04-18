@@ -2258,6 +2258,13 @@ function eventDateYmdFromKey(ev){
         });
       }
 
+      function applyAdminHandoffToken_(handoffToken){
+        showStatus('loginMsg','warn','WORKING');
+        callApi('api_admin_login_with_handoff', handoffToken).then(onLoginRes).catch(function(err){
+          showErr('loginMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+        });
+      }
+
       $('btnInternal').onclick = function(){
         clear('loginMsg');
         var v = String($('internalField').value||'').trim();
@@ -2344,6 +2351,17 @@ function eventDateYmdFromKey(ev){
 
       try{
         var qp = new URLSearchParams(window.location.search || '');
+        var handoffToken = String(qp.get('handoffToken') || '').trim();
+        if(!handoffToken){
+          try{
+            handoffToken = String(localStorage.getItem('ccf_admin_handoff_token') || '').trim();
+          }catch(e){}
+        }
+        if(handoffToken){
+          try{ localStorage.removeItem('ccf_admin_handoff_token'); }catch(e){}
+          applyAdminHandoffToken_(handoffToken);
+          return;
+        }
         var handoff = String(qp.get('handoff') || '').trim();
         if(!handoff){
           handoff = String(sessionStorage.getItem('ccf_qr_handoff_payload') || '').trim();
