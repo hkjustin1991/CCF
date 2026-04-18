@@ -111,8 +111,15 @@ const SERVING_POSITION_GROUPS = {
 };
 
 /******** Web App Router ********/
+function getWebMode_(e){
+  const pMode = (e && e.parameter && e.parameter.mode) || '';
+  const psMode = (e && e.parameters && e.parameters.mode && e.parameters.mode[0]) || '';
+  const pathMode = (e && e.pathInfo) ? String(e.pathInfo || '').split('/')[0] : '';
+  return String(pMode || psMode || pathMode || '').trim().toLowerCase();
+}
+
 function doGet(e) {
-  const mode = String((e && e.parameter && e.parameter.mode) || '').toLowerCase();
+  const mode = getWebMode_(e);
 
   // Public health ping for uptime/deployment checks (NEW)
   if (mode === 'healthping') {
@@ -128,7 +135,7 @@ function doGet(e) {
 
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
-  if (mode === 'rotapublic') return doGetRotaPublic_(e); // Reg.gs
+  if (mode === 'rota') return doGetRotaPublic_(e);
 
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
