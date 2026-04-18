@@ -97,7 +97,7 @@
             .withFailureHandler(function(err){
               reject(err && err.message ? new Error(err.message) : new Error('RPC failed'));
             });
-          runner.invokeRpcFunction_(fn, args);
+          runner.api_rpc(fn, args);
         });
       }
 

@@ -335,6 +335,11 @@ function doPost(e) {
   }
 }
 
+function api_rpc(fn, args){
+  const list = Array.isArray(args) ? args : [];
+  return invokeRpcFunction_(fn, list);
+}
+
 function invokeRpcFunction_(fn, args){
   if (!/^[a-zA-Z0-9_]+$/.test(fn)) {
     throw new Error('Invalid function name.');
