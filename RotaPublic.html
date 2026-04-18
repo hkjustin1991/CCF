@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>CCF Public Rota</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f7f8fb;color:#1f2937;margin:0;padding:16px}
+    .wrap{max-width:1400px;margin:0 auto}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
+    .small{font-size:12px;color:#6b7280}
+    .tableWrap{overflow:auto;border:1px solid #e5e7eb;border-radius:10px;margin-top:12px}
+    table{width:100%;border-collapse:collapse;min-width:1080px}
+    th,td{border-bottom:1px solid #e5e7eb;padding:8px 10px;text-align:left;vertical-align:top;font-size:13px}
+    th{background:#f3f4f6;position:sticky;top:0;z-index:1}
+    tr:nth-child(even) td{background:#fafafa}
+    .err{color:#b91c1c}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2 style="margin:0 0 4px 0;">Public Rota</h2>
+      <div id="meta" class="small">Loading…</div>
+      <div id="msg" class="small" style="margin-top:8px"></div>
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Event Key</th>
+              <th>Lead</th>
+              <th>Singer</th>
+              <th>Pianist</th>
+              <th>Drum</th>
+              <th>Instrument</th>
+              <th>Bible Reader</th>
+              <th>Sermon Passage</th>
+              <th>Response Passage</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"><tr><td colspan="10">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    function esc(s){
+      return String(s==null?'':s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+    function renderRows(rows){
+      var body = document.getElementById('tbody');
+      if (!Array.isArray(rows) || !rows.length){
+        body.innerHTML = '<tr><td colspan="10">No rows</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(function(r){
+        return '<tr>'+
+          '<td>'+esc(r.dateYmd||'-')+'</td>'+
+          '<td>'+esc(r.eventKey||'-')+'</td>'+
+          '<td>'+esc(r.worshipLead||'-')+'</td>'+
+          '<td>'+esc(r.worshipSinger||'-')+'</td>'+
+          '<td>'+esc(r.worshipPianist||'-')+'</td>'+
+          '<td>'+esc(r.worshipDrum||'-')+'</td>'+
+          '<td>'+esc(r.worshipInstrument||'-')+'</td>'+
+          '<td>'+esc(r.bibleReader||'-')+'</td>'+
+          '<td>'+esc(r.sermonPassage||'-')+'</td>'+
+          '<td>'+esc(r.responsePassage||'-')+'</td>'+
+          '</tr>';
+      }).join('');
+    }
+
+    google.script.run
+      .withSuccessHandler(function(res){
+        if (!res || !res.ok){
+          document.getElementById('msg').innerHTML = '<span class="err">Load failed</span>';
+          document.getElementById('meta').textContent = '';
+          renderRows([]);
+          return;
+        }
+        document.getElementById('meta').textContent = 'From: ' + (res.fromDate || '-') + ' | Rows: ' + ((res.rows||[]).length);
+        renderRows(res.rows || []);
+      })
+      .withFailureHandler(function(err){
+        document.getElementById('msg').innerHTML = '<span class="err">' + esc((err && err.message) || 'System error') + '</span>';
+        document.getElementById('meta').textContent = '';
+        renderRows([]);
+      })
+      .api_reg_public_rota_public('');
+  </script>
+</body>
+</html>

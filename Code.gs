@@ -128,6 +128,7 @@ function doGet(e) {
 
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
+  if (mode === 'rotapublic') return doGetRotaPublic_(e); // Reg.gs
 
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;

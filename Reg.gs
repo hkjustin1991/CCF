@@ -72,6 +72,15 @@ function doGetReg_(e){
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+function doGetRotaPublic_(e){
+  const t = HtmlService.createTemplateFromFile('RotaPublic');
+  t.APP_VERSION = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : REG_VERSION;
+  t.REG_VERSION = REG_VERSION;
+  return t.evaluate()
+    .setTitle('CCF Public Rota')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
 function api_reg_ping_public(){ return { ok:true, regVersion: REG_VERSION }; }
 
 
@@ -1043,6 +1052,56 @@ function api_reg_self_serving_data_public(qrPayload){
     });
 
     return { ok:true, member:{ id:id, servingGroups:groups }, summary:summary, events:matrix.events||[], positions:filteredPositions, cells:cells, memberLabelsById:memberLabelsById, maxMonths:ADMIN_SERVING_MONTHS_AHEAD };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function api_reg_public_rota_public(fromDate){
+  try{
+    const from = String(fromDate || admin_todayUkYmd_()).trim() || admin_todayUkYmd_();
+    const events = admin_getUpcomingSundayEventKeys_(from, ADMIN_SERVING_MONTHS_AHEAD) || [];
+    const matrix = admin_getServingPlanMatrix_(events);
+    const sermonMap = admin_getSermonMapByEventKeys_(events.map(function(ev){ return ev.eventKey; })) || {};
+
+    function normalizeDisplay_(value){
+      const s = String(value || '').trim();
+      if (!s) return '-';
+      const up = s.toUpperCase();
+      if (up === 'N/A' || up === 'NA' || up === 'CLOSED') return '-';
+      return s;
+    }
+
+    function joinCell_(eventKey, position){
+      const cellList = (((matrix.cells || {})[eventKey] || {})[position] || []);
+      if (!Array.isArray(cellList) || !cellList.length) return '-';
+      const vals = cellList.map(function(it){
+        const raw = String((it && it.rawValue) || '').trim();
+        if (!raw) return '';
+        return normalizeDisplay_(raw);
+      }).filter(function(v){ return !!v && v !== '-'; });
+      if (!vals.length) return '-';
+      return vals.join(', ');
+    }
+
+    const rows = (matrix.events || []).map(function(ev){
+      const eventKey = String((ev && ev.eventKey) || '').trim();
+      const sermon = sermonMap[eventKey] || {};
+      return {
+        eventKey: eventKey,
+        dateYmd: String((ev && ev.dateYmd) || '').trim(),
+        worshipLead: joinCell_(eventKey, 'Worship_Lead'),
+        worshipSinger: joinCell_(eventKey, 'Worship_Singer'),
+        worshipPianist: joinCell_(eventKey, 'Worship_Pianist'),
+        worshipDrum: joinCell_(eventKey, 'Worship_Drum'),
+        worshipInstrument: joinCell_(eventKey, 'Worship_Instrument'),
+        bibleReader: joinCell_(eventKey, 'Support_BibleReader'),
+        sermonPassage: normalizeDisplay_(String(sermon.sermonPassageCanonical || sermon.sermonPassageRaw || '')),
+        responsePassage: normalizeDisplay_(String(sermon.responsePassageCanonical || sermon.responsePassageRaw || ''))
+      };
+    });
+
+    return { ok:true, fromDate: from, rows: rows };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
