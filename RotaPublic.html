@@ -88,14 +88,8 @@
       .dash{color:#6b7280;font-weight:700}
       .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
       .legend .bubble{font-size:9px}
-      .langFloating{
-        position:fixed;
-        top:8px;
-        left:8px;
-        z-index:30;
-        border-radius:999px;
-        padding:5px 10px;
-      }
+      .headRight{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+      .langToggle{border-radius:999px;padding:4px 10px}
 
       @media (max-width: 720px){
         .screen{padding:4px}
@@ -108,20 +102,22 @@
         th,td{padding:2px 3px}
         .stack{max-width:130px;gap:2px}
         .bubble{font-size:8px;padding:1px 5px}
-        .langFloating{top:6px;left:6px;padding:4px 8px}
+        .langToggle{padding:3px 8px}
       }
     </style>
   </head>
   <body>
     <div class="screen">
-      <button id="btnLang" type="button" class="langFloating">EN</button>
       <div class="card" id="loginCard">
         <div class="header">
           <div>
             <div class="title" id="loginTitle">🧩 CCF 事奉排期</div>
             <div class="small" id="loginSub">只供查閱：未來 8 週排期</div>
           </div>
-          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+          <div class="headRight">
+            <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+            <button id="btnLangLogin" type="button" class="langToggle">EN</button>
+          </div>
         </div>
         <div class="row">
           <input id="pwd" type="password" autocomplete="off" placeholder="輸入密碼 / Enter password" />
@@ -136,7 +132,10 @@
             <div class="title" id="rotaTitle">🗓️ 事奉排期</div>
             <div class="small" id="meta"></div>
           </div>
-          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+          <div class="headRight">
+            <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+            <button id="btnLangRota" type="button" class="langToggle">EN</button>
+          </div>
         </div>
         <div class="legend">
           <span class="small" id="legendLabel">圖例</span>
@@ -175,7 +174,8 @@
       function t(zh, en){ return State.lang === 'zh' ? zh : en; }
 
       function applyLang_(){
-        if ($('btnLang')) $('btnLang').textContent = State.lang === 'zh' ? 'EN' : '中文';
+        if ($('btnLangLogin')) $('btnLangLogin').textContent = State.lang === 'zh' ? 'EN' : '中文';
+        if ($('btnLangRota')) $('btnLangRota').textContent = State.lang === 'zh' ? 'EN' : '中文';
         if ($('loginTitle')) $('loginTitle').textContent = State.lang === 'zh' ? '🧩 CCF 事奉排期' : '🧩 CCF Serving Rota';
         if ($('loginSub')) $('loginSub').textContent = State.lang === 'zh' ? '只供查閱：未來 8 週排期' : 'Read-only: next 8 weeks rota';
         if ($('pwd')) $('pwd').placeholder = State.lang === 'zh' ? '輸入密碼' : 'Enter password';
@@ -258,17 +258,17 @@
         if (e.key === 'Enter') $('btnOpen').click();
       });
 
-      if ($('btnLang')){
-        $('btnLang').onclick = function(){
-          State.lang = (State.lang === 'zh') ? 'en' : 'zh';
-          if (State.data && $('meta')){
-            $('meta').textContent = (State.lang === 'zh')
-              ? ('生成時間：' + String(State.data.generatedAt || '') + ' · 未來 8 週')
-              : ('Generated: ' + String(State.data.generatedAt || '') + ' · Next 8 weeks');
-          }
-          applyLang_();
-        };
+      function toggleLang_(){
+        State.lang = (State.lang === 'zh') ? 'en' : 'zh';
+        if (State.data && $('meta')){
+          $('meta').textContent = (State.lang === 'zh')
+            ? ('生成時間：' + String(State.data.generatedAt || '') + ' · 未來 8 週')
+            : ('Generated: ' + String(State.data.generatedAt || '') + ' · Next 8 weeks');
+        }
+        applyLang_();
       }
+      if ($('btnLangLogin')) $('btnLangLogin').onclick = toggleLang_;
+      if ($('btnLangRota')) $('btnLangRota').onclick = toggleLang_;
       applyLang_();
     </script>
   </body>
