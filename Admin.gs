@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-11.admin112
+ * v2026-03-30.admin113
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-11.admin112';
+const ADMIN_VERSION = '2026-03-30.admin113';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -92,6 +92,7 @@ const ADMIN_SERVING_MONTHS_AHEAD = 7;
 const ADMIN_SERVING_SHEET_NAME = 'Serving';
 const ADMIN_SERVING_AWAY_SHEET_NAME = 'Serving_Away';
 const ADMIN_SERMON_SHEET_NAME = 'Sermon_Info';
+const ADMIN_FINANCE_OFFERING_SHEET_NAME = 'Finance_Offering';
 const ADMIN_SERVING_POSITIONS = [
   'Worship_Lead',
   'Worship_Singer',
@@ -438,6 +439,116 @@ function api_admin_sermon_save(token, payload){
   row.responseParsed = responseParsed;
   admin_audit_(s.actor, 'SERMON_SAVE', JSON.stringify({ eventKey: eventKey, actorId: String(s.actor.id || '') }), 'sermon_info');
   return { ok:true, row: row };
+}
+
+function admin_actorInFinance_(actor){
+  const a = actor || {};
+  const role = String((a.role || '')).trim().toUpperCase();
+  if (role === 'SUPERUSER') return true;
+  const groups = []
+    .concat(Array.isArray(a.servingGroups) ? a.servingGroups : [])
+    .concat(Array.isArray(a.servingGLGroups) ? a.servingGLGroups : [])
+    .concat(Array.isArray(a.glGroups) ? a.glGroups : [])
+    .map(function(g){ return admin_normalizeServingGroup_(g); });
+  return groups.indexOf('finance') >= 0;
+}
+function admin_requireFinanceEditor_(actor){
+  if (admin_actorInFinance_(actor)) return null;
+  return admin_err_('E403','只有財務同工/GL可以修改奉獻','Only finance team members/GL can edit offering.');
+}
+function admin_ensureFinanceOfferingSheet_(){
+  const ss = admin_openSs_();
+  let sh = ss.getSheetByName(ADMIN_FINANCE_OFFERING_SHEET_NAME);
+  if (!sh) sh = ss.insertSheet(ADMIN_FINANCE_OFFERING_SHEET_NAME);
+  const headers = ['EventKey','OfferingAmount','UpdatedAtIso','UpdatedByCCFID'];
+  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
+  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
+  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return sh;
+}
+function admin_getOfferingMap_(){
+  const sh = admin_ensureFinanceOfferingSheet_();
+  const last = sh.getLastRow();
+  const out = {};
+  if (last < 2) return out;
+  const rows = sh.getRange(2, 1, last - 1, 2).getValues();
+  rows.forEach(function(r){
+    const ev = String(r[0] || '').trim();
+    if (!/^SundayService_\d{4}-\d{2}-\d{2}$/.test(ev)) return;
+    const amt = Number(r[1]);
+    out[ev] = isFinite(amt) ? Number(amt.toFixed(2)) : null;
+  });
+  return out;
+}
+function admin_upsertOfferingAmount_(eventKey, amount, actorId){
+  const sh = admin_ensureFinanceOfferingSheet_();
+  const ev = String(eventKey || '').trim();
+  const amt = Number(amount);
+  const fixed = Number(amt.toFixed(2));
+  const last = sh.getLastRow();
+  const nowIso = admin_nowIso_();
+  let rowNumber = 0;
+  if (last >= 2){
+    const vals = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i=0;i<vals.length;i++){
+      if (String(vals[i][0] || '').trim() === ev){
+        rowNumber = i + 2;
+        break;
+      }
+    }
+  }
+  if (!rowNumber){
+    rowNumber = last + 1;
+    sh.getRange(rowNumber, 1, 1, 4).setValues([[ev, fixed, nowIso, String(actorId || '')]]);
+  }else{
+    sh.getRange(rowNumber, 2, 1, 3).setValues([[fixed, nowIso, String(actorId || '')]]);
+  }
+  return { eventKey: ev, amount: fixed, updatedAtIso: nowIso, updatedBy: String(actorId || '') };
+}
+function admin_listSundayServiceEventKeysDesc_(){
+  const check = admin_getCheckinsDataCached_();
+  if (!check.ok) return check;
+  const set = new Set();
+  check.rows.forEach(function(r){
+    const ev = String(r.eventKey || '').trim();
+    if (admin_isSundayServiceKey_(ev)) set.add(ev);
+  });
+  const events = Array.from(set).sort(function(a,b){ return a.localeCompare(b); }).reverse();
+  return { ok:true, events: events };
+}
+function api_admin_finance_offering_list(token){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const list = admin_listSundayServiceEventKeysDesc_();
+  if (!list.ok) return list;
+  const offeringMap = admin_getOfferingMap_();
+  const rows = list.events.map(function(ev){
+    return { eventKey: ev, amount: (typeof offeringMap[ev] === 'number') ? offeringMap[ev] : null };
+  });
+  admin_audit_(s.actor, 'FINANCE_OFFERING_LIST', JSON.stringify({ rows: rows.length }), 'finance');
+  return { ok:true, canEdit: admin_actorInFinance_(s.actor), rows: rows };
+}
+function api_admin_finance_offering_save(token, payload){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const can = admin_requireFinanceEditor_(s.actor);
+  if (can) return can;
+  const p = payload || {};
+  const ev = String(p.eventKey || '').trim();
+  if (!admin_isSundayServiceKey_(ev)){
+    return admin_err_('E416','活動格式錯誤（只支援 SundayService_YYYY-MM-DD）','Invalid eventKey (SundayService_YYYY-MM-DD only).');
+  }
+  const raw = String(p.amount);
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)){
+    return admin_err_('E422','金額格式錯誤（最多兩位小數，不可負數）','Invalid amount format (max 2 decimals, non-negative).');
+  }
+  const amt = Number(raw);
+  if (!isFinite(amt) || amt < 0){
+    return admin_err_('E422','金額必須為非負數字','Amount must be a non-negative number.');
+  }
+  const saved = admin_upsertOfferingAmount_(ev, amt, (s.actor && s.actor.id) || '');
+  admin_audit_(s.actor, 'FINANCE_OFFERING_SAVE', JSON.stringify({ eventKey: ev, amount: saved.amount }), 'finance');
+  return { ok:true, row: saved };
 }
 
 
@@ -1241,6 +1352,8 @@ function api_admin_event_detail(token, eventKey){
 
   const servingRows = admin_getServingForEvent_(ev, mi.byId, set);
   const sermon = admin_getSermonRecordByEventKey_(ev);
+  const offeringMap = admin_getOfferingMap_();
+  const offeringAmount = (typeof offeringMap[ev] === 'number') ? offeringMap[ev] : null;
 
   admin_audit_(s.actor, 'EVENT_DETAIL', JSON.stringify({eventKey: ev, total, new: newCount, existing: existingCount}), 'event');
 
@@ -1257,7 +1370,7 @@ function api_admin_event_detail(token, eventKey){
         sermonPassage: String(sermon.sermonPassageCanonical || sermon.sermonPassageRaw || '').trim(),
         responsePassage: String(sermon.responsePassageCanonical || sermon.responsePassageRaw || '').trim()
       },
-      offering: null,
+      offering: offeringAmount,
       serving: servingRows
     }
   };

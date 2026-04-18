@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-13.reg114
+ * v2026-03-30.reg118
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-03-13.reg117';
+const REG_VERSION = '2026-03-30.reg118';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -1241,6 +1241,7 @@ function api_reg_self_live_service_public(qrPayload){
     const events = admin_getUpcomingSundayEventKeys_(todayYmd, 1);
     const next = (events && events.length) ? events[0].eventKey : '';
     const last = prevYmd ? ('SundayService_' + prevYmd) : '';
+    const offeringMap = (typeof admin_getOfferingMap_ === 'function') ? admin_getOfferingMap_() : {};
 
     const countByEvent = {};
     const liveCountCacheKey = 'reg_live_counts_' + String(next || '') + '_' + String(last || '');
@@ -1322,6 +1323,10 @@ function api_reg_self_live_service_public(qrPayload){
       ok:true,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
+      lastOffering:{
+        eventKey:last,
+        amount: (last && typeof offeringMap[last] === 'number') ? offeringMap[last] : null
+      },
       sermonBlock: (function(){
         var sermonCacheKey = 'reg_live_sermon_' + String(next || '');
         var hit = reg_liveCacheGet_(sermonCacheKey);
