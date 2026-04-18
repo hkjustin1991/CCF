@@ -88,6 +88,14 @@
       .dash{color:#6b7280;font-weight:700}
       .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
       .legend .bubble{font-size:9px}
+      .langFloating{
+        position:fixed;
+        top:8px;
+        left:8px;
+        z-index:30;
+        border-radius:999px;
+        padding:5px 10px;
+      }
 
       @media (max-width: 720px){
         .screen{padding:4px}
@@ -100,11 +108,13 @@
         th,td{padding:2px 3px}
         .stack{max-width:130px;gap:2px}
         .bubble{font-size:8px;padding:1px 5px}
+        .langFloating{top:6px;left:6px;padding:4px 8px}
       }
     </style>
   </head>
   <body>
     <div class="screen">
+      <button id="btnLang" type="button" class="langFloating">EN</button>
       <div class="card" id="loginCard">
         <div class="header">
           <div>
@@ -116,7 +126,6 @@
         <div class="row">
           <input id="pwd" type="password" autocomplete="off" placeholder="輸入密碼 / Enter password" />
           <button id="btnOpen" type="button">進入</button>
-          <button id="btnLang" type="button" class="langBtn">EN</button>
         </div>
         <div id="msg" class="msg"></div>
       </div>
@@ -197,8 +206,8 @@
             '<td><b>'+esc(r.dateYmd || '')+'</b></td>',
             '<td>'+esc(r.sermonTitle || '-')+'</td>',
             '<td>'+esc(r.speaker || '-')+'</td>',
-            '<td>'+esc(r.sermonPassage || '-')+'</td>',
-            '<td>'+esc(r.responsePassage || '-')+'</td>'
+            '<td>'+esc(State.lang==='zh' ? (r.sermonPassageZh || '-') : (r.sermonPassageEn || r.sermonPassageZh || '-'))+'</td>',
+            '<td>'+esc(State.lang==='zh' ? (r.responsePassageZh || '-') : (r.responsePassageEn || r.responsePassageZh || '-'))+'</td>'
           ];
 
           positions.forEach(function(p){

@@ -101,10 +101,6 @@ function reg_publicRotaTokenType_(raw){
   return 'VALUE';
 }
 
-function reg_hasCjk_(text){
-  return /[\u3400-\u9FFF\uF900-\uFAFF]/.test(String(text || ''));
-}
-
 function reg_publicRotaMemberLabel_(entry){
   const e = entry || {};
   const memberId = String(e.memberId || '').trim().toUpperCase();
@@ -112,14 +108,34 @@ function reg_publicRotaMemberLabel_(entry){
     const zh = String(e.nameZh || '').trim();
     const en = String(e.nameEn || '').trim();
     const preferred = String(e.preferredName || '').trim();
-    const preferredIsCjk = reg_hasCjk_(preferred);
     return {
-      textZh: preferred || zh || en || memberId,
-      textEn: (preferred && !preferredIsCjk) ? preferred : (en || preferred || zh || memberId)
+      textZh: zh || preferred || en || memberId,
+      textEn: preferred || en || zh || memberId
     };
   }
   const raw = String(e.rawValue || '').trim();
   return { textZh: raw || '', textEn: raw || '' };
+}
+
+function reg_publicRotaPassageEn_(rawOrCanonical){
+  const src = String(rawOrCanonical || '').trim();
+  if (!src) return '';
+  try{
+    const parsed = bible_parseReference_(src);
+    if (!parsed || !parsed.ok || parsed.status !== 'OK' || !Array.isArray(parsed.segments) || !parsed.segments.length){
+      return src;
+    }
+    return parsed.segments.map(function(seg){
+      const book = String(seg.bookEn || seg.bookZh || '').trim();
+      const chapter = Number(seg.chapter || 0);
+      const v1 = Number(seg.verseStart || 0);
+      const v2 = Number(seg.verseEnd || 0);
+      if (!(chapter > 0 && v1 > 0 && v2 > 0)) return book || src;
+      return book + ' ' + chapter + ':' + v1 + '-' + v2;
+    }).join(', ');
+  }catch(e){
+    return src;
+  }
 }
 
 function reg_publicRotaNext8WeeksEvents_(fromYmd){
@@ -234,13 +250,17 @@ function api_public_rota_view(password){
         ? String(sermon.responsePassageCanonical || '').trim()
         : String(sermon.responsePassageRaw || '').trim();
 
+      const sermonPassageZh = sermonPassage || '-';
+      const responsePassageZh = responsePassage || '-';
       return {
         eventKey: eventKey,
         dateYmd: String(ev.dateYmd || '').trim(),
         sermonTitle: String(sermon.sermonTitle || '').trim() || '-',
         speaker: String(sermon.speaker || '').trim() || '-',
-        sermonPassage: sermonPassage || '-',
-        responsePassage: responsePassage || '-',
+        sermonPassageZh: sermonPassageZh,
+        sermonPassageEn: reg_publicRotaPassageEn_(sermonPassageZh) || sermonPassageZh,
+        responsePassageZh: responsePassageZh,
+        responsePassageEn: reg_publicRotaPassageEn_(responsePassageZh) || responsePassageZh,
         positions: rowPositions
       };
     });
