@@ -101,6 +101,10 @@ function reg_publicRotaTokenType_(raw){
   return 'VALUE';
 }
 
+function reg_hasCjk_(text){
+  return /[\u3400-\u9FFF\uF900-\uFAFF]/.test(String(text || ''));
+}
+
 function reg_publicRotaMemberLabel_(entry){
   const e = entry || {};
   const memberId = String(e.memberId || '').trim().toUpperCase();
@@ -108,10 +112,27 @@ function reg_publicRotaMemberLabel_(entry){
     const zh = String(e.nameZh || '').trim();
     const en = String(e.nameEn || '').trim();
     const preferred = String(e.preferredName || '').trim();
-    return preferred || zh || en || memberId;
+    const preferredIsCjk = reg_hasCjk_(preferred);
+    return {
+      textZh: preferred || zh || en || memberId,
+      textEn: (preferred && !preferredIsCjk) ? preferred : (en || preferred || zh || memberId)
+    };
   }
   const raw = String(e.rawValue || '').trim();
-  return raw || '';
+  return { textZh: raw || '', textEn: raw || '' };
+}
+
+function reg_publicRotaNext8WeeksEvents_(fromYmd){
+  const base = admin_parseYmd_(String(fromYmd || '').trim()) || admin_parseYmd_(admin_todayUkYmd_()) || new Date();
+  let start = new Date(base.getTime());
+  if (!admin_isSunday_(start)) start = admin_nextSunday_(start);
+  const out = [];
+  for (let i=0; i<8; i++){
+    const d = new Date(start.getTime());
+    d.setUTCDate(d.getUTCDate() + (i * 7));
+    out.push({ eventKey:'SundayService_' + admin_fmtYmd_(d), dateYmd: admin_fmtYmd_(d) });
+  }
+  return out;
 }
 
 function api_public_rota_view(password){
@@ -123,7 +144,7 @@ function api_public_rota_view(password){
     }
 
     const from = admin_todayUkYmd_();
-    const events = admin_getUpcomingSundayEventKeys_(from, 1);
+    const events = reg_publicRotaNext8WeeksEvents_(from);
     const matrix = admin_getServingPlanMatrix_(events);
     const eventKeys = (matrix.events || []).map(function(ev){ return String(ev.eventKey || '').trim(); }).filter(Boolean);
     const sermonMap = admin_getSermonInfoForMonth_(eventKeys);
@@ -166,39 +187,41 @@ function api_public_rota_view(password){
             return;
           }
           if (tokenType === 'NA'){
-            displayItems.push({ text:'-', isVacancy:false });
+            displayItems.push({ textZh:'-', textEn:'-', isVacancy:false });
             return;
           }
           if (tokenType === 'VACANT' || tokenType === 'EMPTY'){
-            displayItems.push({ text:'Vacant', isVacancy:true });
+            displayItems.push({ textZh:'空缺', textEn:'Vacant', isVacancy:true });
             return;
           }
           const label = reg_publicRotaMemberLabel_(entry);
-          if (!label){
-            displayItems.push({ text:'Vacant', isVacancy:true });
+          if (!label || (!label.textZh && !label.textEn)){
+            displayItems.push({ textZh:'空缺', textEn:'Vacant', isVacancy:true });
             return;
           }
-          displayItems.push({ text:label, isVacancy:false });
+          displayItems.push({ textZh:label.textZh || '-', textEn:label.textEn || '-', isVacancy:false });
         });
 
         if (!hasClosed){
           const inferredVacancy = Math.max(0, maxSlots - entries.length);
-          for (let i=0;i<inferredVacancy;i++) displayItems.push({ text:'Vacant', isVacancy:true });
+          for (let i=0;i<inferredVacancy;i++) displayItems.push({ textZh:'空缺', textEn:'Vacant', isVacancy:true });
         }
 
         if (hasClosed){
-          rowPositions[pos] = [{ text:'-', isVacancy:false }];
+          rowPositions[pos] = [{ textZh:'-', textEn:'-', isVacancy:false }];
           return;
         }
 
         if (!displayItems.length){
-          rowPositions[pos] = [{ text:'-', isVacancy:false }];
+          rowPositions[pos] = [{ textZh:'-', textEn:'-', isVacancy:false }];
           return;
         }
 
-        const allDash = displayItems.every(function(it){ return String((it && it.text) || '').trim() === '-'; });
+        const allDash = displayItems.every(function(it){
+          return String((it && it.textZh) || '').trim() === '-' && String((it && it.textEn) || '').trim() === '-';
+        });
         if (allDash){
-          rowPositions[pos] = [{ text:'-', isVacancy:false }];
+          rowPositions[pos] = [{ textZh:'-', textEn:'-', isVacancy:false }];
           return;
         }
         rowPositions[pos] = displayItems;
@@ -223,9 +246,11 @@ function api_public_rota_view(password){
     });
 
     const positions = positionsOrder.map(function(pos){
+      const labelObj = (typeof ADMIN_SERVING_POSITION_LABELS === 'object' && ADMIN_SERVING_POSITION_LABELS) ? (ADMIN_SERVING_POSITION_LABELS[pos] || null) : null;
       return {
         key: pos,
-        label: admin_servingPositionLabel_(pos),
+        labelZh: labelObj ? String(labelObj.zh || '').trim() : pos,
+        labelEn: labelObj ? String(labelObj.en || '').trim() : pos,
         group: (positionsMetaMap[pos] && positionsMetaMap[pos].group) ? positionsMetaMap[pos].group : ''
       };
     });

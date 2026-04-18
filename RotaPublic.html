@@ -108,14 +108,15 @@
       <div class="card" id="loginCard">
         <div class="header">
           <div>
-            <div class="title">🧩 CCF 事奉排期 / Serving Rota</div>
-            <div class="small">只供查閱：本月及下月排期 / Read-only for this and next month.</div>
+            <div class="title" id="loginTitle">🧩 CCF 事奉排期</div>
+            <div class="small" id="loginSub">只供查閱：未來 8 週排期</div>
           </div>
-          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?> · Public Read-only / 只供查閱</div>
+          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
         </div>
         <div class="row">
           <input id="pwd" type="password" autocomplete="off" placeholder="輸入密碼 / Enter password" />
-          <button id="btnOpen" type="button">進入 / Open</button>
+          <button id="btnOpen" type="button">進入</button>
+          <button id="btnLang" type="button" class="langBtn">EN</button>
         </div>
         <div id="msg" class="msg"></div>
       </div>
@@ -123,15 +124,15 @@
       <div class="card hide" id="rotaCard">
         <div class="header">
           <div>
-            <div class="title">🗓️ 事奉排期 / Serving Rota</div>
+            <div class="title" id="rotaTitle">🗓️ 事奉排期</div>
             <div class="small" id="meta"></div>
           </div>
-          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?> · Public Read-only / 只供查閱</div>
+          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
         </div>
         <div class="legend">
-          <span class="small">圖例 / Legend:</span>
-          <span class="bubble vacancy">空缺 / Vacant</span>
-          <span class="bubble">同工 / Member</span>
+          <span class="small" id="legendLabel">圖例</span>
+          <span class="bubble vacancy" id="legendVacant">空缺</span>
+          <span class="bubble" id="legendMember">同工</span>
           <span class="bubble dash">-</span>
         </div>
         <div class="tableWrap" id="tableWrap"></div>
@@ -140,6 +141,7 @@
 
     <script>
       function $(id){ return document.getElementById(id); }
+      var State = { lang:'zh', data:null };
       function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 
       function callApi(fn){
@@ -161,17 +163,34 @@
         });
       }
 
+      function t(zh, en){ return State.lang === 'zh' ? zh : en; }
+
+      function applyLang_(){
+        if ($('btnLang')) $('btnLang').textContent = State.lang === 'zh' ? 'EN' : '中文';
+        if ($('loginTitle')) $('loginTitle').textContent = State.lang === 'zh' ? '🧩 CCF 事奉排期' : '🧩 CCF Serving Rota';
+        if ($('loginSub')) $('loginSub').textContent = State.lang === 'zh' ? '只供查閱：未來 8 週排期' : 'Read-only: next 8 weeks rota';
+        if ($('pwd')) $('pwd').placeholder = State.lang === 'zh' ? '輸入密碼' : 'Enter password';
+        if ($('btnOpen')) $('btnOpen').textContent = State.lang === 'zh' ? '進入' : 'Open';
+        if ($('rotaTitle')) $('rotaTitle').textContent = State.lang === 'zh' ? '🗓️ 事奉排期' : '🗓️ Serving Rota';
+        if ($('legendLabel')) $('legendLabel').textContent = State.lang === 'zh' ? '圖例' : 'Legend';
+        if ($('legendVacant')) $('legendVacant').textContent = State.lang === 'zh' ? '空缺' : 'Vacant';
+        if ($('legendMember')) $('legendMember').textContent = State.lang === 'zh' ? '同工' : 'Member';
+        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+      }
+
       function renderTable(data){
         var positions = Array.isArray(data.positions) ? data.positions : [];
         var rows = Array.isArray(data.rows) ? data.rows : [];
         var header = [
-          '<th>日期 / Date</th>',
-          '<th>講題 / Sermon title</th>',
-          '<th>講員 / Speaker</th>',
-          '<th>講道經文 / Sermon passage</th>',
-          '<th>回應經文 / Response passage</th>'
+          '<th>'+esc(t('日期','Date'))+'</th>',
+          '<th>'+esc(t('講題','Sermon title'))+'</th>',
+          '<th>'+esc(t('講員','Speaker'))+'</th>',
+          '<th>'+esc(t('講道經文','Sermon passage'))+'</th>',
+          '<th>'+esc(t('回應經文','Response passage'))+'</th>'
         ];
-        positions.forEach(function(p){ header.push('<th>'+esc(p.label || p.key || '')+'</th>'); });
+        positions.forEach(function(p){
+          header.push('<th>'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
+        });
 
         var body = rows.map(function(r){
           var cells = [
@@ -183,14 +202,15 @@
           ];
 
           positions.forEach(function(p){
-            var list = ((r.positions || {})[p.key]) || [{ text:'-', isVacancy:false }];
+            var list = ((r.positions || {})[p.key]) || [{ textZh:'-', textEn:'-', isVacancy:false }];
             var html;
-            if (!list.length || (list.length===1 && String(list[0].text||'').trim()==='-')){
+            if (!list.length || (list.length===1 && String((State.lang==='zh'?list[0].textZh:list[0].textEn)||'').trim()==='-')){
               html = '<span class="dash">-</span>';
             } else {
               html = '<div class="stack">' + list.map(function(it){
                 var cls = 'bubble' + (it && it.isVacancy ? ' vacancy' : '');
-                return '<span class="'+cls+'">'+esc((it && it.text) || '-')+'</span>';
+                var text = (State.lang === 'zh') ? (it && it.textZh) : (it && it.textEn);
+                return '<span class="'+cls+'">'+esc(text || '-')+'</span>';
               }).join('') + '</div>';
             }
             cells.push('<td>'+html+'</td>');
@@ -212,7 +232,10 @@
             $('msg').textContent = (res && (res.zh || res.en || res.code)) || '無法載入排期 / Unable to load rota.';
             return;
           }
-          $('meta').textContent = '生成時間 / Generated: ' + String(res.generatedAt || '') + ' · 顯示本月及下月 / Showing current and next month';
+          $('meta').textContent = (State.lang === 'zh')
+            ? ('生成時間：' + String(res.generatedAt || '') + ' · 未來 8 週')
+            : ('Generated: ' + String(res.generatedAt || '') + ' · Next 8 weeks');
+          State.data = res;
           $('tableWrap').innerHTML = renderTable(res);
           $('loginCard').classList.add('hide');
           $('rotaCard').classList.remove('hide');
@@ -225,6 +248,19 @@
       $('pwd').addEventListener('keydown', function(e){
         if (e.key === 'Enter') $('btnOpen').click();
       });
+
+      if ($('btnLang')){
+        $('btnLang').onclick = function(){
+          State.lang = (State.lang === 'zh') ? 'en' : 'zh';
+          if (State.data && $('meta')){
+            $('meta').textContent = (State.lang === 'zh')
+              ? ('生成時間：' + String(State.data.generatedAt || '') + ' · 未來 8 週')
+              : ('Generated: ' + String(State.data.generatedAt || '') + ' · Next 8 weeks');
+          }
+          applyLang_();
+        };
+      }
+      applyLang_();
     </script>
   </body>
 </html>
