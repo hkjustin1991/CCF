@@ -134,8 +134,8 @@ function doGet(e) {
   }
 
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
+  if (mode === 'rota') return doGetRotaPublic_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
-  if (mode === 'rota') return doGetRotaPublic_(e);
 
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
