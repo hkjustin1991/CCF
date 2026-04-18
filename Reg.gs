@@ -54,6 +54,8 @@ const REG_ACTIVITY_SHEET = 'Reg_Activity';
 const REG_SERMON_SHEET = 'Sermon_Info';
 const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
 const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
+const REG_ADMIN_HANDOFF_CACHE_PREFIX = 'reg_admin_handoff_';
+const REG_ADMIN_HANDOFF_TTL_SECONDS = 90;
 
 
 /******** Entry ********/
@@ -688,6 +690,68 @@ function reg_getWorshipAuthFromAdminToken_(token){
   const id = String(actor.id || '').trim().toUpperCase();
   if (!id || id === 'SUPERUSER') return { ok:false, code:'E403', zh:'未能識別會員身份', en:'Unable to identify member account.' };
   return regGetSelfMemberByIdForAdmin_(id);
+}
+
+function reg_selfCanAccessAdminPortal_(statusNorm, glGroups){
+  const role = String(statusNorm || '').trim().toUpperCase();
+  const gl = Array.isArray(glGroups) ? glGroups.filter(Boolean) : [];
+  return role === 'STAFF' || role === 'ADMIN' || gl.length > 0 || role === 'GL';
+}
+
+function api_reg_issue_admin_handoff_public(qrPayload){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+
+    const id = String((auth.parsed && auth.parsed.id) || '').trim().toUpperCase();
+    if (!id) return { ok:false, code:'E412', zh:'找不到此 ID', en:'Member not found.' };
+
+    const rowServing = regServingGroupsFromRow_(auth.row);
+    const rowGl = rowServing.gl || [];
+    const statusNorm = regStatus_((auth.row && auth.row.Status) || '');
+    if (!reg_selfCanAccessAdminPortal_(statusNorm, rowGl)){
+      return { ok:false, code:'E403', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
+    }
+
+    const handoffToken = Utilities.getUuid();
+    const payload = {
+      memberId: id,
+      issuedAt: Date.now(),
+      source: 'REG_SELF_PORTAL'
+    };
+    CacheService.getScriptCache().put(
+      REG_ADMIN_HANDOFF_CACHE_PREFIX + handoffToken,
+      JSON.stringify(payload),
+      REG_ADMIN_HANDOFF_TTL_SECONDS
+    );
+
+    return { ok:true, handoffToken: handoffToken, expiresInSeconds: REG_ADMIN_HANDOFF_TTL_SECONDS };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+
+function reg_consumeAdminHandoffToken_(handoffToken){
+  const token = String(handoffToken || '').trim();
+  if (!token) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+
+  const cache = CacheService.getScriptCache();
+  const key = REG_ADMIN_HANDOFF_CACHE_PREFIX + token;
+  const raw = cache.get(key);
+  if (!raw) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  cache.remove(key); // one-time use token
+
+  let payload = null;
+  try{
+    payload = JSON.parse(raw);
+  }catch(e){
+    return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  }
+
+  const id = String((payload && payload.memberId) || '').trim().toUpperCase();
+  if (!id) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+
+  return { ok:true, memberId:id, source:String((payload && payload.source) || '') };
 }
 
 function regDisplayNameForPortal_(m){
