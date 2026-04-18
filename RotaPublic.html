@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>CCF Public Rota</title>
+
+  <style>
+    :root{
+      --bg:#eefbe9; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
+      --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e;
+      --shadow:0 10px 24px rgba(10,30,80,0.10);
+      --pad:clamp(10px, 3.2vw, 16px);
+      --radius:clamp(14px, 3.2vw, 18px);
+      --fs-title:clamp(20px, 4.8vw, 26px);
+      --fs-big:clamp(18px, 4.2vw, 22px);
+      --fs-body:clamp(13px, 3.4vw, 16px);
+      --fs-input:clamp(16px, 4vw, 18px);
+    }
+    *{box-sizing:border-box}
+    html{-webkit-text-size-adjust:100%}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    .wrap{max-width:980px;margin:0 auto;padding:var(--pad)}
+    .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
+    .title{font-size:var(--fs-title);font-weight:900}
+    .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
+    .pill{font-size:12px;color:var(--muted);border:1px solid var(--border);padding:4px 10px;border-radius:999px;background:#fff}
+
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:calc(var(--pad) + 2px);margin:10px 0;box-shadow:var(--shadow)}
+    .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
+    .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
+    .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
+    input,button{width:100%;border-radius:var(--radius);border:1px solid var(--border);background:#fff;color:var(--text);padding:calc(var(--pad) + 2px);font-size:var(--fs-input)}
+    button{cursor:pointer;font-weight:900;box-shadow:0 6px 14px rgba(10,30,80,0.06)}
+    button.primary{background:#e9fff4;border-color:rgba(26,168,108,0.25)}
+    button.alt{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
+    .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+    .miniBtnRow button{flex:1 1 180px}
+
+    .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
+    .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
+    .msgBox.err{border-color:rgba(217,60,94,0.35);background:#fff1f4}
+
+    .tableWrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:#fff;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;margin-top:8px}
+    table{border-collapse:separate;border-spacing:0;min-width:760px;width:max-content}
+    th,td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:10px;vertical-align:top;white-space:normal}
+    th{position:sticky;top:0;background:#fff;font-weight:900;z-index:4}
+    tr:last-child td{border-bottom:0}
+    th:last-child,td:last-child{border-right:0}
+
+    .groupBadge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:900;border:1px solid var(--border);background:#fff}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div>
+        <div class="title">CCF 公開事奉排期 / Public Rota</div>
+        <div class="sub">Read-only rota for current and next month</div>
+      </div>
+      <div><span class="pill">staff <?= APP_VERSION ?></span></div>
+    </header>
+
+    <main id="app"></main>
+  </div>
+
+  <script>
+    function $(id){ return document.getElementById(id); }
+
+    var State = {
+      token: '',
+      loading: false,
+      data: null
+    };
+
+    function escapeHtml(s){
+      return String(s||'').replace(/[&<>'"]/g, function(c){
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'})[c] || c;
+      });
+    }
+
+    function box(type, zh, en){
+      return '<div class="msgBox '+type+'"><div><b>'+escapeHtml(zh||'')+'</b></div><div class="small" style="margin-top:4px;">'+escapeHtml(en||'')+'</div></div>';
+    }
+
+    function callApi(fn){
+      var args = Array.prototype.slice.call(arguments, 1);
+
+      if (window.google && google.script && google.script.run){
+        return new Promise(function(resolve, reject){
+          var runner = google.script.run
+            .withSuccessHandler(function(res){ resolve(res || {}); })
+            .withFailureHandler(function(err){
+              reject(err && err.message ? new Error(err.message) : new Error('RPC failed'));
+            });
+          var target = runner && runner[fn];
+          if (typeof target !== 'function'){
+            reject(new Error('RPC function unavailable: ' + fn));
+            return;
+          }
+          target.apply(runner, args);
+        });
+      }
+
+      return fetch(window.location.href, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json;charset=utf-8' },
+        body: JSON.stringify({ fn: fn, args: args })
+      }).then(function(r){ return r.json(); }).then(function(payload){
+        if (!payload || !payload.ok) throw new Error('RPC transport failed');
+        return payload.result || {};
+      });
+    }
+
+    function renderLogin(msgHtml){
+      $('app').innerHTML =
+        '<div class="card">'+
+          '<div class="big">🔐 輸入密碼 / Enter password</div>'+
+          '<div class="small">只可查看，不可編輯。 / Read-only access only.</div>'+
+          '<div style="margin-top:12px;">'+
+            '<div class="label">Password</div>'+
+            '<input id="passwordField" type="password" autocomplete="off" />'+
+            '<div class="miniBtnRow"><button id="btnLogin" class="primary" type="button">提交 / Submit</button></div>'+
+          '</div>'+
+          '<div id="loginMsg">'+(msgHtml||'')+'</div>'+
+        '</div>';
+
+      $('btnLogin').onclick = function(){
+        var pwd = String(($('passwordField') && $('passwordField').value) || '').trim();
+        if (!pwd){ $('loginMsg').innerHTML = box('err', '請輸入密碼', 'Please enter password.'); return; }
+        $('btnLogin').disabled = true;
+        callApi('api_rota_public_verify', pwd).then(function(res){
+          if (!res || !res.ok || !res.token){
+            $('loginMsg').innerHTML = box('err', (res && res.zh) || '登入失敗', (res && res.en) || 'Login failed.');
+            return;
+          }
+          State.token = res.token;
+          loadRota();
+        }).catch(function(err){
+          $('loginMsg').innerHTML = box('err', '系統錯誤', err && err.message ? err.message : 'System error');
+        }).finally(function(){ $('btnLogin').disabled = false; });
+      };
+    }
+
+    function renderTable(data){
+      var events = (data && data.events) || [];
+      var rows = [];
+
+      events.forEach(function(ev){
+        var list = Array.isArray(ev.assignments) ? ev.assignments : [];
+        if (!list.length){
+          rows.push('<tr><td>'+escapeHtml(ev.eventDateLabel || ev.eventDate || '')+'</td><td colspan="3" class="small">沒有已安排事奉 / No assignments</td></tr>');
+          return;
+        }
+        list.forEach(function(r, idx){
+          rows.push(
+            '<tr>'+
+              '<td>'+(idx === 0 ? escapeHtml(ev.eventDateLabel || ev.eventDate || '') : '')+'</td>'+
+              '<td><span class="groupBadge">'+escapeHtml(r.group || '')+'</span></td>'+
+              '<td>'+escapeHtml(r.position || '')+'</td>'+
+              '<td>'+escapeHtml(r.members || '')+'</td>'+
+            '</tr>'
+          );
+        });
+      });
+
+      if (!rows.length){
+        rows.push('<tr><td colspan="4" class="small">此期間沒有排期資料 / No rota data in this period.</td></tr>');
+      }
+
+      return (
+        '<div class="card">'+
+          '<div class="big">📅 事奉排期 / Rota</div>'+
+          '<div class="small">期間 / Range: '+escapeHtml((data.range && data.range.from) || '')+' → '+escapeHtml((data.range && data.range.to) || '')+'</div>'+
+          '<div class="tableWrap">'+
+            '<table>'+
+              '<thead><tr><th>日期 / Date</th><th>組別 / Group</th><th>崗位 / Position</th><th>事奉者 / Members</th></tr></thead>'+
+              '<tbody>'+rows.join('')+'</tbody>'+
+            '</table>'+
+          '</div>'+
+          '<div class="miniBtnRow"><button id="btnRefresh" class="alt" type="button">重新整理 / Refresh</button><button id="btnRelogin" type="button">更換密碼 / Re-login</button></div>'+
+        '</div>'
+      );
+    }
+
+    function loadRota(){
+      $('app').innerHTML = '<div class="card"><div class="big">載入中… / Loading…</div></div>';
+      callApi('api_rota_public_current_next_month', State.token).then(function(res){
+        if (!res || !res.ok){
+          renderLogin(box('err', (res && res.zh) || '登入已過期', (res && res.en) || 'Session expired.'));
+          return;
+        }
+        State.data = res;
+        $('app').innerHTML = renderTable(res);
+        $('btnRefresh').onclick = function(){ loadRota(); };
+        $('btnRelogin').onclick = function(){ State.token=''; renderLogin(); };
+      }).catch(function(err){
+        renderLogin(box('err', '載入失敗', err && err.message ? err.message : 'Failed to load rota.'));
+      });
+    }
+
+    renderLogin();
+  </script>
+</body>
+</html>
