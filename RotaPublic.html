@@ -1,209 +1,275 @@
 <!doctype html>
 <html>
-<head>
-  <base target="_top">
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-  <title>CCF Public Rota</title>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CCF 事奉排期 / Serving Rota</title>
+    <style>
+      :root{
+        --purple-bg:#3f1f73;
+        --purple-bg-soft:#5d34a1;
+        --card:#ffffff;
+        --text:#1e1b2e;
+        --muted:#6a6285;
+        --line:#ddd6f4;
+        --vac-bg:#fee2e2;
+        --vac-text:#991b1b;
+        --vac-border:#fca5a5;
+      }
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;width:100%;height:100%}
+      body{
+        font-family:Inter,Segoe UI,Arial,sans-serif;
+        background:linear-gradient(160deg,var(--purple-bg) 0%,var(--purple-bg-soft) 100%);
+        color:var(--text);
+      }
+      .screen{min-height:100vh;width:100vw;padding:6px}
+      .card{
+        background:var(--card);
+        border-radius:10px;
+        padding:8px;
+        box-shadow:0 6px 18px rgba(10,6,30,0.18);
+      }
+      .header{display:flex;gap:6px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:6px}
+      .title{font-weight:900;font-size:16px;line-height:1.15;color:#2b1755}
+      .versionChip{display:inline-flex;align-items:center;padding:3px 7px;border-radius:999px;background:#ede9fe;color:#4c1d95;font-weight:800;font-size:10px}
+      .small{font-size:10px;color:var(--muted);line-height:1.25}
+      .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+      input[type="password"]{
+        min-width:180px;
+        border:1px solid #c4b5fd;
+        border-radius:8px;
+        padding:6px 8px;
+        font-size:12px;
+      }
+      button{
+        border:0;
+        border-radius:8px;
+        background:#6d28d9;
+        color:#fff;
+        font-weight:800;
+        padding:6px 9px;
+        font-size:11px;
+        cursor:pointer;
+      }
+      button:hover{filter:brightness(1.06)}
+      .msg{margin-top:6px;font-size:11px}
+      .msg.err{color:#b91c1c}
+      .hide{display:none!important}
+      .tableWrap{
+        margin-top:6px;
+        width:100%;
+        overflow:auto;
+        border:1px solid var(--line);
+        border-radius:8px;
+        max-height:calc(100vh - 120px);
+      }
+      table{
+        width:max-content;
+        min-width:100%;
+        border-collapse:collapse;
+        background:#fff;
+        font-size:10px;
+        line-height:1.2;
+      }
+      th,td{
+        border:1px solid var(--line);
+        padding:3px 4px;
+        vertical-align:top;
+        text-align:left;
+        white-space:normal;
+        word-break:break-word;
+      }
+      th{position:sticky;top:0;background:#f5f3ff;z-index:1;font-size:10px}
+      th:first-child,td:first-child{position:sticky;left:0;background:#faf5ff;z-index:2;min-width:78px}
+      .stack{display:flex;flex-wrap:wrap;gap:3px;max-width:180px;white-space:normal}
+      .bubble{display:inline-flex;align-items:center;border-radius:999px;padding:2px 6px;border:1px solid #d1d5db;background:#fff;font-size:9px;line-height:1.15}
+      .bubble.vacancy{background:var(--vac-bg);color:var(--vac-text);border-color:var(--vac-border);font-weight:800}
+      .dash{color:#6b7280;font-weight:700}
+      .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
+      .legend .bubble{font-size:9px}
+      .headRight{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+      .langToggle{border-radius:999px;padding:4px 10px}
 
-  <style>
-    :root{
-      --bg:#eefbe9; --card:#ffffff; --text:#0d1b3d; --muted:#5a6b90;
-      --border:rgba(10,30,80,0.12); --good:#1aa86c; --bad:#d93c5e;
-      --shadow:0 10px 24px rgba(10,30,80,0.10);
-      --pad:clamp(10px, 3.2vw, 16px);
-      --radius:clamp(14px, 3.2vw, 18px);
-      --fs-title:clamp(20px, 4.8vw, 26px);
-      --fs-big:clamp(18px, 4.2vw, 22px);
-      --fs-body:clamp(13px, 3.4vw, 16px);
-      --fs-input:clamp(16px, 4vw, 18px);
-    }
-    *{box-sizing:border-box}
-    html{-webkit-text-size-adjust:100%}
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
-    .wrap{max-width:980px;margin:0 auto;padding:var(--pad)}
-    .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
-    .title{font-size:var(--fs-title);font-weight:900}
-    .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
-    .pill{font-size:12px;color:var(--muted);border:1px solid var(--border);padding:4px 10px;border-radius:999px;background:#fff}
-
-    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:calc(var(--pad) + 2px);margin:10px 0;box-shadow:var(--shadow)}
-    .big{font-size:var(--fs-big);font-weight:950;letter-spacing:0.2px;line-height:1.25}
-    .small{font-size:var(--fs-body);color:var(--muted);margin-top:6px;line-height:1.45}
-    .label{font-size:var(--fs-body);color:var(--muted);margin-bottom:6px}
-    input,button{width:100%;border-radius:var(--radius);border:1px solid var(--border);background:#fff;color:var(--text);padding:calc(var(--pad) + 2px);font-size:var(--fs-input)}
-    button{cursor:pointer;font-weight:900;box-shadow:0 6px 14px rgba(10,30,80,0.06)}
-    button.primary{background:#e9fff4;border-color:rgba(26,168,108,0.25)}
-    button.alt{background:#eef4ff;border-color:rgba(40,90,200,0.18)}
-    .miniBtnRow{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
-    .miniBtnRow button{flex:1 1 180px}
-
-    .msgBox{border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-top:10px}
-    .msgBox.ok{border-color:rgba(26,168,108,0.35);background:#edfff6}
-    .msgBox.err{border-color:rgba(217,60,94,0.35);background:#fff1f4}
-
-    .tableWrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:#fff;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;margin-top:8px}
-    table{border-collapse:separate;border-spacing:0;min-width:760px;width:max-content}
-    th,td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:10px;vertical-align:top;white-space:normal}
-    th{position:sticky;top:0;background:#fff;font-weight:900;z-index:4}
-    tr:last-child td{border-bottom:0}
-    th:last-child,td:last-child{border-right:0}
-
-    .groupBadge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:900;border:1px solid var(--border);background:#fff}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <header class="topbar">
-      <div>
-        <div class="title">CCF 公開事奉排期 / Public Rota</div>
-        <div class="sub">Read-only rota for current and next month</div>
+      @media (max-width: 720px){
+        .screen{padding:4px}
+        .card{padding:6px;border-radius:8px}
+        .title{font-size:14px}
+        .versionChip{font-size:9px;padding:2px 6px}
+        input[type="password"]{min-width:140px;font-size:11px;padding:5px 6px}
+        button{padding:5px 8px;font-size:10px}
+        table{font-size:9px}
+        th,td{padding:2px 3px}
+        .stack{max-width:130px;gap:2px}
+        .bubble{font-size:8px;padding:1px 5px}
+        .langToggle{padding:3px 8px}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="screen">
+      <div class="card" id="loginCard">
+        <div class="header">
+          <div>
+            <div class="title" id="loginTitle">🧩 CCF 事奉排期</div>
+            <div class="small" id="loginSub">只供查閱：未來 8 週排期</div>
+          </div>
+          <div class="headRight">
+            <div class="versionChip">ROTA <?= (typeof ROTA_PUBLIC_VERSION !== 'undefined') ? ROTA_PUBLIC_VERSION : 'n/a' ?></div>
+            <button id="btnLangLogin" type="button" class="langToggle">EN</button>
+          </div>
+        </div>
+        <div class="row">
+          <input id="pwd" type="password" autocomplete="off" placeholder="輸入密碼 / Enter password" />
+          <button id="btnOpen" type="button">進入</button>
+        </div>
+        <div id="msg" class="msg"></div>
       </div>
-      <div><span class="pill">staff <?= APP_VERSION ?></span></div>
-    </header>
 
-    <main id="app"></main>
-  </div>
+      <div class="card hide" id="rotaCard">
+        <div class="header">
+          <div>
+            <div class="title" id="rotaTitle">🗓️ 事奉排期</div>
+            <div class="small" id="meta"></div>
+          </div>
+          <div class="headRight">
+            <div class="versionChip">ROTA <?= (typeof ROTA_PUBLIC_VERSION !== 'undefined') ? ROTA_PUBLIC_VERSION : 'n/a' ?></div>
+            <button id="btnLangRota" type="button" class="langToggle">EN</button>
+          </div>
+        </div>
+        <div class="legend">
+          <span class="small" id="legendLabel">圖例</span>
+          <span class="bubble vacancy" id="legendVacant">空缺</span>
+          <span class="bubble" id="legendMember">同工</span>
+          <span class="bubble dash">-</span>
+        </div>
+        <div class="tableWrap" id="tableWrap"></div>
+      </div>
+    </div>
 
-  <script>
-    function $(id){ return document.getElementById(id); }
+    <script>
+      function $(id){ return document.getElementById(id); }
+      var State = { lang:'zh', data:null };
+      function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 
-    var State = {
-      token: '',
-      loading: false,
-      data: null
-    };
-
-    function escapeHtml(s){
-      return String(s||'').replace(/[&<>'"]/g, function(c){
-        return ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'})[c] || c;
-      });
-    }
-
-    function box(type, zh, en){
-      return '<div class="msgBox '+type+'"><div><b>'+escapeHtml(zh||'')+'</b></div><div class="small" style="margin-top:4px;">'+escapeHtml(en||'')+'</div></div>';
-    }
-
-    function callApi(fn){
-      var args = Array.prototype.slice.call(arguments, 1);
-
-      if (window.google && google.script && google.script.run){
+      function callApi(fn){
+        var args = Array.prototype.slice.call(arguments, 1);
+        if (!(window.google && google.script && google.script.run)){
+          return Promise.reject(new Error('頁面通訊初始化失敗，請重新開啟連結。 / Portal bridge not ready. Please reopen this page from the Apps Script link.'));
+        }
         return new Promise(function(resolve, reject){
-          var runner = google.script.run
-            .withSuccessHandler(function(res){ resolve(res || {}); })
-            .withFailureHandler(function(err){
-              reject(err && err.message ? new Error(err.message) : new Error('RPC failed'));
-            });
-          var target = runner && runner[fn];
-          if (typeof target !== 'function'){
-            reject(new Error('RPC function unavailable: ' + fn));
-            return;
+          try{
+            var runner = google.script.run
+              .withSuccessHandler(function(res){ resolve(res); })
+              .withFailureHandler(function(err){
+                reject(new Error((err && err.message) ? err.message : String(err || 'API failed')));
+              });
+            runner[fn].apply(runner, args);
+          }catch(e){
+            reject(e);
           }
-          target.apply(runner, args);
         });
       }
 
-      return fetch(window.location.href, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json;charset=utf-8' },
-        body: JSON.stringify({ fn: fn, args: args })
-      }).then(function(r){ return r.json(); }).then(function(payload){
-        if (!payload || !payload.ok) throw new Error('RPC transport failed');
-        return payload.result || {};
-      });
-    }
+      function t(zh, en){ return State.lang === 'zh' ? zh : en; }
 
-    function renderLogin(msgHtml){
-      $('app').innerHTML =
-        '<div class="card">'+
-          '<div class="big">🔐 輸入密碼 / Enter password</div>'+
-          '<div class="small">只可查看，不可編輯。 / Read-only access only.</div>'+
-          '<div style="margin-top:12px;">'+
-            '<div class="label">Password</div>'+
-            '<input id="passwordField" type="password" autocomplete="off" />'+
-            '<div class="miniBtnRow"><button id="btnLogin" class="primary" type="button">提交 / Submit</button></div>'+
-          '</div>'+
-          '<div id="loginMsg">'+(msgHtml||'')+'</div>'+
-        '</div>';
+      function applyLang_(){
+        if ($('btnLangLogin')) $('btnLangLogin').textContent = State.lang === 'zh' ? 'EN' : '中文';
+        if ($('btnLangRota')) $('btnLangRota').textContent = State.lang === 'zh' ? 'EN' : '中文';
+        if ($('loginTitle')) $('loginTitle').textContent = State.lang === 'zh' ? '🧩 CCF 事奉排期' : '🧩 CCF Serving Rota';
+        if ($('loginSub')) $('loginSub').textContent = State.lang === 'zh' ? '只供查閱：未來 8 週排期' : 'Read-only: next 8 weeks rota';
+        if ($('pwd')) $('pwd').placeholder = State.lang === 'zh' ? '輸入密碼' : 'Enter password';
+        if ($('btnOpen')) $('btnOpen').textContent = State.lang === 'zh' ? '進入' : 'Open';
+        if ($('rotaTitle')) $('rotaTitle').textContent = State.lang === 'zh' ? '🗓️ 事奉排期' : '🗓️ Serving Rota';
+        if ($('legendLabel')) $('legendLabel').textContent = State.lang === 'zh' ? '圖例' : 'Legend';
+        if ($('legendVacant')) $('legendVacant').textContent = State.lang === 'zh' ? '空缺' : 'Vacant';
+        if ($('legendMember')) $('legendMember').textContent = State.lang === 'zh' ? '同工' : 'Member';
+        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+      }
 
-      $('btnLogin').onclick = function(){
-        var pwd = String(($('passwordField') && $('passwordField').value) || '').trim();
-        if (!pwd){ $('loginMsg').innerHTML = box('err', '請輸入密碼', 'Please enter password.'); return; }
-        $('btnLogin').disabled = true;
-        callApi('api_rota_public_verify', pwd).then(function(res){
-          if (!res || !res.ok || !res.token){
-            $('loginMsg').innerHTML = box('err', (res && res.zh) || '登入失敗', (res && res.en) || 'Login failed.');
+      function renderTable(data){
+        var positions = Array.isArray(data.positions) ? data.positions : [];
+        var rows = Array.isArray(data.rows) ? data.rows : [];
+        var header = [
+          '<th>'+esc(t('日期','Date'))+'</th>',
+          '<th>'+esc(t('講題','Sermon title'))+'</th>',
+          '<th>'+esc(t('講員','Speaker'))+'</th>',
+          '<th>'+esc(t('講道經文','Sermon passage'))+'</th>',
+          '<th>'+esc(t('回應經文','Response passage'))+'</th>'
+        ];
+        positions.forEach(function(p){
+          header.push('<th>'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
+        });
+
+        var body = rows.map(function(r){
+          var cells = [
+            '<td><b>'+esc(r.dateYmd || '')+'</b></td>',
+            '<td>'+esc(r.sermonTitle || '-')+'</td>',
+            '<td>'+esc(r.speaker || '-')+'</td>',
+            '<td>'+esc(State.lang==='zh' ? (r.sermonPassageZh || '-') : (r.sermonPassageEn || r.sermonPassageZh || '-'))+'</td>',
+            '<td>'+esc(State.lang==='zh' ? (r.responsePassageZh || '-') : (r.responsePassageEn || r.responsePassageZh || '-'))+'</td>'
+          ];
+
+          positions.forEach(function(p){
+            var list = ((r.positions || {})[p.key]) || [{ textZh:'-', textEn:'-', isVacancy:false }];
+            var html;
+            if (!list.length || (list.length===1 && String((State.lang==='zh'?list[0].textZh:list[0].textEn)||'').trim()==='-')){
+              html = '<span class="dash">-</span>';
+            } else {
+              html = '<div class="stack">' + list.map(function(it){
+                var cls = 'bubble' + (it && it.isVacancy ? ' vacancy' : '');
+                var text = (State.lang === 'zh') ? (it && it.textZh) : (it && it.textEn);
+                return '<span class="'+cls+'">'+esc(text || '-')+'</span>';
+              }).join('') + '</div>';
+            }
+            cells.push('<td>'+html+'</td>');
+          });
+
+          return '<tr>' + cells.join('') + '</tr>';
+        }).join('');
+
+        return '<table><thead><tr>'+header.join('')+'</tr></thead><tbody>'+body+'</tbody></table>';
+      }
+
+      $('btnOpen').onclick = function(){
+        var pwd = String(($('pwd').value || '')).trim();
+        $('msg').className = 'msg';
+        $('msg').textContent = '載入中... / Loading...';
+        callApi('api_public_rota_view', pwd).then(function(res){
+          if (!res || !res.ok){
+            $('msg').className = 'msg err';
+            $('msg').textContent = (res && (res.zh || res.en || res.code)) || '無法載入排期 / Unable to load rota.';
             return;
           }
-          State.token = res.token;
-          loadRota();
+          $('meta').textContent = (State.lang === 'zh')
+            ? ('生成時間：' + String(res.generatedAt || '') + ' · 未來 8 週')
+            : ('Generated: ' + String(res.generatedAt || '') + ' · Next 8 weeks');
+          State.data = res;
+          $('tableWrap').innerHTML = renderTable(res);
+          $('loginCard').classList.add('hide');
+          $('rotaCard').classList.remove('hide');
         }).catch(function(err){
-          $('loginMsg').innerHTML = box('err', '系統錯誤', err && err.message ? err.message : 'System error');
-        }).finally(function(){ $('btnLogin').disabled = false; });
-      };
-    }
-
-    function renderTable(data){
-      var events = (data && data.events) || [];
-      var rows = [];
-
-      events.forEach(function(ev){
-        var list = Array.isArray(ev.assignments) ? ev.assignments : [];
-        if (!list.length){
-          rows.push('<tr><td>'+escapeHtml(ev.eventDateLabel || ev.eventDate || '')+'</td><td colspan="3" class="small">沒有已安排事奉 / No assignments</td></tr>');
-          return;
-        }
-        list.forEach(function(r, idx){
-          rows.push(
-            '<tr>'+
-              '<td>'+(idx === 0 ? escapeHtml(ev.eventDateLabel || ev.eventDate || '') : '')+'</td>'+
-              '<td><span class="groupBadge">'+escapeHtml(r.group || '')+'</span></td>'+
-              '<td>'+escapeHtml(r.position || '')+'</td>'+
-              '<td>'+escapeHtml(r.members || '')+'</td>'+
-            '</tr>'
-          );
+          $('msg').className = 'msg err';
+          $('msg').textContent = (err && err.message) ? err.message : '系統錯誤 / System error';
         });
+      };
+
+      $('pwd').addEventListener('keydown', function(e){
+        if (e.key === 'Enter') $('btnOpen').click();
       });
 
-      if (!rows.length){
-        rows.push('<tr><td colspan="4" class="small">此期間沒有排期資料 / No rota data in this period.</td></tr>');
-      }
-
-      return (
-        '<div class="card">'+
-          '<div class="big">📅 事奉排期 / Rota</div>'+
-          '<div class="small">期間 / Range: '+escapeHtml((data.range && data.range.from) || '')+' → '+escapeHtml((data.range && data.range.to) || '')+'</div>'+
-          '<div class="tableWrap">'+
-            '<table>'+
-              '<thead><tr><th>日期 / Date</th><th>組別 / Group</th><th>崗位 / Position</th><th>事奉者 / Members</th></tr></thead>'+
-              '<tbody>'+rows.join('')+'</tbody>'+
-            '</table>'+
-          '</div>'+
-          '<div class="miniBtnRow"><button id="btnRefresh" class="alt" type="button">重新整理 / Refresh</button><button id="btnRelogin" type="button">更換密碼 / Re-login</button></div>'+
-        '</div>'
-      );
-    }
-
-    function loadRota(){
-      $('app').innerHTML = '<div class="card"><div class="big">載入中… / Loading…</div></div>';
-      callApi('api_rota_public_current_next_month', State.token).then(function(res){
-        if (!res || !res.ok){
-          renderLogin(box('err', (res && res.zh) || '登入已過期', (res && res.en) || 'Session expired.'));
-          return;
+      function toggleLang_(){
+        State.lang = (State.lang === 'zh') ? 'en' : 'zh';
+        if (State.data && $('meta')){
+          $('meta').textContent = (State.lang === 'zh')
+            ? ('生成時間：' + String(State.data.generatedAt || '') + ' · 未來 8 週')
+            : ('Generated: ' + String(State.data.generatedAt || '') + ' · Next 8 weeks');
         }
-        State.data = res;
-        $('app').innerHTML = renderTable(res);
-        $('btnRefresh').onclick = function(){ loadRota(); };
-        $('btnRelogin').onclick = function(){ State.token=''; renderLogin(); };
-      }).catch(function(err){
-        renderLogin(box('err', '載入失敗', err && err.message ? err.message : 'Failed to load rota.'));
-      });
-    }
-
-    renderLogin();
-  </script>
-</body>
+        applyLang_();
+      }
+      if ($('btnLangLogin')) $('btnLangLogin').onclick = toggleLang_;
+      if ($('btnLangRota')) $('btnLangRota').onclick = toggleLang_;
+      applyLang_();
+    </script>
+  </body>
 </html>
