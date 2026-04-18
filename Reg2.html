@@ -694,6 +694,9 @@
       worshipMembersFetchedAt: 0,
       sermonExpandState: {},
       sermonTextCache: {},
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_STATE_BEGIN */
+      liveSelectedEventKey: '',
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_STATE_END */
 
       keepExistingQr: false, // keep key/QR during update
       submitting: false      // prevent double submit
@@ -1471,8 +1474,25 @@
       var last = res.lastAttendance || {};
       var lastOffering = res.lastOffering || {};
       var groups = {};
-      var worshipSongs = Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : [];
-      var sermonBlock = res.sermonBlock || { hasData:false, entries:[] };
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_SELECTOR_BEGIN */
+      var options = (Array.isArray(res.serviceOptions) ? res.serviceOptions : []).slice(0, 4);
+      var byEvent = (res.servicesByEvent && typeof res.servicesByEvent === 'object') ? res.servicesByEvent : {};
+      var candidate = String(State.liveSelectedEventKey || '').trim();
+      var valid = options.some(function(opt){ return String((opt && opt.eventKey) || '') === candidate; });
+      var selectedEventKey = valid ? candidate : String(res.defaultEventKey || '').trim();
+      if (!selectedEventKey && options.length) selectedEventKey = String((options[0] && options[0].eventKey) || '').trim();
+      var selectedBundle = byEvent[selectedEventKey] || {};
+      if (!selectedBundle || !selectedBundle.sermonBlock){
+        selectedBundle = {
+          sermonBlock: res.sermonBlock || { hasData:false, entries:[] },
+          servingThisWeek: Array.isArray(res.servingThisWeek) ? res.servingThisWeek : [],
+          worshipSongsThisWeek: Array.isArray(res.worshipSongsThisWeek) ? res.worshipSongsThisWeek : []
+        };
+      }
+      State.liveSelectedEventKey = selectedEventKey;
+      var worshipSongs = Array.isArray(selectedBundle.worshipSongsThisWeek) ? selectedBundle.worshipSongsThisWeek : [];
+      var sermonBlock = selectedBundle.sermonBlock || { hasData:false, entries:[] };
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_SELECTOR_END */
 
       function normalizedGroupKey(g){ return String(g||'').trim().toLowerCase(); }
       function badgeCls(g){ var k = normalizedGroupKey(g); return (k==='worship'||k==='media'||k==='logistic'||k==='support'||k==='finance') ? k : ''; }
@@ -1497,7 +1517,7 @@
         return false;
       }
 
-      (res.servingThisWeek||[]).forEach(function(r){
+      ((selectedBundle && selectedBundle.servingThisWeek) || []).forEach(function(r){
         var g = normalizedGroupKey(r.group) || 'other';
         if (!groups[g]) groups[g] = [];
         groups[g].push(r || {});
@@ -1565,6 +1585,18 @@
       pieces.push('<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>');
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>');
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週奉獻 / Last week\'s offering</b>: '+escapeHtml((typeof lastOffering.amount === 'number') ? ('£'+Number(lastOffering.amount).toFixed(2)) : '—')+' ('+escapeHtml(String(lastOffering.eventKey||last.eventKey||''))+')</div>');
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_SELECTOR_RENDER_BEGIN */
+      if (options.length){
+        var selectorOptions = options.map(function(opt){
+          opt = opt || {};
+          var evKey = String(opt.eventKey || '').trim();
+          var lblZh = String(opt.labelZh || opt.dateYmd || evKey || '').trim();
+          var lblEn = String(opt.labelEn || opt.dateYmd || evKey || '').trim();
+          return '<option value="'+escapeHtml(evKey)+'" '+(evKey===selectedEventKey?'selected':'')+'>'+escapeHtml(lblZh+' / '+lblEn)+'</option>';
+        }).join('');
+        pieces.push('<div class="msgBox" style="margin-top:8px;"><div class="label" style="margin-top:0;">聚會選擇 / Service</div><select id="serviceInfoSelect">'+selectorOptions+'</select></div>');
+      }
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_SELECTOR_RENDER_END */
       pieces.push(renderSermonHtml_());
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>本週事奉 / Serving this week</b></div>');
       var groupOrder = ['worship','media','logistic','support','finance'];
@@ -1577,7 +1609,13 @@
       });
       var blocks = orderedKeys.map(renderGroupBlock_).filter(Boolean).join('');
       pieces.push(blocks || '<div class="msgBox warn" style="margin-top:8px;">—</div>');
-      pieces.push('<div class="miniBtnRow"><button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>');
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_BUTTON_BEGIN */
+      var showSaturn = String(res.viewerMemberId || '').trim().toUpperCase();
+      var saturnBtn = (showSaturn === 'CCF0001' || showSaturn === 'CCF0137')
+        ? '<button id="btnSailorSaturn" class="alt">For Sailor Saturn</button>'
+        : '';
+      pieces.push('<div class="miniBtnRow">'+saturnBtn+'<button id="btnLiveBack" class="danger">⬅️ 返回 / Back</button></div></div>');
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_BUTTON_END */
       return pieces.join('');
     }
 
@@ -2652,6 +2690,50 @@ function viewSelfHoliday(m){
 
     function bindLive(){
       if ($('btnLiveBack')) $('btnLiveBack').onclick = function(){ State.view='selfHome'; render(); };
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_BIND_BEGIN */
+      if ($('serviceInfoSelect')) $('serviceInfoSelect').onchange = function(){
+        State.liveSelectedEventKey = String(this.value || '').trim();
+        render();
+      };
+      if ($('btnSailorSaturn')) $('btnSailorSaturn').onclick = function(){
+        var modal = openModal(
+          '<div class="big">For Sailor Saturn</div>'+
+          '<div class="miniBtnRow"><button id="btnSaturnThis" class="alt">本月 / This month</button><button id="btnSaturnNext" class="alt">下月 / Next month</button><button id="btnSaturnClose" class="danger">關閉 / Close</button></div>'+
+          '<div id="saturnMsg" class="small" style="margin-top:8px;"></div>'
+        );
+        function b64ToBytes_(b64){
+          var bin = atob(String(b64||''));
+          var len = bin.length;
+          var out = new Uint8Array(len);
+          for (var i=0;i<len;i++) out[i] = bin.charCodeAt(i);
+          return out;
+        }
+        function exportSaturn_(which){
+          var msg = modal.querySelector('#saturnMsg');
+          if (msg) msg.innerHTML = '載入中… / Loading…';
+          callApi('api_reg_self_sailor_saturn_csv_public', State.authQrPayload, which).then(function(res){
+            if(!res || !res.ok){ if (msg) msg.innerHTML = showServerErr(res); return; }
+            var bytes = b64ToBytes_(res.base64 || '');
+            var blob = new Blob([bytes], { type: String(res.mimeType || 'text/csv;charset=utf-8') });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = String(res.filename || 'CCF_SailorSaturn.csv');
+            document.body.appendChild(a);
+            a.click();
+            try{ document.body.removeChild(a); }catch(e){}
+            URL.revokeObjectURL(url);
+            var warns = Array.isArray(res.warnings) ? res.warnings.filter(Boolean) : [];
+            if (msg) msg.innerHTML = warns.length ? showBox('warn','已下載，附帶警告','Downloaded with warnings','<div class="small">'+escapeHtml(warns.join('；'))+'</div>') : showBox('ok','已下載','Downloaded');
+          }).catch(function(err){
+            if (msg) msg.innerHTML = showBox('err','下載失敗','Download failed', '<div class="small">'+escapeHtml((err&&err.message)||String(err||''))+'</div>');
+          });
+        }
+        modal.querySelector('#btnSaturnClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#btnSaturnThis').onclick = function(){ exportSaturn_('THIS'); };
+        modal.querySelector('#btnSaturnNext').onclick = function(){ exportSaturn_('NEXT'); };
+      };
+      /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_BIND_END */
       Array.prototype.slice.call(document.querySelectorAll('[data-sermon-toggle]')).forEach(function(btn){
         btn.onclick = function(){
           var key = String(btn.getAttribute('data-sermon-key')||'');

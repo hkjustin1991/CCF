@@ -1660,6 +1660,281 @@ function reg_liveCachePut_(key, val, ttlSec){
   try{ CacheService.getScriptCache().put(key, JSON.stringify(val), Number(ttlSec||30)); }catch(e){}
 }
 
+/* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_SERVICE_BEGIN */
+function reg_isSailorSaturnAllowed_(memberId){
+  const id = String(memberId || '').trim().toUpperCase();
+  return id === 'CCF0001' || id === 'CCF0137';
+}
+
+function reg_getNext4SundayEvents_(){
+  const todayYmd = admin_todayUkYmd_();
+  return admin_getUpcomingSundayEventKeys_(todayYmd, 4) || [];
+}
+
+function reg_buildLiveServiceEntry_(eventKey, byId, prefetched){
+  const ev = String(eventKey || '').trim();
+  const memberById = byId || {};
+  const pre = prefetched || {};
+  let servingRaw = [];
+  if (ev && pre.servingMatrix){
+    const matrix = pre.servingMatrix || {};
+    const posMeta = pre.positionMetaByKey || {};
+    const cellsByEvent = (((matrix.cells || {})[ev]) || {});
+    const positions = (matrix.positions || []).map(function(p){ return String((p && p.position) || '').trim(); }).filter(Boolean);
+    positions.forEach(function(position){
+      const meta = posMeta[position] || {};
+      const entries = cellsByEvent[position] || [];
+      entries.forEach(function(entry){
+        const e = entry || {};
+        const memberId = String(e.memberId || '').trim().toUpperCase();
+        const m = memberById[memberId] || {};
+        servingRaw.push({
+          eventKey: ev,
+          group: String(meta.group || ''),
+          position: position,
+          rawValue: String(e.rawValue || ''),
+          memberId: memberId,
+          nameZh: String(e.nameZh || m.nameZh || '').trim(),
+          nameEn: String(e.nameEn || m.nameEn || '').trim()
+        });
+      });
+    });
+  }else{
+    servingRaw = ev ? admin_getServingForEvent_(ev, memberById, null, false) : [];
+  }
+  const serving = servingRaw.map(function(r){
+    const m = memberById[String(r.memberId||'').trim().toUpperCase()] || {};
+    const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
+    const suffixZh = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄'
+      : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹' : '');
+    const suffixEn = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? 'Brother'
+      : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? 'Sister' : '');
+    const nameZh = String(r.nameZh||'').trim();
+    const nameEn = String(r.nameEn||'').trim();
+    return {
+      eventKey: r.eventKey,
+      group: admin_normalizeServingGroup_(r.group || ''),
+      groupZh: getServingGroupLabelZh_(r.group || ''),
+      groupEn: getServingGroupLabelEn_(r.group || ''),
+      position: r.position,
+      positionZh: admin_servingPositionZh_(r.position || ''),
+      positionEn: admin_servingPositionLabel_(r.position || ''),
+      rawValue: String(r.rawValue || ''),
+      memberId: String(r.memberId || ''),
+      nameZh: nameZh,
+      nameEn: nameEn,
+      suffixZh: suffixZh,
+      suffixEn: suffixEn,
+      displayName: [nameZh, nameEn].filter(Boolean).join(' / ') + (suffixZh || suffixEn ? (' · ' + [suffixZh, suffixEn].filter(Boolean).join(' / ')) : '')
+    };
+  });
+
+  const worshipSongsThisWeek = [];
+  if (ev){
+    var songs = {};
+    if (pre.worshipMap && pre.worshipMap[ev]){
+      songs = pre.worshipMap[ev] || {};
+    }else{
+      const worshipCacheKey = 'reg_live_worship_' + ev;
+      songs = reg_liveCacheGet_(worshipCacheKey);
+      if (!songs){
+        const planningMap = reg_getWorshipPlanningMapByEventKeys_([ev]);
+        songs = planningMap[ev] || {};
+        reg_liveCachePut_(worshipCacheKey, songs, 45);
+      }
+    }
+    [
+      { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
+      { section:'WORSHIP_MAIN_2', labelZh:'敬拜 2', labelEn:'Main 2' },
+      { section:'WORSHIP_MAIN_3', labelZh:'敬拜 3', labelEn:'Main 3' },
+      { section:'WORSHIP_MAIN_4', labelZh:'敬拜 4', labelEn:'Main 4' },
+      { section:'WORSHIP_RESPONSE_1', labelZh:'回應 1', labelEn:'Response 1' },
+      { section:'WORSHIP_RESPONSE_2', labelZh:'回應 2', labelEn:'Response 2' }
+    ].forEach(function(meta){
+      const sec = songs[meta.section] || {};
+      worshipSongsThisWeek.push({
+        section: meta.section,
+        labelZh: meta.labelZh,
+        labelEn: meta.labelEn,
+        songTitle: String(sec.songTitle || '').trim()
+      });
+    });
+  }
+
+  var sermonCacheKey = 'reg_live_sermon_' + String(ev || '');
+  var hit = reg_liveCacheGet_(sermonCacheKey);
+  var sermonBlock = hit;
+  if (!sermonBlock){
+    sermonBlock = reg_buildCurrentServiceSermonBlock_(ev);
+    reg_liveCachePut_(sermonCacheKey, sermonBlock, 45);
+  }
+
+  return {
+    sermonBlock: sermonBlock,
+    servingThisWeek: serving,
+    worshipSongsThisWeek: worshipSongsThisWeek
+  };
+}
+
+function reg_resolveExportDisplayNameZh_(entry, byId, warnings){
+  const e = entry || {};
+  const memberById = byId || {};
+  const warns = Array.isArray(warnings) ? warnings : [];
+  const raw = String(e.rawValue || e.value || '').trim();
+  const mid = String(e.memberId || '').trim().toUpperCase();
+  const member = mid ? (memberById[mid] || {}) : {};
+  const zh = String(e.nameZh || member.nameZh || member.NameZh || '').trim();
+  const en = String(e.nameEn || member.nameEn || member.NameEn || '').trim();
+  const preferred = String(e.preferredName || member.preferredName || member.PreferredName || '').trim();
+
+  var base = zh || '';
+  if (!base) base = String(e.nameZh || '').trim();
+  if (!base) base = en;
+  if (!base) base = preferred;
+  if (!base) base = raw;
+  if (!base) base = mid;
+
+  if (!zh && (mid || raw)) warns.push('Chinese name unavailable for ' + (mid || raw));
+
+  const titled = /(牧師|傳道|弟兄|姊妹)$/.test(base);
+  if (titled) return base;
+
+  const genderRaw = String(member.gender || member.Gender || '').trim().toLowerCase();
+  if (genderRaw === 'male' || genderRaw === 'm' || genderRaw === '男') return base + '弟兄';
+  if (genderRaw === 'female' || genderRaw === 'f' || genderRaw === '女') return base + '姊妹';
+  return base;
+}
+
+function reg_csvEscape_(value){
+  const s = String(value == null ? '' : value);
+  if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function reg_csvDateZh_(ymd){
+  const m = String(ymd || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return String(ymd || '');
+  return String(Number(m[1])) + '年' + String(Number(m[2])) + '月' + String(Number(m[3])) + '日';
+}
+
+function api_reg_self_sailor_saturn_csv_public(qrPayload, whichMonth){
+  try{
+    const auth = regGetSelfMemberByQr_(qrPayload);
+    if (!auth.ok) return auth;
+    const memberId = String((auth && auth.parsed && auth.parsed.id) || '').trim().toUpperCase();
+    if (!reg_isSailorSaturnAllowed_(memberId)) return { ok:false, code:'E403', zh:'沒有權限', en:'Not authorised.' };
+
+    const mode = String(whichMonth || 'THIS').trim().toUpperCase();
+    const now = new Date();
+    const year = Number(Utilities.formatDate(now, 'Europe/London', 'yyyy'));
+    const month = Number(Utilities.formatDate(now, 'Europe/London', 'M'));
+    const targetYear = (mode === 'NEXT' && month === 12) ? (year + 1) : year;
+    const targetMonth = (mode === 'NEXT') ? ((month % 12) + 1) : month;
+
+    const d = new Date(Date.UTC(targetYear, targetMonth - 1, 1));
+    const events = [];
+    while (Number(Utilities.formatDate(d, 'Europe/London', 'M')) === targetMonth){
+      if (Utilities.formatDate(d, 'Europe/London', 'u') === '7'){
+        const ymd = Utilities.formatDate(d, 'Europe/London', 'yyyy-MM-dd');
+        events.push({ eventKey:'SundayService_' + ymd, dateYmd: ymd });
+      }
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+
+    const matrix = admin_getServingPlanMatrix_(events) || {};
+    const membersIndex = admin_getMembersIndex_() || {};
+    const byId = membersIndex.byId || {};
+    const sermonMap = admin_getSermonMapByEventKeys_(events.map(function(ev){ return ev.eventKey; })) || {};
+    const warnings = [];
+
+    function isSkipToken_(raw){
+      const up = String(raw || '').trim().toUpperCase();
+      return !up || up === 'N/A' || up === 'NA' || up === 'CLOSED' || up === '__CLOSED__' || up.indexOf('CLOSED') === 0;
+    }
+
+    function collectNames_(eventKey, position){
+      const list = ((((matrix.cells || {})[eventKey] || {})[position]) || []);
+      return list.map(function(entry){
+        const raw = String((entry && entry.rawValue) || '').trim();
+        if (isSkipToken_(raw)) return '';
+        return reg_resolveExportDisplayNameZh_(entry, byId, warnings);
+      }).filter(Boolean).join('+');
+    }
+
+    function speakerName_(eventKey){
+      const sermon = sermonMap[eventKey] || {};
+      const raw = String(sermon.speaker || '').trim();
+      if (!raw) return '';
+      if (/(牧師|傳道|弟兄|姊妹)/.test(raw)) return raw;
+      const hit = Object.keys(byId).find(function(mid){
+        const m = byId[mid] || {};
+        return raw === String(m.nameZh || '').trim() || raw === String(m.nameEn || '').trim() || raw === String(m.preferredName || '').trim();
+      });
+      if (hit){
+        return reg_resolveExportDisplayNameZh_({ memberId:hit, rawValue:raw }, byId, warnings);
+      }
+      return raw;
+    }
+
+    function otherField_(eventKey){
+      const prayer = collectNames_(eventKey, 'Support_Prayer');
+      const testimony = collectNames_(eventKey, 'Support_Testimony');
+      const communion = collectNames_(eventKey, 'Support_Communion');
+      const parts = [];
+      if (prayer) parts.push('祈禱：' + prayer);
+      if (testimony) parts.push('見證：' + testimony);
+      if (communion) parts.push('聖餐：' + communion);
+      return parts.join('；');
+    }
+
+    function passageValue_(eventKey, kind){
+      const sermon = sermonMap[eventKey] || {};
+      if (kind === 'SERMON'){
+        return String(sermon.sermonPassageCanonical || sermon.sermonPassageRaw || '').trim();
+      }
+      if (kind === 'RESPONSE'){
+        return String(sermon.responsePassageCanonical || sermon.responsePassageRaw || '').trim();
+      }
+      return '';
+    }
+
+    const header = '日期,講員,領詩,司琴,和唱,讀經,講道經文,回應經文,場務,招待,PPT,影音,茶水,其他';
+    const rows = events.slice().sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); }).map(function(ev){
+      const eventKey = String(ev.eventKey || '').trim();
+      const cols = [
+        reg_csvDateZh_(ev.dateYmd),
+        speakerName_(eventKey),
+        collectNames_(eventKey, 'Worship_Lead'),
+        collectNames_(eventKey, 'Worship_Pianist'),
+        collectNames_(eventKey, 'Worship_Singer'),
+        collectNames_(eventKey, 'Support_BibleReader'),
+        passageValue_(eventKey, 'SERMON'),
+        passageValue_(eventKey, 'RESPONSE'),
+        collectNames_(eventKey, 'Logistic_Venue'),
+        collectNames_(eventKey, 'Logistic_Welcome'),
+        collectNames_(eventKey, 'Media_PPT'),
+        collectNames_(eventKey, 'Media_AV'),
+        collectNames_(eventKey, 'Logistic_Refreshment'),
+        otherField_(eventKey)
+      ];
+      return cols.map(reg_csvEscape_).join(',');
+    });
+
+    const csv = '\ufeff' + [header].concat(rows).join('\n');
+    const yyyyMm = String(targetYear) + '-' + (targetMonth < 10 ? ('0'+targetMonth) : String(targetMonth));
+    return {
+      ok:true,
+      filename:'CCF_SailorSaturn_' + yyyyMm + '.csv',
+      mimeType:'text/csv;charset=utf-8',
+      base64: Utilities.base64Encode(Utilities.newBlob(csv, 'text/csv;charset=utf-8').getBytes()),
+      warnings: warnings
+    };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
+/* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_SERVICE_END */
+
 function api_reg_self_live_service_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
@@ -1672,7 +1947,7 @@ function api_reg_self_live_service_public(qrPayload){
     const prevSunday = new Date(today.getTime() - offsetToPrevSunday*24*60*60*1000);
     const prevYmd = admin_fmtYmd_(prevSunday);
 
-    const events = admin_getUpcomingSundayEventKeys_(todayYmd, 1);
+    const events = (reg_getNext4SundayEvents_() || []).slice(0, 4);
     const next = (events && events.length) ? events[0].eventKey : '';
     const last = prevYmd ? ('SundayService_' + prevYmd) : '';
     const offeringMap = (typeof admin_getOfferingMap_ === 'function') ? admin_getOfferingMap_() : {};
@@ -1698,79 +1973,43 @@ function api_reg_self_live_service_public(qrPayload){
 
     const mi = admin_getMembersIndex_() || {};
     const byId = mi.byId || {};
-    const servingRaw = next ? admin_getServingForEvent_(next, byId, null, false) : [];
-    const serving = servingRaw.map(function(r){
-      const m = byId[String(r.memberId||'').trim().toUpperCase()] || {};
-      const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
-      const suffixZh = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄'
-        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹' : '');
-      const suffixEn = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? 'Brother'
-        : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? 'Sister' : '');
-      const nameZh = String(r.nameZh||'').trim();
-      const nameEn = String(r.nameEn||'').trim();
-      return {
-        eventKey: r.eventKey,
-        group: admin_normalizeServingGroup_(r.group || ''),
-        groupZh: getServingGroupLabelZh_(r.group || ''),
-        groupEn: getServingGroupLabelEn_(r.group || ''),
-        position: r.position,
-        positionZh: admin_servingPositionZh_(r.position || ''),
-        positionEn: admin_servingPositionLabel_(r.position || ''),
-        rawValue: String(r.rawValue || ''),
-        memberId: String(r.memberId || ''),
-        nameZh: nameZh,
-        nameEn: nameEn,
-        suffixZh: suffixZh,
-        suffixEn: suffixEn,
-        displayName: [nameZh, nameEn].filter(Boolean).join(' / ') + (suffixZh || suffixEn ? (' · ' + [suffixZh, suffixEn].filter(Boolean).join(' / ')) : '')
-      };
+    const eventKeys = events.map(function(ev){ return String((ev && ev.eventKey) || '').trim(); }).filter(Boolean);
+    const servingMatrix = admin_getServingPlanMatrix_(events) || {};
+    const positionMetaByKey = {};
+    (servingMatrix.positions || []).forEach(function(p){
+      const key = String((p && p.position) || '').trim();
+      if (!key) return;
+      positionMetaByKey[key] = p || {};
     });
-
-    const worshipSongsThisWeek = [];
-    if (next){
-      const worshipCacheKey = 'reg_live_worship_' + next;
-      var songs = reg_liveCacheGet_(worshipCacheKey);
-      if (!songs){
-        const planningMap = reg_getWorshipPlanningMapByEventKeys_([next]);
-        songs = planningMap[next] || {};
-        reg_liveCachePut_(worshipCacheKey, songs, 45);
-      }
-      [
-        { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
-        { section:'WORSHIP_MAIN_2', labelZh:'敬拜 2', labelEn:'Main 2' },
-        { section:'WORSHIP_MAIN_3', labelZh:'敬拜 3', labelEn:'Main 3' },
-        { section:'WORSHIP_MAIN_4', labelZh:'敬拜 4', labelEn:'Main 4' },
-        { section:'WORSHIP_RESPONSE_1', labelZh:'回應 1', labelEn:'Response 1' },
-        { section:'WORSHIP_RESPONSE_2', labelZh:'回應 2', labelEn:'Response 2' }
-      ].forEach(function(meta){
-        const sec = songs[meta.section] || {};
-        worshipSongsThisWeek.push({
-          section: meta.section,
-          labelZh: meta.labelZh,
-          labelEn: meta.labelEn,
-          songTitle: String(sec.songTitle || '').trim()
-        });
+    const worshipMap = reg_getWorshipPlanningMapByEventKeys_(eventKeys);
+    const servicesByEvent = {};
+    const serviceOptions = (events || []).map(function(ev){
+      const ek = String((ev && ev.eventKey) || '').trim();
+      const ymd = String((ev && ev.dateYmd) || '').trim() || ek.replace('SundayService_', '');
+      servicesByEvent[ek] = reg_buildLiveServiceEntry_(ek, byId, {
+        servingMatrix: servingMatrix,
+        positionMetaByKey: positionMetaByKey,
+        worshipMap: worshipMap
       });
-    }
+      return { eventKey: ek, dateYmd: ymd, labelZh: ymd, labelEn: ymd };
+    }).slice(0, 4);
+    const selected = servicesByEvent[next] || { sermonBlock:{ hasData:false, entries:[] }, servingThisWeek:[], worshipSongsThisWeek:[] };
 
     return {
       ok:true,
+      viewerMemberId: String((auth && auth.parsed && auth.parsed.id) || '').trim().toUpperCase(),
+      defaultEventKey: next,
+      serviceOptions: serviceOptions,
+      servicesByEvent: servicesByEvent,
       currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
       lastOffering:{
         eventKey:last,
         amount: (last && typeof offeringMap[last] === 'number') ? offeringMap[last] : null
       },
-      sermonBlock: (function(){
-        var sermonCacheKey = 'reg_live_sermon_' + String(next || '');
-        var hit = reg_liveCacheGet_(sermonCacheKey);
-        if (hit) return hit;
-        var built = reg_buildCurrentServiceSermonBlock_(next);
-        reg_liveCachePut_(sermonCacheKey, built, 45);
-        return built;
-      })(),
-      servingThisWeek: serving,
-      worshipSongsThisWeek: worshipSongsThisWeek
+      sermonBlock: selected.sermonBlock,
+      servingThisWeek: selected.servingThisWeek,
+      worshipSongsThisWeek: selected.worshipSongsThisWeek
     };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
