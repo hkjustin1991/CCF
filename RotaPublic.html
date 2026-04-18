@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CCF Serving Rota</title>
+    <title>CCF 事奉排期 / Serving Rota</title>
     <style>
       :root{
         --purple-bg:#3f1f73;
@@ -108,14 +108,14 @@
       <div class="card" id="loginCard">
         <div class="header">
           <div>
-            <div class="title">🧩 CCF Serving Rota</div>
-            <div class="small">Read-only rota for current and next month.</div>
+            <div class="title">🧩 CCF 事奉排期 / Serving Rota</div>
+            <div class="small">只供查閱：本月及下月排期 / Read-only for this and next month.</div>
           </div>
-          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?> · Public Read-only / 只供查閱</div>
         </div>
         <div class="row">
-          <input id="pwd" type="password" autocomplete="off" placeholder="Enter rota password" />
-          <button id="btnOpen" type="button">Open rota</button>
+          <input id="pwd" type="password" autocomplete="off" placeholder="輸入密碼 / Enter password" />
+          <button id="btnOpen" type="button">進入 / Open</button>
         </div>
         <div id="msg" class="msg"></div>
       </div>
@@ -123,15 +123,15 @@
       <div class="card hide" id="rotaCard">
         <div class="header">
           <div>
-            <div class="title">🗓️ Serving Rota</div>
+            <div class="title">🗓️ 事奉排期 / Serving Rota</div>
             <div class="small" id="meta"></div>
           </div>
-          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+          <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?> · Public Read-only / 只供查閱</div>
         </div>
         <div class="legend">
-          <span class="small">Legend:</span>
-          <span class="bubble vacancy">Vacant</span>
-          <span class="bubble">Member</span>
+          <span class="small">圖例 / Legend:</span>
+          <span class="bubble vacancy">空缺 / Vacant</span>
+          <span class="bubble">同工 / Member</span>
           <span class="bubble dash">-</span>
         </div>
         <div class="tableWrap" id="tableWrap"></div>
@@ -144,14 +144,20 @@
 
       function callApi(fn){
         var args = Array.prototype.slice.call(arguments, 1);
-        return fetch(location.href, {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ fn:fn, args:args })
-        }).then(function(r){ return r.json(); })
-        .then(function(payload){
-          if(!payload || !payload.ok) throw new Error((payload && payload.error && payload.error.message) || 'API failed');
-          return payload.result;
+        if (!(window.google && google.script && google.script.run)){
+          return Promise.reject(new Error('頁面通訊初始化失敗，請重新開啟連結。 / Portal bridge not ready. Please reopen this page from the Apps Script link.'));
+        }
+        return new Promise(function(resolve, reject){
+          try{
+            var runner = google.script.run
+              .withSuccessHandler(function(res){ resolve(res); })
+              .withFailureHandler(function(err){
+                reject(new Error((err && err.message) ? err.message : String(err || 'API failed')));
+              });
+            runner[fn].apply(runner, args);
+          }catch(e){
+            reject(e);
+          }
         });
       }
 
@@ -159,11 +165,11 @@
         var positions = Array.isArray(data.positions) ? data.positions : [];
         var rows = Array.isArray(data.rows) ? data.rows : [];
         var header = [
-          '<th>Date</th>',
-          '<th>Sermon title</th>',
-          '<th>Speaker</th>',
-          '<th>Sermon passage</th>',
-          '<th>Response passage</th>'
+          '<th>日期 / Date</th>',
+          '<th>講題 / Sermon title</th>',
+          '<th>講員 / Speaker</th>',
+          '<th>講道經文 / Sermon passage</th>',
+          '<th>回應經文 / Response passage</th>'
         ];
         positions.forEach(function(p){ header.push('<th>'+esc(p.label || p.key || '')+'</th>'); });
 
@@ -199,20 +205,20 @@
       $('btnOpen').onclick = function(){
         var pwd = String(($('pwd').value || '')).trim();
         $('msg').className = 'msg';
-        $('msg').textContent = 'Loading...';
+        $('msg').textContent = '載入中... / Loading...';
         callApi('api_public_rota_view', pwd).then(function(res){
           if (!res || !res.ok){
             $('msg').className = 'msg err';
-            $('msg').textContent = (res && (res.en || res.code)) || 'Unable to load rota.';
+            $('msg').textContent = (res && (res.zh || res.en || res.code)) || '無法載入排期 / Unable to load rota.';
             return;
           }
-          $('meta').textContent = 'Generated: ' + String(res.generatedAt || '') + ' · Showing current and next month';
+          $('meta').textContent = '生成時間 / Generated: ' + String(res.generatedAt || '') + ' · 顯示本月及下月 / Showing current and next month';
           $('tableWrap').innerHTML = renderTable(res);
           $('loginCard').classList.add('hide');
           $('rotaCard').classList.remove('hide');
         }).catch(function(err){
           $('msg').className = 'msg err';
-          $('msg').textContent = (err && err.message) ? err.message : 'System error';
+          $('msg').textContent = (err && err.message) ? err.message : '系統錯誤 / System error';
         });
       };
 
