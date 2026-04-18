@@ -2352,7 +2352,13 @@ function eventDateYmdFromKey(ev){
       try{
         var qp = new URLSearchParams(window.location.search || '');
         var handoffToken = String(qp.get('handoffToken') || '').trim();
+        if(!handoffToken){
+          try{
+            handoffToken = String(localStorage.getItem('ccf_admin_handoff_token') || '').trim();
+          }catch(e){}
+        }
         if(handoffToken){
+          try{ localStorage.removeItem('ccf_admin_handoff_token'); }catch(e){}
           applyAdminHandoffToken_(handoffToken);
           return;
         }
