@@ -56,6 +56,7 @@ const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
 const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
 const REG_ADMIN_HANDOFF_CACHE_PREFIX = 'reg_admin_handoff_';
 const REG_ADMIN_HANDOFF_TTL_SECONDS = 90;
+const ROTA_PUBLIC_VERSION = '2026-04-18.rota1';
 
 
 /******** Entry ********/
@@ -74,14 +75,172 @@ function doGetReg_(e){
 
 function doGetRotaPublic_(e){
   const t = HtmlService.createTemplateFromFile('RotaPublic');
-  t.APP_VERSION = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : REG_VERSION;
-  t.REG_VERSION = REG_VERSION;
+  t.ROTA_PUBLIC_VERSION = ROTA_PUBLIC_VERSION;
   return t.evaluate()
-    .setTitle('CCF Public Rota')
+    .setTitle('CCF Serving Rota')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function api_reg_ping_public(){ return { ok:true, regVersion: REG_VERSION }; }
+
+function reg_getPublicRotaPassword_(){
+  try{
+    const p = PropertiesService.getScriptProperties();
+    const configured = String((p && p.getProperty('ROTA_PUBLIC_PASSWORD')) || '').trim();
+    if (configured) return configured;
+  }catch(e){}
+  return '16.9';
+}
+
+function reg_publicRotaTokenType_(raw){
+  const v = String(raw || '').trim().toUpperCase();
+  if (!v) return 'EMPTY';
+  if (v === 'N/A' || v === 'NA') return 'NA';
+  if (v === 'CLOSED') return 'CLOSED';
+  if (v === 'VACANT') return 'VACANT';
+  return 'VALUE';
+}
+
+function reg_publicRotaMemberLabel_(entry){
+  const e = entry || {};
+  const memberId = String(e.memberId || '').trim().toUpperCase();
+  if (memberId){
+    const zh = String(e.nameZh || '').trim();
+    const en = String(e.nameEn || '').trim();
+    const preferred = String(e.preferredName || '').trim();
+    return preferred || zh || en || memberId;
+  }
+  const raw = String(e.rawValue || '').trim();
+  return raw || '';
+}
+
+function api_public_rota_view(password){
+  try{
+    const inputPass = String(password || '').trim();
+    const expected = reg_getPublicRotaPassword_();
+    if (!inputPass || inputPass !== expected){
+      return { ok:false, code:'E401', zh:'密碼不正確', en:'Invalid password.' };
+    }
+
+    const from = admin_todayUkYmd_();
+    const events = admin_getUpcomingSundayEventKeys_(from, 1);
+    const matrix = admin_getServingPlanMatrix_(events);
+    const eventKeys = (matrix.events || []).map(function(ev){ return String(ev.eventKey || '').trim(); }).filter(Boolean);
+    const sermonMap = admin_getSermonInfoForMonth_(eventKeys);
+
+    const positionsOrder = (typeof ADMIN_SERVING_POSITIONS !== 'undefined' && Array.isArray(ADMIN_SERVING_POSITIONS))
+      ? ADMIN_SERVING_POSITIONS.slice()
+      : [];
+    const positionsMetaMap = {};
+    (matrix.positions || []).forEach(function(p){
+      const key = String((p && p.position) || '').trim();
+      if (!key) return;
+      positionsMetaMap[key] = p;
+    });
+    positionsOrder.forEach(function(pos){
+      if (!positionsMetaMap[pos]){
+        positionsMetaMap[pos] = {
+          key: pos,
+          position: pos,
+          group: (typeof ADMIN_SERVING_POSITION_GROUP === 'object' && ADMIN_SERVING_POSITION_GROUP) ? (ADMIN_SERVING_POSITION_GROUP[pos] || '') : ''
+        };
+      }
+    });
+
+    const rows = (matrix.events || []).map(function(ev){
+      const eventKey = String((ev && ev.eventKey) || '').trim();
+      const sermon = sermonMap[eventKey] || admin_sermonBlankFromEventKey_(eventKey);
+      const rowPositions = {};
+
+      positionsOrder.forEach(function(pos){
+        const entries = ((((matrix.cells || {})[eventKey] || {})[pos]) || []);
+        const maxSlots = Math.max(1, Number((typeof ADMIN_SERVING_POSITION_MAX === 'object' && ADMIN_SERVING_POSITION_MAX) ? (ADMIN_SERVING_POSITION_MAX[pos] || 1) : 1));
+        const displayItems = [];
+        let hasClosed = false;
+
+        entries.forEach(function(entry){
+          const raw = String((entry && entry.rawValue) || '').trim();
+          const tokenType = reg_publicRotaTokenType_(raw);
+          if (tokenType === 'CLOSED'){
+            hasClosed = true;
+            return;
+          }
+          if (tokenType === 'NA'){
+            displayItems.push({ text:'-', isVacancy:false });
+            return;
+          }
+          if (tokenType === 'VACANT' || tokenType === 'EMPTY'){
+            displayItems.push({ text:'Vacant', isVacancy:true });
+            return;
+          }
+          const label = reg_publicRotaMemberLabel_(entry);
+          if (!label){
+            displayItems.push({ text:'Vacant', isVacancy:true });
+            return;
+          }
+          displayItems.push({ text:label, isVacancy:false });
+        });
+
+        if (!hasClosed){
+          const inferredVacancy = Math.max(0, maxSlots - entries.length);
+          for (let i=0;i<inferredVacancy;i++) displayItems.push({ text:'Vacant', isVacancy:true });
+        }
+
+        if (hasClosed){
+          rowPositions[pos] = [{ text:'-', isVacancy:false }];
+          return;
+        }
+
+        if (!displayItems.length){
+          rowPositions[pos] = [{ text:'-', isVacancy:false }];
+          return;
+        }
+
+        const allDash = displayItems.every(function(it){ return String((it && it.text) || '').trim() === '-'; });
+        if (allDash){
+          rowPositions[pos] = [{ text:'-', isVacancy:false }];
+          return;
+        }
+        rowPositions[pos] = displayItems;
+      });
+
+      const sermonPassage = (String(sermon.sermonPassageStatus || '').trim() === 'OK')
+        ? String(sermon.sermonPassageCanonical || '').trim()
+        : String(sermon.sermonPassageRaw || '').trim();
+      const responsePassage = (String(sermon.responsePassageStatus || '').trim() === 'OK')
+        ? String(sermon.responsePassageCanonical || '').trim()
+        : String(sermon.responsePassageRaw || '').trim();
+
+      return {
+        eventKey: eventKey,
+        dateYmd: String(ev.dateYmd || '').trim(),
+        sermonTitle: String(sermon.sermonTitle || '').trim() || '-',
+        speaker: String(sermon.speaker || '').trim() || '-',
+        sermonPassage: sermonPassage || '-',
+        responsePassage: responsePassage || '-',
+        positions: rowPositions
+      };
+    });
+
+    const positions = positionsOrder.map(function(pos){
+      return {
+        key: pos,
+        label: admin_servingPositionLabel_(pos),
+        group: (positionsMetaMap[pos] && positionsMetaMap[pos].group) ? positionsMetaMap[pos].group : ''
+      };
+    });
+
+    return {
+      ok:true,
+      version: ROTA_PUBLIC_VERSION,
+      generatedAt: admin_nowIso_(),
+      positions: positions,
+      rows: rows
+    };
+  }catch(e){
+    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+  }
+}
 
 function api_public_serving_rota(password){
   try{
