@@ -1887,7 +1887,18 @@ function api_reg_self_sailor_saturn_csv_public(qrPayload, whichMonth){
       return parts.join('；');
     }
 
-    const header = '日期,講員,領詩,司琴,和唱,讀經,場務,招待,PPT,影音,茶水,其他';
+    function passageValue_(eventKey, kind){
+      const sermon = sermonMap[eventKey] || {};
+      if (kind === 'SERMON'){
+        return String(sermon.sermonPassageCanonical || sermon.sermonPassageRaw || '').trim();
+      }
+      if (kind === 'RESPONSE'){
+        return String(sermon.responsePassageCanonical || sermon.responsePassageRaw || '').trim();
+      }
+      return '';
+    }
+
+    const header = '日期,講員,領詩,司琴,和唱,讀經,講道經文,回應經文,場務,招待,PPT,影音,茶水,其他';
     const rows = events.slice().sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); }).map(function(ev){
       const eventKey = String(ev.eventKey || '').trim();
       const cols = [
@@ -1897,6 +1908,8 @@ function api_reg_self_sailor_saturn_csv_public(qrPayload, whichMonth){
         collectNames_(eventKey, 'Worship_Pianist'),
         collectNames_(eventKey, 'Worship_Singer'),
         collectNames_(eventKey, 'Support_BibleReader'),
+        passageValue_(eventKey, 'SERMON'),
+        passageValue_(eventKey, 'RESPONSE'),
         collectNames_(eventKey, 'Logistic_Venue'),
         collectNames_(eventKey, 'Logistic_Welcome'),
         collectNames_(eventKey, 'Media_PPT'),
