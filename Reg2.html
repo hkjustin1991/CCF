@@ -1475,7 +1475,7 @@
       var lastOffering = res.lastOffering || {};
       var groups = {};
       /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_SELECTOR_BEGIN */
-      var options = Array.isArray(res.serviceOptions) ? res.serviceOptions : [];
+      var options = (Array.isArray(res.serviceOptions) ? res.serviceOptions : []).slice(0, 4);
       var byEvent = (res.servicesByEvent && typeof res.servicesByEvent === 'object') ? res.servicesByEvent : {};
       var candidate = String(State.liveSelectedEventKey || '').trim();
       var valid = options.some(function(opt){ return String((opt && opt.eventKey) || '') === candidate; });

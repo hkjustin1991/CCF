@@ -1671,10 +1671,37 @@ function reg_getNext4SundayEvents_(){
   return admin_getUpcomingSundayEventKeys_(todayYmd, 4) || [];
 }
 
-function reg_buildLiveServiceEntry_(eventKey, byId){
+function reg_buildLiveServiceEntry_(eventKey, byId, prefetched){
   const ev = String(eventKey || '').trim();
   const memberById = byId || {};
-  const servingRaw = ev ? admin_getServingForEvent_(ev, memberById, null, false) : [];
+  const pre = prefetched || {};
+  let servingRaw = [];
+  if (ev && pre.servingMatrix){
+    const matrix = pre.servingMatrix || {};
+    const posMeta = pre.positionMetaByKey || {};
+    const cellsByEvent = (((matrix.cells || {})[ev]) || {});
+    const positions = (matrix.positions || []).map(function(p){ return String((p && p.position) || '').trim(); }).filter(Boolean);
+    positions.forEach(function(position){
+      const meta = posMeta[position] || {};
+      const entries = cellsByEvent[position] || [];
+      entries.forEach(function(entry){
+        const e = entry || {};
+        const memberId = String(e.memberId || '').trim().toUpperCase();
+        const m = memberById[memberId] || {};
+        servingRaw.push({
+          eventKey: ev,
+          group: String(meta.group || ''),
+          position: position,
+          rawValue: String(e.rawValue || ''),
+          memberId: memberId,
+          nameZh: String(e.nameZh || m.nameZh || '').trim(),
+          nameEn: String(e.nameEn || m.nameEn || '').trim()
+        });
+      });
+    });
+  }else{
+    servingRaw = ev ? admin_getServingForEvent_(ev, memberById, null, false) : [];
+  }
   const serving = servingRaw.map(function(r){
     const m = memberById[String(r.memberId||'').trim().toUpperCase()] || {};
     const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
@@ -1704,12 +1731,17 @@ function reg_buildLiveServiceEntry_(eventKey, byId){
 
   const worshipSongsThisWeek = [];
   if (ev){
-    const worshipCacheKey = 'reg_live_worship_' + ev;
-    var songs = reg_liveCacheGet_(worshipCacheKey);
-    if (!songs){
-      const planningMap = reg_getWorshipPlanningMapByEventKeys_([ev]);
-      songs = planningMap[ev] || {};
-      reg_liveCachePut_(worshipCacheKey, songs, 45);
+    var songs = {};
+    if (pre.worshipMap && pre.worshipMap[ev]){
+      songs = pre.worshipMap[ev] || {};
+    }else{
+      const worshipCacheKey = 'reg_live_worship_' + ev;
+      songs = reg_liveCacheGet_(worshipCacheKey);
+      if (!songs){
+        const planningMap = reg_getWorshipPlanningMapByEventKeys_([ev]);
+        songs = planningMap[ev] || {};
+        reg_liveCachePut_(worshipCacheKey, songs, 45);
+      }
     }
     [
       { section:'WORSHIP_MAIN_1', labelZh:'敬拜 1', labelEn:'Main 1' },
@@ -1902,7 +1934,7 @@ function api_reg_self_live_service_public(qrPayload){
     const prevSunday = new Date(today.getTime() - offsetToPrevSunday*24*60*60*1000);
     const prevYmd = admin_fmtYmd_(prevSunday);
 
-    const events = reg_getNext4SundayEvents_();
+    const events = (reg_getNext4SundayEvents_() || []).slice(0, 4);
     const next = (events && events.length) ? events[0].eventKey : '';
     const last = prevYmd ? ('SundayService_' + prevYmd) : '';
     const offeringMap = (typeof admin_getOfferingMap_ === 'function') ? admin_getOfferingMap_() : {};
@@ -1928,13 +1960,26 @@ function api_reg_self_live_service_public(qrPayload){
 
     const mi = admin_getMembersIndex_() || {};
     const byId = mi.byId || {};
+    const eventKeys = events.map(function(ev){ return String((ev && ev.eventKey) || '').trim(); }).filter(Boolean);
+    const servingMatrix = admin_getServingPlanMatrix_(events) || {};
+    const positionMetaByKey = {};
+    (servingMatrix.positions || []).forEach(function(p){
+      const key = String((p && p.position) || '').trim();
+      if (!key) return;
+      positionMetaByKey[key] = p || {};
+    });
+    const worshipMap = reg_getWorshipPlanningMapByEventKeys_(eventKeys);
     const servicesByEvent = {};
     const serviceOptions = (events || []).map(function(ev){
       const ek = String((ev && ev.eventKey) || '').trim();
       const ymd = String((ev && ev.dateYmd) || '').trim() || ek.replace('SundayService_', '');
-      servicesByEvent[ek] = reg_buildLiveServiceEntry_(ek, byId);
+      servicesByEvent[ek] = reg_buildLiveServiceEntry_(ek, byId, {
+        servingMatrix: servingMatrix,
+        positionMetaByKey: positionMetaByKey,
+        worshipMap: worshipMap
+      });
       return { eventKey: ek, dateYmd: ymd, labelZh: ymd, labelEn: ymd };
-    });
+    }).slice(0, 4);
     const selected = servicesByEvent[next] || { sermonBlock:{ hasData:false, entries:[] }, servingThisWeek:[], worshipSongsThisWeek:[] };
 
     return {
