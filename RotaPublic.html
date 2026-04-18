@@ -115,7 +115,7 @@
             <div class="small" id="loginSub">只供查閱：未來 8 週排期</div>
           </div>
           <div class="headRight">
-            <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+            <div class="versionChip">ROTA <?= (typeof ROTA_PUBLIC_VERSION !== 'undefined') ? ROTA_PUBLIC_VERSION : 'n/a' ?></div>
             <button id="btnLangLogin" type="button" class="langToggle">EN</button>
           </div>
         </div>
@@ -133,7 +133,7 @@
             <div class="small" id="meta"></div>
           </div>
           <div class="headRight">
-            <div class="versionChip">ROTA <?= ROTA_PUBLIC_VERSION ?></div>
+            <div class="versionChip">ROTA <?= (typeof ROTA_PUBLIC_VERSION !== 'undefined') ? ROTA_PUBLIC_VERSION : 'n/a' ?></div>
             <button id="btnLangRota" type="button" class="langToggle">EN</button>
           </div>
         </div>
