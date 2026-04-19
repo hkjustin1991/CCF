@@ -3522,7 +3522,13 @@ function admin_getMembersIndex_(){
   const cache = CacheService.getScriptCache();
   const key = 'admin_membersIndex_v2';
   const cached = cache.get(key);
-  if (cached) return JSON.parse(cached);
+  if (cached){
+    try{
+      return JSON.parse(cached);
+    }catch(parseErr){
+      try{ cache.remove(key); }catch(_e){}
+    }
+  }
 
   const sh = admin_findMembersSheet_();
   if (!sh) throw new Error('Members sheet not found (schema mismatch).');
@@ -3569,7 +3575,12 @@ function admin_getMembersIndex_(){
   }
 
   const payload = { byId: byId, all: all };
-  cache.put(key, JSON.stringify(payload), 15);
+  try{
+    cache.put(key, JSON.stringify(payload), 15);
+  }catch(cacheErr){
+    const msg = String((cacheErr && cacheErr.message) || cacheErr || '').toLowerCase();
+    if (msg.indexOf('argument too large') === -1) throw cacheErr;
+  }
   return payload;
 }
 
