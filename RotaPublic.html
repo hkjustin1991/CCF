@@ -1,3 +1,4 @@
+<!-- START: RotaPublic public serving rota screen -->
 <!doctype html>
 <html>
   <head>
@@ -92,13 +93,13 @@
       .grp-finance{background:#fff2cc!important;border-color:rgba(202,155,0,0.45)!important;color:#7a5b00!important}
       .grp-other{background:#e5e7eb!important;border-color:#cbd5e1!important;color:#374151!important}
       .dash{color:#6b7280;font-weight:700}
-      .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
-      .legend .bubble{font-size:9px}
       .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
       .groupToggle{display:inline-flex;gap:4px;align-items:center;font-size:10px;border:1px solid #ddd6f4;border-radius:999px;padding:3px 8px;background:#faf5ff}
       .groupToggle input{margin:0}
+      .sermonToggle{display:inline-flex;gap:4px;align-items:center;font-size:10px;border:1px solid #ddd6f4;border-radius:999px;padding:3px 8px;background:#eef2ff}
+      .sermonToggle input{margin:0}
       .nameSelect{border:1px solid #c4b5fd;border-radius:8px;padding:5px 8px;font-size:11px;background:#fff;color:#2b1755}
-      .warnText{margin-top:6px;font-size:10px;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:6px;padding:5px 7px}
+      .warnText{display:none;margin-top:6px;font-size:10px;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:6px;padding:5px 7px}
       .headRight{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
       .langToggle{border-radius:999px;padding:4px 10px}
       .btnSecondary{background:#4c1d95}
@@ -121,7 +122,7 @@
         @page{size:A4 landscape;margin:10mm}
         body{background:#fff;color:#111}
         .screen,.card{padding:0;box-shadow:none;border-radius:0}
-        .header,.legend,.controls{display:none!important}
+        .header,.controls{display:none!important}
         .tableWrap{max-height:none;overflow:visible;border:0}
         table{font-size:9px}
         .warnText{display:block;margin:0 0 8px 0}
@@ -159,14 +160,9 @@
             <button id="btnLangRota" type="button" class="langToggle">EN</button>
           </div>
         </div>
-        <div class="legend">
-          <span class="small" id="legendLabel">圖例</span>
-          <span class="bubble vacancy" id="legendVacant">空缺</span>
-          <span class="bubble" id="legendMember">同工</span>
-          <span class="bubble dash">-</span>
-        </div>
         <div class="controls">
-          <button id="btnPdf" type="button" class="btnSecondary">PDF (A4 橫向)</button>
+          <button id="btnPdf" type="button" class="btnSecondary">Export PDF</button>
+          <label class="sermonToggle"><input type="checkbox" id="toggleSermon" checked /><span id="toggleSermonLabel">講道</span></label>
           <select id="nameMode" class="nameSelect"></select>
           <div id="groupToggles"></div>
         </div>
@@ -177,7 +173,7 @@
 
     <script>
       function $(id){ return document.getElementById(id); }
-      var State = { lang:'zh', data:null, groupEnabled:{}, nameMode:'preferred' };
+      var State = { lang:'zh', data:null, groupEnabled:{}, nameMode:'preferred', showSermon:true };
       function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 
       function callApi(fn){
@@ -212,10 +208,8 @@
         if ($('pwd')) $('pwd').placeholder = State.lang === 'zh' ? '輸入密碼' : 'Enter password';
         if ($('btnOpen')) $('btnOpen').textContent = State.lang === 'zh' ? '進入' : 'Open';
         if ($('rotaTitle')) $('rotaTitle').textContent = State.lang === 'zh' ? '🗓️ 事奉排期' : '🗓️ Serving Rota';
-        if ($('legendLabel')) $('legendLabel').textContent = State.lang === 'zh' ? '圖例' : 'Legend';
-        if ($('legendVacant')) $('legendVacant').textContent = State.lang === 'zh' ? '空缺' : 'Vacant';
-        if ($('legendMember')) $('legendMember').textContent = State.lang === 'zh' ? '同工' : 'Member';
-        if ($('btnPdf')) $('btnPdf').textContent = State.lang === 'zh' ? 'PDF (A4 橫向)' : 'PDF (A4 Landscape)';
+        if ($('btnPdf')) $('btnPdf').textContent = State.lang === 'zh' ? 'Export PDF' : 'Export PDF';
+        if ($('toggleSermonLabel')) $('toggleSermonLabel').textContent = State.lang === 'zh' ? '講道' : 'Sermon';
         if ($('nameMode')){
           var opt = [];
           opt.push('<option value="preferred">'+esc(t('稱呼：常用', 'Names: Preferred'))+'</option>');
@@ -232,10 +226,11 @@
       }
 
       function buildPrintWarning_(){
-        var stamp = displayGeneratedAt_(State.data || null) || '-';
+        var stamp = displayGeneratedAt_(State.data || null);
+        if (!stamp) return '';
         return t(
-          '生成時間：' + stamp + '。⚠️ 此文件一經匯出即屬非受控版本，只反映匯出當刻。請以最新線上版本為準。',
-          'Generated at: ' + stamp + '. ⚠️ This export is an uncontrolled copy and is accurate only at generation time. Always refer to the latest online/live version.'
+          '生成時間：' + stamp + '。⚠️ 此文件一經匯出即屬非受控版本，可能不是最新版本，只反映匯出當刻。請以最新線上版本為準。',
+          'Generated at: ' + stamp + '. ⚠️ This export is an uncontrolled copy and may not be up to date. It is accurate only at generation time. Always refer to the latest online/live version.'
         );
       }
 
@@ -260,6 +255,14 @@
       function renderGroupToggles(positions){
         var seen = {};
         var groups = [];
+        var groupLabelMap = {
+          worship: { zh:'敬拜聯盟', en:'Worship' },
+          media: { zh:'影像大師', en:'Media' },
+          logistic: { zh:'後勤特工', en:'Logistics' },
+          support: { zh:'聖工支援隊', en:'Support' },
+          finance: { zh:'財務公司', en:'Finance' },
+          other: { zh:'其他', en:'Other' }
+        };
         (positions || []).forEach(function(p){
           var g = String((p && p.group) || '').trim();
           if (!g || seen[g]) return;
@@ -268,8 +271,10 @@
         });
         return groups.map(function(g){
           var key = String(g || '');
+          var mapKey = key.toLowerCase();
+          var localized = groupLabelMap[mapKey] || { zh:key, en:key };
           var checked = State.groupEnabled[key] !== false;
-          var label = esc(key);
+          var label = esc(State.lang === 'zh' ? localized.zh : localized.en);
           return '<label class="groupToggle"><input type="checkbox" data-group="'+esc(key)+'" '+(checked?'checked':'')+' />'+label+'</label>';
         }).join('');
       }
@@ -294,12 +299,14 @@
           return 'grp-' + key;
         }
         var header = [
-          '<th>'+esc(t('日期','Date'))+'</th>',
-          '<th>'+esc(t('講題','Sermon title'))+'</th>',
-          '<th>'+esc(t('講員','Speaker'))+'</th>',
-          '<th>'+esc(t('講道經文','Sermon passage'))+'</th>',
-          '<th>'+esc(t('回應經文','Response passage'))+'</th>'
+          '<th>'+esc(t('日期','Date'))+'</th>'
         ];
+        if (State.showSermon){
+          header.push('<th>'+esc(t('講題','Sermon title'))+'</th>');
+          header.push('<th>'+esc(t('講員','Speaker'))+'</th>');
+          header.push('<th>'+esc(t('講道經文','Sermon passage'))+'</th>');
+          header.push('<th>'+esc(t('回應經文','Response passage'))+'</th>');
+        }
         activePositions.forEach(function(p){
           var gcls = groupClass_(p.group);
           header.push('<th class="'+gcls+'">'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
@@ -307,12 +314,14 @@
 
         var body = rows.map(function(r){
           var cells = [
-            '<td><b>'+esc(r.dateYmd || '')+'</b></td>',
-            '<td>'+esc(r.sermonTitle || '-')+'</td>',
-            '<td>'+esc(r.speaker || '-')+'</td>',
-            '<td>'+esc(State.lang==='zh' ? (r.sermonPassageZh || '-') : (r.sermonPassageEn || r.sermonPassageZh || '-'))+'</td>',
-            '<td>'+esc(State.lang==='zh' ? (r.responsePassageZh || '-') : (r.responsePassageEn || r.responsePassageZh || '-'))+'</td>'
+            '<td><b>'+esc(r.dateYmd || '')+'</b></td>'
           ];
+          if (State.showSermon){
+            cells.push('<td>'+esc(r.sermonTitle || '-')+'</td>');
+            cells.push('<td>'+esc(r.speaker || '-')+'</td>');
+            cells.push('<td>'+esc(State.lang==='zh' ? (r.sermonPassageZh || '-') : (r.sermonPassageEn || r.sermonPassageZh || '-'))+'</td>');
+            cells.push('<td>'+esc(State.lang==='zh' ? (r.responsePassageZh || '-') : (r.responsePassageEn || r.responsePassageZh || '-'))+'</td>');
+          }
 
           activePositions.forEach(function(p){
             var list = ((r.positions || {})[p.key]) || [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
@@ -397,9 +406,14 @@
         State.nameMode = next;
         if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
       });
+      if ($('toggleSermon')) $('toggleSermon').addEventListener('change', function(e){
+        State.showSermon = !!(e && e.target && e.target.checked);
+        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+      });
       if ($('btnLangLogin')) $('btnLangLogin').onclick = toggleLang_;
       if ($('btnLangRota')) $('btnLangRota').onclick = toggleLang_;
       applyLang_();
     </script>
   </body>
 </html>
+<!-- END: RotaPublic public serving rota screen -->

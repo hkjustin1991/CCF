@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-03-30.reg118
+ * v2026-04-20.reg100
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-04-18.reg119';
+const REG_VERSION = '2026-04-20.reg100';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -56,7 +56,7 @@ const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
 const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
 const REG_ADMIN_HANDOFF_CACHE_PREFIX = 'reg_admin_handoff_';
 const REG_ADMIN_HANDOFF_TTL_SECONDS = 90;
-const ROTA_PUBLIC_VERSION = '2026-04-18.rota2';
+const ROTA_PUBLIC_VERSION = '2026-04-20.rota100';
 
 
 /******** Entry ********/
@@ -110,7 +110,7 @@ function reg_publicRotaMemberLabel_(entry){
     const preferred = String(e.preferredName || '').trim();
     return {
       textZh: zh || preferred || en || memberId,
-      textEn: preferred || en || zh || memberId,
+      textEn: en || preferred || zh || memberId,
       textPreferred: preferred || zh || en || memberId
     };
   }
