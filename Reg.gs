@@ -110,11 +110,12 @@ function reg_publicRotaMemberLabel_(entry){
     const preferred = String(e.preferredName || '').trim();
     return {
       textZh: zh || preferred || en || memberId,
-      textEn: preferred || en || zh || memberId
+      textEn: preferred || en || zh || memberId,
+      textPreferred: preferred || zh || en || memberId
     };
   }
   const raw = String(e.rawValue || '').trim();
-  return { textZh: raw || '', textEn: raw || '' };
+  return { textZh: raw || '', textEn: raw || '', textPreferred: raw || '' };
 }
 
 function reg_publicRotaPassageEn_(rawOrCanonical){
@@ -203,33 +204,38 @@ function api_public_rota_view(password){
             return;
           }
           if (tokenType === 'NA'){
-            displayItems.push({ textZh:'-', textEn:'-', isVacancy:false });
+            displayItems.push({ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false });
             return;
           }
           if (tokenType === 'VACANT' || tokenType === 'EMPTY'){
-            displayItems.push({ textZh:'空缺', textEn:'Vacant', isVacancy:true });
+            displayItems.push({ textZh:'空缺', textEn:'Vacant', textPreferred:'Vacant', isVacancy:true });
             return;
           }
           const label = reg_publicRotaMemberLabel_(entry);
-          if (!label || (!label.textZh && !label.textEn)){
-            displayItems.push({ textZh:'空缺', textEn:'Vacant', isVacancy:true });
+          if (!label || (!label.textZh && !label.textEn && !label.textPreferred)){
+            displayItems.push({ textZh:'空缺', textEn:'Vacant', textPreferred:'Vacant', isVacancy:true });
             return;
           }
-          displayItems.push({ textZh:label.textZh || '-', textEn:label.textEn || '-', isVacancy:false });
+          displayItems.push({
+            textZh:label.textZh || '-',
+            textEn:label.textEn || '-',
+            textPreferred:label.textPreferred || '-',
+            isVacancy:false
+          });
         });
 
         if (!hasClosed){
           const inferredVacancy = Math.max(0, maxSlots - entries.length);
-          for (let i=0;i<inferredVacancy;i++) displayItems.push({ textZh:'空缺', textEn:'Vacant', isVacancy:true });
+          for (let i=0;i<inferredVacancy;i++) displayItems.push({ textZh:'空缺', textEn:'Vacant', textPreferred:'Vacant', isVacancy:true });
         }
 
         if (hasClosed){
-          rowPositions[pos] = [{ textZh:'-', textEn:'-', isVacancy:false }];
+          rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
           return;
         }
 
         if (!displayItems.length){
-          rowPositions[pos] = [{ textZh:'-', textEn:'-', isVacancy:false }];
+          rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
           return;
         }
 
@@ -237,7 +243,7 @@ function api_public_rota_view(password){
           return String((it && it.textZh) || '').trim() === '-' && String((it && it.textEn) || '').trim() === '-';
         });
         if (allDash){
-          rowPositions[pos] = [{ textZh:'-', textEn:'-', isVacancy:false }];
+          rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
           return;
         }
         rowPositions[pos] = displayItems;
@@ -279,6 +285,7 @@ function api_public_rota_view(password){
       ok:true,
       version: ROTA_PUBLIC_VERSION,
       generatedAt: admin_nowIso_(),
+      generatedAtDisplay: reg_clientSafeDateTime_(new Date()),
       positions: positions,
       rows: rows
     };
