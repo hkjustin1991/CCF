@@ -56,7 +56,7 @@ const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
 const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
 const REG_ADMIN_HANDOFF_CACHE_PREFIX = 'reg_admin_handoff_';
 const REG_ADMIN_HANDOFF_TTL_SECONDS = 90;
-const ROTA_PUBLIC_VERSION = '2026-04-20.rota100';
+const ROTA_PUBLIC_VERSION = '2026-04-20.rota101';
 
 
 /******** Entry ********/

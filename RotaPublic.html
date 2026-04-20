@@ -96,6 +96,12 @@
       .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
       .groupToggle{display:inline-flex;gap:4px;align-items:center;font-size:10px;border:1px solid #ddd6f4;border-radius:999px;padding:3px 8px;background:#faf5ff}
       .groupToggle input{margin:0}
+      .groupToggle.grp-worship{background:#ffe3e8;border-color:rgba(217,60,94,0.35);color:#8a1230}
+      .groupToggle.grp-media{background:#e7f0ff;border-color:rgba(40,90,200,0.35);color:#1a3d9a}
+      .groupToggle.grp-logistic{background:#f5eadb;border-color:rgba(139,94,60,0.35);color:#7a4a22}
+      .groupToggle.grp-support{background:#e7fff2;border-color:rgba(26,168,108,0.35);color:#0b6b40}
+      .groupToggle.grp-finance{background:#fff2cc;border-color:rgba(202,155,0,0.45);color:#7a5b00}
+      .groupToggle.grp-other{background:#e5e7eb;border-color:#cbd5e1;color:#374151}
       .sermonToggle{display:inline-flex;gap:4px;align-items:center;font-size:10px;border:1px solid #ddd6f4;border-radius:999px;padding:3px 8px;background:#eef2ff}
       .sermonToggle input{margin:0}
       .nameSelect{border:1px solid #c4b5fd;border-radius:8px;padding:5px 8px;font-size:11px;background:#fff;color:#2b1755}
@@ -124,6 +130,10 @@
         .screen,.card{padding:0;box-shadow:none;border-radius:0}
         .header,.controls{display:none!important}
         .tableWrap{max-height:none;overflow:visible;border:0}
+        .tableWrap table{
+          transform-origin:top left;
+          transform:scale(var(--print-scale, 1));
+        }
         table{font-size:9px}
         .warnText{display:block;margin:0 0 8px 0}
       }
@@ -275,8 +285,19 @@
           var localized = groupLabelMap[mapKey] || { zh:key, en:key };
           var checked = State.groupEnabled[key] !== false;
           var label = esc(State.lang === 'zh' ? localized.zh : localized.en);
-          return '<label class="groupToggle"><input type="checkbox" data-group="'+esc(key)+'" '+(checked?'checked':'')+' />'+label+'</label>';
+          return '<label class="groupToggle grp-'+esc(mapKey || 'other')+'"><input type="checkbox" data-group="'+esc(key)+'" '+(checked?'checked':'')+' />'+label+'</label>';
         }).join('');
+      }
+
+      function preparePrintLayout_(){
+        var wrap = $('tableWrap');
+        if (!wrap) return;
+        var table = wrap.querySelector('table');
+        if (!table) return;
+        var baseWidth = Math.max(320, document.documentElement.clientWidth - 24);
+        var tableWidth = Math.max(1, table.scrollWidth || table.offsetWidth || 1);
+        var scale = Math.min(1, baseWidth / tableWidth);
+        document.documentElement.style.setProperty('--print-scale', String(scale));
       }
 
       function renderTable(data){
@@ -367,6 +388,7 @@
           State.data = res;
           $('groupToggles').innerHTML = renderGroupToggles(res.positions || []);
           $('tableWrap').innerHTML = renderTable(res);
+          if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
           $('loginCard').classList.add('hide');
           $('rotaCard').classList.remove('hide');
         }).catch(function(err){
@@ -395,23 +417,38 @@
         var g = String(target.getAttribute('data-group') || '').trim();
         if (!g) return;
         State.groupEnabled[g] = !!target.checked;
-        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+        if (State.data && $('tableWrap')){
+          $('tableWrap').innerHTML = renderTable(State.data);
+          if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        }
       });
       if ($('btnPdf')) $('btnPdf').onclick = function(){
+        if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        preparePrintLayout_();
         window.print();
       };
       if ($('nameMode')) $('nameMode').addEventListener('change', function(e){
         var next = String((e && e.target && e.target.value) || '').trim().toLowerCase();
         if (next !== 'zh' && next !== 'en' && next !== 'preferred') next = 'preferred';
         State.nameMode = next;
-        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+        if (State.data && $('tableWrap')){
+          $('tableWrap').innerHTML = renderTable(State.data);
+          if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        }
       });
       if ($('toggleSermon')) $('toggleSermon').addEventListener('change', function(e){
         State.showSermon = !!(e && e.target && e.target.checked);
-        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+        if (State.data && $('tableWrap')){
+          $('tableWrap').innerHTML = renderTable(State.data);
+          if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        }
       });
       if ($('btnLangLogin')) $('btnLangLogin').onclick = toggleLang_;
       if ($('btnLangRota')) $('btnLangRota').onclick = toggleLang_;
+      window.addEventListener('beforeprint', function(){
+        if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        preparePrintLayout_();
+      });
       applyLang_();
     </script>
   </body>
