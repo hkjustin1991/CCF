@@ -3522,7 +3522,11 @@ function admin_getMembersIndex_(){
   }
 
   const payload = { byId: byId, all: all };
-  cache.put(key, JSON.stringify(payload), 15);
+  try{
+    cache.put(key, JSON.stringify(payload), 15);
+  }catch(e){
+    // CacheService enforces a value size limit; skip cache when payload is too large.
+  }
   return payload;
 }
 
