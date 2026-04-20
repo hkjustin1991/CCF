@@ -94,8 +94,14 @@
       .dash{color:#6b7280;font-weight:700}
       .legend{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px}
       .legend .bubble{font-size:9px}
+      .controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
+      .groupToggle{display:inline-flex;gap:4px;align-items:center;font-size:10px;border:1px solid #ddd6f4;border-radius:999px;padding:3px 8px;background:#faf5ff}
+      .groupToggle input{margin:0}
+      .nameSelect{border:1px solid #c4b5fd;border-radius:8px;padding:5px 8px;font-size:11px;background:#fff;color:#2b1755}
+      .warnText{margin-top:6px;font-size:10px;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:6px;padding:5px 7px}
       .headRight{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
       .langToggle{border-radius:999px;padding:4px 10px}
+      .btnSecondary{background:#4c1d95}
 
       @media (max-width: 720px){
         .screen{padding:4px}
@@ -109,6 +115,16 @@
         .stack{max-width:130px;gap:2px}
         .bubble{font-size:8px;padding:1px 5px}
         .langToggle{padding:3px 8px}
+      }
+
+      @media print{
+        @page{size:A4 landscape;margin:10mm}
+        body{background:#fff;color:#111}
+        .screen,.card{padding:0;box-shadow:none;border-radius:0}
+        .header,.legend,.controls{display:none!important}
+        .tableWrap{max-height:none;overflow:visible;border:0}
+        table{font-size:9px}
+        .warnText{display:block;margin:0 0 8px 0}
       }
     </style>
   </head>
@@ -149,13 +165,19 @@
           <span class="bubble" id="legendMember">同工</span>
           <span class="bubble dash">-</span>
         </div>
+        <div class="controls">
+          <button id="btnPdf" type="button" class="btnSecondary">PDF (A4 橫向)</button>
+          <select id="nameMode" class="nameSelect"></select>
+          <div id="groupToggles"></div>
+        </div>
+        <div class="warnText" id="printWarn"></div>
         <div class="tableWrap" id="tableWrap"></div>
       </div>
     </div>
 
     <script>
       function $(id){ return document.getElementById(id); }
-      var State = { lang:'zh', data:null };
+      var State = { lang:'zh', data:null, groupEnabled:{}, nameMode:'preferred' };
       function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 
       function callApi(fn){
@@ -193,12 +215,79 @@
         if ($('legendLabel')) $('legendLabel').textContent = State.lang === 'zh' ? '圖例' : 'Legend';
         if ($('legendVacant')) $('legendVacant').textContent = State.lang === 'zh' ? '空缺' : 'Vacant';
         if ($('legendMember')) $('legendMember').textContent = State.lang === 'zh' ? '同工' : 'Member';
-        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+        if ($('btnPdf')) $('btnPdf').textContent = State.lang === 'zh' ? 'PDF (A4 橫向)' : 'PDF (A4 Landscape)';
+        if ($('nameMode')){
+          var opt = [];
+          opt.push('<option value="preferred">'+esc(t('稱呼：常用', 'Names: Preferred'))+'</option>');
+          opt.push('<option value="zh">'+esc(t('稱呼：中文', 'Names: Chinese'))+'</option>');
+          opt.push('<option value="en">'+esc(t('稱呼：英文', 'Names: English'))+'</option>');
+          $('nameMode').innerHTML = opt.join('');
+          $('nameMode').value = State.nameMode;
+        }
+        if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        if (State.data){
+          if ($('groupToggles')) $('groupToggles').innerHTML = renderGroupToggles(State.data.positions || []);
+          if ($('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+        }
+      }
+
+      function buildPrintWarning_(){
+        var stamp = displayGeneratedAt_(State.data || null) || '-';
+        return t(
+          '生成時間：' + stamp + '。⚠️ 此文件一經匯出即屬非受控版本，只反映匯出當刻。請以最新線上版本為準。',
+          'Generated at: ' + stamp + '. ⚠️ This export is an uncontrolled copy and is accurate only at generation time. Always refer to the latest online/live version.'
+        );
+      }
+
+      function displayGeneratedAt_(data){
+        if (!data) return '';
+        var raw = String(data.generatedAtDisplay || data.generatedAt || '').trim();
+        if (!raw) return '';
+        if (data.generatedAtDisplay) return raw;
+        var d = new Date(raw);
+        if (isNaN(d.getTime())) return raw;
+        try{
+          return new Intl.DateTimeFormat(undefined, {
+            year:'numeric', month:'2-digit', day:'2-digit',
+            hour:'2-digit', minute:'2-digit', second:'2-digit',
+            hour12:false
+          }).format(d);
+        }catch(e){
+          return raw;
+        }
+      }
+
+      function renderGroupToggles(positions){
+        var seen = {};
+        var groups = [];
+        (positions || []).forEach(function(p){
+          var g = String((p && p.group) || '').trim();
+          if (!g || seen[g]) return;
+          seen[g] = true;
+          groups.push(g);
+        });
+        return groups.map(function(g){
+          var key = String(g || '');
+          var checked = State.groupEnabled[key] !== false;
+          var label = esc(key);
+          return '<label class="groupToggle"><input type="checkbox" data-group="'+esc(key)+'" '+(checked?'checked':'')+' />'+label+'</label>';
+        }).join('');
       }
 
       function renderTable(data){
         var positions = Array.isArray(data.positions) ? data.positions : [];
+        var activePositions = positions.filter(function(p){
+          var g = String((p && p.group) || '').trim();
+          return State.groupEnabled[g] !== false;
+        });
         var rows = Array.isArray(data.rows) ? data.rows : [];
+        function itemText_(it){
+          if (!it) return '-';
+          if (it.isVacancy) return State.lang === 'zh' ? (it.textZh || '空缺') : (it.textEn || 'Vacant');
+          if (State.nameMode === 'zh') return it.textZh || it.textPreferred || it.textEn || '-';
+          if (State.nameMode === 'en') return it.textEn || it.textPreferred || it.textZh || '-';
+          return it.textPreferred || it.textEn || it.textZh || '-';
+        }
         function groupClass_(g){
           var key = String(g || '').trim().toLowerCase();
           if (!key) return 'grp-other';
@@ -211,7 +300,7 @@
           '<th>'+esc(t('講道經文','Sermon passage'))+'</th>',
           '<th>'+esc(t('回應經文','Response passage'))+'</th>'
         ];
-        positions.forEach(function(p){
+        activePositions.forEach(function(p){
           var gcls = groupClass_(p.group);
           header.push('<th class="'+gcls+'">'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
         });
@@ -225,17 +314,17 @@
             '<td>'+esc(State.lang==='zh' ? (r.responsePassageZh || '-') : (r.responsePassageEn || r.responsePassageZh || '-'))+'</td>'
           ];
 
-          positions.forEach(function(p){
-            var list = ((r.positions || {})[p.key]) || [{ textZh:'-', textEn:'-', isVacancy:false }];
+          activePositions.forEach(function(p){
+            var list = ((r.positions || {})[p.key]) || [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
             var html;
-            if (!list.length || (list.length===1 && String((State.lang==='zh'?list[0].textZh:list[0].textEn)||'').trim()==='-')){
+            if (!list.length || (list.length===1 && String(itemText_(list[0]) || '').trim()==='-')){
               html = '<span class="dash">-</span>';
             } else {
               html = '<div class="stack">' + list.map(function(it){
                 var cls = 'bubble';
                 if (it && it.isVacancy) cls += ' vacancy';
                 else cls += ' ' + groupClass_(p.group);
-                var text = (State.lang === 'zh') ? (it && it.textZh) : (it && it.textEn);
+                var text = itemText_(it);
                 return '<span class="'+cls+'">'+esc(text || '-')+'</span>';
               }).join('') + '</div>';
             }
@@ -258,10 +347,16 @@
             $('msg').textContent = (res && (res.zh || res.en || res.code)) || '無法載入排期 / Unable to load rota.';
             return;
           }
+          (res.positions || []).forEach(function(p){
+            var g = String((p && p.group) || '').trim();
+            if (g && typeof State.groupEnabled[g] === 'undefined') State.groupEnabled[g] = true;
+          });
+          var stamp = displayGeneratedAt_(res);
           $('meta').textContent = (State.lang === 'zh')
-            ? ('生成時間：' + String(res.generatedAt || '') + ' · 未來 8 週')
-            : ('Generated: ' + String(res.generatedAt || '') + ' · Next 8 weeks');
+            ? ('生成時間：' + stamp + ' · 未來 8 週')
+            : ('Generated: ' + stamp + ' · Next 8 weeks');
           State.data = res;
+          $('groupToggles').innerHTML = renderGroupToggles(res.positions || []);
           $('tableWrap').innerHTML = renderTable(res);
           $('loginCard').classList.add('hide');
           $('rotaCard').classList.remove('hide');
@@ -278,12 +373,30 @@
       function toggleLang_(){
         State.lang = (State.lang === 'zh') ? 'en' : 'zh';
         if (State.data && $('meta')){
+          var stamp = displayGeneratedAt_(State.data);
           $('meta').textContent = (State.lang === 'zh')
-            ? ('生成時間：' + String(State.data.generatedAt || '') + ' · 未來 8 週')
-            : ('Generated: ' + String(State.data.generatedAt || '') + ' · Next 8 weeks');
+            ? ('生成時間：' + stamp + ' · 未來 8 週')
+            : ('Generated: ' + stamp + ' · Next 8 weeks');
         }
         applyLang_();
       }
+      if ($('groupToggles')) $('groupToggles').addEventListener('change', function(e){
+        var target = e && e.target;
+        if (!target || target.type !== 'checkbox') return;
+        var g = String(target.getAttribute('data-group') || '').trim();
+        if (!g) return;
+        State.groupEnabled[g] = !!target.checked;
+        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+      });
+      if ($('btnPdf')) $('btnPdf').onclick = function(){
+        window.print();
+      };
+      if ($('nameMode')) $('nameMode').addEventListener('change', function(e){
+        var next = String((e && e.target && e.target.value) || '').trim().toLowerCase();
+        if (next !== 'zh' && next !== 'en' && next !== 'preferred') next = 'preferred';
+        State.nameMode = next;
+        if (State.data && $('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
+      });
       if ($('btnLangLogin')) $('btnLangLogin').onclick = toggleLang_;
       if ($('btnLangRota')) $('btnLangRota').onclick = toggleLang_;
       applyLang_();
