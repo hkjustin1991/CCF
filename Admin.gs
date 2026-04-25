@@ -2247,6 +2247,65 @@ function bible_normalizeReferenceInput_(raw){
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+var __BIBLE_S2T_CHAR_MAP = {
+  '创':'創','记':'記','亚':'亞','师':'師','历':'歷','诗':'詩','传':'傳','赛':'賽','结':'結','弥':'彌','鸿':'鴻','该':'該','玛':'瑪',
+  '马':'馬','约':'約','罗':'羅','后':'後','门':'門','启':'啟','录':'錄','犹':'猶','书':'書','翰':'翰','众':'眾','灵':'靈','颂':'頌'
+};
+var __BIBLE_T2S_CHAR_MAP = null;
+function bible_toTraditionalZh_(text){
+  var src = String(text || '');
+  return src.split('').map(function(ch){ return __BIBLE_S2T_CHAR_MAP[ch] || ch; }).join('');
+}
+function bible_toSimplifiedZh_(text){
+  if (!__BIBLE_T2S_CHAR_MAP){
+    __BIBLE_T2S_CHAR_MAP = {};
+    Object.keys(__BIBLE_S2T_CHAR_MAP).forEach(function(k){
+      var t = __BIBLE_S2T_CHAR_MAP[k];
+      if (!__BIBLE_T2S_CHAR_MAP[t]) __BIBLE_T2S_CHAR_MAP[t] = k;
+    });
+  }
+  var src = String(text || '');
+  return src.split('').map(function(ch){ return __BIBLE_T2S_CHAR_MAP[ch] || ch; }).join('');
+}
+function bible_expandZhAliasVariants_(alias){
+  var out = [];
+  function add(v){
+    var s = String(v || '').trim();
+    if (!s) return;
+    if (out.indexOf(s) < 0) out.push(s);
+  }
+  var base = String(alias || '').trim();
+  if (!base) return out;
+  add(base);
+  add(bible_toTraditionalZh_(base));
+  add(bible_toSimplifiedZh_(base));
+  var snapshot = out.slice();
+  snapshot.forEach(function(v){
+    if (/[㐀-鿿]/.test(v) && v.length >= 3) add(v.slice(0, -1));
+  });
+  return out;
+}
+function bible_derivedZhAliases_(zhName){
+  var zh = String(zhName || '').trim();
+  if (!zh) return [];
+  var out = [];
+  function add(v){
+    var k = String(v || '').trim();
+    if (!k || k === zh) return;
+    if (out.indexOf(k) < 0) out.push(k);
+  }
+  if (/福音$/.test(zh)) add(zh.replace(/福音$/, ''));
+  if (/行傳$/.test(zh)) add(zh.replace(/行傳$/, ''));
+  if (/啟示錄$/.test(zh)) add(zh.replace(/錄$/, ''));
+  if (/篇$/.test(zh)) add(zh.replace(/篇$/, ''));
+  if (/書$/.test(zh)) add(zh.replace(/書$/, ''));
+  if (/記$/.test(zh)) add(zh.replace(/記$/, ''));
+  if (/記([上下])$/.test(zh)) add(zh.replace(/記([上下])$/, '$1'));
+  if (/紀([上下])$/.test(zh)) add(zh.replace(/紀([上下])$/, '$1'));
+  if (/志([上下])$/.test(zh)) add(zh.replace(/志([上下])$/, '$1'));
+  return out;
+}
 function bible_buildBookAliasMap_(){
   if (typeof __BIBLE_ALIAS_CACHE !== 'undefined' && __BIBLE_ALIAS_CACHE) return __BIBLE_ALIAS_CACHE;
   var books = [
@@ -2260,7 +2319,7 @@ function bible_buildBookAliasMap_(){
     ['HOS','何西阿書','Hosea',['何','hos']],['JOL','約珥書','Joel',['珥','jol']],['AMO','阿摩司書','Amos',['摩','amo']],['OBA','俄巴底亞書','Obadiah',['俄','oba']],['JON','約拿書','Jonah',['拿','jon']],
     ['MIC','彌迦書','Micah',['彌','mic']],['NAM','那鴻書','Nahum',['鴻','nam']],['HAB','哈巴谷書','Habakkuk',['哈','hab']],['ZEP','西番雅書','Zephaniah',['番','zep']],['HAG','哈該書','Haggai',['該','hag']],
     ['ZEC','撒迦利亞書','Zechariah',['亞','zec']],['MAL','瑪拉基書','Malachi',['瑪','mal']],['MAT','馬太福音','Matthew',['太','馬太福音','matthew','matt','mt']],['MRK','馬可福音','Mark',['可','馬可福音','mark','mk']],
-    ['LUK','路加福音','Luke',['路','路加福音','luke','lk']],['JHN','約翰福音','John',['約','約翰福音','john','jn']],['ACT','使徒行傳','Acts',['徒','使徒行傳','acts','ac']],['ROM','羅馬書','Romans',['羅','羅馬書','romans','rom']],
+    ['LUK','路加福音','Luke',['路','路加','路加福音','luke','lk']],['JHN','約翰福音','John',['約','約翰福音','john','jn']],['ACT','使徒行傳','Acts',['徒','使徒行傳','acts','ac']],['ROM','羅馬書','Romans',['羅','羅馬書','romans','rom']],
     ['1CO','哥林多前書','1 Corinthians',['林前','1co','1 cor']],['2CO','哥林多後書','2 Corinthians',['林後','2co','2 cor']],['GAL','加拉太書','Galatians',['加','gal']],['EPH','以弗所書','Ephesians',['弗','eph']],['PHP','腓立比書','Philippians',['腓','php','phil']],
     ['COL','歌羅西書','Colossians',['西','col']],['1TH','帖撒羅尼迦前書','1 Thessalonians',['帖前','1th']],['2TH','帖撒羅尼迦後書','2 Thessalonians',['帖後','2th']],['1TI','提摩太前書','1 Timothy',['提前','1ti']],['2TI','提摩太後書','2 Timothy',['提後','2ti']],
     ['TIT','提多書','Titus',['多','tit']],['PHM','腓利門書','Philemon',['門','phm']],['HEB','希伯來書','Hebrews',['來','heb']],['JAS','雅各書','James',['雅','jas']],['1PE','彼得前書','1 Peter',['彼前','1pe']],
@@ -2269,11 +2328,14 @@ function bible_buildBookAliasMap_(){
   var map = {};
   books.forEach(function(b){
     var meta = { key:b[0], zh:b[1], en:b[2] };
-    [b[1], b[2]].concat(b[3]||[]).forEach(function(a){
-      var k = String(a||'').trim().toLowerCase();
-      if (!k) return;
-      map[k] = meta;
-      map[k.replace(/\s+/g,'')] = meta;
+    [b[1], b[2]].concat(b[3]||[]).concat(bible_derivedZhAliases_(b[1])).forEach(function(a){
+      bible_expandZhAliasVariants_(a).forEach(function(v){
+        var k = String(v||'').trim().toLowerCase();
+        if (!k) return;
+        if (!map[k]) map[k] = meta;
+        var kNoSpace = k.replace(/\s+/g,'');
+        if (!map[kNoSpace]) map[kNoSpace] = meta;
+      });
     });
   });
   __BIBLE_ALIAS_CACHE = map;
@@ -2331,7 +2393,6 @@ function bible_expandCanonicalSegments_(parsed){
   return parsed && Array.isArray(parsed.segments) ? parsed.segments : [];
 }
 function bible_bookShortZhByKey_(bookKey){
-  var key = String(bookKey || '').trim().toUpperCase();
   var map = {
     GEN:'創',EXO:'出',LEV:'利',NUM:'民',DEU:'申',JOS:'書',JDG:'士',RUT:'得',
     '1SA':'撒上','2SA':'撒下','1KI':'王上','2KI':'王下','1CH':'代上','2CH':'代下',
