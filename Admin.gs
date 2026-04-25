@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-03-30.admin113
+ * v2026-04-20.admin100
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-03-30.admin113';
+const ADMIN_VERSION = '2026-04-20.admin100';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -1003,15 +1003,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    const member = membersById[String(id || '').toUpperCase()] || null;
-    const compact = admin_memberLabelCompact_(member || { id:id });
-    duplicateDetails.push({
-      memberId: id,
-      memberLabel: compact.label || id,
-      positions: effectivePositions.slice(),
-      dateYmd: eventDateYmd,
-      newlyIntroduced:true
-    });
+    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -1035,8 +1027,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     if (!canOverride){
       const detail = duplicateDetails.map(function(d){
         const labels = (d.positions || []).map(admin_servingPositionLabel_);
-        const who = String(d.memberLabel || d.memberId || '').trim();
-        return who + ': ' + labels.join('、');
+        return d.memberId + ': ' + labels.join(', ');
       }).join(' | ');
       return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
     }
@@ -1299,18 +1290,12 @@ function api_admin_stats(token, fromDate, toDate){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
-  const mi = admin_getMembersIndex_();
-  const holidayEligibleIds = [];
-  for (let i=0;i<mi.all.length;i++){
-    const m = mi.all[i];
-    if (!m || !m.id) continue;
-    const st = admin_normStatus_(m.status || '');
-    if (st === 'DISABLED') continue;
-    holidayEligibleIds.push(m.id);
+  const allMemberIds = new Set();
+  for (const ev of events){
+    const set = evAttendees.get(ev) || new Set();
+    set.forEach(function(mid){ allMemberIds.add(mid); });
   }
-  const awayMap = admin_getEffectiveAwayPeriodsMap_(holidayEligibleIds);
-  const holidayTrackedIds = Object.keys(awayMap);
-  const offeringMap = admin_getOfferingMap_();
+  const awayMap = admin_getAwayPeriodsMap_(Array.from(allMemberIds));
 
   const out = [];
   for (const ev of events){
@@ -1324,16 +1309,11 @@ function api_admin_stats(token, fromDate, toDate){
       for (const mid of set){
         const fev = firstSeen[mid];
         if (fev && fev === ev) newCount++;
+        if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
       }
     }
-    for (let i=0;i<holidayTrackedIds.length;i++){
-      const mid = holidayTrackedIds[i];
-      if (set && set.has(mid)) continue;
-      if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
-    }
     const existing = Math.max(0, total - newCount);
-    const offering = (typeof offeringMap[ev] === 'number') ? offeringMap[ev] : null;
-    out.push({ eventKey: ev, total: total, new: newCount, existing: existing, holiday: holidayCount, offering: offering });
+    out.push({ eventKey: ev, total: total, new: newCount, existing: existing, holiday: holidayCount });
   }
 
   admin_audit_(s.actor, 'STATS_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), events: out.length}), 'stats');
@@ -1653,12 +1633,21 @@ function api_admin_matrix(token, fromDate, toDate, q){
   members.sort((a,b)=> a.id.localeCompare(b.id));
 
   const away = {};
-  const awayMap = admin_getEffectiveAwayPeriodsMap_(members.map(function(m){ return m.id; }));
+  const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
   events.forEach(function(ev){
     const d = admin_eventDateFromKey_(ev);
     if (!d) return;
     members.forEach(function(m){
-      const hit = admin_isInAwayOnDate_(awayMap[m.id], d);
+      const ap = admin_getAwayPeriodForMember_(m.id);
+      var periods = (ap && ap.periods) ? ap.periods.slice() : [];
+      var hist = historyMap[m.id] || [];
+      periods = periods.concat(hist);
+      const hit = periods.some(function(p){
+        const from = admin_parseYmd_(p.fromYmd || p.from || '');
+        const to = admin_parseYmd_(p.toYmd || p.to || '');
+        if (!from || !to) return false;
+        return d.getTime() >= from.getTime() && d.getTime() <= to.getTime();
+      });
       if (!hit) return;
       if (!away[m.id]) away[m.id] = {};
       away[m.id][ev] = 1;
@@ -1799,12 +1788,6 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
   const lowEnabled = !!low.enabled;
   const lowFlag = !!low.flagById[id];
   const away = admin_getAwayPeriodForMember_(id);
-  const awayHistory = ((admin_getAwayHistoryPeriodsMap_([id]) || {})[id] || []).map(function(p){
-    return {
-      from: String((p && p.fromYmd) || '').trim(),
-      to: String((p && p.toYmd) || '').trim()
-    };
-  }).filter(function(p){ return p.from && p.to; });
   const servingInsights = admin_getServingInsightsForMember_(id);
 
   admin_audit_(s.actor, 'MEMBER_DETAIL', JSON.stringify({id:id, from:String(fromDate||''), to:String(toDate||'')}), 'member_detail');
@@ -1839,7 +1822,6 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       from2: away.from2Ymd || '',
       to2: away.to2Ymd || ''
     },
-    awayHistory: awayHistory,
     servingInsights: servingInsights
   };
 }
@@ -2628,35 +2610,6 @@ function admin_getAwayPeriodsMap_(memberIds){
       periods: [p1, p2].filter(p => p.fromYmd || p.toYmd)
     };
   });
-  return out;
-}
-function admin_getEffectiveAwayPeriodsMap_(memberIds){
-  const ids = (Array.isArray(memberIds) ? memberIds : [])
-    .map(function(x){ return String(x||'').trim().toUpperCase(); })
-    .filter(Boolean);
-  if (!ids.length) return {};
-
-  const currentMap = admin_getAwayPeriodsMap_(ids);
-  const historyMap = admin_getAwayHistoryPeriodsMap_(ids);
-  const out = {};
-
-  ids.forEach(function(id){
-    const all = [];
-    const seen = {};
-    const curr = (currentMap[id] && Array.isArray(currentMap[id].periods)) ? currentMap[id].periods : [];
-    const hist = Array.isArray(historyMap[id]) ? historyMap[id] : [];
-    curr.concat(hist).forEach(function(p){
-      const from = String((p && (p.fromYmd || p.from)) || '').trim();
-      const to = String((p && (p.toYmd || p.to)) || '').trim();
-      if (!from || !to) return;
-      const key = from + '|' + to;
-      if (seen[key]) return;
-      seen[key] = 1;
-      all.push({ fromYmd: from, toYmd: to });
-    });
-    if (all.length) out[id] = { periods: all };
-  });
-
   return out;
 }
 function admin_getServingInsightsForMember_(memberId){
@@ -3522,13 +3475,7 @@ function admin_getMembersIndex_(){
   const cache = CacheService.getScriptCache();
   const key = 'admin_membersIndex_v2';
   const cached = cache.get(key);
-  if (cached){
-    try{
-      return JSON.parse(cached);
-    }catch(parseErr){
-      try{ cache.remove(key); }catch(_e){}
-    }
-  }
+  if (cached) return JSON.parse(cached);
 
   const sh = admin_findMembersSheet_();
   if (!sh) throw new Error('Members sheet not found (schema mismatch).');
@@ -3577,9 +3524,8 @@ function admin_getMembersIndex_(){
   const payload = { byId: byId, all: all };
   try{
     cache.put(key, JSON.stringify(payload), 15);
-  }catch(cacheErr){
-    const msg = String((cacheErr && cacheErr.message) || cacheErr || '').toLowerCase();
-    if (msg.indexOf('argument too large') === -1) throw cacheErr;
+  }catch(e){
+    // CacheService enforces a value size limit; skip cache when payload is too large.
   }
   return payload;
 }

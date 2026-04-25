@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-03-30.admin113
-  For Admin.gs: v2026-03-30.admin113
+  UI VERSION TAG: admin2-ui-2026-04-20.100
+  For Admin.gs: v2026-04-20.admin100
   PR REFRESH: admin107 follow-up submission
   ============================================================
   -->
@@ -369,7 +369,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-03-30.admin113</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-04-20.100</span></div>
     </header>
 
     <main id="app"></main>
@@ -415,8 +415,7 @@
       sermonRowInflight:{},
       financeRows:[],
       financeCanEdit:false,
-      financeSaveTimers:{},
-      statsShowOffering:false
+      financeSaveTimers:{}
     };
 
     function $(id){ return document.getElementById(id); }
@@ -815,17 +814,8 @@
       el.innerHTML = buildMsgHtml_(kind, res);
     }
 
-    function showBox(targetId, kind, titleZh, titleEn, detailHtml, allowHtmlDetail, meta){
-      var m = (meta && typeof meta === 'object') ? meta : {};
-      var payload = {
-        code:String(m.code || (kind==='err'?'E500':'S100')),
-        subCode:String(m.subCode || ''),
-        subGroup:String(m.subGroup || ''),
-        zh:String(titleZh||''),
-        en:String(titleEn||''),
-        detailHtml:detailHtml||'',
-        trustedDetailHtml:!!allowHtmlDetail
-      };
+    function showBox(targetId, kind, titleZh, titleEn, detailHtml, allowHtmlDetail){
+      var payload = { code:(kind==='err'?'E500':'S100'), zh:String(titleZh||''), en:String(titleEn||''), detailHtml:detailHtml||'', trustedDetailHtml:!!allowHtmlDetail };
       if (!allowHtmlDetail && detailHtml) payload.detailEn = String(detailHtml||'');
       renderMsg_(targetId, kind, payload);
     }
@@ -883,20 +873,6 @@
         var parts = String(line||'').split('→').map(function(x){ return String(x||'').trim(); }).filter(Boolean);
         if (!parts.length) return null;
         return { memberLabel: parts[0] || '', position: parts[1] || '', group: normalizeServingGroupKey_(parts[2] || '') };
-      }).filter(Boolean);
-    }
-    function parseDuplicateAssignmentDetailLines_(detailText){
-      var raw = String(detailText||'').trim();
-      if (!raw) return [];
-      return raw.split('|').map(function(line){
-        var parts = String(line||'').split(':');
-        if (parts.length < 2) return null;
-        var memberLabel = String(parts.shift() || '').trim();
-        var positionsRaw = String(parts.join(':') || '').trim();
-        if (!memberLabel || !positionsRaw) return null;
-        var positions = positionsRaw.split(/[、,]/).map(function(x){ return String(x||'').trim(); }).filter(Boolean);
-        if (positions.length < 2) return null;
-        return { memberLabel:memberLabel, positions:positions };
       }).filter(Boolean);
     }
     function formatServingGroupMismatchDetailHtml_(detailText){
@@ -982,17 +958,6 @@
           };
         }
       }
-      if (res.subCode === 'DUPLICATE_ASSIGNMENT' && res.detail){
-        var dupLines = parseDuplicateAssignmentDetailLines_(res.detail);
-        if (dupLines.length){
-          return {
-            html: dupLines.map(function(row){
-              return '<div class="small"><b>'+escapeHtml(row.memberLabel||'')+'</b>：'+escapeHtml((row.positions||[]).join('、'))+'</div>';
-            }).join(''),
-            allow:true
-          };
-        }
-      }
       var dZh = normalizeMessageText_(res.detailZh || '');
       var dEn = normalizeMessageText_(res.detailEn || '');
       var d = normalizeMessageText_(res.detail || '');
@@ -1007,7 +972,7 @@
       res = normalizeErrResForRender_(res);
       var titles = toBilingualText_(res, '系統錯誤', 'System error');
       var detailObj = buildErrDetailHtml_(res);
-      showBox(targetId,'err',titles.zh,titles.en,detailObj.html,detailObj.allow,res);
+      showBox(targetId,'err',withErrorCodeTag_(titles.zh, res),titles.en,detailObj.html,detailObj.allow);
     }
 
 
@@ -3477,7 +3442,7 @@ function viewAttendanceHome(){
               if (!res2 || !res2.ok){
                 if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
                   var mismatchTitle = toBilingualText_(res2, '成員不屬於該事奉組別', 'Member is NOT a member of this serving group.');
-                  showBox('servingEditMsg','err',mismatchTitle.zh, mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true, res2);
+                  showBox('servingEditMsg','err',withErrorCodeTag_(mismatchTitle.zh, res2), mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
                   return;
                 }
                 if (res2 && res2.code === 'E409' && res2.canOverride){
@@ -3516,10 +3481,10 @@ function viewAttendanceHome(){
                         return label.zh || p;
                       });
                       var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((d.memberLabel || d.memberId || '') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
+                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                     }).join('<br/>');
                   }
-                showBox('servingEditMsg','warn', titleZh, titleEn, detail, true, res2);
+                showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                   var btnRow = document.createElement('div');
                   btnRow.className = 'miniBtnRow';
                   var btn = document.createElement('button');
@@ -3628,7 +3593,7 @@ function viewAttendanceHome(){
             if (!res2 || !res2.ok){
               if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
                 var mismatchTitle = toBilingualText_(res2, '成員不屬於該事奉組別', 'Member is NOT a member of this serving group.');
-                showBox('quickMsg','err',mismatchTitle.zh, mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true, res2);
+                showBox('quickMsg','err',withErrorCodeTag_(mismatchTitle.zh, res2), mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
                 return;
               }
               if (res2 && res2.code === 'E409' && res2.canOverride){
@@ -3667,10 +3632,10 @@ function viewAttendanceHome(){
                       return label.zh || p;
                     });
                     var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((d.memberLabel || d.memberId || '') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
+                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
                   }).join('<br/>');
                 }
-                showBox('quickMsg','warn', titleZh, titleEn, detail, true, res2);
+                showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                 var btnRow = document.createElement('div');
                 btnRow.className = 'miniBtnRow';
                 var btn = document.createElement('button');
@@ -4095,10 +4060,6 @@ function viewAttendanceHome(){
           '<div class="miniBtnRow">'+
             '<button id="btnLoadStats" class="btnStats">🔄 載入 / Load</button>'+
             (roleIsAdmin() ? '<button id="btnRebuild" class="btnPeriod">🔄 重建 / Rebuild</button>' : '')+
-            '<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;">'+
-              '<input id="toggleShowOffering" type="checkbox" />'+
-              '<span>顯示奉獻線 / Show offering line</span>'+
-            '</label>'+
             '<button id="backAttendance3" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="statsMsg"></div>'+
@@ -4111,23 +4072,9 @@ function viewAttendanceHome(){
       $('from3').value = App.from;
       $('to3').value = App.to || getTodayYmdUk();
       $('backAttendance3').onclick = function(){ App.view='attendanceHome'; render(); };
-      if ($('toggleShowOffering')){
-        $('toggleShowOffering').checked = !!App.statsShowOffering;
-      }
 
       $('btnLoadStats').onclick = function(){ loadStats(false); };
       if ($('btnRebuild')) $('btnRebuild').onclick = function(){ loadStats(true); };
-      var lastStatsEvents = [];
-      if ($('toggleShowOffering')){
-        $('toggleShowOffering').onchange = function(){
-          App.statsShowOffering = !!$('toggleShowOffering').checked;
-          if (lastStatsEvents.length){
-            drawStatsChart_(lastStatsEvents);
-          } else {
-            drawEmptyChart_();
-          }
-        };
-      }
 
       loadStats(false);
 
@@ -4158,12 +4105,10 @@ function viewAttendanceHome(){
 
           if(!res.events || !res.events.length){
             showBox('statsMsg','warn','此範圍沒有數據','No data in this range.');
-            lastStatsEvents = [];
             drawEmptyChart_();
             $('statsOut').innerHTML = '';
             return;
           }
-          lastStatsEvents = Array.isArray(res.events) ? res.events : [];
           drawStatsChart_(res.events);
           $('statsOut').innerHTML = renderStatsTable_(res.events);
 
@@ -4189,18 +4134,15 @@ function viewAttendanceHome(){
               '<th>新朋友 / New</th>'+
               '<th>舊朋友 / Existing</th>'+
               '<th>假期中人數 / On holiday</th>'+
-              '<th>奉獻 / Offering</th>'+
             '</tr></thead><tbody>';
         events.forEach(function(r){
           var ymd = eventDateYmdFromKey(r.eventKey) || String(r.eventKey||'');
-          var offeringText = (typeof r.offering === 'number') ? ('£' + Number(r.offering).toFixed(2)) : '—';
           html += '<tr>'+
             '<td><span class="chip">'+escapeHtml(String(ymd))+'</span></td>'+
             '<td>'+escapeHtml(String(r.total||0))+'</td>'+
             '<td>'+escapeHtml(String(r.new||0))+'</td>'+
             '<td>'+escapeHtml(String(r.existing||0))+'</td>'+
             '<td>'+escapeHtml(String(r.holiday||0))+'</td>'+
-            '<td>'+escapeHtml(offeringText)+'</td>'+
           '</tr>';
         });
         html += '</tbody></table></div></div>';
@@ -4220,28 +4162,6 @@ function viewAttendanceHome(){
         var labels = events.map(function(x){ return eventDateYmdFromKey(x.eventKey) || x.eventKey; });
         var existing = events.map(function(x){ return x.existing; });
         var nnew = events.map(function(x){ return x.new; });
-        var showOffering = !!App.statsShowOffering;
-        var offering = events.map(function(x){ return (typeof x.offering === 'number') ? x.offering : null; });
-        var datasets = [
-          { label: '舊朋友 / Existing', data: existing, stack: 'stack1' },
-          { label: '新朋友 / New', data: nnew, stack: 'stack1' }
-        ];
-        if (showOffering){
-          datasets.push({
-            type:'line',
-            label:'奉獻 / Offering (£)',
-            data: offering,
-            yAxisID: 'y1',
-            borderColor:'#d48806',
-            backgroundColor:'#d48806',
-            borderWidth:2,
-            tension:0.15,
-            spanGaps:false,
-            pointRadius:4,
-            pointHoverRadius:5,
-            pointStyle:'circle'
-          });
-        }
 
         try{
           var ctx = $('statsChart').getContext('2d');
@@ -4251,27 +4171,15 @@ function viewAttendanceHome(){
             type: 'bar',
             data: {
               labels: labels,
-              datasets: datasets
+              datasets: [
+                { label: '舊朋友 / Existing', data: existing, stack: 'stack1' },
+                { label: '新朋友 / New', data: nnew, stack: 'stack1' }
+              ]
             },
             options: {
               responsive:true,
               maintainAspectRatio:false,
-              plugins:{
-                legend:{ display:true },
-                tooltip:{
-                  callbacks:{
-                    label:function(ctx){
-                      var lbl = String(ctx.dataset && ctx.dataset.label || '');
-                      var val = ctx.raw;
-                      if (lbl.indexOf('Offering') >= 0 || lbl.indexOf('奉獻') >= 0){
-                        if (typeof val === 'number') return lbl + ': £' + Number(val).toFixed(2);
-                        return lbl + ': —';
-                      }
-                      return lbl + ': ' + String(val == null ? '—' : val);
-                    }
-                  }
-                }
-              },
+              plugins:{ legend:{ display:true } },
               // ✅ Click bar segments still works (tooltip)
               // ✅ Clicking the x-axis label opens service stats dialog
               onClick: function(evt, elements, chart){
@@ -4308,14 +4216,7 @@ function viewAttendanceHome(){
               },
               scales:{
                 x:{ stacked:true, ticks:{ maxRotation:0, minRotation:0 } },
-                y:{ stacked:true, beginAtZero:true, stacked:true, title:{ display:true, text:'Attendance' } },
-                y1:{
-                  display: showOffering,
-                  position:'right',
-                  beginAtZero:true,
-                  grid:{ drawOnChartArea:false },
-                  title:{ display: showOffering, text:'Offering (£)' }
-                }
+                y:{ stacked:true, beginAtZero:true, stacked:true }
               }
             }
           });
@@ -4730,7 +4631,6 @@ function viewAttendanceHome(){
         var att = (res.attendance && res.attendance.attendedEventKeys) ? res.attendance.attendedEventKeys : [];
         var low = res.lowAttendance || {};
         var away = res.away || {};
-        var awayHistory = Array.isArray(res.awayHistory) ? res.awayHistory : [];
         var servingInsights = res.servingInsights || {};
 
         var statusDisplay = displayMemberStatusLabel(m.status||'');
@@ -4781,22 +4681,10 @@ function viewAttendanceHome(){
           }
           awaySummary = '<div class="small">'+lines.join('<br/>')+'</div>';
         }
-        var awayHistoryHtml = '';
-        if (awayHistory.length){
-          var histLines = awayHistory.map(function(p){
-            var from = ymdToDmy_(String((p && p.from) || '').trim()) || '';
-            var to = ymdToDmy_(String((p && p.to) || '').trim()) || '';
-            return '• ' + escapeHtml(from + ' - ' + to);
-          });
-          awayHistoryHtml = '<div class="small" style="margin-top:8px;">'+
-            '<b>歷史假期 / Holiday history</b><br/>'+histLines.join('<br/>')+
-          '</div>';
-        }
         var awayCard =
           '<div class="msgBox warn" style="margin-top:10px;">'+
             '<div class="big warn">🏖️ 請假 / Absence</div>'+
             awaySummary+
-            awayHistoryHtml+
             '<div class="miniBtnRow">'+
               '<button id="btnAbsence" class="btnPeriod">請假 / Absence</button>'+
             '</div>'+
