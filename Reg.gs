@@ -139,12 +139,13 @@ function reg_publicRotaPassageEn_(rawOrCanonical){
   }
 }
 
-function reg_publicRotaNext8WeeksEvents_(fromYmd){
+function reg_publicRotaNextWeeksEvents_(fromYmd, weeks){
   const base = admin_parseYmd_(String(fromYmd || '').trim()) || admin_parseYmd_(admin_todayUkYmd_()) || new Date();
   let start = new Date(base.getTime());
   if (!admin_isSunday_(start)) start = admin_nextSunday_(start);
+  const totalWeeks = (Number(weeks) === 12) ? 12 : 8;
   const out = [];
-  for (let i=0; i<8; i++){
+  for (let i=0; i<totalWeeks; i++){
     const d = new Date(start.getTime());
     d.setUTCDate(d.getUTCDate() + (i * 7));
     out.push({ eventKey:'SundayService_' + admin_fmtYmd_(d), dateYmd: admin_fmtYmd_(d) });
@@ -152,7 +153,7 @@ function reg_publicRotaNext8WeeksEvents_(fromYmd){
   return out;
 }
 
-function api_public_rota_view(password){
+function api_public_rota_view(password, weeks){
   try{
     const inputPass = String(password || '').trim();
     const expected = reg_getPublicRotaPassword_();
@@ -161,7 +162,8 @@ function api_public_rota_view(password){
     }
 
     const from = admin_todayUkYmd_();
-    const events = reg_publicRotaNext8WeeksEvents_(from);
+    const weekCount = (Number(weeks) === 12) ? 12 : 8;
+    const events = reg_publicRotaNextWeeksEvents_(from, weekCount);
     const matrix = admin_getServingPlanMatrix_(events);
     const eventKeys = (matrix.events || []).map(function(ev){ return String(ev.eventKey || '').trim(); }).filter(Boolean);
     const sermonMap = admin_getSermonInfoForMonth_(eventKeys);
@@ -189,6 +191,7 @@ function api_public_rota_view(password){
       const eventKey = String((ev && ev.eventKey) || '').trim();
       const sermon = sermonMap[eventKey] || admin_sermonBlankFromEventKey_(eventKey);
       const rowPositions = {};
+      const rowPositionMeta = {};
 
       positionsOrder.forEach(function(pos){
         const entries = ((((matrix.cells || {})[eventKey] || {})[pos]) || []);
@@ -231,11 +234,13 @@ function api_public_rota_view(password){
 
         if (hasClosed){
           rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+          rowPositionMeta[pos] = { isClosed:true };
           return;
         }
 
         if (!displayItems.length){
           rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+          rowPositionMeta[pos] = { isClosed:false };
           return;
         }
 
@@ -244,9 +249,11 @@ function api_public_rota_view(password){
         });
         if (allDash){
           rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+          rowPositionMeta[pos] = { isClosed:false };
           return;
         }
         rowPositions[pos] = displayItems;
+        rowPositionMeta[pos] = { isClosed:false };
       });
 
       const sermonPassage = (String(sermon.sermonPassageStatus || '').trim() === 'OK')
@@ -267,7 +274,8 @@ function api_public_rota_view(password){
         sermonPassageEn: reg_publicRotaPassageEn_(sermonPassageZh) || sermonPassageZh,
         responsePassageZh: responsePassageZh,
         responsePassageEn: reg_publicRotaPassageEn_(responsePassageZh) || responsePassageZh,
-        positions: rowPositions
+        positions: rowPositions,
+        positionMeta: rowPositionMeta
       };
     });
 
@@ -284,6 +292,7 @@ function api_public_rota_view(password){
     return {
       ok:true,
       version: ROTA_PUBLIC_VERSION,
+      weeks: weekCount,
       generatedAt: admin_nowIso_(),
       generatedAtDisplay: reg_clientSafeDateTime_(new Date()),
       positions: positions,
