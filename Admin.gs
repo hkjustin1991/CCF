@@ -963,11 +963,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         admin_servingPositionLabel_(r.position) + ': ' + ids.join(', ')
       );
     }
-    const minAllowed = admin_servingMinRequired_(r.position);
-    const filledSlots = admin_countServingFilledSlots_(r.value);
-    if (minAllowed && filledSlots > 0 && filledSlots < minAllowed){
-      return admin_conflict_('崗位人數不足','Not enough people for this position.', '', 'POSITION_MIN_REQUIRED', 'SERVING_ASSIGNMENT');
-    }
     ids.forEach(function(id){
       const groupKey = ADMIN_SERVING_POSITION_GROUP[r.position] || '';
       if (!admin_memberHasServingGroup_(membersById[id], groupKey)){
@@ -1003,7 +998,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
+    const attemptedPositions = normalized.filter(function(p){ return existing.indexOf(p) < 0; });
+    duplicateDetails.push({
+      memberId: id,
+      positions: effectivePositions.slice(0, 2),
+      existingPositions: existing.slice(0, 2),
+      attemptedPositions: attemptedPositions.slice(0, 2),
+      dateYmd: eventDateYmd,
+      newlyIntroduced:true
+    });
   });
 
   const evDate = admin_eventDateFromKey_(ev);

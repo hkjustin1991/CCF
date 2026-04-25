@@ -269,6 +269,21 @@
       text-align:center;
       font-size:12px;
     }
+    .servingPlanHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+    .btnMobileCompact{width:auto;padding:8px 12px;border-radius:10px;font-size:12px;background:#285ac8}
+    .servingPlanCompactTable{width:100%;border-collapse:collapse;background:#fff}
+    .servingPlanCompactTable th,.servingPlanCompactTable td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;text-align:left}
+    .servingPlanCompactTable th{background:#f5f8ff;font-size:12px}
+    .servingPlanCompactDate{min-width:102px;font-weight:900}
+    .servingPlanCompactPos{min-width:128px}
+    .servingPlanCompactAssign .servingPlanEntry{display:inline-block;margin:2px 4px 2px 0;padding:4px 8px;font-size:12px;border-radius:999px}
+    .servingPlanCompactAssign .emptySlotOutline{display:inline-block;margin:2px 4px 2px 0;padding:3px 7px;font-size:11px;border-radius:999px}
+    @media (max-width: 720px){
+      .servingPlanCompactTable th,.servingPlanCompactTable td{padding:5px 6px}
+      .servingPlanCompactDate{min-width:88px}
+      .servingPlanCompactPos{min-width:104px}
+      .btnMobileCompact{font-size:11px;padding:7px 9px}
+    }
     .groupDialog{
       margin-top:10px;
       border:1px solid var(--border);
@@ -365,7 +380,9 @@
         <div class="sub"><?= ADMIN_TITLE_EN ?></div>
         <div class="hint">
           ⚠️ 請避免用手機使用此管理平台，建議使用電腦或平板。<br/>
-          ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/><br/>
+          ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/>
+          📱🧾 如需手機版，請進入「事奉排期」後按右上角手機/iPad按鈕。<br/>
+          📱🧾 For mobile/tablet compact view, open "Serving plan" and tap the top-right phone/iPad button.<br/><br/>
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
@@ -401,6 +418,7 @@
       servingPlanInfoOpenGroups:{},
       servingGroupOverview:null,
       servingPlanTimer:null,
+      servingPlanMobileView:false,
       selectedServingGroup:null,
       glBackGuardArmed:false,
       worshipMonth:'',
@@ -1757,16 +1775,51 @@ function eventDateYmdFromKey(ev){
         lines.push(escapeHtml('成員: ' + (c.memberId||'') + '｜離開期重疊: ' + String(c.from||'') + ' - ' + String(c.to||'') + ' / Member: ' + (c.memberId||'') + '｜Holiday overlap: ' + String(c.from||'') + ' - ' + String(c.to||'') + dateLabel));
       });
       duplicates.forEach(function(d){
-        var posLabelsZh = (d.positions||[]).map(function(p){
-          var label = SERVING_POSITION_LABELS[p] || {};
-          return label.zh || servingPositionLabel_({ position: p });
-        });
+        var existLabels = mapServingPosBilingual_(d.existingPositions || []);
+        var tryLabels = mapServingPosBilingual_(d.attemptedPositions || []);
+        var allLabels = mapServingPosBilingual_(d.positions || []);
+        if (!existLabels.length && allLabels.length) existLabels = allLabels.slice(0, Math.max(allLabels.length - 1, 1));
+        if (!tryLabels.length && allLabels.length > 1) tryLabels = [allLabels[allLabels.length - 1]];
+        if (!tryLabels.length && allLabels.length === 1) tryLabels = allLabels.slice();
         var lineDate = String(d.dateYmd || effectiveDate || '').trim();
         var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
-        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜重覆崗位: ' + posLabelsZh.join('、') + ' / Member: ' + (d.memberId||'') + '｜Duplicate positions: ' + posLabelsZh.join(', ') + dateLabel));
+        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜已安排: ' + (existLabels.join('、') || '—') + '｜嘗試安排: ' + (tryLabels.join('、') || '—') + ' / Member: ' + (d.memberId||'') + '｜Already assigned: ' + (existLabels.join(', ') || '—') + '｜Trying to assign: ' + (tryLabels.join(', ') || '—') + dateLabel));
       });
       if (!lines.length) return '';
       return lines.join('<br/>');
+    }
+    function mapServingPosBilingual_(positions){
+      return (positions||[]).map(function(p){
+        var label = SERVING_POSITION_LABELS[p] || {};
+        var zh = String(label.zh || '').trim();
+        var en = String(label.en || '').trim();
+        if (zh && en) return zh + ' / ' + en;
+        if (zh) return zh;
+        if (en) return en;
+        return servingPositionLabel_({ position: p });
+      }).filter(Boolean);
+    }
+    function duplicateDetailHtml_(duplicates, fallbackDateYmd){
+      var list = Array.isArray(duplicates) ? duplicates : [];
+      if (!list.length) return '';
+      return list.map(function(d){
+        var existLabels = mapServingPosBilingual_(d.existingPositions || []);
+        var tryLabels = mapServingPosBilingual_(d.attemptedPositions || []);
+        var allLabels = mapServingPosBilingual_(d.positions || []);
+        if (!existLabels.length && allLabels.length) existLabels = allLabels.slice(0, Math.max(allLabels.length - 1, 1));
+        if (!tryLabels.length && allLabels.length > 1) tryLabels = [allLabels[allLabels.length - 1]];
+        if (!tryLabels.length && allLabels.length === 1) tryLabels = allLabels.slice();
+        var dateYmd = String(d.dateYmd || fallbackDateYmd || '').trim();
+        var dateLine = dateYmd ? ('日期 / Date: ' + formatYmdZhEn_(dateYmd)) : '';
+        return [
+          '成員 / Member: ' + (d.memberId || '—'),
+          '已安排 / Already assigned: ' + (existLabels.join('、') || '—'),
+          '嘗試安排 / Trying to assign: ' + (tryLabels.join('、') || '—'),
+          dateLine
+        ].filter(Boolean).map(function(line){
+          return '<div class="small">' + escapeHtml(line) + '</div>';
+        }).join('');
+      }).join('');
     }
 
     function overrideConfirmTitleByContext_(res){
@@ -2837,10 +2890,16 @@ function viewAttendanceHome(){
     }
 
     function viewServingPlan(){
+      var mobileBtnLabel = App.servingPlanMobileView ? '🖥️ 標準檢視 / Standard view' : '📱📲 手機/iPad精簡檢視 / Mobile+iPad compact';
       return ''+
         '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
-          '<div class="big">🧩 事奉排期 / Serving plan</div>'+
-          '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
+          '<div class="servingPlanHead">'+
+            '<div>'+
+              '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+              '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
+            '</div>'+
+            '<button id="toggleServingMobileView" class="btnMobileCompact">'+mobileBtnLabel+'</button>'+
+          '</div>'+
           '<div id="servingPlanList" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -2851,6 +2910,13 @@ function viewAttendanceHome(){
 
     function bindServingPlan(){
       $('backServingPlan').onclick = function(){ App.view='menu'; render(); };
+      var mobileToggleBtn = $('toggleServingMobileView');
+      if (mobileToggleBtn){
+        mobileToggleBtn.onclick = function(){
+          App.servingPlanMobileView = !App.servingPlanMobileView;
+          render();
+        };
+      }
 
       var listEl = $('servingPlanList');
       function loadServingPlan(){
@@ -2919,6 +2985,42 @@ function viewAttendanceHome(){
               monthButtons+
             '</div>';
           var viewEvents = monthMap[App.servingPlanMonth] || [];
+          function compactRowsHtml_(groupKey, groupPositions, canEdit){
+            var rows = [];
+            viewEvents.forEach(function(ev){
+              groupPositions.forEach(function(pos){
+                var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+                var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
+                if (!maxSlots || maxSlots < 1) maxSlots = 1;
+                var existingEntries = (cell && cell.length) ? cell : [];
+                var entries = existingEntries.map(function(entry, idx){
+                  var label = formatServingEntry_(entry);
+                  if (!label) return '';
+                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
+                  return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+label+'</button>';
+                }).filter(Boolean);
+                var hasClosed = existingEntries.some(function(entry){
+                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
+                  return isServingClosedToken_(raw);
+                });
+                var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
+                if (vacantCount > 0){
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 / Vacant x'+vacantCount+'</button>');
+                }
+                rows.push(
+                  '<tr>'+
+                    '<td class="servingPlanCompactDate">'+escapeHtml(eventLabel_(ev))+'</td>'+
+                    '<td class="servingPlanCompactPos">'+escapeHtml(servingPositionLabel_(pos))+'</td>'+
+                    '<td class="servingPlanCompactAssign">'+entries.join('')+'</td>'+
+                  '</tr>'
+                );
+              });
+            });
+            if (!rows.length){
+              return '<div class="small">暫無記錄 / No records</div>';
+            }
+            return '<div class="tableWrap"><table class="servingPlanCompactTable"><thead><tr><th>日期 / Date</th><th>崗位 / Position</th><th>安排 / Assignment</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+          }
           var groupSections = groupOrder.map(function(groupKey){
             var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
             var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
@@ -2986,12 +3088,14 @@ function viewAttendanceHome(){
                     '<div></div>'+
                     (groupKey === 'other' ? '' : '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 摘要 / Summary</button>')+
                   '</div>'+
-                  '<div class="tableWrap">'+
-                    '<table class="servingPlanTable">'+
-                      '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
-                      '<tbody>'+bodyHtml+'</tbody>'+
-                    '</table>'+
-                  '</div>'+
+                  (App.servingPlanMobileView
+                    ? compactRowsHtml_(groupKey, groupPositions, canEdit)
+                    : ('<div class="tableWrap">'+
+                        '<table class="servingPlanTable">'+
+                          '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
+                          '<tbody>'+bodyHtml+'</tbody>'+
+                        '</table>'+
+                      '</div>'))+
                 '</div>'+
               '</div>';
           }).join('');
@@ -3473,16 +3577,9 @@ function viewAttendanceHome(){
                     detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                   }
                   if (res2.duplicates && res2.duplicates.length){
-                    titleZh = '同一會員重覆崗位';
-                    titleEn = 'They are already serving this position.';
-                    detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                      var posLabelsZh = (d.positions||[]).map(function(p){
-                        var label = SERVING_POSITION_LABELS[p] || {};
-                        return label.zh || p;
-                      });
-                      var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                    }).join('<br/>');
+                    titleZh = '同一會員重覆崗位（已安排 vs 嘗試安排）';
+                    titleEn = 'Duplicate serving assignment (already assigned vs trying to assign).';
+                    detail = (detail ? (detail + '<br/>') : '') + duplicateDetailHtml_(res2.duplicates, res2.dateYmd);
                   }
                 showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                   var btnRow = document.createElement('div');
@@ -3624,16 +3721,9 @@ function viewAttendanceHome(){
                   detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                 }
                 if (res2.duplicates && res2.duplicates.length){
-                  titleZh = '同一會員重覆崗位';
-                  titleEn = 'They are already serving this position.';
-                  detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                    var posLabelsZh = (d.positions||[]).map(function(p){
-                      var label = SERVING_POSITION_LABELS[p] || {};
-                      return label.zh || p;
-                    });
-                    var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                  }).join('<br/>');
+                  titleZh = '同一會員重覆崗位（已安排 vs 嘗試安排）';
+                  titleEn = 'Duplicate serving assignment (already assigned vs trying to assign).';
+                  detail = (detail ? (detail + '<br/>') : '') + duplicateDetailHtml_(res2.duplicates, res2.dateYmd);
                 }
                 showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                 var btnRow = document.createElement('div');
