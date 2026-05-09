@@ -507,8 +507,8 @@
     }
 
     function scannerConfigWarningHtml_(){
-      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return showBox('warn','⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕','⚠️ External scanner config is invalid. External scanner has been disabled.','<div class="small">'+detail+'</div>');
+      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'Scanner settings are unavailable.');
+      return showBox('warn','⚠️ 掃描器設定暫時未能使用，請聯絡影音同工。','⚠️ Scanner settings are currently unavailable. Please contact the Media team.','<div class="small">'+detail+'</div>');
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -520,7 +520,7 @@
         var btn = $(id);
         if(btn){
           btn.disabled = true;
-          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.title = 'Scanner settings are currently unavailable';
         }
       });
       var msgEl = $(msgId || 'msg');
@@ -552,7 +552,7 @@
       var opts = (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) ? arg1 : { onPayload:arg1, onStatus:arg2 };
       opts = opts || {};
       if(!EXTERNAL_SCANNER_CONFIG.ok){
-        if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'External scanner configuration is invalid.');
+        if(typeof opts.onError === 'function') opts.onError(EXTERNAL_SCANNER_CONFIG.message || 'Scanner settings are currently unavailable.');
         if(typeof opts.onStatus === 'function') opts.onStatus('config_invalid');
         return null;
       }
@@ -867,7 +867,7 @@
         '<div style="margin-top:10px;border-top:1px dashed #d6dcef;padding-top:10px;">'+
           '<div class="small">相機被封鎖時可改用圖片解碼 / If camera is blocked, decode from image</div>'+
           '<input id="'+inputId+'" type="file" accept="image/*" style="margin-top:6px;" />'+
-          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Decode QR image</button></div>'+
+          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button></div>'+
           '<div id="'+statusId+'" class="small" style="margin-top:6px;"></div>'+
         '</div>';
     }
@@ -887,7 +887,7 @@
                 if(status === 'success') return;
                 if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
                 else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
-                else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
+                else setHtml_('scanMsg', showBox('warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'));
               });
             }) +
             bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
@@ -931,7 +931,7 @@
                     if(status === 'success') return;
                     if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
                     else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
-                    else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
+                    else setHtml_('scanMsg', showBox('warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'));
                   });
                 }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
             });
@@ -945,7 +945,7 @@
                   if(status === 'success') return;
                   if(status === 'blocked') setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖','Popup blocked'));
                   else if(status === 'config_invalid') setHtml_('scanMsg', showBox('err','掃描器出現問題','Scanner error','<div class="small">'+escapeHtml(EXTERNAL_SCANNER_CONFIG.message || '')+'</div>'));
-                  else setHtml_('scanMsg', showBox('warn','外置掃描未完成','External scanner did not complete'));
+                  else setHtml_('scanMsg', showBox('warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'));
                 });
               }) + bindImageQrFallback_('scanMsg', function(decoded){ stopScan(); onCaptured(decoded); })
           });
@@ -1764,16 +1764,20 @@ function viewSelfHoliday(m){
     function viewScan(){
       return ''+
         '<div class="card">'+
-          '<div class="big">📷 掃描 QR</div>'+
-          '<div class="small">請選擇「啟動相機」掃描 QR，或「上傳 QR 圖片」登入（只作登記，不會自動簽到）。</div>'+
-          '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
+          '<div class="big">📷 掃描 QR / Scan QR</div>'+
+          '<div class="small">請按「掃描 QR」登入（只作登記，不會自動簽到）。<br/>Tap Scan QR to log in (registration only; no auto check-in).</div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnStartScanCam" class="primary" type="button">▶️ 啟動相機 / Start camera</button>'+
-            '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
-            '<button id="btnExternalScan" class="alt" type="button">🌐 外置掃描器 / External scanner</button>'+
+            '<button id="btnExternalScan" class="primary" type="button">📷 掃描 QR / Scan QR</button>'+
             '<button id="btnUploadScanQr" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
             '<button id="btnCancelScan" class="danger" type="button">取消 / Cancel</button>'+
           '</div>'+
+          '<details class="card" style="margin-top:10px;"><summary>進階：內置相機測試 / Advanced: built-in camera test</summary>'+
+            '<div class="videoWrap" style="margin-top:10px;"><video id="video" playsinline></video></div>'+
+            '<div class="miniBtnRow">'+
+              '<button id="btnStartScanCam" class="alt" type="button">▶️ 啟動相機 / Start camera</button>'+
+              '<button id="btnSwitchCam" class="alt" type="button">🔄 切換相機 / Switch camera</button>'+
+            '</div>'+
+          '</details>'+
           '<input id="scanQrImageInput" type="file" accept="image/*" class="hide" />'+
           '<div id="scanMsg"></div>'+
         '</div>';
@@ -1955,7 +1959,15 @@ function viewSelfHoliday(m){
 
     function bindScanChoice(){
       if ($('btnChoiceBack')) $('btnChoiceBack').onclick = function(){ State.view='home'; render(); };
-      if ($('btnChoiceScan')) $('btnChoiceScan').onclick = function(){ State.view='scan'; render(); };
+      if ($('btnChoiceScan')) $('btnChoiceScan').onclick = function(){
+        setHtml_('scanChoiceMsg', showBox('warn','正在開啟掃描器…','Opening scanner…','<div class="small">請在掃描器頁面完成掃描 / Please complete scanning in the scanner page.</div>'));
+        if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanChoiceMsg', ['btnChoiceScan']); return; }
+        openExternalScanner_(handleScanPayload_, function(status){
+          if(status === 'success') return;
+          if(status === 'config_invalid') setHtml_('scanChoiceMsg', showBox('warn','掃描器設定暫時未能使用，請聯絡影音同工。','Scanner settings are currently unavailable. Please contact the Media team.'));
+          else setHtml_('scanChoiceMsg', showBox('warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'));
+        });
+      };
       if ($('btnChoiceUpload') && $('choiceQrImageInput')){
         $('btnChoiceUpload').onclick = function(){
           var input = $('choiceQrImageInput');
@@ -2038,51 +2050,20 @@ function viewSelfHoliday(m){
       applyExternalScannerGuard_('scanMsg', ['btnExternalScan']);
 
       $('btnExternalScan').onclick = function(){
+        setHtml_('scanMsg', showBox('warn','正在開啟掃描器…','Opening scanner…','<div class="small">請在掃描器頁面完成掃描 / Please complete scanning in the scanner page.</div>'));
         if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnExternalScan']); return; }
         stopScan();
         openExternalScanner_(onCaptured, function(status){
           if(status === 'success') return;
-          if(status === 'timeout'){
-            setHtml_('scanMsg', showBox('warn','外置掃描器逾時','External scanner timed out.'));
-            return;
-          }
-          if(status === 'cancel' || status === 'popup_closed'){
-            setHtml_('scanMsg', showBox('warn','外置掃描已取消','External scanner cancelled.'));
-            return;
-          }
-          if(status === 'blocked'){
-            setHtml_('scanMsg', showBox('err','彈出視窗被封鎖','Popup was blocked.'));
-            return;
-          }
           if(status === 'config_invalid'){
-            applyExternalScannerGuard_('scanMsg', ['btnExternalScan']);
+            setHtml_('scanMsg', showBox('warn','掃描器設定暫時未能使用，請聯絡影音同工。','Scanner settings are currently unavailable. Please contact the Media team.'));
+            return;
           }
+          setHtml_('scanMsg', showBox('warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'));
         });
       };
 
-      setHtml_('scanMsg', showBox('warn','優先使用外置掃描器…','Starting external scanner…'));
-      if (EXTERNAL_SCANNER_CONFIG.ok){
-        openExternalScanner_(onCaptured, function(status){
-          if(status === 'success') return;
-          if(status === 'timeout'){
-            setHtml_('scanMsg', showBox('warn','外置掃描器逾時，請按「啟動相機」','External scanner timed out. Tap Start camera.'));
-            return;
-          }
-          if(status === 'cancel' || status === 'popup_closed'){
-            setHtml_('scanMsg', showBox('warn','外置掃描已取消，請按「啟動相機」','External scanner cancelled. Tap Start camera.'));
-            return;
-          }
-          if(status === 'blocked'){
-            setHtml_('scanMsg', showBox('warn','彈出視窗被封鎖，請按「啟動相機」','Popup blocked. Tap Start camera.'));
-            return;
-          }
-          if(status === 'config_invalid'){
-            setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
-          }
-        });
-      } else {
-        setHtml_('scanMsg', showBox('warn','外置掃描器未設定，請按「啟動相機」','External scanner not configured. Tap Start camera.'));
-      }
+      setHtml_('scanMsg', showBox('warn','請按「掃描 QR」開始','Tap Scan QR to start.'));
     }
 
     function bindSelfHome(){
