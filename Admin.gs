@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-04-20.admin100';
+const ADMIN_VERSION = '2026-05-24.admin101';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -1565,26 +1565,27 @@ function api_admin_period_stats(token, fromDate, toDate){
  * - includes low attendance flag
  */
 function api_admin_matrix(token, fromDate, toDate, q){
-  const s = admin_requireSession_(token);
-  if (!s.ok) return s;
-  const glBlock = admin_requireNonGl_(s.actor);
-  if (glBlock) return glBlock;
+  try{
+    const s = admin_requireSession_(token);
+    if (!s.ok) return s;
+    const glBlock = admin_requireNonGl_(s.actor);
+    if (glBlock) return glBlock;
 
-  const range = admin_validateRange_(s.actor, fromDate, toDate);
-  if (!range.ok) return range;
+    const range = admin_validateRange_(s.actor, fromDate, toDate);
+    if (!range.ok) return range;
 
   const query = String(q||'').trim();
   const qU = query.toUpperCase();
   const qL = query.toLowerCase();
 
-  const check = admin_getCheckinsDataCached_();
-  if (!check.ok) return check;
+    const check = admin_getCheckinsDataCached_();
+    if (!check || !check.ok) return check || { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席資料', en:'Unable to load attendance data.' };
 
   const evSet = new Set();
-  const attended = {};
+  const attendanceSet = {};
   const attendeeIds = new Set();
 
-  for (const r of check.rows){
+  for (const r of (Array.isArray(check.rows) ? check.rows : [])){
     const ev = r.eventKey;
     if (!admin_isSundayServiceKey_(ev)) continue;
 
@@ -1598,8 +1599,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
     evSet.add(ev);
     attendeeIds.add(mid);
 
-    if (!attended[mid]) attended[mid] = {};
-    attended[mid][ev] = 1;
+    attendanceSet[ev + '|' + mid] = 1;
   }
 
   const events = Array.from(evSet).sort((a,b)=>{
@@ -1607,12 +1607,13 @@ function api_admin_matrix(token, fromDate, toDate, q){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
-  const mi = admin_getMembersIndex_();
-  const flags = admin_getLowAttendanceFlagsCached_();
+  const mi = admin_getMembersIndex_() || { byId:{} };
+  const flags = admin_getLowAttendanceFlagsCached_() || { flagById:{} };
+  const memberIndexById = mi.byId || {};
 
   const members = [];
   for (const id of attendeeIds){
-    const m = mi.byId[id];
+    const m = memberIndexById[id];
     if (!m) continue;
 
     const st = admin_normStatus_(m.status);
@@ -1634,6 +1635,31 @@ function api_admin_matrix(token, fromDate, toDate, q){
   }
 
   members.sort((a,b)=> a.id.localeCompare(b.id));
+  const familiesByKey = {};
+  members.forEach(function(m){
+    const src = memberIndexById[m.id] || {};
+    const familyIdRaw = String(src.familyId || src.FamilyID || '').trim();
+    const familyKey = familyIdRaw ? familyIdRaw : ('INDIVIDUAL_' + m.id);
+    if (!familiesByKey[familyKey]){
+      familiesByKey[familyKey] = {
+        familyKey: familyKey,
+        familyId: familyIdRaw || '',
+        displayLabel: familyIdRaw ? ('Family ' + familyIdRaw) : 'Individual',
+        members: [],
+        summary: { memberCount:0, attendanceCount:0, possibleCount:0, percent:0 }
+      };
+    }
+    const letter = String(src.memberLetter || src.MemberLetter || '').trim();
+    familiesByKey[familyKey].members.push({
+      id: m.id,
+      memberLetter: letter,
+      nameZh: m.nameZh || '',
+      nameEn: m.nameEn || '',
+      status: String(src.status || ''),
+      lowFlag: !!m.lowFlag,
+      attendedByEvent: {}
+    });
+  });
 
   const away = {};
   const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
@@ -1657,16 +1683,51 @@ function api_admin_matrix(token, fromDate, toDate, q){
     });
   });
 
-  admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length}), 'matrix');
+  const familyList = Object.keys(familiesByKey).map(function(k){ return familiesByKey[k]; });
+  familyList.forEach(function(fam){
+    fam.members.sort(function(a,b){
+      const la = String(a.memberLetter||'').trim();
+      const lb = String(b.memberLetter||'').trim();
+      if (la && lb && la !== lb) return la.localeCompare(lb);
+      if (la && !lb) return -1;
+      if (!la && lb) return 1;
+      const na = (a.nameZh || a.nameEn || a.id);
+      const nb = (b.nameZh || b.nameEn || b.id);
+      return String(na).localeCompare(String(nb));
+    });
+    var attendedCount = 0;
+    fam.members.forEach(function(m){
+      events.forEach(function(ev){
+        const hit = !!attendanceSet[ev + '|' + m.id];
+        if (hit) attendedCount++;
+        m.attendedByEvent[ev] = hit;
+      });
+    });
+    const possible = fam.members.length * events.length;
+    fam.summary = {
+      memberCount: fam.members.length,
+      attendanceCount: attendedCount,
+      possibleCount: possible,
+      percent: possible ? Math.round((attendedCount / possible) * 1000) / 10 : 0
+    };
+  });
+  familyList.sort(function(a,b){ return String(a.familyKey||'').localeCompare(String(b.familyKey||'')); });
+
+  admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length, families:familyList.length}), 'matrix');
 
   return {
     ok:true,
     range:{ from: admin_fmtYmd_(range.from), to: admin_fmtYmd_(range.to) },
-    events: events,
+    events: events.map(function(ev){ return { eventKey:ev, dateYmd: admin_fmtYmd_(admin_eventDateFromKey_(ev) || new Date()), label: ev.replace('SundayService_','') }; }),
     members: members,
-    attended: attended,
-    away: away
+    attended: attendanceSet,
+    away: away,
+    families: familyList,
+    totals: { eventCount: events.length, familyCount: familyList.length, memberCount: members.length, checkinCount: Object.keys(attendanceSet).length }
   };
+  }catch(e){
+    return { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'出席矩陣載入失敗', en:'Attendance matrix load failed.', detail:String(e&&e.message||e) };
+  }
 }
 
 /**
