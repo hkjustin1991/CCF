@@ -176,6 +176,19 @@
       .kv{ grid-template-columns: 120px 1fr; }
       .videoWrap{aspect-ratio:1/1}
     }
+    @media (max-width:700px){
+      .selfMainGrid{grid-template-columns:1fr}
+      .worshipTopRow{flex-direction:column}
+      .worshipTableWrap{min-width:0;resize:none}
+      .worshipCols .colSection,.worshipCols .colKey,.worshipCols .colLink,.worshipCols .colAction{width:auto}
+      .worshipCardHead,.rotaRow{align-items:flex-start}
+      .chip,.groupBadge{overflow-wrap:anywhere}
+    }
+    @media (max-width:430px){
+      .kv{grid-template-columns:1fr}
+      .miniBtnRow button{min-height:52px}
+      input,select,textarea,button{font-size:16px}
+    }
   </style>
 </head>
 
@@ -1582,7 +1595,7 @@
 
       var pieces = [];
       pieces.push('<div class="card"><div class="big">📡 聚會資訊 / Service information</div>');
-      pieces.push('<div class="msgBox"><b>當前出席 / Current attendance</b>: '+escapeHtml(String(cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')</div>');
+      pieces.push('<div class="msgBox"><b>總出席人數 / Total attendance</b>: '+escapeHtml(String(cur.totalAttendance||cur.count||0))+' ('+escapeHtml(cur.eventKey||'')+')<br/><b>新朋友 / New friends</b>: '+escapeHtml(String(cur.newFriendCount||0))+'<br/><b>曾出席／恆常出席者 / Existing churchgoers</b>: '+escapeHtml(String(cur.existingChurchgoerCount||Math.max(0,(cur.totalAttendance||cur.count||0)-(cur.newFriendCount||0))))+'</div>');
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週出席 / Last week\'s attendance</b>: '+escapeHtml(String(last.count||0))+' ('+escapeHtml(last.eventKey||'')+')</div>');
       pieces.push('<div class="msgBox" style="margin-top:8px;"><b>上週奉獻 / Last week\'s offering</b>: '+escapeHtml((typeof lastOffering.amount === 'number') ? ('£'+Number(lastOffering.amount).toFixed(2)) : '—')+' ('+escapeHtml(String(lastOffering.eventKey||last.eventKey||''))+')</div>');
       /* PATCH_BOUNDARY: SAILOR_SATURN_LIVE_UI_SELECTOR_RENDER_BEGIN */

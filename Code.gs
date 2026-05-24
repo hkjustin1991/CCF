@@ -1466,12 +1466,18 @@ function api_get_live_page(token, eventKeyOptional) {
 
   const checkedInSet = new Set(ids);
   const servingToday = getServingForEvent_(eventKey, members, checkedInSet);
+  const totalAttendance = names.length;
+  const newFriendCount = newCount;
+  const existingChurchgoerCount = Math.max(0, totalAttendance - newFriendCount);
 
   const payload = {
     ok:true,
     eventKey,
     checkedInCount: names.length,
     newCount: newCount,
+    totalAttendance: totalAttendance,
+    newFriendCount: newFriendCount,
+    existingChurchgoerCount: existingChurchgoerCount,
     lastSignIn,
     names,
     servingToday
