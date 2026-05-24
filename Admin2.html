@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-04-20.100
+  UI VERSION TAG: admin2-ui-2026-05-24.101
   For Admin.gs: v2026-04-20.admin100
   PR REFRESH: admin107 follow-up submission
   ============================================================
@@ -224,6 +224,21 @@
     .groupContextBtn:disabled{opacity:.45;cursor:not-allowed}
 
     .sgColor-worship{background:#ffe3e8!important;border-color:rgba(217,60,94,0.35)!important;color:#8a1230!important}
+    .mobileStackCards{display:none}
+    .familyCard{border:1px solid var(--border);border-radius:12px;padding:10px;margin:8px 0;background:#fff}
+    .familyHead{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .eventChip{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:2px 8px;margin:2px;font-size:12px}
+    .mobileActionBtn{min-height:52px}
+    @media (max-width:700px){
+      .kv{grid-template-columns:1fr!important}
+      .miniBtnRow button,.btnMatrix,.btnBack{min-height:52px}
+      .tableWrap{display:none}
+      .mobileStackCards{display:block}
+    }
+    @media (max-width:430px){
+      input,select,textarea,button{font-size:16px}
+      .card{padding:12px}
+    }
     .sgColor-media{background:#e7f0ff!important;border-color:rgba(40,90,200,0.35)!important;color:#1a3d9a!important}
     .sgColor-logistic{background:#f5eadb!important;border-color:rgba(139,94,60,0.35)!important;color:#7a4a22!important}
     .sgColor-support{background:#e7fff2!important;border-color:rgba(26,168,108,0.35)!important;color:#0b6b40!important}
@@ -386,7 +401,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-04-20.100</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-05-24.101</span></div>
     </header>
 
     <main id="app"></main>
@@ -3951,6 +3966,11 @@ function viewAttendanceHome(){
     }
 
     function bindMatrix(){
+      if (!App.from){
+        var d = new Date();
+        d.setDate(d.getDate() - 84);
+        App.from = d.toISOString().slice(0,10);
+      }
       $('from').value = App.from;
       $('to').value = App.to || getTodayYmdUk();
       $('filterWrap').classList.add('hide');
@@ -3970,11 +3990,11 @@ function viewAttendanceHome(){
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showStatus('matrixMsg','warn','WORKING');
+        showStatus('matrixMsg','warn','WORKING / 載入中');
         logAction('MATRIX_LOAD', JSON.stringify({from:from,to:to}), 'matrix');
 
         callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
-          if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席矩陣', en:'Unable to load attendance matrix.'}); return; }
 
           clear('matrixMsg');
           if(!res.events || !res.events.length){
@@ -3989,14 +4009,14 @@ function viewAttendanceHome(){
           $('filterLive').value = '';
           $('filterLive').oninput = function(){ applyMatrixFilter(String($('filterLive').value||'').trim()); };
         }).catch(function(err){
-          showErr('matrixMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('matrixMsg', err || {code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席矩陣', en:'Unable to load attendance matrix.'});
         });
       }
 
       function safeClassId(id){ return String(id||'').replace(/[^A-Za-z0-9]/g,'_'); }
 
       function renderMatrixTable(res){
-        var events = res.events || [];
+        var events = (res.events || []).map(function(e){ return (typeof e==='string') ? {eventKey:e,label:eventDateYmdFromKey(e)||e} : e; });
         var members = res.members || [];
         var attended = res.attended || {};
 
@@ -4018,15 +4038,15 @@ function viewAttendanceHome(){
         html += '</tr></thead><tbody>';
 
         for(var r=0;r<events.length;r++){
-          var ev = events[r];
-          var ymd = eventDateYmdFromKey(ev) || ev;
+          var ev = events[r].eventKey;
+          var ymd = events[r].label || eventDateYmdFromKey(ev) || ev;
           html += '<tr>';
           html += '<td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(ymd)+'</span></td>';
 
           for(var c=0;c<members.length;c++){
             var mid = members[c].id;
             var cid2 = safeClassId(mid);
-            var tick = (attended[mid] && attended[mid][ev]) ? '✅' : '';
+            var tick = attended[ev+'|'+mid] ? '✅' : '';
             var isAway = !!(res.away && res.away[mid] && res.away[mid][ev]);
             var mark = tick || (isAway ? '🏖️ Holiday' : '');
             html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+mark+'</span></td>'; 
@@ -4035,6 +4055,7 @@ function viewAttendanceHome(){
         }
 
         html += '</tbody></table></div>';
+        html += renderMatrixCards_(res, events);
         $('matrixOut').innerHTML = html;
 
         // member clicks
@@ -4052,6 +4073,26 @@ function viewAttendanceHome(){
             openEventStatsModal(ev);
           };
         });
+      }
+      function renderMatrixCards_(res, events){
+        var families = Array.isArray(res.families) ? res.families : [];
+        if (!families.length) return '';
+        var out = '<div class="mobileStackCards">';
+        families.forEach(function(f){
+          out += '<div class="familyCard"><div class="familyHead"><b>'+escapeHtml(f.displayLabel||f.familyKey||'')+'</b><span class="small">'+escapeHtml(String((f.summary&&f.summary.memberCount)||0))+'人 / members</span></div>';
+          (f.members||[]).forEach(function(m){
+            out += '<div style="margin-top:8px"><div><b>'+escapeHtml(m.nameZh||m.nameEn||m.id)+'</b> <span class="small">'+escapeHtml(m.id)+'</span></div><div>';
+            events.forEach(function(ev){
+              var k = ev.eventKey;
+              var mark = (m.attendedByEvent && m.attendedByEvent[k]) ? '✅' : '—';
+              out += '<span class="eventChip">'+escapeHtml((ev.label||k).replace('SundayService_',''))+': '+mark+'</span>';
+            });
+            out += '</div></div>';
+          });
+          out += '</div>';
+        });
+        out += '</div>';
+        return out;
       }
 
       function applyMatrixFilter(text){
