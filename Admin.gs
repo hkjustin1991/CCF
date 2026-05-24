@@ -1565,26 +1565,27 @@ function api_admin_period_stats(token, fromDate, toDate){
  * - includes low attendance flag
  */
 function api_admin_matrix(token, fromDate, toDate, q){
-  const s = admin_requireSession_(token);
-  if (!s.ok) return s;
-  const glBlock = admin_requireNonGl_(s.actor);
-  if (glBlock) return glBlock;
+  try{
+    const s = admin_requireSession_(token);
+    if (!s.ok) return s;
+    const glBlock = admin_requireNonGl_(s.actor);
+    if (glBlock) return glBlock;
 
-  const range = admin_validateRange_(s.actor, fromDate, toDate);
-  if (!range.ok) return range;
+    const range = admin_validateRange_(s.actor, fromDate, toDate);
+    if (!range.ok) return range;
 
   const query = String(q||'').trim();
   const qU = query.toUpperCase();
   const qL = query.toLowerCase();
 
-  const check = admin_getCheckinsDataCached_();
-  if (!check.ok) return check;
+    const check = admin_getCheckinsDataCached_();
+    if (!check || !check.ok) return check || { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席資料', en:'Unable to load attendance data.' };
 
   const evSet = new Set();
   const attendanceSet = {};
   const attendeeIds = new Set();
 
-  for (const r of check.rows){
+  for (const r of (Array.isArray(check.rows) ? check.rows : [])){
     const ev = r.eventKey;
     if (!admin_isSundayServiceKey_(ev)) continue;
 
@@ -1606,12 +1607,13 @@ function api_admin_matrix(token, fromDate, toDate, q){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
-  const mi = admin_getMembersIndex_();
-  const flags = admin_getLowAttendanceFlagsCached_();
+  const mi = admin_getMembersIndex_() || { byId:{} };
+  const flags = admin_getLowAttendanceFlagsCached_() || { flagById:{} };
+  const memberIndexById = mi.byId || {};
 
   const members = [];
   for (const id of attendeeIds){
-    const m = mi.byId[id];
+    const m = memberIndexById[id];
     if (!m) continue;
 
     const st = admin_normStatus_(m.status);
@@ -1633,12 +1635,9 @@ function api_admin_matrix(token, fromDate, toDate, q){
   }
 
   members.sort((a,b)=> a.id.localeCompare(b.id));
-  const memberById = {};
-  members.forEach(function(m){ memberById[m.id] = m; });
-
   const familiesByKey = {};
   members.forEach(function(m){
-    const src = mi.byId[m.id] || {};
+    const src = memberIndexById[m.id] || {};
     const familyIdRaw = String(src.familyId || src.FamilyID || '').trim();
     const familyKey = familyIdRaw ? familyIdRaw : ('INDIVIDUAL_' + m.id);
     if (!familiesByKey[familyKey]){
@@ -1726,6 +1725,9 @@ function api_admin_matrix(token, fromDate, toDate, q){
     families: familyList,
     totals: { eventCount: events.length, familyCount: familyList.length, memberCount: members.length, checkinCount: Object.keys(attendanceSet).length }
   };
+  }catch(e){
+    return { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'出席矩陣載入失敗', en:'Attendance matrix load failed.', detail:String(e&&e.message||e) };
+  }
 }
 
 /**
