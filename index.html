@@ -2286,8 +2286,9 @@ if (btnC) {
           box.innerHTML =
             '<div class="kv">' +
               '<div>Event</div><div>'+escapeHtml(res.eventKey)+'</div>' +
-              '<div>已簽到 / Checked-in</div><div><span class="big">'+escapeHtml(res.checkedInCount)+'</span></div>' +
-              '<div>新朋友 / New</div><div><span class="big">'+escapeHtml(res.newCount||0)+'</span></div>' +
+              '<div>總出席人數 / Total attendance</div><div><span class="big">'+escapeHtml(res.totalAttendance!=null?res.totalAttendance:res.checkedInCount||0)+'</span></div>' +
+              '<div>新朋友 / New friends</div><div><span class="big">'+escapeHtml(res.newFriendCount!=null?res.newFriendCount:res.newCount||0)+'</span></div>' +
+              '<div>曾出席／恆常出席者 / Existing churchgoers</div><div><span class="big">'+escapeHtml(res.existingChurchgoerCount!=null?res.existingChurchgoerCount:Math.max(0,(res.checkedInCount||0)-(res.newCount||0)))+'</span></div>' +
             '</div>' +
             last +
             newFriendsHtml;

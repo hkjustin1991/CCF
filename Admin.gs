@@ -1581,7 +1581,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
   if (!check.ok) return check;
 
   const evSet = new Set();
-  const attended = {};
+  const attendanceSet = {};
   const attendeeIds = new Set();
 
   for (const r of check.rows){
@@ -1598,8 +1598,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
     evSet.add(ev);
     attendeeIds.add(mid);
 
-    if (!attended[mid]) attended[mid] = {};
-    attended[mid][ev] = 1;
+    attendanceSet[ev + '|' + mid] = 1;
   }
 
   const events = Array.from(evSet).sort((a,b)=>{
@@ -1634,6 +1633,34 @@ function api_admin_matrix(token, fromDate, toDate, q){
   }
 
   members.sort((a,b)=> a.id.localeCompare(b.id));
+  const memberById = {};
+  members.forEach(function(m){ memberById[m.id] = m; });
+
+  const familiesByKey = {};
+  members.forEach(function(m){
+    const src = mi.byId[m.id] || {};
+    const familyIdRaw = String(src.familyId || src.FamilyID || '').trim();
+    const familyKey = familyIdRaw ? familyIdRaw : ('INDIVIDUAL_' + m.id);
+    if (!familiesByKey[familyKey]){
+      familiesByKey[familyKey] = {
+        familyKey: familyKey,
+        familyId: familyIdRaw || '',
+        displayLabel: familyIdRaw ? ('Family ' + familyIdRaw) : 'Individual',
+        members: [],
+        summary: { memberCount:0, attendanceCount:0, possibleCount:0, percent:0 }
+      };
+    }
+    const letter = String(src.memberLetter || src.MemberLetter || '').trim();
+    familiesByKey[familyKey].members.push({
+      id: m.id,
+      memberLetter: letter,
+      nameZh: m.nameZh || '',
+      nameEn: m.nameEn || '',
+      status: String(src.status || ''),
+      lowFlag: !!m.lowFlag,
+      attendedByEvent: {}
+    });
+  });
 
   const away = {};
   const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
@@ -1657,15 +1684,47 @@ function api_admin_matrix(token, fromDate, toDate, q){
     });
   });
 
-  admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length}), 'matrix');
+  const familyList = Object.keys(familiesByKey).map(function(k){ return familiesByKey[k]; });
+  familyList.forEach(function(fam){
+    fam.members.sort(function(a,b){
+      const la = String(a.memberLetter||'').trim();
+      const lb = String(b.memberLetter||'').trim();
+      if (la && lb && la !== lb) return la.localeCompare(lb);
+      if (la && !lb) return -1;
+      if (!la && lb) return 1;
+      const na = (a.nameZh || a.nameEn || a.id);
+      const nb = (b.nameZh || b.nameEn || b.id);
+      return String(na).localeCompare(String(nb));
+    });
+    var attendedCount = 0;
+    fam.members.forEach(function(m){
+      events.forEach(function(ev){
+        const hit = !!attendanceSet[ev + '|' + m.id];
+        if (hit) attendedCount++;
+        m.attendedByEvent[ev] = hit;
+      });
+    });
+    const possible = fam.members.length * events.length;
+    fam.summary = {
+      memberCount: fam.members.length,
+      attendanceCount: attendedCount,
+      possibleCount: possible,
+      percent: possible ? Math.round((attendedCount / possible) * 1000) / 10 : 0
+    };
+  });
+  familyList.sort(function(a,b){ return String(a.familyKey||'').localeCompare(String(b.familyKey||'')); });
+
+  admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length, families:familyList.length}), 'matrix');
 
   return {
     ok:true,
     range:{ from: admin_fmtYmd_(range.from), to: admin_fmtYmd_(range.to) },
-    events: events,
+    events: events.map(function(ev){ return { eventKey:ev, dateYmd: admin_fmtYmd_(admin_eventDateFromKey_(ev) || new Date()), label: ev.replace('SundayService_','') }; }),
     members: members,
-    attended: attended,
-    away: away
+    attended: attendanceSet,
+    away: away,
+    families: familyList,
+    totals: { eventCount: events.length, familyCount: familyList.length, memberCount: members.length, checkinCount: Object.keys(attendanceSet).length }
   };
 }
 
