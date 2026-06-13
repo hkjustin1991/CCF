@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin112
- * CHANGELOG: native CCF worship diagnostics and sermon import date/header hardening.
+ * v2026-06-13.admin113
+ * CHANGELOG: worship v113 diagnostics display and defensive preview guard.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin112';
+const ADMIN_VERSION = '2026-06-13.admin113';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
