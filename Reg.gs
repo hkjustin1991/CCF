@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg108
- * CHANGELOG: worship import public-link fallback, upload fix, and progress messaging.
+ * v2026-06-13.reg109
+ * CHANGELOG: worship upload multi-sheet header detection and clearer external Google Sheet permission errors.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg108';
+const REG_VERSION = '2026-06-13.reg109';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2796,18 +2796,20 @@ function worshipReadUploadedSpreadsheetFormat_(file){
   try{
     const bytes = Utilities.base64Decode(b64);
     if (/\.(csv)$/i.test(lower) || /csv/i.test(mime)){
-      return { ok:true, sheetName:name || 'CSV upload', values:worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), ',') };
+      const values = worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), ',');
+      return { ok:true, sheetName:name || 'CSV upload', values:values, sheets:[{ sheetName:name || 'CSV upload', values:values }] };
     }
     if (/\.(tsv|txt)$/i.test(lower)){
-      return { ok:true, sheetName:name || 'TSV upload', values:worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), '\t') };
+      const values = worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), '\t');
+      return { ok:true, sheetName:name || 'TSV upload', values:values, sheets:[{ sheetName:name || 'TSV upload', values:values }] };
     }
     if (!/\.xlsx$/i.test(lower)) return worshipError_('E_WORSHIP_UNSUPPORTED_UPLOAD','只支援 .xlsx、.csv 或 .tsv 匯入檔案','Only .xlsx, .csv or .tsv upload files are supported.', name || mime);
     const blob = Utilities.newBlob(bytes, 'application/zip', name || 'worship.xlsx');
     const parts = Utilities.unzip(blob);
     const byName = {};
     parts.forEach(function(part){ byName[String(part.getName()).replace(/^\//,'')] = part; });
-    const sheetPart = byName['xl/worksheets/sheet1.xml'] || Object.keys(byName).filter(function(k){ return /^xl\/worksheets\/sheet\d+\.xml$/.test(k); }).sort().map(function(k){ return byName[k]; })[0];
-    if (!sheetPart) return worshipError_('E_WORSHIP_INVALID_FORMAT','Excel 檔案沒有工作表','Excel file has no worksheet.', name);
+    const sheetKeys = Object.keys(byName).filter(function(k){ return /^xl\/worksheets\/sheet\d+\.xml$/.test(k); }).sort(function(a,b){ return Number((a.match(/sheet(\d+)/)||[,0])[1]) - Number((b.match(/sheet(\d+)/)||[,0])[1]); });
+    if (!sheetKeys.length) return worshipError_('E_WORSHIP_INVALID_FORMAT','Excel 檔案沒有工作表','Excel file has no worksheet.', name);
     const shared = [];
     if (byName['xl/sharedStrings.xml']){
       const sx = byName['xl/sharedStrings.xml'].getDataAsString('UTF-8');
@@ -2816,29 +2818,32 @@ function worshipReadUploadedSpreadsheetFormat_(file){
         shared.push(text);
       });
     }
-    const xml = sheetPart.getDataAsString('UTF-8');
-    const rows = [];
-    (xml.match(/<row[\s\S]*?<\/row>/g) || []).forEach(function(rowXml){
-      const row = [];
-      (rowXml.match(/<c[\s\S]*?<\/c>/g) || []).forEach(function(cXml){
-        const ref = (cXml.match(/\br="([A-Z]+)\d+"/) || [,''])[1];
-        const idx = ref ? worshipColumnLettersToIndex_(ref) : (row.length + 1);
-        const type = (cXml.match(/\bt="([^"]+)"/) || [,''])[1];
-        let v = '';
-        if (type === 'inlineStr'){
-          v = (cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/) || [,''])[1];
-          v = worshipDecodeXml_(v);
-        } else {
-          v = (cXml.match(/<v[^>]*>([\s\S]*?)<\/v>/) || [,''])[1];
-          if (type === 's') v = shared[Number(v)] || '';
-          else v = worshipDecodeXml_(v);
-        }
-        row[idx - 1] = String(v || '').trim();
+    const sheets = sheetKeys.map(function(key){
+      const xml = byName[key].getDataAsString('UTF-8');
+      const rows = [];
+      (xml.match(/<row[\s\S]*?<\/row>/g) || []).forEach(function(rowXml){
+        const row = [];
+        (rowXml.match(/<c[\s\S]*?<\/c>/g) || []).forEach(function(cXml){
+          const ref = (cXml.match(/\br="([A-Z]+)\d+"/) || [,''])[1];
+          const idx = ref ? worshipColumnLettersToIndex_(ref) : (row.length + 1);
+          const type = (cXml.match(/\bt="([^"]+)"/) || [,''])[1];
+          let v = '';
+          if (type === 'inlineStr'){
+            v = (cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/) || [,''])[1];
+            v = worshipDecodeXml_(v);
+          } else {
+            v = (cXml.match(/<v[^>]*>([\s\S]*?)<\/v>/) || [,''])[1];
+            if (type === 's') v = shared[Number(v)] || '';
+            else v = worshipDecodeXml_(v);
+          }
+          row[idx - 1] = String(v || '').trim();
+        });
+        if (row.some(function(x){ return String(x||'').trim(); })) rows.push(row.map(function(x){ return x || ''; }));
       });
-      if (row.some(function(x){ return String(x||'').trim(); })) rows.push(row.map(function(x){ return x || ''; }));
-    });
-    if (!rows.length) return worshipError_('E_WORSHIP_INVALID_FORMAT','Excel 檔案沒有可匯入資料','Excel file has no importable rows.', name);
-    return { ok:true, sheetName:name || 'Excel upload', values:rows };
+      return { sheetName:key.replace(/^xl\/worksheets\//,''), values:rows };
+    }).filter(function(sh){ return sh.values && sh.values.length; });
+    if (!sheets.length) return worshipError_('E_WORSHIP_INVALID_FORMAT','Excel 檔案沒有可匯入資料','Excel file has no importable rows.', name);
+    return { ok:true, sheetName:sheets[0].sheetName, values:sheets[0].values, sheets:sheets };
   }catch(e){ return worshipError_('E_WORSHIP_UPLOAD_PARSE_FAILED','匯入檔案解析失敗','Uploaded file parsing failed.', String(e && e.message || e)); }
 }
 
@@ -2854,7 +2859,7 @@ function worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid){
       const values = worshipParseDelimitedValues_(text, ',');
       if (values && values.length) return { ok:true, sheetName:'CSV export', gid:gid, values:values, via:'PUBLIC_CSV_EXPORT' };
     }
-    return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法直接讀取 Google Sheet，請檢查共享權限，或改用檔案上載','Could not read Google Sheet directly; check sharing permissions or use file upload.', 'SpreadsheetApp and CSV export failed. HTTP ' + code);
+    return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法直接讀取 Google Sheet，請檢查共享權限，或改用檔案上載','Could not read Google Sheet directly; check sharing permissions or use file upload.', (code === 401 || code === 403 ? 'Google returned HTTP ' + code + ': sheet is not publicly exportable or not shared with the web app owner. Please upload .xlsx/.csv/.tsv, publish/share the sheet, or export from Google Sheets first.' : 'SpreadsheetApp and CSV export failed. HTTP ' + code));
   }catch(e){ return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法直接讀取 Google Sheet，請檢查共享權限，或改用檔案上載','Could not read Google Sheet directly; check sharing permissions or use file upload.', String(e && e.message || e)); }
 }
 
@@ -2867,48 +2872,78 @@ function worshipReadExistingSheetFormat_(spreadsheetId, sheetNameOrGid){
 }
 
 function worshipHeaderKey_(h){
-  const n = worshipNormalizeAlias_(h).replace(/\s+/g,'');
-  if (/^(DATE|日期)$/.test(n)) return 'Date';
-  if (/^(EVENTKEY|EVENT|活動)$/.test(n)) return 'EventKey';
-  if (/(主領|LEAD)/.test(n)) return 'Worship_Lead';
-  if (/(和唱|SINGER|VOCAL)/.test(n)) return 'Worship_Singer';
-  if (/(司琴|PIANIST|KEYS)/.test(n)) return 'Worship_Pianist';
+  const n = worshipNormalizeAlias_(h).replace(/[\s\-_/／\\:：()（）\[\]【】.。]+/g,'');
+  if (/^(DATE|日期|SERVICE日期|SERVICEDATE|SUNDAY|SUNDAYDATE|主日|主日日期|崇拜日期|崇拜日|聚會日期)$/.test(n)) return 'Date';
+  if (/^(EVENTKEY|EVENT|活動|SERVICE|SERVICEKEY)$/.test(n)) return 'EventKey';
+  if (/(主領|領詩|敬拜主領|敬拜領袖|敬拜LEADER|WORSHIPLEADER|LEAD)/.test(n)) return 'Worship_Lead';
+  if (/(和唱|和音|歌手|SINGER|VOCAL|BACKING)/.test(n)) return 'Worship_Singer';
+  if (/(司琴|琴|PIANIST|PIANO|KEYS|KEYBOARD)/.test(n)) return 'Worship_Pianist';
   if (/(鼓手|鼓|DRUM|DRUMMER)/.test(n)) return 'Worship_Drum';
-  if (/(樂器|INSTRUMENT)/.test(n)) return 'Worship_Instrument';
+  if (/(樂器|樂手|結他|吉他|GUITAR|BASS|INSTRUMENT)/.test(n)) return 'Worship_Instrument';
   const sec = /(敬拜|WORSHIP|MAIN).*1/.test(n) ? 'WORSHIP_MAIN_1' : /(敬拜|WORSHIP|MAIN).*2/.test(n) ? 'WORSHIP_MAIN_2' : /(回應|RESPONSE).*1/.test(n) ? 'WORSHIP_RESPONSE_1' : /(回應|RESPONSE).*2/.test(n) ? 'WORSHIP_RESPONSE_2' : '';
   if (sec){
     if (/(KEY|調)/.test(n)) return sec + '.songKey';
     if (/CAPO/.test(n)) return sec + '.capo';
-    if (/(VERSION|版本|NOTE|備註)/.test(n)) return sec + '.versionNote';
-    if (/(LINK|YOUTUBE|CHORD|URL|連結)/.test(n)) return sec + '.linkUrl';
+    if (/(VERSION|版本|NOTE|備註|備忘)/.test(n)) return sec + '.versionNote';
+    if (/(LINK|YOUTUBE|CHORD|URL|連結|譜)/.test(n)) return sec + '.linkUrl';
     return sec + '.songTitle';
   }
   return '';
 }
 
-function worshipRowsFromValues_(values){
-  let headerRow = -1, map = {};
-  for (let r=0; r<Math.min(values.length, 10); r++){
-    const temp = {};
-    (values[r]||[]).forEach(function(h, c){ const k = worshipHeaderKey_(h); if (k) temp[k] = c; });
-    if (temp.EventKey || temp.Date || temp.Worship_Lead || temp.Worship_Singer){ headerRow = r; map = temp; break; }
+function worshipDateCellToEventKey_(value){
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^SundayService_\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{5}(\.\d+)?$/.test(raw)){
+    const days = Number(raw);
+    if (days > 20000 && days < 80000){
+      const dt = new Date(Math.round((days - 25569) * 86400000));
+      return 'SundayService_' + Utilities.formatDate(dt, 'UTC', 'yyyy-MM-dd');
+    }
   }
-  if (headerRow < 0) return worshipError_('E_WORSHIP_INVALID_FORMAT','找不到標題列','Header row not found');
+  const ymd = raw.match(/(\d{4})\s*[-\/年.]\s*(\d{1,2})\s*[-\/月.]\s*(\d{1,2})/);
+  const dmy = raw.match(/(^|\D)(\d{1,2})\s*[-\/.]\s*(\d{1,2})\s*[-\/.]\s*(\d{2,4})(\D|$)/);
+  if (ymd) return 'SundayService_' + ymd[1] + '-' + ('0'+ymd[2]).slice(-2) + '-' + ('0'+ymd[3]).slice(-2);
+  if (dmy) return 'SundayService_' + (String(dmy[4]).length === 2 ? '20'+dmy[4] : dmy[4]) + '-' + ('0'+dmy[3]).slice(-2) + '-' + ('0'+dmy[2]).slice(-2);
+  return '';
+}
+
+function worshipRowsFromValues_(values){
+  values = Array.isArray(values) ? values : [];
+  let headerRow = -1, map = {}, bestScore = -1, best = null;
+  const maxScan = Math.min(values.length, 80);
+  for (let r=0; r<maxScan; r++){
+    const temp = {};
+    (values[r]||[]).forEach(function(h, c){ const k = worshipHeaderKey_(h); if (k && temp[k] === undefined) temp[k] = c; });
+    const keys = Object.keys(temp);
+    const score = keys.reduce(function(n,k){
+      if (k === 'Date' || k === 'EventKey') return n + 3;
+      if (/^Worship_/.test(k)) return n + 2;
+      if (/^WORSHIP_/.test(k)) return n + 1;
+      return n;
+    }, 0);
+    if (score > bestScore){ bestScore = score; best = { row:r, map:temp, keys:keys }; }
+    if ((temp.EventKey || temp.Date) && keys.some(function(k){ return /^Worship_|^WORSHIP_/.test(k); }) && score >= 5){ headerRow = r; map = temp; break; }
+  }
+  if (headerRow < 0 && best && bestScore >= 4 && best.keys.some(function(k){ return /^Worship_|^WORSHIP_/.test(k); })){
+    headerRow = best.row;
+    map = best.map;
+    if (map.Date === undefined && map.EventKey === undefined) map.Date = 0;
+  }
+  if (headerRow < 0){
+    const sample = values.slice(0, 12).map(function(row, i){ return (i+1) + ': ' + (row || []).slice(0, 12).join(' | '); }).join('\n');
+    return worshipError_('E_WORSHIP_INVALID_FORMAT','找不到標題列','Header row not found', sample || 'No visible rows');
+  }
   const out = [];
   for (let r=headerRow+1; r<values.length; r++){
     const row = values[r] || [];
     const o = { _rowNumber:r+1 };
     Object.keys(map).forEach(function(k){ o[k] = String(row[map[k]] || '').trim(); });
-    if (!o.EventKey && o.Date){
-      const rawDate = String(o.Date);
-      const ymd = rawDate.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
-      const dmy = rawDate.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
-      if (ymd) o.EventKey = 'SundayService_' + ymd[1] + '-' + ('0'+ymd[2]).slice(-2) + '-' + ('0'+ymd[3]).slice(-2);
-      else if (dmy) o.EventKey = 'SundayService_' + (String(dmy[3]).length === 2 ? '20'+dmy[3] : dmy[3]) + '-' + ('0'+dmy[2]).slice(-2) + '-' + ('0'+dmy[1]).slice(-2);
-    }
+    if (!o.EventKey && o.Date) o.EventKey = worshipDateCellToEventKey_(o.Date);
     if (Object.keys(o).some(function(k){ return k.charAt(0) !== '_' && String(o[k]||'').trim(); })) out.push(o);
   }
-  return { ok:true, rows:out };
+  return { ok:true, rows:out, headerRow:headerRow + 1 };
 }
 
 function worshipImportParseInput_(input){
@@ -2916,10 +2951,17 @@ function worshipImportParseInput_(input){
   if (input && typeof input === 'object'){
     const upload = worshipReadUploadedSpreadsheetFormat_(input);
     if (!upload.ok) return upload;
-    const uploadRows = worshipRowsFromValues_(upload.values);
-    if (!uploadRows.ok) return uploadRows;
-    uploadRows.source = { uploadName:String(input.name || input.filename || ''), sheetName:upload.sheetName || '', via:'UPLOAD' };
-    return uploadRows;
+    const sheets = upload.sheets && upload.sheets.length ? upload.sheets : [{ sheetName:upload.sheetName || '', values:upload.values || [] }];
+    let best = null, firstError = null;
+    sheets.forEach(function(sh){
+      const parsed = worshipRowsFromValues_(sh.values || []);
+      if (parsed.ok){
+        parsed.source = { uploadName:String(input.name || input.filename || ''), sheetName:sh.sheetName || '', via:'UPLOAD' };
+        if (!best || (parsed.rows || []).length > (best.rows || []).length) best = parsed;
+      } else if (!firstError) firstError = parsed;
+    });
+    if (!best) return firstError || worshipError_('E_WORSHIP_INVALID_FORMAT','找不到標題列','Header row not found');
+    return best;
   }
   const parsed = worshipParseSpreadsheetUrlOrId_(input);
   if (!parsed.ok) return parsed;
