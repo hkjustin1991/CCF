@@ -1,4 +1,4 @@
-<!-- START: RotaPublic public serving rota screen -->
+<!-- START: RotaPublic public serving rota screen | UI VERSION rota-ui-2026-06-13.102 | CHANGELOG: next-year date labels/version alignment -->
 <!doctype html>
 <html>
   <head>
@@ -349,9 +349,17 @@
           header.push('<th class="'+gcls+'">'+esc(State.lang === 'zh' ? (p.labelZh || p.key || '') : (p.labelEn || p.key || ''))+'</th>');
         });
 
+        function rotaDateLabel_(ymd){
+          var m = String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          if(!m) return String(ymd||'');
+          var y=Number(m[1]), mo=Number(m[2]), d=Number(m[3]);
+          var thisYear=(new Date()).getFullYear();
+          var en=new Date(Date.UTC(y,mo-1,d)).toLocaleString('en',{month:'short', day:'numeric', year:(y!==thisYear?'numeric':undefined)});
+          return (y!==thisYear ? (y+'年') : '') + mo+'月'+d+'日 / '+en;
+        }
         var body = rows.map(function(r){
           var cells = [
-            '<td><b>'+esc(r.dateYmd || '')+'</b></td>'
+            '<td><b>'+esc(rotaDateLabel_(r.dateYmd || ''))+'</b></td>'
           ];
           if (State.showSermon){
             cells.push('<td>'+esc(r.sermonTitle || '-')+'</td>');

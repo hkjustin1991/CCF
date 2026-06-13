@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-05-24.101
-  For Admin.gs: v2026-04-20.admin100
-  PR REFRESH: admin107 follow-up submission
+  UI VERSION TAG: admin2-ui-2026-06-13.102
+  For Admin.gs: v2026-06-13.admin102
+  CHANGELOG: fixed matrix status key/diagnostics, admin boot fallback, handoff recovery, mobile serving cards, and YYYY-MM month ordering.
   ============================================================
   -->
 
@@ -223,6 +223,14 @@
     .groupContextBtn.isSelected{box-shadow:inset 0 0 0 2px #0d1b3d}
     .groupContextBtn:disabled{opacity:.45;cursor:not-allowed}
 
+
+    .servingRotaCards{display:grid;gap:10px;margin-top:8px}
+    .servingRotaCard{border:1px solid var(--border);border-radius:14px;background:#fff;padding:10px;box-shadow:0 6px 14px rgba(10,30,80,.05)}
+    .servingRotaDate{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:950;color:#1a3d9a;margin-bottom:8px;flex-wrap:wrap}
+    .servingRotaPosRow{display:grid;grid-template-columns:minmax(96px,32%) 1fr;gap:8px;align-items:start;padding:7px 0;border-top:1px dashed rgba(10,30,80,.12)}
+    .servingRotaPosLabel{font-size:13px;font-weight:900;color:var(--muted)}
+    .servingRotaBubbles{display:flex;gap:6px;flex-wrap:wrap}
+    .closedSlot{background:#f4f6fb!important;color:#6b7280!important;border-color:rgba(10,30,80,.12)!important}
     .sgColor-worship{background:#ffe3e8!important;border-color:rgba(217,60,94,0.35)!important;color:#8a1230!important}
     .mobileStackCards{display:none}
     .familyCard{border:1px solid var(--border);border-radius:12px;padding:10px;margin:8px 0;background:#fff}
@@ -232,7 +240,7 @@
     @media (max-width:700px){
       .kv{grid-template-columns:1fr!important}
       .miniBtnRow button,.btnMatrix,.btnBack{min-height:52px}
-      .tableWrap{display:none}
+      .desktopMatrixTableWrap{display:none}
       .mobileStackCards{display:block}
     }
     @media (max-width:430px){
@@ -401,10 +409,10 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-05-24.101</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.102</span></div>
     </header>
 
-    <main id="app"></main>
+    <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
 
     <footer class="footer">
       <div>© Cantonese Christian Fellowship</div>
@@ -433,7 +441,7 @@
       servingPlanInfoOpenGroups:{},
       servingGroupOverview:null,
       servingPlanTimer:null,
-      servingPlanMobileView:false,
+      servingPlanMobileView:(window.matchMedia && window.matchMedia('(max-width: 820px)').matches),
       selectedServingGroup:null,
       glBackGuardArmed:false,
       worshipMonth:'',
@@ -869,7 +877,8 @@
       var msg = ADMIN_MSG[msgKey];
       if (!msg || !msg.zh || !msg.en){
         console.error('showStatus metadata missing', { targetId:targetId, kind:kind, msgKey:msgKey, detail:detail });
-        msg = { code:'E500', zh:'內部錯誤', en:'Internal error' };
+        msg = { code:'E_UI_MESSAGE_KEY', zh:'介面訊息設定錯誤', en:'UI message key error' };
+        detail = 'Missing ADMIN_MSG key: ' + String(msgKey||'') + (detail ? (' | ' + detail) : '');
       }
       var payload = { code:msg.code, zh:msg.zh, en:msg.en, detailEn:String(detail||'') };
       renderMsg_(targetId, kind, payload);
@@ -1759,21 +1768,27 @@ function eventDateYmdFromKey(ev){
       if (!m) return null;
       return { y:+m[1], m:+m[2], d:+m[3] };
     }
-    function monthLabel_(monthNum){
-      var en = new Date(Date.UTC(2026, monthNum-1, 1)).toLocaleString('en', { month:'short' });
-      return monthNum + '月 / ' + en;
+    function currentUkYear_(){ return Number(getTodayYmdUk().slice(0,4)) || (new Date()).getFullYear(); }
+    function monthLabel_(ym){
+      var m = String(ym||'').match(/^(\d{4})-(\d{2})$/);
+      if (!m) return String(ym||'');
+      var y = Number(m[1]), mo = Number(m[2]);
+      var en = new Date(Date.UTC(y, mo-1, 1)).toLocaleString('en', { month:'short' });
+      var suffix = (y !== currentUkYear_()) ? (y > currentUkYear_() ? '（下年度） / '+en+' '+y+' (next year)' : ' / '+en+' '+y) : (' / '+en+' '+y);
+      return y + '年' + mo + '月' + suffix;
     }
 
     function formatYmdZhEn_(ymd){
       var parts = parseYmdParts_(ymd);
       if (!parts) return String(ymd||'');
-      var en = new Date(Date.UTC(2026, parts.m-1, 1)).toLocaleString('en', { month:'short' });
+      var en = new Date(Date.UTC(parts.y, parts.m-1, 1)).toLocaleString('en', { month:'short' });
       return parts.y + '-' + String(parts.m).padStart(2,'0') + '-' + String(parts.d).padStart(2,'0') + '（' + parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d + '）';
     }
     function eventLabel_(ev){
       var parts = parseYmdParts_(ev.dateYmd);
       if (!parts) return escapeHtml(ev.eventKey||'');
-      var en = new Date(Date.UTC(2026, parts.m-1, 1)).toLocaleString('en', { month:'short' });
+      var en = new Date(Date.UTC(parts.y, parts.m-1, 1)).toLocaleString('en', { month:'short' });
+      if (parts.y !== currentUkYear_()) return parts.y + '年' + parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d + ', ' + parts.y;
       return parts.m + '月' + parts.d + '日 / ' + en + ' ' + parts.d;
     }
 
@@ -2352,8 +2367,14 @@ function eventDateYmdFromKey(ev){
 
       function applyAdminHandoffToken_(handoffToken){
         showStatus('loginMsg','warn','WORKING');
-        callApi('api_admin_login_with_handoff', handoffToken).then(onLoginRes).catch(function(err){
-          showErr('loginMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+        callApi('api_admin_login_with_handoff', handoffToken).then(function(res){
+          if(res && res.ok){
+            try{ localStorage.removeItem('ccf_admin_handoff_token'); }catch(e){}
+            try{ var u = new URL(window.location.href); u.searchParams.delete('handoffToken'); history.replaceState(null, '', u.toString()); }catch(e){}
+          }
+          onLoginRes(res);
+        }).catch(function(err){
+          showErr('loginMsg', err || {code:'E_HANDOFF_BRIDGE_FAILED', zh:'管理登入橋接失敗', en:'Admin handoff bridge failed.'});
         });
       }
 
@@ -2454,7 +2475,6 @@ function eventDateYmdFromKey(ev){
           }catch(e){}
         }
         if(handoffToken){
-          try{ localStorage.removeItem('ccf_admin_handoff_token'); }catch(e){}
           applyAdminHandoffToken_(handoffToken);
           return;
         }
@@ -2645,7 +2665,7 @@ function eventDateYmdFromKey(ev){
       function songRow(ev, sec, label, songMap){
         return '<tr><td>'+label+'</td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'songTitle')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="songTitle" value="'+escapeHtml(g(songMap,sec,'songTitle'))+'" /></td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'songKey')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="songKey" value="'+escapeHtml(g(songMap,sec,'songKey'))+'" /></td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'versionNote')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="versionNote" value="'+escapeHtml(g(songMap,sec,'versionNote'))+'" /></td><td><input id="'+worshipSongInputId_(ev.eventKey, sec, 'linkUrl')+'" data-auto-song="1" data-ev="'+escapeHtml(ev.eventKey)+'" data-sec="'+sec+'" data-key="linkUrl" value="'+escapeHtml(g(songMap,sec,'linkUrl'))+'" /></td></tr>';
       }
-      var monthOpts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+      var monthOpts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(monthLabel_(m))+'</option>'; }).join('');
       var canEditRota = !!perm.canGlRotaEdit;
       var html = ''+
         '<div class="card"><div class="topRow"><div class="big">🎵 敬拜排期 / Worship planning</div><button id="btnWorshipPlanBack" class="btnDanger">⬅️ 返回 / Back</button></div>'+
@@ -2730,7 +2750,7 @@ function eventDateYmdFromKey(ev){
       var months = Array.isArray(payload.months) ? payload.months : [];
       var rows = Array.isArray(payload.rows) ? payload.rows : [];
       var month = String(payload.month || App.sermonMonth || '').trim();
-      var opts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===month?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+      var opts = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===month?' selected':'')+'>'+escapeHtml(monthLabel_(m))+'</option>'; }).join('');
       function parseUi_(row, prefix){
         var status = String(row[prefix+'Status']||'EMPTY').trim() || 'EMPTY';
         var canonical = String(row[prefix+'Canonical']||'').trim();
@@ -3007,14 +3027,14 @@ function viewAttendanceHome(){
           events.forEach(function(ev){
             var parts = parseYmdParts_(ev.dateYmd);
             if (!parts) return;
-            var key = parts.m;
+            var key = String(parts.y) + '-' + String(parts.m).padStart(2,'0');
             if (!monthMap[key]){
               monthMap[key] = [];
               monthKeys.push(key);
             }
             monthMap[key].push(ev);
           });
-          monthKeys.sort(function(a,b){ return a - b; });
+          monthKeys.sort();
           if (!App.servingPlanMonth && monthKeys.length){
             App.servingPlanMonth = monthKeys[0];
           }
@@ -3029,40 +3049,35 @@ function viewAttendanceHome(){
             '</div>';
           var viewEvents = monthMap[App.servingPlanMonth] || [];
           function compactRowsHtml_(groupKey, groupPositions, canEdit){
-            var rows = [];
+            var cards = [];
             viewEvents.forEach(function(ev){
+              var posRows = [];
               groupPositions.forEach(function(pos){
                 var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
                 var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
                 if (!maxSlots || maxSlots < 1) maxSlots = 1;
                 var existingEntries = (cell && cell.length) ? cell : [];
-                var entries = existingEntries.map(function(entry, idx){
-                  var label = formatServingEntry_(entry);
-                  if (!label) return '';
-                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
-                  return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+label+'</button>';
-                }).filter(Boolean);
                 var hasClosed = existingEntries.some(function(entry){
                   var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
                   return isServingClosedToken_(raw);
                 });
+                var entries = existingEntries.map(function(entry, idx){
+                  var label = formatServingEntry_(entry) || (hasClosed ? '不適用 / N/A' : '—');
+                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
+                  var cls = hasClosed ? ' servingPlanEntry closedSlot' : ' servingPlanEntry';
+                  return '<button type="button" class="'+cls+'" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+label+'</button>';
+                }).filter(Boolean);
                 var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
                 if (vacantCount > 0){
                   entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 / Vacant x'+vacantCount+'</button>');
                 }
-                rows.push(
-                  '<tr>'+
-                    '<td class="servingPlanCompactDate">'+escapeHtml(eventLabel_(ev))+'</td>'+
-                    '<td class="servingPlanCompactPos">'+escapeHtml(servingPositionLabel_(pos))+'</td>'+
-                    '<td class="servingPlanCompactAssign">'+entries.join('')+'</td>'+
-                  '</tr>'
-                );
+                if (!entries.length) entries.push('<span class="servingPlanEntry closedSlot">不適用 / N/A</span>');
+                posRows.push('<div class="servingRotaPosRow"><div class="servingRotaPosLabel">'+escapeHtml(servingPositionLabel_(pos))+'</div><div class="servingRotaBubbles">'+entries.join('')+'</div></div>');
               });
+              cards.push('<div class="servingRotaCard"><div class="servingRotaDate"><span>'+escapeHtml(eventLabel_(ev))+'</span>'+(canEdit ? '<button class="btnPeriod btnMini servingEditBtn" data-event="'+escapeHtml(ev.eventKey||'')+'" data-group="'+escapeHtml(groupKey)+'">✏️ 編輯 / Edit</button>' : '')+'</div>'+posRows.join('')+'</div>');
             });
-            if (!rows.length){
-              return '<div class="small">暫無記錄 / No records</div>';
-            }
-            return '<div class="tableWrap"><table class="servingPlanCompactTable"><thead><tr><th>日期 / Date</th><th>崗位 / Position</th><th>安排 / Assignment</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+            if (!cards.length) return '<div class="small">暫無記錄 / No records</div>';
+            return '<div class="servingRotaCards">'+cards.join('')+'</div>';
           }
           var groupSections = groupOrder.map(function(groupKey){
             var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
@@ -3990,7 +4005,7 @@ function viewAttendanceHome(){
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showStatus('matrixMsg','warn','WORKING / 載入中');
+        showStatus('matrixMsg','warn','WORKING');
         logAction('MATRIX_LOAD', JSON.stringify({from:from,to:to}), 'matrix');
 
         callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
@@ -4020,7 +4035,11 @@ function viewAttendanceHome(){
         var members = res.members || [];
         var attended = res.attended || {};
 
-        var html = '<div class="tableWrap"><table><thead><tr>';
+        var preferCards = isMobileLayout_() || (members.length * events.length > 1800);
+        if (members.length * events.length > 1800){ showBox('matrixMsg','warn','結果較大，已使用家庭卡片模式','Large result: using family-card mode.'); }
+        var html = '';
+        if (!preferCards){
+        html += '<div class="tableWrap desktopMatrixTableWrap"><table><thead><tr>';
         html += '<th>Event / 活動</th>';
 
         for(var i=0;i<members.length;i++){
@@ -4055,7 +4074,8 @@ function viewAttendanceHome(){
         }
 
         html += '</tbody></table></div>';
-        html += renderMatrixCards_(res, events);
+        }
+        if (preferCards) html += renderMatrixCards_(res, events, true);
         $('matrixOut').innerHTML = html;
 
         // member clicks
@@ -4074,10 +4094,10 @@ function viewAttendanceHome(){
           };
         });
       }
-      function renderMatrixCards_(res, events){
+      function renderMatrixCards_(res, events, forceShow){
         var families = Array.isArray(res.families) ? res.families : [];
         if (!families.length) return '';
-        var out = '<div class="mobileStackCards">';
+        var out = '<div class="mobileStackCards"'+(forceShow ? ' style="display:block"' : '')+'>';
         families.forEach(function(f){
           out += '<div class="familyCard"><div class="familyHead"><b>'+escapeHtml(f.displayLabel||f.familyKey||'')+'</b><span class="small">'+escapeHtml(String((f.summary&&f.summary.memberCount)||0))+'人 / members</span></div>';
           (f.members||[]).forEach(function(m){
@@ -4103,7 +4123,7 @@ function viewAttendanceHome(){
         for(var i=0;i<members.length;i++){
           var m = members[i];
           var cid = safeClassId(m.id);
-          var hay = (m.id + ' ' + (m.nameZh||'') + ' ' + (m.nameEn||'')).toLowerCase();
+          var hay = (m.id + ' ' + (m.nameZh||'') + ' ' + (m.nameEn||'') + ' ' + (m.familyKey||'')).toLowerCase();
           var show = (!t) || hay.includes(t);
 
           var th = $('matrixOut').querySelector('.mcolh_'+cid);
@@ -5340,8 +5360,13 @@ function viewAttendanceHome(){
       document.body.classList.toggle('serving-rota-mode', !!enabled);
     }
 
+    function isMobileLayout_(){
+      return window.matchMedia && window.matchMedia('(max-width: 820px)').matches;
+    }
+
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
+      if (App.view === 'servingPlan' && App.servingPlanMobileView === false && isMobileLayout_()) App.servingPlanMobileView = true;
       var root = $('app');
       var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan' || App.view === 'sermonInfo');
       setServingRotaMode_(servingRotaMode);
@@ -5382,6 +5407,20 @@ function viewAttendanceHome(){
     /* init */
     App.to = getTodayYmdUk();
     try { render(); } catch (e) { showBootError_(e); }
+    setTimeout(function(){
+      var root = $('app');
+      if(!root) return;
+      var staticBoot = root.getAttribute('data-static-boot') === '1' || !!$('adminStaticBoot');
+      if(staticBoot){
+        try{ render(); }catch(e){ showBootError_(e); }
+      }
+      setTimeout(function(){
+        var r = $('app');
+        if(r && ($('adminStaticBoot') || !String(r.innerHTML||'').trim())){
+          r.innerHTML = '<div class="card"><div class="big err">頁面初始化失敗 / Page initialisation failed</div><div class="small">請重新整理；如仍失敗，請使用一般 QR 登入。<br/>Refresh and try again, or use normal QR login.</div><div class="small">Code: E_ADMIN_BOOT</div></div>';
+        }
+      }, 400);
+    }, 1100);
   </script>
 </body>
 </html>

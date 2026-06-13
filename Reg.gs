@@ -1,7 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-04-20.reg100
+ * v2026-06-13.reg102
+ * CHANGELOG: admin handoff fallback support and rota public version alignment.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -34,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-05-24.reg101';
+const REG_VERSION = '2026-06-13.reg102';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -56,7 +57,7 @@ const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
 const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
 const REG_ADMIN_HANDOFF_CACHE_PREFIX = 'reg_admin_handoff_';
 const REG_ADMIN_HANDOFF_TTL_SECONDS = 90;
-const ROTA_PUBLIC_VERSION = '2026-04-20.rota101';
+const ROTA_PUBLIC_VERSION = '2026-06-13.rota102';
 
 
 /******** Entry ********/
@@ -1021,7 +1022,7 @@ function regGetSelfMemberByIdForAdmin_(memberId){
 function reg_getWorshipAuthFromAdminToken_(token){
   if (typeof admin_requireSession_ !== 'function') return { ok:false, code:'E500', zh:'系統設定錯誤', en:'Admin session helper unavailable.' };
   const s = admin_requireSession_(token);
-  if (!s || !s.ok) return s || { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  if (!s || !s.ok) return s || { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
   const actor = s.actor || {};
   const id = String(actor.id || '').trim().toUpperCase();
   if (!id || id === 'SUPERUSER') return { ok:false, code:'E403', zh:'未能識別會員身份', en:'Unable to identify member account.' };
@@ -1069,23 +1070,23 @@ function api_reg_issue_admin_handoff_public(qrPayload){
 
 function reg_consumeAdminHandoffToken_(handoffToken){
   const token = String(handoffToken || '').trim();
-  if (!token) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  if (!token) return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
 
   const cache = CacheService.getScriptCache();
   const key = REG_ADMIN_HANDOFF_CACHE_PREFIX + token;
   const raw = cache.get(key);
-  if (!raw) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  if (!raw) return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
   cache.remove(key); // one-time use token
 
   let payload = null;
   try{
     payload = JSON.parse(raw);
   }catch(e){
-    return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+    return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
   }
 
   const id = String((payload && payload.memberId) || '').trim().toUpperCase();
-  if (!id) return { ok:false, code:'E401', zh:'登入已過期，請重新登入', en:'Session expired. Please login again.' };
+  if (!id) return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
 
   return { ok:true, memberId:id, source:String((payload && payload.source) || '') };
 }

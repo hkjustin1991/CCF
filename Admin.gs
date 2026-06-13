@@ -1,7 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-04-20.admin100
+ * v2026-06-13.admin102
+ * CHANGELOG: matrix performance/diagnostics, handoff error specificity, serving month-order support.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -47,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-05-24.admin101';
+const ADMIN_VERSION = '2026-06-13.admin102';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -314,7 +315,7 @@ function api_admin_login(input){
 
   const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
   if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
-    return admin_err_('E403','此管理平台只限已授權同工使用','Admin portal for authorised staff only.');
+    return { ok:false, code:'E_HANDOFF_UNAUTHORISED', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
   }
   if (!m.key || String(m.key) !== parsed.key){
     return admin_err_('E418','Key 不相符（可能是舊 QR）','Key mismatch (possibly old QR).');
@@ -337,11 +338,11 @@ function api_admin_login(input){
 function api_admin_login_with_handoff(handoffToken){
   const consume = (typeof reg_consumeAdminHandoffToken_ === 'function')
     ? reg_consumeAdminHandoffToken_(handoffToken)
-    : { ok:false, code:'E500', zh:'系統設定錯誤', en:'Handoff helper unavailable.' };
-  if (!consume || !consume.ok) return consume || admin_err_('E401','登入已過期，請重新登入','Session expired. Please login again.');
+    : { ok:false, code:'E_HANDOFF_BRIDGE_FAILED', zh:'管理登入橋接失敗', en:'Admin handoff bridge failed.' };
+  if (!consume || !consume.ok) return consume || { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
 
   const id = String(consume.memberId || '').trim().toUpperCase();
-  if (!id) return admin_err_('E401','登入已過期，請重新登入','Session expired. Please login again.');
+  if (!id) return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
 
   const mi = admin_getMembersIndex_();
   const m = mi.byId[id];
@@ -368,7 +369,7 @@ function api_admin_login_with_handoff(handoffToken){
 
   const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
   if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
-    return admin_err_('E403','此管理平台只限已授權同工使用','Admin portal for authorised staff only.');
+    return { ok:false, code:'E_HANDOFF_UNAUTHORISED', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
   }
 
   const role = (st === 'STAFF' || st === 'ADMIN') ? st : 'GL';
@@ -1565,6 +1566,7 @@ function api_admin_period_stats(token, fromDate, toDate){
  * - includes low attendance flag
  */
 function api_admin_matrix(token, fromDate, toDate, q){
+  let stage = 'READ_CHECKINS';
   try{
     const s = admin_requireSession_(token);
     if (!s.ok) return s;
@@ -1578,9 +1580,11 @@ function api_admin_matrix(token, fromDate, toDate, q){
   const qU = query.toUpperCase();
   const qL = query.toLowerCase();
 
+    stage = 'READ_CHECKINS';
     const check = admin_getCheckinsDataCached_();
     if (!check || !check.ok) return check || { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席資料', en:'Unable to load attendance data.' };
 
+  stage = 'BUILD_EVENTS';
   const evSet = new Set();
   const attendanceSet = {};
   const attendeeIds = new Set();
@@ -1607,6 +1611,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
+  stage = 'BUILD_MEMBERS';
   const mi = admin_getMembersIndex_() || { byId:{} };
   const flags = admin_getLowAttendanceFlagsCached_() || { flagById:{} };
   const memberIndexById = mi.byId || {};
@@ -1630,11 +1635,21 @@ function api_admin_matrix(token, fromDate, toDate, q){
       nameEn: m.nameEn || '',
       lowFlag: !!flags.flagById[m.id],
       lowFlagZh: flags.flagById[m.id] ? '出席偏低：建議關顧跟進' : '',
-      lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : ''
+      lowFlagEn: flags.flagById[m.id] ? 'Low attendance — consider pastoral care.' : '',
+      familyKey: String((m.familyId || m.FamilyID || '')).trim() || ('INDIVIDUAL_' + m.id)
     });
   }
 
-  members.sort((a,b)=> a.id.localeCompare(b.id));
+  members.sort(function(a,b){
+    const fa = String(a.familyKey||''); const fb = String(b.familyKey||'');
+    if (fa !== fb) return fa.localeCompare(fb);
+    const sa = memberIndexById[a.id] || {}; const sb = memberIndexById[b.id] || {};
+    const la = String(sa.memberLetter || sa.MemberLetter || ''); const lb = String(sb.memberLetter || sb.MemberLetter || '');
+    if (la !== lb) return la.localeCompare(lb);
+    const na = (a.nameZh || a.nameEn || a.id); const nb = (b.nameZh || b.nameEn || b.id);
+    if (na !== nb) return String(na).localeCompare(String(nb));
+    return a.id.localeCompare(b.id);
+  });
   const familiesByKey = {};
   members.forEach(function(m){
     const src = memberIndexById[m.id] || {};
@@ -1661,13 +1676,16 @@ function api_admin_matrix(token, fromDate, toDate, q){
     });
   });
 
+  stage = 'BUILD_AWAY';
   const away = {};
-  const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
+  const memberIds = members.map(function(m){ return m.id; });
+  const currentAwayMap = admin_getAwayPeriodsMap_(memberIds);
+  const historyMap = admin_getAwayHistoryPeriodsMap_(memberIds);
   events.forEach(function(ev){
     const d = admin_eventDateFromKey_(ev);
     if (!d) return;
     members.forEach(function(m){
-      const ap = admin_getAwayPeriodForMember_(m.id);
+      const ap = currentAwayMap[m.id] || {};
       var periods = (ap && ap.periods) ? ap.periods.slice() : [];
       var hist = historyMap[m.id] || [];
       periods = periods.concat(hist);
@@ -1683,6 +1701,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
     });
   });
 
+  stage = 'BUILD_FAMILIES';
   const familyList = Object.keys(familiesByKey).map(function(k){ return familiesByKey[k]; });
   familyList.forEach(function(fam){
     fam.members.sort(function(a,b){
@@ -1726,7 +1745,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
     totals: { eventCount: events.length, familyCount: familyList.length, memberCount: members.length, checkinCount: Object.keys(attendanceSet).length }
   };
   }catch(e){
-    return { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'出席矩陣載入失敗', en:'Attendance matrix load failed.', detail:String(e&&e.message||e) };
+    return { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'出席矩陣載入失敗', en:'Attendance matrix load failed.', detail:String(e&&e.message||e), stage:stage };
   }
 }
 
@@ -4084,7 +4103,7 @@ function admin_verifyReauth_(actor, reauthQrPayload){
   }
 
   if (!(st === 'STAFF' || st === 'ADMIN')){
-    return admin_err_('E403','此管理平台只限已授權同工使用','Admin portal for authorised staff only.');
+    return { ok:false, code:'E_HANDOFF_UNAUTHORISED', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
   }
   return { ok:true, confirmedBy: parsed.id };
 }
