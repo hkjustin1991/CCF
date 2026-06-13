@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg107
- * CHANGELOG: worship import direct-link fallback and upload support.
+ * v2026-06-13.reg108
+ * CHANGELOG: worship import public-link fallback, upload fix, and progress messaging.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg107';
+const REG_VERSION = '2026-06-13.reg108';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2802,7 +2802,7 @@ function worshipReadUploadedSpreadsheetFormat_(file){
       return { ok:true, sheetName:name || 'TSV upload', values:worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), '\t') };
     }
     if (!/\.xlsx$/i.test(lower)) return worshipError_('E_WORSHIP_UNSUPPORTED_UPLOAD','只支援 .xlsx、.csv 或 .tsv 匯入檔案','Only .xlsx, .csv or .tsv upload files are supported.', name || mime);
-    const blob = Utilities.newBlob(bytes, mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name || 'worship.xlsx');
+    const blob = Utilities.newBlob(bytes, 'application/zip', name || 'worship.xlsx');
     const parts = Utilities.unzip(blob);
     const byName = {};
     parts.forEach(function(part){ byName[String(part.getName()).replace(/^\//,'')] = part; });
@@ -2843,8 +2843,9 @@ function worshipReadUploadedSpreadsheetFormat_(file){
 }
 
 function worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid){
-  const gid = /^\d+$/.test(String(sheetNameOrGid||'')) ? String(sheetNameOrGid||'') : '0';
-  const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(String(spreadsheetId||'')) + '/export?format=csv&gid=' + encodeURIComponent(gid);
+  const hasGid = /^\d+$/.test(String(sheetNameOrGid||''));
+  const gid = hasGid ? String(sheetNameOrGid||'') : '';
+  const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(String(spreadsheetId||'')) + '/export?format=csv' + (hasGid ? ('&gid=' + encodeURIComponent(gid)) : '');
   try{
     const resp = UrlFetchApp.fetch(url, { muteHttpExceptions:true, followRedirects:true });
     const code = resp.getResponseCode();
@@ -2858,22 +2859,13 @@ function worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid){
 }
 
 function worshipReadExistingSheetFormat_(spreadsheetId, sheetNameOrGid){
-  try{
-    const ss = SpreadsheetApp.openById(String(spreadsheetId||''));
-    let sh = null;
-    const key = String(sheetNameOrGid||'').trim();
-    if (key){
-      sh = ss.getSheetByName(key);
-      if (!sh && /^\d+$/.test(key)) sh = ss.getSheets().filter(function(s){ return String(s.getSheetId()) === key; })[0] || null;
-    }
-    if (!sh) sh = ss.getSheets()[0];
-    const values = sh.getDataRange().getDisplayValues();
-    if (!values || values.length < 2) return worshipError_('E_WORSHIP_INVALID_FORMAT','試算表沒有足夠資料','Spreadsheet has no importable rows');
-    return { ok:true, sheetName:sh.getName(), gid:String(sh.getSheetId()), values:values, via:'SPREADSHEET_SERVICE' };
-  }catch(e){
-    return worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid);
-  }
+  // User-supplied worship spreadsheets are often owned outside this Apps Script account.
+  // Avoid SpreadsheetApp.openById first because it can throw an unhelpful service-level E500.
+  const publicCsv = worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid);
+  if (publicCsv && publicCsv.ok) return publicCsv;
+  return publicCsv || worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法直接讀取 Google Sheet，請檢查共享權限，或改用檔案上載','Could not read Google Sheet directly; check sharing permissions or use file upload.');
 }
+
 function worshipHeaderKey_(h){
   const n = worshipNormalizeAlias_(h).replace(/\s+/g,'');
   if (/^(DATE|日期)$/.test(n)) return 'Date';

@@ -12,11 +12,11 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.107
-  CHANGELOG: worship direct-link fallback and upload import support.
+  UI VERSION TAG: reg2-ui-2026-06-13.108
+  CHANGELOG: worship import upload fix and progress messaging.
   ============================================================
 
-  Changes (reg2-ui-2026-06-13.107): worship Google Sheet import/export with preview table.
+  Changes (reg2-ui-2026-06-13.108): worship Google Sheet import/export with preview table.
   [1] Scan QR -> Self menu with 3 options:
       - Details check/change
       - Attendance check (self only)
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.107</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.108</span></div>
     </header>
 
     <main id="app">
@@ -2355,6 +2355,7 @@ function viewSelfHoliday(m){
         function readWorshipImportInput_(cb){
           var file = (modal.querySelector('#wImportFile').files || [])[0];
           if (!file){ cb(String(modal.querySelector('#wImportSheetUrl').value || '').trim()); return; }
+          var readBox = modal.querySelector('#wImportPreviewBox'); if (readBox) readBox.innerHTML = showBox('warn','讀取檔案中…','Reading file…');
           var reader = new FileReader();
           reader.onload = function(){ cb({ name:file.name, mimeType:file.type, base64:String(reader.result||'').split(',').pop() }); };
           reader.onerror = function(){ var box=modal.querySelector('#wImportPreviewBox'); if(box) box.innerHTML = showBox('err','讀取檔案失敗','Failed to read file'); };
@@ -2363,7 +2364,9 @@ function viewSelfHoliday(m){
         modal.querySelector('#wImportClose').onclick = function(){ closeModal(modal); };
         modal.querySelector('#wImportPreview').onclick = function(){
           modal.querySelector('#wImportCommit').disabled = true;
+          var box0 = modal.querySelector('#wImportPreviewBox'); if (box0) box0.innerHTML = showBox('warn','匯入預覽處理中…','Preparing import preview…');
           readWorshipImportInput_(function(input){
+          var box1 = modal.querySelector('#wImportPreviewBox'); if (box1) box1.innerHTML = showBox('warn','伺服器解析中…','Server is parsing…');
           callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, input).then(function(res){
             var box = modal.querySelector('#wImportPreviewBox');
             if(!res || !res.ok){ if (box) box.innerHTML = showServerErr(res); return; }
@@ -2375,12 +2378,13 @@ function viewSelfHoliday(m){
         };
         modal.querySelector('#wImportCommit').onclick = function(){
           var input = confirmedInput;
-          if (!input){ readWorshipImportInput_(function(latestInput){ callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, latestInput, false).then(function(res){
+          if (!input){ var msgStart0 = worshipMsgEl_(); if (msgStart0) msgStart0.innerHTML = showBox('warn','匯入寫入中…','Committing import…'); readWorshipImportInput_(function(latestInput){ callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, latestInput, false).then(function(res){
             var msgEl = worshipMsgEl_();
             if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
             if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed','<div class="small">Changed: '+escapeHtml(String(res.changed||0))+'</div>');
             closeModal(modal);
           }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); }); }); return; }
+          var msgStart = worshipMsgEl_(); if (msgStart) msgStart.innerHTML = showBox('warn','匯入寫入中…','Committing import…');
           callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, input, false).then(function(res){
             var msgEl = worshipMsgEl_();
             if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }

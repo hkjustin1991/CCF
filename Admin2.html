@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.108
-  For Admin.gs: v2026-06-13.admin108
-  CHANGELOG: worship import upload fallback and sermon .docx import.
+  UI VERSION TAG: admin2-ui-2026-06-13.109
+  For Admin.gs: v2026-06-13.admin109
+  CHANGELOG: worship import upload fix/progress and sermon .docx import.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.108</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.109</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -2753,6 +2753,7 @@ function eventDateYmdFromKey(ev){
         var fileEl = $('adminWorshipImportFile');
         var file = fileEl && fileEl.files ? fileEl.files[0] : null;
         if (!file){ cb(String(($('adminWorshipSheetUrl')||{}).value || '').trim()); return; }
+        var box=$('adminWorshipPreviewBox'); if (box) box.innerHTML = '<div class="msgBox warn">讀取檔案中… / Reading file…</div>';
         var reader = new FileReader();
         reader.onload = function(){ cb({ name:file.name, mimeType:file.type, base64:String(reader.result||'').split(',').pop() }); };
         reader.onerror = function(){ showErr('worshipPlanMsg', { code:'E_WORSHIP_UPLOAD_READ_FAILED', zh:'讀取檔案失敗', en:'Failed to read file.' }); };
@@ -2760,7 +2761,9 @@ function eventDateYmdFromKey(ev){
       }
       if (adminImportBtn) adminImportBtn.onclick = function(){
         if (adminCommitBtn) adminCommitBtn.disabled = true;
+        var box0=$('adminWorshipPreviewBox'); if (box0) box0.innerHTML = '<div class="msgBox warn">匯入預覽處理中… / Preparing import preview…</div>';
         readAdminWorshipImportInput_(function(input){
+        var box1=$('adminWorshipPreviewBox'); if (box1) box1.innerHTML = '<div class="msgBox warn">伺服器解析中… / Server is parsing…</div>';
         callApi('api_admin_worship_import_preview', App.token, input).then(function(res){
           var box = $('adminWorshipPreviewBox');
           if(!res || !res.ok){ if (box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'E_WORSHIP_PREVIEW_FAILED')+'</b><div>'+escapeHtml((res&&res.zh)||'預覽失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Preview failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>'; return; }
@@ -2772,11 +2775,12 @@ function eventDateYmdFromKey(ev){
       };
       if (adminCommitBtn) adminCommitBtn.onclick = function(){
         var input = adminPreviewInput;
-        if (!input){ readAdminWorshipImportInput_(function(latestInput){ callApi('api_admin_worship_import_commit', App.token, latestInput, false).then(function(res){
+        if (!input){ showBox('worshipPlanMsg','warn','匯入寫入中…','Committing import…'); readAdminWorshipImportInput_(function(latestInput){ callApi('api_admin_worship_import_commit', App.token, latestInput, false).then(function(res){
           if(!res || !res.ok){ showErr('worshipPlanMsg', res); return; }
           showBox('worshipPlanMsg','ok','匯入完成','Import completed');
           return loadAdminWorshipPlan_();
         }).catch(function(err){ showErr('worshipPlanMsg', err || {code:'E500', zh:'匯入失敗', en:'Import failed'}); }); }); return; }
+        showBox('worshipPlanMsg','warn','匯入寫入中…','Committing import…');
         callApi('api_admin_worship_import_commit', App.token, input, false).then(function(res){
           if(!res || !res.ok){ showErr('worshipPlanMsg', res); return; }
           showBox('worshipPlanMsg','ok','匯入完成','Import completed');
