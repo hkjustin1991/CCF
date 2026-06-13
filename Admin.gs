@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin107
- * CHANGELOG: sermon .docx import for existing sermon info page.
+ * v2026-06-13.admin108
+ * CHANGELOG: worship import upload fallback and sermon .docx import.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin107';
+const ADMIN_VERSION = '2026-06-13.admin108';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.

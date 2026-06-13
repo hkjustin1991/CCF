@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg106
- * CHANGELOG: worship spreadsheet import/export with Worship_Alias.
+ * v2026-06-13.reg107
+ * CHANGELOG: worship import direct-link fallback and upload support.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg106';
+const REG_VERSION = '2026-06-13.reg107';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2759,6 +2759,104 @@ function worshipParseSpreadsheetUrlOrId_(input){
   return { ok:true, spreadsheetId:id, sheetNameOrGid:gid };
 }
 
+function worshipParseDelimitedValues_(text, delimiter){
+  const raw = String(text || '').replace(/^\uFEFF/, '');
+  if (!raw.trim()) return [];
+  if (delimiter === '\t'){
+    return raw.split(/\r?\n/).filter(function(line){ return String(line||'').trim(); }).map(function(line){ return String(line||'').split('\t').map(function(c){ return String(c||'').trim(); }); });
+  }
+  try{ return Utilities.parseCsv(raw); }catch(e){ return raw.split(/\r?\n/).map(function(line){ return String(line||'').split(','); }); }
+}
+
+function worshipDecodeXml_(value){
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, function(_, n){ return String.fromCharCode(Number(n)); })
+    .replace(/&#x([0-9a-fA-F]+);/g, function(_, n){ return String.fromCharCode(parseInt(n, 16)); });
+}
+
+function worshipColumnLettersToIndex_(letters){
+  const s = String(letters || '').toUpperCase();
+  let n = 0;
+  for (let i=0;i<s.length;i++) n = n * 26 + (s.charCodeAt(i) - 64);
+  return n;
+}
+
+function worshipReadUploadedSpreadsheetFormat_(file){
+  const f = file || {};
+  const name = String(f.name || f.filename || '').trim();
+  const mime = String(f.mimeType || '').trim();
+  const b64 = String(f.base64 || '').replace(/^data:.*?;base64,/, '');
+  if (!b64) return worshipError_('E_WORSHIP_UPLOAD_MISSING','請先選擇匯入檔案','Please choose a file to import.');
+  const lower = name.toLowerCase();
+  try{
+    const bytes = Utilities.base64Decode(b64);
+    if (/\.(csv)$/i.test(lower) || /csv/i.test(mime)){
+      return { ok:true, sheetName:name || 'CSV upload', values:worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), ',') };
+    }
+    if (/\.(tsv|txt)$/i.test(lower)){
+      return { ok:true, sheetName:name || 'TSV upload', values:worshipParseDelimitedValues_(Utilities.newBlob(bytes).getDataAsString('UTF-8'), '\t') };
+    }
+    if (!/\.xlsx$/i.test(lower)) return worshipError_('E_WORSHIP_UNSUPPORTED_UPLOAD','只支援 .xlsx、.csv 或 .tsv 匯入檔案','Only .xlsx, .csv or .tsv upload files are supported.', name || mime);
+    const blob = Utilities.newBlob(bytes, mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name || 'worship.xlsx');
+    const parts = Utilities.unzip(blob);
+    const byName = {};
+    parts.forEach(function(part){ byName[String(part.getName()).replace(/^\//,'')] = part; });
+    const sheetPart = byName['xl/worksheets/sheet1.xml'] || Object.keys(byName).filter(function(k){ return /^xl\/worksheets\/sheet\d+\.xml$/.test(k); }).sort().map(function(k){ return byName[k]; })[0];
+    if (!sheetPart) return worshipError_('E_WORSHIP_INVALID_FORMAT','Excel 檔案沒有工作表','Excel file has no worksheet.', name);
+    const shared = [];
+    if (byName['xl/sharedStrings.xml']){
+      const sx = byName['xl/sharedStrings.xml'].getDataAsString('UTF-8');
+      (sx.match(/<si[\s\S]*?<\/si>/g) || []).forEach(function(si){
+        const text = (si.match(/<t[^>]*>[\s\S]*?<\/t>/g) || []).map(function(t){ return worshipDecodeXml_(t.replace(/<[^>]+>/g, '')); }).join('');
+        shared.push(text);
+      });
+    }
+    const xml = sheetPart.getDataAsString('UTF-8');
+    const rows = [];
+    (xml.match(/<row[\s\S]*?<\/row>/g) || []).forEach(function(rowXml){
+      const row = [];
+      (rowXml.match(/<c[\s\S]*?<\/c>/g) || []).forEach(function(cXml){
+        const ref = (cXml.match(/\br="([A-Z]+)\d+"/) || [,''])[1];
+        const idx = ref ? worshipColumnLettersToIndex_(ref) : (row.length + 1);
+        const type = (cXml.match(/\bt="([^"]+)"/) || [,''])[1];
+        let v = '';
+        if (type === 'inlineStr'){
+          v = (cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/) || [,''])[1];
+          v = worshipDecodeXml_(v);
+        } else {
+          v = (cXml.match(/<v[^>]*>([\s\S]*?)<\/v>/) || [,''])[1];
+          if (type === 's') v = shared[Number(v)] || '';
+          else v = worshipDecodeXml_(v);
+        }
+        row[idx - 1] = String(v || '').trim();
+      });
+      if (row.some(function(x){ return String(x||'').trim(); })) rows.push(row.map(function(x){ return x || ''; }));
+    });
+    if (!rows.length) return worshipError_('E_WORSHIP_INVALID_FORMAT','Excel 檔案沒有可匯入資料','Excel file has no importable rows.', name);
+    return { ok:true, sheetName:name || 'Excel upload', values:rows };
+  }catch(e){ return worshipError_('E_WORSHIP_UPLOAD_PARSE_FAILED','匯入檔案解析失敗','Uploaded file parsing failed.', String(e && e.message || e)); }
+}
+
+function worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid){
+  const gid = /^\d+$/.test(String(sheetNameOrGid||'')) ? String(sheetNameOrGid||'') : '0';
+  const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(String(spreadsheetId||'')) + '/export?format=csv&gid=' + encodeURIComponent(gid);
+  try{
+    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions:true, followRedirects:true });
+    const code = resp.getResponseCode();
+    const text = resp.getContentText('UTF-8') || '';
+    if (code >= 200 && code < 300 && text && !/^\s*</.test(text)){
+      const values = worshipParseDelimitedValues_(text, ',');
+      if (values && values.length) return { ok:true, sheetName:'CSV export', gid:gid, values:values, via:'PUBLIC_CSV_EXPORT' };
+    }
+    return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法直接讀取 Google Sheet，請檢查共享權限，或改用檔案上載','Could not read Google Sheet directly; check sharing permissions or use file upload.', 'SpreadsheetApp and CSV export failed. HTTP ' + code);
+  }catch(e){ return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法直接讀取 Google Sheet，請檢查共享權限，或改用檔案上載','Could not read Google Sheet directly; check sharing permissions or use file upload.', String(e && e.message || e)); }
+}
+
 function worshipReadExistingSheetFormat_(spreadsheetId, sheetNameOrGid){
   try{
     const ss = SpreadsheetApp.openById(String(spreadsheetId||''));
@@ -2771,10 +2869,11 @@ function worshipReadExistingSheetFormat_(spreadsheetId, sheetNameOrGid){
     if (!sh) sh = ss.getSheets()[0];
     const values = sh.getDataRange().getDisplayValues();
     if (!values || values.length < 2) return worshipError_('E_WORSHIP_INVALID_FORMAT','試算表沒有足夠資料','Spreadsheet has no importable rows');
-    return { ok:true, sheetName:sh.getName(), gid:String(sh.getSheetId()), values:values };
-  }catch(e){ return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法開啟 Google Sheet，請檢查權限/連結','Could not open Google Sheet; check sharing/link', String(e && e.message || e)); }
+    return { ok:true, sheetName:sh.getName(), gid:String(sh.getSheetId()), values:values, via:'SPREADSHEET_SERVICE' };
+  }catch(e){
+    return worshipReadSheetByPublicCsvFallback_(spreadsheetId, sheetNameOrGid);
+  }
 }
-
 function worshipHeaderKey_(h){
   const n = worshipNormalizeAlias_(h).replace(/\s+/g,'');
   if (/^(DATE|日期)$/.test(n)) return 'Date';
@@ -2822,6 +2921,14 @@ function worshipRowsFromValues_(values){
 
 function worshipImportParseInput_(input){
   if (Array.isArray(input)) return { ok:true, rows:reg_parseWorshipImportRows_(input) };
+  if (input && typeof input === 'object'){
+    const upload = worshipReadUploadedSpreadsheetFormat_(input);
+    if (!upload.ok) return upload;
+    const uploadRows = worshipRowsFromValues_(upload.values);
+    if (!uploadRows.ok) return uploadRows;
+    uploadRows.source = { uploadName:String(input.name || input.filename || ''), sheetName:upload.sheetName || '', via:'UPLOAD' };
+    return uploadRows;
+  }
   const parsed = worshipParseSpreadsheetUrlOrId_(input);
   if (!parsed.ok) return parsed;
   const read = worshipReadExistingSheetFormat_(parsed.spreadsheetId, parsed.sheetNameOrGid);

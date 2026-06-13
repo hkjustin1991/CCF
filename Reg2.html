@@ -12,11 +12,11 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.106
-  CHANGELOG: improves admin handoff auto navigation and longer token recovery.
+  UI VERSION TAG: reg2-ui-2026-06-13.107
+  CHANGELOG: worship direct-link fallback and upload import support.
   ============================================================
 
-  Changes (reg2-ui-2026-06-13.106): worship Google Sheet import/export with preview table.
+  Changes (reg2-ui-2026-06-13.107): worship Google Sheet import/export with preview table.
   [1] Scan QR -> Self menu with 3 options:
       - Details check/change
       - Attendance check (self only)
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.106</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.107</span></div>
     </header>
 
     <main id="app">
@@ -2347,14 +2347,23 @@ function viewSelfHoliday(m){
         var modal = openModal(
           '<div class="big">匯入 / Import</div>'+
           '<label>Google Sheet URL / ID</label><input id="wImportSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/... 或 spreadsheet ID" />'+
+          '<div class="small">或上載 .xlsx/.csv/.tsv / Or upload .xlsx/.csv/.tsv</div><input id="wImportFile" type="file" accept=".xlsx,.csv,.tsv,text/csv,text/tab-separated-values" />'+
           '<div id="wImportPreviewBox" class="msgBox small">貼上 Google Sheet URL/ID 後按預覽。/ Paste a Google Sheet URL/ID, then preview.</div>'+
           '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">匯入預覽 / Import preview</button><button id="wImportCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
         );
         var confirmedInput = '';
+        function readWorshipImportInput_(cb){
+          var file = (modal.querySelector('#wImportFile').files || [])[0];
+          if (!file){ cb(String(modal.querySelector('#wImportSheetUrl').value || '').trim()); return; }
+          var reader = new FileReader();
+          reader.onload = function(){ cb({ name:file.name, mimeType:file.type, base64:String(reader.result||'').split(',').pop() }); };
+          reader.onerror = function(){ var box=modal.querySelector('#wImportPreviewBox'); if(box) box.innerHTML = showBox('err','讀取檔案失敗','Failed to read file'); };
+          reader.readAsDataURL(file);
+        }
         modal.querySelector('#wImportClose').onclick = function(){ closeModal(modal); };
         modal.querySelector('#wImportPreview').onclick = function(){
-          var input = String(modal.querySelector('#wImportSheetUrl').value || '').trim();
           modal.querySelector('#wImportCommit').disabled = true;
+          readWorshipImportInput_(function(input){
           callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, input).then(function(res){
             var box = modal.querySelector('#wImportPreviewBox');
             if(!res || !res.ok){ if (box) box.innerHTML = showServerErr(res); return; }
@@ -2362,9 +2371,16 @@ function viewSelfHoliday(m){
             if (box) box.innerHTML = (res.hasHardErrors ? showBox('err','預覽有錯誤','Preview has errors') : showBox('ok','預覽完成','Preview ready')) + worshipPreviewTable_(res);
             modal.querySelector('#wImportCommit').disabled = !!res.hasHardErrors;
           }).catch(function(err){ showWorshipErr_('預覽失敗','Preview failed', err); });
+          });
         };
         modal.querySelector('#wImportCommit').onclick = function(){
-          var input = confirmedInput || String(modal.querySelector('#wImportSheetUrl').value || '').trim();
+          var input = confirmedInput;
+          if (!input){ readWorshipImportInput_(function(latestInput){ callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, latestInput, false).then(function(res){
+            var msgEl = worshipMsgEl_();
+            if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
+            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed','<div class="small">Changed: '+escapeHtml(String(res.changed||0))+'</div>');
+            closeModal(modal);
+          }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); }); }); return; }
           callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, input, false).then(function(res){
             var msgEl = worshipMsgEl_();
             if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }

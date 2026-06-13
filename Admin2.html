@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.107
-  For Admin.gs: v2026-06-13.admin107
-  CHANGELOG: sermon .docx import on sermon information page.
+  UI VERSION TAG: admin2-ui-2026-06-13.108
+  For Admin.gs: v2026-06-13.admin108
+  CHANGELOG: worship import upload fallback and sermon .docx import.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.107</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.108</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -2692,6 +2692,7 @@ function eventDateYmdFromKey(ev){
         '<div class="small">月份 / Month</div><select id="worshipMonthSelect">'+(monthOpts||'<option value="">ALL</option>')+'</select>'+
         '<div class="miniBtnRow"><button id="btnAdminWorshipImport" class="btnWorship">匯入預覽 / Import preview</button><button id="btnAdminWorshipCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="btnAdminWorshipExport" class="btnWorship">匯出 / Export</button></div>'+
         '<input id="adminWorshipSheetUrl" placeholder="Google Sheet URL / ID" />'+
+        '<div class="small">或上載 .xlsx/.csv/.tsv / Or upload .xlsx/.csv/.tsv</div><input id="adminWorshipImportFile" type="file" accept=".xlsx,.csv,.tsv,text/csv,text/tab-separated-values" />'+
         '<div id="adminWorshipPreviewBox" class="small"></div>'+
         '<div id="worshipPlanMsg"></div></div>';
       if (!monthEvents.length) return html + '<div class="card"><div class="msgBox warn">此月份沒有敬拜活動 / No worship events in selected month.</div></div>';
@@ -2748,9 +2749,18 @@ function eventDateYmdFromKey(ev){
       var adminCommitBtn = $('btnAdminWorshipCommit');
       var adminExportBtn = $('btnAdminWorshipExport');
       var adminPreviewInput = '';
+      function readAdminWorshipImportInput_(cb){
+        var fileEl = $('adminWorshipImportFile');
+        var file = fileEl && fileEl.files ? fileEl.files[0] : null;
+        if (!file){ cb(String(($('adminWorshipSheetUrl')||{}).value || '').trim()); return; }
+        var reader = new FileReader();
+        reader.onload = function(){ cb({ name:file.name, mimeType:file.type, base64:String(reader.result||'').split(',').pop() }); };
+        reader.onerror = function(){ showErr('worshipPlanMsg', { code:'E_WORSHIP_UPLOAD_READ_FAILED', zh:'讀取檔案失敗', en:'Failed to read file.' }); };
+        reader.readAsDataURL(file);
+      }
       if (adminImportBtn) adminImportBtn.onclick = function(){
-        var input = String(($('adminWorshipSheetUrl')||{}).value || '').trim();
         if (adminCommitBtn) adminCommitBtn.disabled = true;
+        readAdminWorshipImportInput_(function(input){
         callApi('api_admin_worship_import_preview', App.token, input).then(function(res){
           var box = $('adminWorshipPreviewBox');
           if(!res || !res.ok){ if (box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'E_WORSHIP_PREVIEW_FAILED')+'</b><div>'+escapeHtml((res&&res.zh)||'預覽失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Preview failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>'; return; }
@@ -2758,9 +2768,15 @@ function eventDateYmdFromKey(ev){
           if (box) box.innerHTML = (res.hasHardErrors ? '<div class="msgBox err">預覽有錯誤 / Preview has errors</div>' : '<div class="msgBox ok">預覽完成 / Preview ready</div>') + adminWorshipPreviewTable_(res);
           if (adminCommitBtn) adminCommitBtn.disabled = !!res.hasHardErrors;
         }).catch(function(err){ showErr('worshipPlanMsg', err || {code:'E500', zh:'預覽失敗', en:'Preview failed'}); });
+        });
       };
       if (adminCommitBtn) adminCommitBtn.onclick = function(){
-        var input = adminPreviewInput || String(($('adminWorshipSheetUrl')||{}).value || '').trim();
+        var input = adminPreviewInput;
+        if (!input){ readAdminWorshipImportInput_(function(latestInput){ callApi('api_admin_worship_import_commit', App.token, latestInput, false).then(function(res){
+          if(!res || !res.ok){ showErr('worshipPlanMsg', res); return; }
+          showBox('worshipPlanMsg','ok','匯入完成','Import completed');
+          return loadAdminWorshipPlan_();
+        }).catch(function(err){ showErr('worshipPlanMsg', err || {code:'E500', zh:'匯入失敗', en:'Import failed'}); }); }); return; }
         callApi('api_admin_worship_import_commit', App.token, input, false).then(function(res){
           if(!res || !res.ok){ showErr('worshipPlanMsg', res); return; }
           showBox('worshipPlanMsg','ok','匯入完成','Import completed');
