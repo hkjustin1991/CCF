@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin109
- * CHANGELOG: worship import upload fix/progress and sermon .docx import.
+ * v2026-06-13.admin110
+ * CHANGELOG: sermon .docx upload unzip ContentType fix.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin109';
+const ADMIN_VERSION = '2026-06-13.admin110';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -554,7 +554,7 @@ function sermonImportExtractDocx_(file){
   if (name && !/\.docx$/i.test(name)) return sermonImportErr_('SERMON_IMPORT_UNSUPPORTED_FILE_TYPE','只支援 .docx Word 檔案','Only .docx Word files are supported.', name);
   try{
     const bytes = Utilities.base64Decode(b64);
-    const blob = Utilities.newBlob(bytes, mime || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name || 'sermon.docx');
+    const blob = Utilities.newBlob(bytes, 'application/zip', name || 'sermon.docx');
     const files = Utilities.unzip(blob);
     let docXml = '';
     files.forEach(function(part){ if (String(part.getName()).replace(/^\//,'') === 'word/document.xml') docXml = part.getDataAsString('UTF-8'); });
