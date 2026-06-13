@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin105
- * CHANGELOG: delayed handoff-token consume plus matrix diagnostics/monthly PDF UI.
+ * v2026-06-13.admin106
+ * CHANGELOG: worship spreadsheet import/export with Worship_Alias.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin105';
+const ADMIN_VERSION = '2026-06-13.admin106';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.

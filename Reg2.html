@@ -12,11 +12,11 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.105
+  UI VERSION TAG: reg2-ui-2026-06-13.106
   CHANGELOG: improves admin handoff auto navigation and longer token recovery.
   ============================================================
 
-  Changes (reg2-ui2):
+  Changes (reg2-ui-2026-06-13.106): worship Google Sheet import/export with preview table.
   [1] Scan QR -> Self menu with 3 options:
       - Details check/change
       - Attendance check (self only)
@@ -200,9 +200,9 @@
         <div class="title">粵語基督徒團契 會員登記及自助服務平台</div>
         <div class="sub">CCF registration and self service portal</div>
         <div id="globalClock" class="sub"></div>
-        
+
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.105</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.106</span></div>
     </header>
 
     <main id="app">
@@ -2332,29 +2332,43 @@ function viewSelfHoliday(m){
         el.onchange=function(){ syncKeyField_(String(el.getAttribute('data-target')||'')); };
       });
 
+      function worshipPreviewTable_(res){
+        var rows = [];
+        (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED' }); });
+        (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||'') }); });
+        if (!rows.length) return '<div class="small">沒有變更 / No changes</div>';
+        return '<div class="tableScroll"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th></tr></thead><tbody>'+rows.map(function(r){
+          var bad = String(r.status||'').indexOf('ACCEPTED') !== 0;
+          return '<tr'+(bad?' style="background:#ffecec"':'')+'><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.area||'')+'</td><td>'+escapeHtml(r.fieldName||'')+'</td><td>'+escapeHtml(r.oldValue||'')+'</td><td>'+escapeHtml(r.newValue||'')+'</td><td>'+escapeHtml(r.status||'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>';
+      }
       var importBtn = $('btnWorshipImportMenu');
       if (importBtn) importBtn.onclick = function(){
         var modal = openModal(
-          '<div class="big">匯入 / Import</div>'+ 
-          '<textarea id="wImportBox" placeholder="貼上 CSV/TSV（Worship_Import 欄位） / Paste CSV/TSV (Worship_Import columns)"></textarea>'+
-          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">📥 匯入預覽 / Import preview</button><button id="wImportCommit" class="btnWorship">✅ 確認匯入 / Import commit</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
+          '<div class="big">匯入 / Import</div>'+
+          '<label>Google Sheet URL / ID</label><input id="wImportSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/... 或 spreadsheet ID" />'+
+          '<div id="wImportPreviewBox" class="msgBox small">貼上 Google Sheet URL/ID 後按預覽。/ Paste a Google Sheet URL/ID, then preview.</div>'+
+          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">匯入預覽 / Import preview</button><button id="wImportCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
         );
+        var confirmedInput = '';
         modal.querySelector('#wImportClose').onclick = function(){ closeModal(modal); };
         modal.querySelector('#wImportPreview').onclick = function(){
-          var rows = parseImportTextRows_(modal.querySelector('#wImportBox').value || '');
-          callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, rows).then(function(res){
-            var msgEl = worshipMsgEl_();
-            if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-            State.worshipImportRows = rows;
-            if (msgEl) msgEl.innerHTML = showBox('ok','預覽完成','Preview ready','<div class="small">Rows: '+escapeHtml(String(res.count||0))+'</div>');
+          var input = String(modal.querySelector('#wImportSheetUrl').value || '').trim();
+          modal.querySelector('#wImportCommit').disabled = true;
+          callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, input).then(function(res){
+            var box = modal.querySelector('#wImportPreviewBox');
+            if(!res || !res.ok){ if (box) box.innerHTML = showServerErr(res); return; }
+            confirmedInput = input;
+            if (box) box.innerHTML = (res.hasHardErrors ? showBox('err','預覽有錯誤','Preview has errors') : showBox('ok','預覽完成','Preview ready')) + worshipPreviewTable_(res);
+            modal.querySelector('#wImportCommit').disabled = !!res.hasHardErrors;
           }).catch(function(err){ showWorshipErr_('預覽失敗','Preview failed', err); });
         };
         modal.querySelector('#wImportCommit').onclick = function(){
-          var rows = State.worshipImportRows.length ? State.worshipImportRows : parseImportTextRows_(modal.querySelector('#wImportBox').value || '');
-          callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, rows, false).then(function(res){
+          var input = confirmedInput || String(modal.querySelector('#wImportSheetUrl').value || '').trim();
+          callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, input, false).then(function(res){
             var msgEl = worshipMsgEl_();
             if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed');
+            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed','<div class="small">Changed: '+escapeHtml(String(res.changed||0))+'</div>');
             closeModal(modal);
           }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); });
         };
@@ -3200,7 +3214,7 @@ function viewSelfHoliday(m){
       render();
     }
 
-    
+
     function updateGlobalClock_(){
       var el = $('globalClock');
       if(!el) return;

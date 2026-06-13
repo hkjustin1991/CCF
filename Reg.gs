@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg105
- * CHANGELOG: longer admin handoff TTL, delayed consume, top-window navigation support.
+ * v2026-06-13.reg106
+ * CHANGELOG: worship spreadsheet import/export with Worship_Alias.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg105';
+const REG_VERSION = '2026-06-13.reg106';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2059,6 +2059,7 @@ function api_reg_self_live_service_public(qrPayload){
 
 const REG_WORSHIP_PLANNING_SHEET = 'Worship_Planning';
 const REG_WORSHIP_AUDIT_SHEET = 'Worship_Audit';
+const REG_WORSHIP_ALIAS_SHEET = 'Worship_Alias';
 const REG_WORSHIP_IMPORT_HEADERS = [
   'EventKey','Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument',
   'WorshipSong1Title','WorshipSong1Key','WorshipSong1Capo','WorshipSong1Version','WorshipSong1Link',
@@ -2625,21 +2626,20 @@ function api_admin_worship_rota_gl_save(token, eventKey, rows, overrideAway){
   }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
 }
 
-function api_admin_worship_import_preview(token, importRows){
-  const auth = reg_getWorshipAuthFromAdminToken_(token);
-  if (!auth.ok) return auth;
-  return api_reg_self_worship_import_preview_public('__admin__', importRows);
-}
-
-function api_admin_worship_import_commit(token, importRows, overrideAway){
+function api_admin_worship_import_preview(token, spreadsheetUrlOrId){
   try{
     const auth = reg_getWorshipAuthFromAdminToken_(token);
     if (!auth.ok) return auth;
-    const key = String((auth && auth.row && auth.row.Key) || '').trim();
-    if (!key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
-    const qrPayload = String((auth && auth.parsed && auth.parsed.id) || '') + '|' + key;
-    return api_reg_self_worship_import_commit_public(qrPayload, importRows, overrideAway);
-  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+    return worshipPreviewImportChanges_(auth, spreadsheetUrlOrId);
+  }catch(e){ return regErr_('E_WORSHIP_PREVIEW_FAILED','匯入預覽失敗','Import preview failed', e); }
+}
+
+function api_admin_worship_import_commit(token, spreadsheetUrlOrId, overrideAway){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    return worshipCommitImportChanges_(auth, spreadsheetUrlOrId, overrideAway, 'ADMIN_WORSHIP_IMPORT');
+  }catch(e){ return regErr_('E_WORSHIP_IMPORT_FAILED','匯入失敗','Import failed', e); }
 }
 
 function api_admin_worship_export(token, format){
@@ -2650,85 +2650,381 @@ function api_admin_worship_export(token, format){
     if (!key) return { ok:false, code:'E417', zh:'系統缺少 Key，請聯絡影音同工', en:'Key missing in database. Please contact Media team.' };
     const qrPayload = String((auth && auth.parsed && auth.parsed.id) || '') + '|' + key;
     return api_reg_self_worship_export_public(qrPayload, format);
-  }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+  }catch(e){ return regErr_('E_WORSHIP_EXPORT_FAILED','匯出失敗','Export failed', e); }
+}
+
+
+function worshipError_(code, zh, en, detail, subCode){
+  const out = { ok:false, code:String(code||'E_WORSHIP_ERROR'), zh:String(zh||'敬拜匯入/匯出錯誤'), en:String(en||'Worship import/export error') };
+  if (subCode) out.subCode = String(subCode);
+  if (detail !== undefined && detail !== null && String(detail) !== '') out.detail = String(detail);
+  return out;
+}
+
+function worshipEnsureAliasSheet_(){
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
+  let sh = ss.getSheetByName(REG_WORSHIP_ALIAS_SHEET);
+  if (!sh) sh = ss.insertSheet(REG_WORSHIP_ALIAS_SHEET);
+  const headers = ['CCFID','Aliases'];
+  const current = sh.getLastRow() >= 1 ? sh.getRange(1,1,1,2).getValues()[0] : [];
+  if (String(current[0]||'').trim() !== headers[0] || String(current[1]||'').trim() !== headers[1]){
+    sh.getRange(1,1,1,2).setValues([headers]).setFontWeight('bold');
+  }
+  return sh;
+}
+
+function worshipNormalizeAlias_(value){
+  return String(value || '')
+    .replace(/[，、；;\/|\n\r\t]+/g, ' ')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[.,:：()（）\[\]{}<>《》!！?？_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function worshipIsActiveWorshipMember_(ccfId, membersIndex){
+  const id = String(ccfId||'').trim().toUpperCase();
+  const m = membersIndex && membersIndex.byId ? membersIndex.byId[id] : null;
+  if (!m) return false;
+  const st = String(m.status || '').trim().toUpperCase();
+  if (st === 'PROVISIONAL' || st === 'DISABLED') return false;
+  return reg_isWorshipMember_(m);
+}
+
+function worshipReadAliasMap_(){
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('worship_alias_map_v1');
+  if (cached) return JSON.parse(cached);
+  const mi = admin_getMembersIndex_();
+  const sh = worshipEnsureAliasSheet_();
+  const out = { byAlias:{}, aliasesById:{}, conflicts:{} };
+  const add = function(alias, id){
+    const ccfId = String(id||'').trim().toUpperCase();
+    if (!/^CCF\d{4}$/.test(ccfId) || !worshipIsActiveWorshipMember_(ccfId, mi)) return;
+    const key = worshipNormalizeAlias_(alias);
+    if (!key) return;
+    if (!out.byAlias[key]) out.byAlias[key] = [];
+    if (out.byAlias[key].indexOf(ccfId) < 0) out.byAlias[key].push(ccfId);
+    if (!out.aliasesById[ccfId]) out.aliasesById[ccfId] = [];
+    if (out.aliasesById[ccfId].indexOf(alias) < 0) out.aliasesById[ccfId].push(String(alias||''));
+  };
+  Object.keys((mi && mi.byId) || {}).forEach(function(id){ add(id, id); });
+  const last = sh.getLastRow();
+  if (last >= 2){
+    const rows = sh.getRange(2,1,last-1,2).getValues();
+    rows.forEach(function(r){
+      const id = String(r[0]||'').trim().toUpperCase();
+      if (!id) return;
+      add(id, id);
+      String(r[1]||'').split(/[，,、;；\/|\n\r]+/).forEach(function(a){ add(a, id); });
+    });
+  }
+  Object.keys(out.byAlias).forEach(function(k){ if ((out.byAlias[k]||[]).length > 1) out.conflicts[k] = out.byAlias[k]; });
+  try{ cache.put('worship_alias_map_v1', JSON.stringify(out), 15); }catch(e){}
+  return out;
+}
+
+function worshipResolveAliasToCcfId_(rawName, aliasMap, membersIndex){
+  const raw = String(rawName||'').trim();
+  if (!raw) return { ok:true, empty:true, ccfId:'' };
+  const up = raw.toUpperCase();
+  if (/^(VACANT|空缺)$/i.test(raw)) return { ok:true, special:'VACANT', ccfId:'' };
+  if (/^(N\/A|NA|不適用)$/i.test(raw)) return { ok:true, special:'N/A', ccfId:'' };
+  if (/^(CLOSED|關閉)$/i.test(raw)) return { ok:true, special:'CLOSED', ccfId:'' };
+  if (/^CCF\d{4}$/.test(up)){
+    if (!((membersIndex && membersIndex.byId || {})[up])) return worshipError_('E_WORSHIP_UNKNOWN_NAME','找不到此 CCFID','Unknown CCFID', raw);
+    if (!worshipIsActiveWorshipMember_(up, membersIndex)) return worshipError_('E_WORSHIP_MEMBER_NOT_IN_GROUP','此成員不是有效敬拜組成員','Member is not an active Worship member', raw);
+    return { ok:true, ccfId:up };
+  }
+  const key = worshipNormalizeAlias_(raw);
+  const ids = ((aliasMap && aliasMap.byAlias) ? aliasMap.byAlias[key] : []) || [];
+  if (ids.length > 1) return worshipError_('E_WORSHIP_ALIAS_AMBIGUOUS','名稱對應多於一位有效成員，請在 Worship_Alias 修正','Alias resolves to more than one active member; fix Worship_Alias', raw + ' → ' + ids.join(', '));
+  if (!ids.length) return worshipError_('E_WORSHIP_UNKNOWN_NAME','找不到名稱/別名','Unknown name/alias', raw);
+  if (!worshipIsActiveWorshipMember_(ids[0], membersIndex)) return worshipError_('E_WORSHIP_MEMBER_NOT_IN_GROUP','此成員不是有效敬拜組成員','Member is not an active Worship member', raw + ' → ' + ids[0]);
+  return { ok:true, ccfId:ids[0] };
+}
+
+function worshipParseSpreadsheetUrlOrId_(input){
+  const raw = String(input||'').trim();
+  if (!raw) return worshipError_('E_WORSHIP_INVALID_FORMAT','請輸入 Google Sheet URL 或 ID','Please enter a Google Sheet URL or ID');
+  let id = raw, gid = '';
+  const m = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (m) id = m[1];
+  const gm = raw.match(/[?&#]gid=([0-9]+)/);
+  if (gm) gid = gm[1];
+  if (!/^[a-zA-Z0-9-_]{20,}$/.test(id)) return worshipError_('E_WORSHIP_INVALID_FORMAT','Google Sheet ID 格式錯誤','Invalid Google Sheet ID', raw);
+  return { ok:true, spreadsheetId:id, sheetNameOrGid:gid };
+}
+
+function worshipReadExistingSheetFormat_(spreadsheetId, sheetNameOrGid){
+  try{
+    const ss = SpreadsheetApp.openById(String(spreadsheetId||''));
+    let sh = null;
+    const key = String(sheetNameOrGid||'').trim();
+    if (key){
+      sh = ss.getSheetByName(key);
+      if (!sh && /^\d+$/.test(key)) sh = ss.getSheets().filter(function(s){ return String(s.getSheetId()) === key; })[0] || null;
+    }
+    if (!sh) sh = ss.getSheets()[0];
+    const values = sh.getDataRange().getDisplayValues();
+    if (!values || values.length < 2) return worshipError_('E_WORSHIP_INVALID_FORMAT','試算表沒有足夠資料','Spreadsheet has no importable rows');
+    return { ok:true, sheetName:sh.getName(), gid:String(sh.getSheetId()), values:values };
+  }catch(e){ return worshipError_('E_WORSHIP_SHEET_OPEN_FAILED','無法開啟 Google Sheet，請檢查權限/連結','Could not open Google Sheet; check sharing/link', String(e && e.message || e)); }
+}
+
+function worshipHeaderKey_(h){
+  const n = worshipNormalizeAlias_(h).replace(/\s+/g,'');
+  if (/^(DATE|日期)$/.test(n)) return 'Date';
+  if (/^(EVENTKEY|EVENT|活動)$/.test(n)) return 'EventKey';
+  if (/(主領|LEAD)/.test(n)) return 'Worship_Lead';
+  if (/(和唱|SINGER|VOCAL)/.test(n)) return 'Worship_Singer';
+  if (/(司琴|PIANIST|KEYS)/.test(n)) return 'Worship_Pianist';
+  if (/(鼓手|鼓|DRUM|DRUMMER)/.test(n)) return 'Worship_Drum';
+  if (/(樂器|INSTRUMENT)/.test(n)) return 'Worship_Instrument';
+  const sec = /(敬拜|WORSHIP|MAIN).*1/.test(n) ? 'WORSHIP_MAIN_1' : /(敬拜|WORSHIP|MAIN).*2/.test(n) ? 'WORSHIP_MAIN_2' : /(回應|RESPONSE).*1/.test(n) ? 'WORSHIP_RESPONSE_1' : /(回應|RESPONSE).*2/.test(n) ? 'WORSHIP_RESPONSE_2' : '';
+  if (sec){
+    if (/(KEY|調)/.test(n)) return sec + '.songKey';
+    if (/CAPO/.test(n)) return sec + '.capo';
+    if (/(VERSION|版本|NOTE|備註)/.test(n)) return sec + '.versionNote';
+    if (/(LINK|YOUTUBE|CHORD|URL|連結)/.test(n)) return sec + '.linkUrl';
+    return sec + '.songTitle';
+  }
+  return '';
+}
+
+function worshipRowsFromValues_(values){
+  let headerRow = -1, map = {};
+  for (let r=0; r<Math.min(values.length, 10); r++){
+    const temp = {};
+    (values[r]||[]).forEach(function(h, c){ const k = worshipHeaderKey_(h); if (k) temp[k] = c; });
+    if (temp.EventKey || temp.Date || temp.Worship_Lead || temp.Worship_Singer){ headerRow = r; map = temp; break; }
+  }
+  if (headerRow < 0) return worshipError_('E_WORSHIP_INVALID_FORMAT','找不到標題列','Header row not found');
+  const out = [];
+  for (let r=headerRow+1; r<values.length; r++){
+    const row = values[r] || [];
+    const o = { _rowNumber:r+1 };
+    Object.keys(map).forEach(function(k){ o[k] = String(row[map[k]] || '').trim(); });
+    if (!o.EventKey && o.Date){
+      const rawDate = String(o.Date);
+      const ymd = rawDate.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+      const dmy = rawDate.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+      if (ymd) o.EventKey = 'SundayService_' + ymd[1] + '-' + ('0'+ymd[2]).slice(-2) + '-' + ('0'+ymd[3]).slice(-2);
+      else if (dmy) o.EventKey = 'SundayService_' + (String(dmy[3]).length === 2 ? '20'+dmy[3] : dmy[3]) + '-' + ('0'+dmy[2]).slice(-2) + '-' + ('0'+dmy[1]).slice(-2);
+    }
+    if (Object.keys(o).some(function(k){ return k.charAt(0) !== '_' && String(o[k]||'').trim(); })) out.push(o);
+  }
+  return { ok:true, rows:out };
+}
+
+function worshipImportParseInput_(input){
+  if (Array.isArray(input)) return { ok:true, rows:reg_parseWorshipImportRows_(input) };
+  const parsed = worshipParseSpreadsheetUrlOrId_(input);
+  if (!parsed.ok) return parsed;
+  const read = worshipReadExistingSheetFormat_(parsed.spreadsheetId, parsed.sheetNameOrGid);
+  if (!read.ok) return read;
+  const rows = worshipRowsFromValues_(read.values);
+  if (!rows.ok) return rows;
+  rows.source = { spreadsheetId:parsed.spreadsheetId, sheetName:read.sheetName, gid:read.gid };
+  return rows;
 }
 
 function reg_parseWorshipImportRows_(rows){
   const list = Array.isArray(rows) ? rows : [];
   return list.map(function(r){
     const o = r || {};
-    const out = {};
+    const out = { _rowNumber:o._rowNumber || '' };
     REG_WORSHIP_IMPORT_HEADERS.forEach(function(h){ out[h] = String(o[h] || '').trim(); });
+    ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'].forEach(function(sec){
+      ['songTitle','songKey','capo','versionNote','linkUrl'].forEach(function(k){ out[sec+'.'+k] = String(o[sec+'.'+k] || '').trim(); });
+    });
     return out;
   }).filter(function(r){ return !!r.EventKey; });
 }
 
-function api_reg_self_worship_import_preview_public(qrPayload, importRows){
-  const parsed = reg_parseWorshipImportRows_(importRows);
-  return { ok:true, rows:parsed, count:parsed.length };
+function worshipGetCurrentImportState_(eventKeys){
+  const plan = reg_getWorshipPlanningMapByEventKeys_(eventKeys);
+  const state = {};
+  eventKeys.forEach(function(ev){
+    const rota = admin_getServingValuesForEvent_(ev);
+    state[ev] = { rota:{}, songs:plan[ev] || {} };
+    ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'].forEach(function(p){ state[ev].rota[p] = String(rota[p] || '').trim(); });
+  });
+  return state;
 }
 
-function api_reg_self_worship_import_commit_public(qrPayload, importRows, overrideAway){
-  try{
-    const auth = regGetSelfMemberByQr_(qrPayload);
-    if (!auth.ok) return auth;
-    const parsed = reg_parseWorshipImportRows_(importRows);
-    const out = [];
-    parsed.forEach(function(r){
-      const rotaRows = [
-        { position:'Worship_Lead', value:r.Worship_Lead },
-        { position:'Worship_Singer', value:r.Worship_Singer },
-        { position:'Worship_Pianist', value:r.Worship_Pianist },
-        { position:'Worship_Drum', value:r.Worship_Drum },
-        { position:'Worship_Instrument', value:r.Worship_Instrument }
-      ];
-      const rr = api_reg_self_worship_rota_gl_save_public(qrPayload, r.EventKey, rotaRows, overrideAway);
-      if (!rr || !rr.ok) throw new Error((rr && (rr.zh || rr.en || rr.code)) || 'Import rota failed');
-      const songs = [
-        { sec:'WORSHIP_MAIN_1', title:r.WorshipSong1Title, key:r.WorshipSong1Key, capo:r.WorshipSong1Capo, ver:r.WorshipSong1Version, link:r.WorshipSong1Link },
-        { sec:'WORSHIP_MAIN_2', title:r.WorshipSong2Title, key:r.WorshipSong2Key, capo:r.WorshipSong2Capo, ver:r.WorshipSong2Version, link:r.WorshipSong2Link },
-        { sec:'WORSHIP_RESPONSE_1', title:r.ResponseSong1Title, key:r.ResponseSong1Key, capo:r.ResponseSong1Capo, ver:r.ResponseSong1Version, link:r.ResponseSong1Link },
-        { sec:'WORSHIP_RESPONSE_2', title:r.ResponseSong2Title, key:r.ResponseSong2Key, capo:r.ResponseSong2Capo, ver:r.ResponseSong2Version, link:r.ResponseSong2Link }
-      ];
-      songs.forEach(function(s){
-        api_reg_self_worship_song_save_public(qrPayload, { eventKey:r.EventKey, songSection:s.sec, songTitle:s.title, songKey:s.key, capo:s.capo, versionNote:s.ver, linkUrl:s.link, linkTitle:'' });
-      });
-      out.push({ eventKey:r.EventKey, ok:true });
+function worshipCanonicalRotaValue_(raw, aliasMap, mi){
+  const s = String(raw||'').trim();
+  if (!s || /^(VACANT|空缺)$/i.test(s)) return { ok:true, value:'' };
+  if (/^(CLOSED|關閉)$/i.test(s)) return { ok:true, value:'CLOSED' };
+  const parts = s.split(/[，,、;；\/|\n\r]+/).map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+  const out = [];
+  for (let i=0;i<parts.length;i++){
+    const res = worshipResolveAliasToCcfId_(parts[i], aliasMap, mi);
+    if (!res.ok) return res;
+    if (res.special === 'N/A') out.push('N/A');
+    else if (res.special === 'CLOSED') return { ok:true, value:'CLOSED' };
+    else if (res.ccfId) out.push(res.ccfId);
+  }
+  return { ok:true, value:out.join(', ') };
+}
+
+function worshipPreviewImportChanges_(auth, input){
+  const base = reg_buildWorshipPagePayload_(auth, false);
+  if (!base.ok) return base;
+  if (!base.permission || !base.permission.canGlRotaEdit) return worshipError_('E_WORSHIP_PERMISSION','你沒有權限匯入敬拜排更','No permission to import worship rota');
+  const parsed = worshipImportParseInput_(input);
+  if (!parsed.ok) return parsed;
+  const mi = admin_getMembersIndex_();
+  const aliasMap = worshipReadAliasMap_();
+  const eventKeys = parsed.rows.map(function(r){ return String(r.EventKey||'').trim(); }).filter(Boolean);
+  const current = worshipGetCurrentImportState_(eventKeys);
+  const changes = [], errors = [];
+  const positions = ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'];
+  parsed.rows.forEach(function(r){
+    const ev = String(r.EventKey||'').trim();
+    if (!admin_isSundayServiceKey_(ev)){ errors.push(Object.assign(worshipError_('E_WORSHIP_INVALID_EVENT','活動日期/代碼錯誤','Invalid date/event', ev), { eventKey:ev, rowNumber:r._rowNumber||'' })); return; }
+    positions.forEach(function(pos){
+      if (r[pos] === undefined) return;
+      const cv = worshipCanonicalRotaValue_(r[pos], aliasMap, mi);
+      if (!cv.ok){ errors.push(Object.assign(cv, { eventKey:ev, area:'ROTA', fieldName:pos, rowNumber:r._rowNumber||'' })); return; }
+      const oldVal = String(((current[ev]||{}).rota||{})[pos] || '').trim();
+      if (oldVal !== cv.value) changes.push({ eventKey:ev, area:'ROTA', fieldName:pos, oldValue:oldVal, newValue:cv.value, status:'ACCEPTED' });
     });
-    return { ok:true, results:out };
-  }catch(e){ return regErr_('E500','匯入失敗', 'Import failed', e); }
+    ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'].forEach(function(sec){
+      ['songTitle','songKey','capo','versionNote','linkUrl'].forEach(function(k){
+        const key = sec+'.'+k;
+        if (r[key] === undefined) return;
+        let nv = String(r[key]||'').trim();
+        const oldVal = String(((((current[ev]||{}).songs||{})[sec]||{})[k]) || '').trim();
+        if (oldVal !== nv) changes.push({ eventKey:ev, area:'SONG', fieldName:key, oldValue:oldVal, newValue:nv, status:'ACCEPTED' });
+      });
+    });
+  });
+  const effectiveByEvent = {};
+  eventKeys.forEach(function(ev){ effectiveByEvent[ev] = Object.assign({}, ((current[ev]||{}).rota||{})); });
+  changes.filter(function(c){ return c.area === 'ROTA'; }).forEach(function(c){
+    if (!effectiveByEvent[c.eventKey]) effectiveByEvent[c.eventKey] = {};
+    effectiveByEvent[c.eventKey][c.fieldName] = c.newValue;
+    const max = Number((typeof ADMIN_SERVING_POSITION_MAX === 'object' && ADMIN_SERVING_POSITION_MAX[c.fieldName]) || 1);
+    const ids = admin_extractMemberIdsFromServingValue_(c.newValue);
+    if (ids.length > max) errors.push(Object.assign(worshipError_('E_WORSHIP_POSITION_CAPACITY','崗位人數超出上限','Too many people for this position', c.fieldName + ': ' + ids.join(', ')), { eventKey:c.eventKey, area:'ROTA', fieldName:c.fieldName }));
+  });
+  Object.keys(effectiveByEvent).forEach(function(ev){
+    const byMember = {};
+    positions.forEach(function(pos){
+      admin_extractMemberIdsFromServingValue_(String(effectiveByEvent[ev][pos]||'')).forEach(function(id){
+        if (!byMember[id]) byMember[id] = [];
+        byMember[id].push(pos);
+      });
+    });
+    Object.keys(byMember).forEach(function(id){
+      const p = (typeof admin_filterDuplicateConflictPositions_ === 'function') ? admin_filterDuplicateConflictPositions_(byMember[id]) : byMember[id];
+      if (p.length > 1) errors.push(Object.assign(worshipError_('E_WORSHIP_DUPLICATE_ASSIGNMENT','同一成員在同日有重複敬拜崗位','Duplicate worship assignment on the same date', id + ': ' + p.join(', ')), { eventKey:ev, area:'ROTA', fieldName:p.join(', ') }));
+    });
+    const changedIds = {};
+    changes.filter(function(c){ return c.area === 'ROTA' && c.eventKey === ev; }).forEach(function(c){ admin_extractMemberIdsFromServingValue_(c.newValue).forEach(function(id){ changedIds[id] = true; }); });
+    const ids = Object.keys(changedIds);
+    if (ids.length){
+      const conflicts = admin_checkServingAwayConflicts_(admin_eventDateFromKey_(ev), ids.map(function(id){ return { memberId:id }; })) || [];
+      conflicts.forEach(function(c){ errors.push(Object.assign(worshipError_('E_WORSHIP_HOLIDAY_CONFLICT','事奉安排與假期重疊','Serving assignment overlaps holiday period', (c.memberId||'') + ' ' + (c.from||'') + ' - ' + (c.to||'')), { eventKey:ev, area:'ROTA', fieldName:'holiday' })); });
+    }
+  });
+  return { ok:true, source:parsed.source || {}, changes:changes, accepted:changes, errors:errors, rejected:errors, hasHardErrors:errors.length > 0, canCommit:errors.length === 0 };
+}
+
+function worshipCommitImportChanges_(auth, input, overrideAway, actionSource){
+  const preview = worshipPreviewImportChanges_(auth, input);
+  if (!preview.ok) return preview;
+  if (preview.hasHardErrors) return worshipError_('E_WORSHIP_IMPORT_BLOCKED','匯入有錯誤，請先修正試算表後再匯入','Import has errors; fix the spreadsheet and import again', (preview.errors||[]).map(function(e){ return e.code + ':' + (e.detail||e.fieldName||''); }).join(' | '));
+  const actorId = String((auth && auth.parsed && auth.parsed.id) || '').toUpperCase();
+  const token = reg_issueTempAdminTokenForWorship_(actorId);
+  if (!token) return worshipError_('E_WORSHIP_PERMISSION','授權失敗','Authorization failed');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try{
+    const byEvent = {};
+    (preview.changes||[]).forEach(function(c){ if (!byEvent[c.eventKey]) byEvent[c.eventKey] = { rota:[], songs:[] }; byEvent[c.eventKey][c.area === 'ROTA' ? 'rota' : 'songs'].push(c); });
+    Object.keys(byEvent).forEach(function(ev){
+      const rotaRows = byEvent[ev].rota.map(function(c){ return { position:c.fieldName, value:c.newValue }; });
+      if (rotaRows.length){
+        const res = api_admin_serving_event_save(token, ev, rotaRows, !!overrideAway, 'WORSHIP');
+        if (!res || !res.ok) throw new Error(JSON.stringify(res || worshipError_('E_WORSHIP_ROTA_SAVE','排更儲存失敗','Rota save failed')));
+      }
+      const songBySec = {};
+      byEvent[ev].songs.forEach(function(c){ const m = String(c.fieldName).split('.'); if (!songBySec[m[0]]) songBySec[m[0]] = {}; songBySec[m[0]][m[1]] = c.newValue; });
+      Object.keys(songBySec).forEach(function(sec){
+        const old = reg_getWorshipPlanningMapByEventKeys_([ev])[ev][sec] || {};
+        const p = Object.assign({ eventKey:ev, songSection:sec, songTitle:old.songTitle||'', songKey:old.songKey||'', capo:old.capo||'', versionNote:old.versionNote||'', linkUrl:old.linkUrl||'', linkTitle:old.linkTitle||'' }, songBySec[sec]);
+        if (p.linkUrl && !p.songTitle){ const yt = reg_tryFetchYoutubeMeta_(p.linkUrl); if (yt.ok && yt.title){ p.songTitle = yt.title; p.linkTitle = yt.title; } }
+        const sr = reg_worship_song_save_with_auth_(auth, p, actionSource || 'SELF_WORSHIP_IMPORT');
+        if (!sr || !sr.ok) throw new Error(JSON.stringify(sr));
+      });
+    });
+    const now = Utilities.formatDate(new Date(), 'Europe/London', 'yyyy-MM-dd HH:mm:ss');
+    const audit = (preview.changes||[]).filter(function(c){ return c.area === 'ROTA'; }).map(function(c){ return [now, actorId, c.eventKey, 'ROTA', c.fieldName, c.oldValue, c.newValue, actionSource || 'SELF_WORSHIP_IMPORT', 'spreadsheet import']; });
+    reg_writeWorshipAuditRows_(audit);
+    return { ok:true, changed:(preview.changes||[]).length, changes:preview.changes };
+  }catch(e){ return regErr_('E_WORSHIP_IMPORT_COMMIT_FAILED','匯入寫入失敗','Import commit failed', e); }
+  finally{ try{ lock.releaseLock(); }catch(e){} }
+}
+
+function worshipBuildExportRowsFromExistingRotaAndSongs_(auth){
+  const data = reg_buildWorshipPagePayload_(auth, false);
+  if (!data.ok) return data;
+  const headers = ['EventKey','Date','主領 / Lead','和唱 / Singer','司琴 / Pianist','鼓 / Drum','樂器 / Instrument',
+    '敬拜 1 Title / Worship 1','敬拜 1 Key','敬拜 1 Capo','敬拜 1 Version / Note','敬拜 1 Link / YouTube / Chord',
+    '敬拜 2 Title / Worship 2','敬拜 2 Key','敬拜 2 Capo','敬拜 2 Version / Note','敬拜 2 Link / YouTube / Chord',
+    '回應 1 Title / Response 1','回應 1 Key','回應 1 Capo','回應 1 Version / Note','回應 1 Link / YouTube / Chord',
+    '回應 2 Title / Response 2','回應 2 Key','回應 2 Capo','回應 2 Version / Note','回應 2 Link / YouTube / Chord'];
+  const rows = (data.events||[]).map(function(ev){
+    const s = ev.songs || {}; function g(sec,k){ return String(((s[sec]||{})[k]) || ''); }
+    const r = ev.rota || {};
+    return [ev.eventKey, ev.dateYmd || ev.eventKey.replace('SundayService_',''), r.Worship_Lead || '', r.Worship_Singer || '', r.Worship_Pianist || '', r.Worship_Drum || '', r.Worship_Instrument || '',
+      g('WORSHIP_MAIN_1','songTitle'), g('WORSHIP_MAIN_1','songKey'), g('WORSHIP_MAIN_1','capo'), g('WORSHIP_MAIN_1','versionNote'), g('WORSHIP_MAIN_1','linkUrl'),
+      g('WORSHIP_MAIN_2','songTitle'), g('WORSHIP_MAIN_2','songKey'), g('WORSHIP_MAIN_2','capo'), g('WORSHIP_MAIN_2','versionNote'), g('WORSHIP_MAIN_2','linkUrl'),
+      g('WORSHIP_RESPONSE_1','songTitle'), g('WORSHIP_RESPONSE_1','songKey'), g('WORSHIP_RESPONSE_1','capo'), g('WORSHIP_RESPONSE_1','versionNote'), g('WORSHIP_RESPONSE_1','linkUrl'),
+      g('WORSHIP_RESPONSE_2','songTitle'), g('WORSHIP_RESPONSE_2','songKey'), g('WORSHIP_RESPONSE_2','capo'), g('WORSHIP_RESPONSE_2','versionNote'), g('WORSHIP_RESPONSE_2','linkUrl')];
+  });
+  return { ok:true, headers:headers, rows:rows };
+}
+
+function api_reg_self_worship_import_preview_public(qrPayload, spreadsheetUrlOrId){
+  try{ const auth = regGetSelfMemberByQr_(qrPayload); if (!auth.ok) return auth; return worshipPreviewImportChanges_(auth, spreadsheetUrlOrId); }
+  catch(e){ return regErr_('E_WORSHIP_PREVIEW_FAILED','匯入預覽失敗','Import preview failed', e); }
+}
+
+function api_reg_self_worship_import_commit_public(qrPayload, spreadsheetUrlOrId, overrideAway){
+  try{ const auth = regGetSelfMemberByQr_(qrPayload); if (!auth.ok) return auth; return worshipCommitImportChanges_(auth, spreadsheetUrlOrId, overrideAway, 'SELF_WORSHIP_IMPORT'); }
+  catch(e){ return regErr_('E_WORSHIP_IMPORT_FAILED','匯入失敗','Import failed', e); }
 }
 
 function api_reg_self_worship_export_public(qrPayload, format){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
     if (!auth.ok) return auth;
-    const data = reg_buildWorshipPagePayload_(auth, false);
+    const data = worshipBuildExportRowsFromExistingRotaAndSongs_(auth);
     if (!data.ok) return data;
     const ss = SpreadsheetApp.create('Worship_Export_' + Utilities.formatDate(new Date(), 'Europe/London', 'yyyyMMdd_HHmmss'));
     const sh = ss.getSheets()[0];
     sh.setName('Worship_Import');
-    sh.getRange(1,1,1,REG_WORSHIP_IMPORT_HEADERS.length).setValues([REG_WORSHIP_IMPORT_HEADERS]);
-    const rows = (data.events || []).map(function(ev){
-      const s = ev.songs || {};
-      function g(sec, key){ return String(((s[sec] || {})[key]) || ''); }
-      return [
-        ev.eventKey, ev.rota.Worship_Lead, ev.rota.Worship_Singer, ev.rota.Worship_Pianist, ev.rota.Worship_Drum, ev.rota.Worship_Instrument,
-        g('WORSHIP_MAIN_1','songTitle'), g('WORSHIP_MAIN_1','songKey'), g('WORSHIP_MAIN_1','capo'), g('WORSHIP_MAIN_1','versionNote'), g('WORSHIP_MAIN_1','linkUrl'),
-        g('WORSHIP_MAIN_2','songTitle'), g('WORSHIP_MAIN_2','songKey'), g('WORSHIP_MAIN_2','capo'), g('WORSHIP_MAIN_2','versionNote'), g('WORSHIP_MAIN_2','linkUrl'),
-        g('WORSHIP_RESPONSE_1','songTitle'), g('WORSHIP_RESPONSE_1','songKey'), g('WORSHIP_RESPONSE_1','capo'), g('WORSHIP_RESPONSE_1','versionNote'), g('WORSHIP_RESPONSE_1','linkUrl'),
-        g('WORSHIP_RESPONSE_2','songTitle'), g('WORSHIP_RESPONSE_2','songKey'), g('WORSHIP_RESPONSE_2','capo'), g('WORSHIP_RESPONSE_2','versionNote'), g('WORSHIP_RESPONSE_2','linkUrl')
-      ];
-    });
-    if (rows.length) sh.getRange(2,1,rows.length,REG_WORSHIP_IMPORT_HEADERS.length).setValues(rows);
-    const warn = 'Exported at ' + Utilities.formatDate(new Date(), 'Europe/London', 'dd/MM/yy HH:mm:ss') + '\nUncontrolled when exported. Please refer to portal for latest version.';
-    sh.getRange(1, REG_WORSHIP_IMPORT_HEADERS.length + 2).setValue(warn);
+    const stamp = Utilities.formatDate(new Date(), 'Europe/London', 'dd/MM/yy HH:mm:ss');
+    const warnEn = 'Exported at ' + stamp + '. Uncontrolled when exported. Please refer to portal for latest version.';
+    const warnZh = '匯出時間：' + stamp + '。匯出後屬非受控版本，請以系統最新資料為準。';
+    sh.getRange(1,1,1,data.headers.length).merge().setValue(warnEn + '\n' + warnZh).setFontWeight('bold').setBackground('#fff3cd');
+    sh.getRange(3,1,1,data.headers.length).setValues([data.headers]).setFontWeight('bold');
+    if (data.rows.length) sh.getRange(4,1,data.rows.length,data.headers.length).setValues(data.rows);
+    sh.setFrozenRows(3);
+    sh.autoResizeColumns(1, data.headers.length);
     if (String(format||'').toUpperCase() === 'PDF'){
       const pdf = UrlFetchApp.fetch('https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=pdf&portrait=false&fitw=true&sheetnames=false&printtitle=false&pagenumbers=false&gridlines=true&fzr=false', { headers:{ Authorization:'Bearer ' + ScriptApp.getOAuthToken() } }).getBlob();
       return { ok:true, kind:'PDF', filename:'Worship_Export.pdf', base64:Utilities.base64Encode(pdf.getBytes()) };
     }
-    return { ok:true, kind:'SPREADSHEET', url:ss.getUrl(), spreadsheetId:ss.getId() };
-  }catch(e){ return regErr_('E500','匯出失敗','Export failed', e); }
+    return { ok:true, kind:'SPREADSHEET', url:ss.getUrl(), spreadsheetId:ss.getId(), warning:warnEn + ' ' + warnZh };
+  }catch(e){ return regErr_('E_WORSHIP_EXPORT_FAILED','匯出失敗','Export failed', e); }
 }
 
 function getServingGroupLabelZh_(raw){
