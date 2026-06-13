@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin103
- * CHANGELOG: matrix performance/diagnostics, handoff error specificity, monthly matrix/PDF UI support.
+ * v2026-06-13.admin104
+ * CHANGELOG: matrix diagnostics, monthly matrix/PDF UI, and hardened admin boot diagnostics.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin103';
+const ADMIN_VERSION = '2026-06-13.admin104';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.

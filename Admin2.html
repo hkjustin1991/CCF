@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.103
-  For Admin.gs: v2026-06-13.admin103
-  CHANGELOG: changed matrix large/mobile mode to monthly summary matrix and added clean PDF export.
+  UI VERSION TAG: admin2-ui-2026-06-13.104
+  For Admin.gs: v2026-06-13.admin104
+  CHANGELOG: hardened boot diagnostics and retained monthly matrix/PDF export.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.103</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.104</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -484,6 +484,7 @@
       }catch(e){
         msg = 'Unknown boot error';
       }
+      var bootEsc = function(v){ return String(v == null ? '' : v).replace(/[&<>\"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]); }); };
       var token = 'BOOT-' + Date.now() + '-' + (msg.slice(0, 24).replace(/[^A-Za-z0-9]+/g, '_') || 'error');
       var diag = '';
       try{
@@ -494,10 +495,10 @@
           '<div class="card msgBox err" style="display:block">'+
             '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
-            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
+            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+bootEsc(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
               '<summary style="cursor:pointer;font-weight:700">同工診斷資料 / Staff diagnostics</summary>'+
-              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+escapeHtml(diag)+'</pre>'+
+              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+bootEsc(diag)+'</pre>'+
             '</details>'+
           '</div>'+
         '</div>';

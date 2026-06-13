@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.102
-  CHANGELOG: improved admin handoff fallback and version alignment.
+  UI VERSION TAG: reg2-ui-2026-06-13.103
+  CHANGELOG: changed admin handoff to same-tab navigation and hardened boot diagnostics.
   ============================================================
 
   Changes (reg2-ui2):
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.102</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.103</span></div>
     </header>
 
     <main id="app">
@@ -242,6 +242,7 @@
       }catch(e){
         msg = 'Unknown boot error';
       }
+      var bootEsc = function(v){ return String(v == null ? '' : v).replace(/[&<>\"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]); }); };
       var token = 'BOOT-' + Date.now() + '-' + (msg.slice(0, 24).replace(/[^A-Za-z0-9]+/g, '_') || 'error');
       var diag = '';
       try{
@@ -252,10 +253,10 @@
           '<div class="card msgBox err" style="display:block">'+
             '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
-            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
+            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+bootEsc(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
               '<summary style="cursor:pointer;font-weight:700">同工診斷資料 / Staff diagnostics</summary>'+
-              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+escapeHtml(diag)+'</pre>'+
+              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+bootEsc(diag)+'</pre>'+
             '</details>'+
           '</div>'+
         '</div>';
@@ -2202,13 +2203,8 @@ function viewSelfHoliday(m){
           var adminUrl = LIVE_PORTAL_URL + sep + 'mode=admin&handoffToken=' + encodeURIComponent(token);
           var fallback = '<div class="small"><a href="'+escapeHtml(adminUrl)+'">如新頁面沒有開啟，請按此進入管理頁面 / If the admin page does not open, tap here</a></div>';
           try{ localStorage.setItem('ccf_admin_handoff_token', token); }catch(e){}
-          $('selfMsg').innerHTML = showBox('ok','正在開啟管理頁面','Opening admin portal', fallback);
-          var mobile = window.matchMedia && window.matchMedia('(max-width: 820px)').matches;
-          if(mobile){ window.location.href = adminUrl; return; }
-          var opened = null;
-          try{ opened = window.open(adminUrl, '_blank'); }catch(e){}
-          if(!opened){ return; }
-          try{ opened.opener = null; }catch(e){}
+          $('selfMsg').innerHTML = showBox('ok','正在進入管理頁面','Opening admin portal', fallback);
+          setTimeout(function(){ window.location.assign(adminUrl); }, 120);
         }).catch(function(){
           $('selfMsg').innerHTML = showBox('err','系統錯誤','System error');
         });
