@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.111
-  For Admin.gs: v2026-06-13.admin111
-  CHANGELOG: worship preview future-only messaging and closeable preview UI.
+  UI VERSION TAG: admin2-ui-2026-06-13.112
+  For Admin.gs: v2026-06-13.admin112
+  CHANGELOG: native CCF worship block import diagnostics and sermon preview hardening.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.111</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.112</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -2738,16 +2738,16 @@ function eventDateYmdFromKey(ev){
       function adminWorshipPreviewTable_(res){
         var rows = [];
         var summary = (res && res.summary) || {};
-        (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED / 可匯入', message:'Will be written on confirm.' }); });
-        (Array.isArray((res||{}).warnings) ? res.warnings : []).forEach(function(w){ rows.push({ eventKey:w.eventKey||'', area:w.area||'SKIPPED', fieldName:w.fieldName||'', oldValue:'', newValue:w.detail||'', status:(w.code||'WARNING')+' '+(w.zh||w.en||''), message:(w.en||'Warning')+' / '+(w.zh||'提示') }); });
-        (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||''), message:(e.message||e.en||'Error')+' / '+(e.zh||'錯誤') }); });
-        var note = '<div class="msgBox warn"><b>只預覽及匯入今日或之後的敬拜安排 / Only today and future worship planning is imported.</b><div class="small">Today: '+escapeHtml((res&&res.todayYmd)||'')+' · Accepted: '+escapeHtml(String(summary.accepted||0))+' · Skipped past rows: '+escapeHtml(String(summary.skipped||0))+' · Errors: '+escapeHtml(String(summary.errors||0))+'</div><div class="miniBtnRow"><button id="btnAdminWorshipPreviewClear" class="danger">關閉預覽 / Close preview</button></div></div>';
+        (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED / 可匯入', message:'Will be written on confirm.', source:((c.sheetName||'') + (c.rowNumber ? (' row ' + c.rowNumber) : '')) }); });
+        (Array.isArray((res||{}).warnings) ? res.warnings : []).forEach(function(w){ rows.push({ eventKey:w.eventKey||'', area:w.area||'SKIPPED', fieldName:w.fieldName||'', oldValue:'', newValue:w.detail||'', status:(w.code||'WARNING')+' '+(w.zh||w.en||''), message:(w.en||'Warning')+' / '+(w.zh||'提示'), source:((w.sheetName||'') + (w.rowNumber ? (' row ' + w.rowNumber) : '')) }); });
+        (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||''), message:(e.message||e.en||'Error')+' / '+(e.zh||'錯誤'), source:((e.sheetName||'') + (e.rowNumber ? (' row ' + e.rowNumber) : '')) }); });
+        var note = '<div class="msgBox warn"><b>只預覽及匯入今日或之後的敬拜安排 / Only today and future worship planning is imported.</b><div class="small">Today: '+escapeHtml((res&&res.todayYmd)||'')+' · Accepted: '+escapeHtml(String(summary.accepted||0))+' · Skipped past rows: '+escapeHtml(String(summary.skipped||0))+' · Warnings: '+escapeHtml(String(summary.warnings||0))+' · Errors: '+escapeHtml(String(summary.errors||0))+'</div><div class="miniBtnRow"><button id="btnAdminWorshipPreviewClear" class="danger">關閉預覽 / Close preview</button></div></div>';
         if (!rows.length) return note + '<div class="msgBox ok">沒有變更 / No changes</div>';
-        return note + '<div class="tableWrap"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
+        return note + '<div class="tableWrap"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Source</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
           var st = String(r.status||'');
           var bad = st.indexOf('ERROR') >= 0 || st.indexOf('E_WORSHIP_') >= 0 && st.indexOf('PAST_EVENT_SKIPPED') < 0;
           var warn = st.indexOf('SKIPPED') >= 0 || st.indexOf('WARNING') >= 0 || st.indexOf('PAST_EVENT_SKIPPED') >= 0;
-          return '<tr'+(bad?' style="background:#ffecec"':(warn?' style="background:#fff8db"':''))+'><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.area||'')+'</td><td>'+escapeHtml(r.fieldName||'')+'</td><td>'+escapeHtml(r.oldValue||'')+'</td><td>'+escapeHtml(r.newValue||'')+'</td><td>'+escapeHtml(r.status||'')+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
+          return '<tr'+(bad?' style="background:#ffecec"':(warn?' style="background:#fff8db"':''))+'><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.area||'')+'</td><td>'+escapeHtml(r.fieldName||'')+'</td><td>'+escapeHtml(r.oldValue||'')+'</td><td>'+escapeHtml(r.newValue||'')+'</td><td>'+escapeHtml(r.status||'')+'</td><td>'+escapeHtml(r.source||'')+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
         }).join('')+'</tbody></table></div>';
       }
       var adminImportBtn = $('btnAdminWorshipImport');
@@ -2940,9 +2940,9 @@ function eventDateYmdFromKey(ev){
       function sermonImportPreviewTable_(res){
         var rows = (res && Array.isArray(res.rows)) ? res.rows : [];
         if (!rows.length) return '<div class="msgBox warn">沒有可預覽資料 / No preview rows</div>';
-        return '<div class="tableWrap"><table><thead><tr><th>日期 / Date</th><th>EventKey</th><th>講道經文 / Sermon passage</th><th>講題 / Sermon title</th><th>講員 / Speaker</th><th>回應經文 / Response passage</th><th>回應講員 / Response speaker</th><th>狀態 / Status</th><th>訊息 / Message</th></tr></thead><tbody>'+rows.map(function(r){
+        return '<div class="tableWrap"><table><thead><tr><th>Word row</th><th>日期 / Date</th><th>EventKey</th><th>講道經文 / Sermon passage</th><th>講題 / Sermon title</th><th>講員 / Speaker</th><th>回應經文 / Response passage</th><th>回應講員 / Response speaker</th><th>狀態 / Status</th><th>訊息 / Message</th></tr></thead><tbody>'+rows.map(function(r){
           var st=String(r.status||''); var bg=st==='ERROR'?' style="background:#ffecec"':(st==='WARNING'?' style="background:#fff8e1"':'');
-          return '<tr'+bg+'><td>'+escapeHtml(r.dateYmd||'')+'</td><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.sermonPassageRaw||'')+'</td><td>'+escapeHtml(r.sermonTitle||'')+'</td><td>'+escapeHtml(r.speaker||'')+'</td><td>'+escapeHtml(r.responsePassageRaw||'')+'</td><td>'+escapeHtml(r.responseSpeaker||'')+'</td><td>'+escapeHtml(st==='OK'?'OK / 可匯入':(st==='WARNING'?'Warning / 提示':'Error / 錯誤'))+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
+          return '<tr'+bg+'><td>'+escapeHtml((r.sourceTable?('T'+r.sourceTable+' '):'')+(r.sourceRow?('Row '+r.sourceRow):''))+'</td><td>'+escapeHtml(r.dateYmd||'')+'</td><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.sermonPassageRaw||'')+'</td><td>'+escapeHtml(r.sermonTitle||'')+'</td><td>'+escapeHtml(r.speaker||'')+'</td><td>'+escapeHtml(r.responsePassageRaw||'')+'</td><td>'+escapeHtml(r.responseSpeaker||'')+'</td><td>'+escapeHtml(st==='OK'?'OK / 可匯入':(st==='WARNING'?'Warning / 提示':'Error / 錯誤'))+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
         }).join('')+'</tbody></table></div>';
       }
       function sermonImportChooseMonth_(message, cb){
@@ -2968,8 +2968,8 @@ function eventDateYmdFromKey(ev){
             if(box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'SERMON_IMPORT_ERROR')+'</b><div>'+escapeHtml((res&&res.zh)||'匯入預覽失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Import preview failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>'; return;
           }
           App.sermonImportFile=fileObj; App.sermonImportOptions=options; App.sermonImportPreview=res;
-          if(box) box.innerHTML = '<div class="msgBox '+(res.hasHardErrors?'err':'ok')+'"><b>'+(res.hasHardErrors?'預覽有錯誤 / Preview has errors':'預覽完成 / Preview ready')+'</b><div class="small">Month: '+escapeHtml(res.month||'')+' ('+escapeHtml(res.monthSource||'')+')</div><div class="miniBtnRow"><button id="btnSermonImportCommit" class="btnPeriod" '+(res.hasHardErrors?'disabled':'')+'>確認匯入 / Confirm import</button></div></div>'+sermonImportPreviewTable_(res);
-          var commitBtn=$('btnSermonImportCommit'); if(commitBtn) commitBtn.onclick=function(){ sermonImportCommit_(); };
+          if(box) box.innerHTML = '<div class="msgBox '+(res.hasHardErrors?'err':'ok')+'"><b>'+(res.hasHardErrors?'預覽有錯誤 / Preview has errors':'預覽完成 / Preview ready')+'</b><div class="small">Month: '+escapeHtml(res.month||'')+' ('+escapeHtml(res.monthSource||'')+') · Rows: '+escapeHtml(String((res.rows||[]).length||0))+' · Warnings: '+escapeHtml(String((res.warnings||[]).length||0))+' · Errors: '+escapeHtml(String((res.errors||[]).length||0))+'</div><div class="miniBtnRow"><button id="btnSermonImportClose" class="btnDanger">關閉預覽 / Close preview</button><button id="btnSermonImportCommit" class="btnPeriod" '+(res.hasHardErrors?'disabled':'')+'>確認匯入 / Confirm import</button></div></div>'+sermonImportPreviewTable_(res);
+          var closeBtn=$('btnSermonImportClose'); if(closeBtn) closeBtn.onclick=function(){ if(box) box.innerHTML=''; App.sermonImportFile=null; App.sermonImportOptions={}; App.sermonImportPreview=null; }; var commitBtn=$('btnSermonImportCommit'); if(commitBtn) commitBtn.onclick=function(){ sermonImportCommit_(); };
         }).catch(function(err){ showErr('sermonInfoMsg', err || {code:'SERMON_IMPORT_DOCX_PARSE_FAILED', zh:'匯入預覽失敗', en:'Import preview failed'}); });
       }
       function sermonImportCommit_(){

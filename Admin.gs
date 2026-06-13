@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin111
- * CHANGELOG: worship preview future-only messaging and closeable preview UI.
+ * v2026-06-13.admin112
+ * CHANGELOG: native CCF worship diagnostics and sermon import date/header hardening.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin111';
+const ADMIN_VERSION = '2026-06-13.admin112';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -627,7 +627,7 @@ function sermonImportResolveMonth_(doc, filename, options){
 }
 
 function sermonImportParseDate_(raw, ym){
-  const s = sermonImportNormalize_(raw);
+  const s = sermonImportNormalize_(raw).replace(/\s+/g, '');
   if (!s) return '';
   let m = s.match(/SundayService_(\d{4}-\d{2}-\d{2})/i);
   if (m) return m[1];
@@ -635,10 +635,13 @@ function sermonImportParseDate_(raw, ym){
   if (m) return sermonImportYmd_(m[1], m[2], m[3]);
   m = s.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
   if (m) return sermonImportYmd_(String(m[3]).length === 2 ? '20'+m[3] : m[3], m[2], m[1]);
-  m = s.match(/(?:^|\D)(\d{1,2})(?:日|號|号)?(?:\D|$)/);
+  m = s.match(/(\d{1,2})月(\d{1,2})(?:日|號|号)?/);
+  if (m && /^\d{4}-\d{2}$/.test(ym)) return sermonImportYmd_(ym.slice(0,4), m[1], m[2]);
+  m = s.match(/^(\d{1,2})(?:日|號|号)?$/);
   if (m && /^\d{4}-\d{2}$/.test(ym)) return sermonImportYmd_(ym.slice(0,4), ym.slice(5,7), m[1]);
   return '';
 }
+
 function sermonImportYmd_(y,m,d){
   const yy=Number(y), mm=Number(m), dd=Number(d);
   const dt = new Date(Date.UTC(yy, mm-1, dd));
@@ -649,17 +652,18 @@ function sermonImportYmd_(y,m,d){
 function sermonImportFindRows_(doc, ym){
   const out = [];
   let ignoredColumns = 0;
-  (doc.tables || []).forEach(function(table){
+  (doc.tables || []).forEach(function(table, tableIdx){
     for (let r=0;r<table.length;r++){
       const headers = table[r] || [];
       const map = {};
       headers.forEach(function(h, idx){ const key = sermonImportHeaderKey_(h); if (key && map[key] === undefined) map[key] = idx; else if (!key) ignoredColumns++; });
+      const hasDate = map.date !== undefined || map.eventKey !== undefined;
       const hasSermon = map.speaker !== undefined || map.sermonPassageRaw !== undefined || map.sermonTitle !== undefined || map.responsePassageRaw !== undefined || map.responseSpeaker !== undefined;
-      if (!hasSermon) continue;
+      if (!hasDate || !hasSermon) continue;
       for (let rr=r+1; rr<table.length; rr++){
         const row = table[rr] || [];
         if (!row.some(function(c){ return String(c||'').trim(); })) continue;
-        const item = { sourceRow:rr+1, dateRaw:'', eventKey:'', speaker:'', sermonTitle:'', sermonPassageRaw:'', responsePassageRaw:'', responseSpeaker:'' };
+        const item = { sourceRow:rr+1, sourceTable:tableIdx+1, dateRaw:'', eventKey:'', speaker:'', sermonTitle:'', sermonPassageRaw:'', responsePassageRaw:'', responseSpeaker:'' };
         Object.keys(map).forEach(function(k){ item[k] = sermonImportNormalize_(row[map[k]] || ''); });
         if (!item.dateRaw) item.dateRaw = item.date || item.eventKey || row[0] || '';
         if (item.eventKey && /^SundayService_/.test(item.eventKey)) item.dateYmd = item.eventKey.replace('SundayService_','');
@@ -673,6 +677,7 @@ function sermonImportFindRows_(doc, ym){
   if (!out.length) return { ok:false, rows:[], ignoredColumns:ignoredColumns };
   return { ok:true, rows:out, ignoredColumns:ignoredColumns };
 }
+
 
 function sermonImportBuildPreview_(actor, file, options){
   const doc = sermonImportExtractDocx_(file);
@@ -712,9 +717,9 @@ function sermonImportBuildPreview_(actor, file, options){
       }
     });
     const status = rowErrors.length ? 'ERROR' : (rowWarnings.length ? 'WARNING' : 'OK');
-    rows.push({ dateYmd:r.dateYmd||'', eventKey:r.eventKey||'', speaker:r.speaker||'', sermonTitle:r.sermonTitle||'', sermonPassageRaw:r.sermonPassageRaw||'', responsePassageRaw:r.responsePassageRaw||'', responseSpeaker:r.responseSpeaker||'', status:status, message:rowErrors.concat(rowWarnings).join(' | '), sourceRow:r.sourceRow });
-    rowErrors.forEach(function(msg){ errors.push({ code:'SERMON_IMPORT_ROW_DATE_INVALID', eventKey:r.eventKey||'', detail:'row ' + r.sourceRow + ': ' + msg }); });
-    rowWarnings.forEach(function(msg){ warnings.push({ code:'SERMON_IMPORT_WARNING', eventKey:r.eventKey||'', detail:'row ' + r.sourceRow + ': ' + msg }); });
+    rows.push({ dateYmd:r.dateYmd||'', eventKey:r.eventKey||'', speaker:r.speaker||'', sermonTitle:r.sermonTitle||'', sermonPassageRaw:r.sermonPassageRaw||'', responsePassageRaw:r.responsePassageRaw||'', responseSpeaker:r.responseSpeaker||'', status:status, message:rowErrors.concat(rowWarnings).join(' | '), sourceRow:r.sourceRow, sourceTable:r.sourceTable });
+    rowErrors.forEach(function(msg){ errors.push({ code:'SERMON_IMPORT_ROW_DATE_INVALID', eventKey:r.eventKey||'', detail:'table ' + (r.sourceTable||'') + ' row ' + r.sourceRow + ': ' + msg }); });
+    rowWarnings.forEach(function(msg){ warnings.push({ code:'SERMON_IMPORT_WARNING', eventKey:r.eventKey||'', detail:'table ' + (r.sourceTable||'') + ' row ' + r.sourceRow + ': ' + msg }); });
   });
   if (parsed.ignoredColumns) warnings.push({ code:'SERMON_IMPORT_IGNORED_COLUMNS', detail:String(parsed.ignoredColumns) + ' unrelated/unknown columns ignored' });
   return { ok:true, month:month.ym, monthSource:month.source, monthRaw:month.raw, rows:rows, changes:changes, warnings:warnings, errors:errors, hasHardErrors:errors.length > 0, canCommit:errors.length === 0 };

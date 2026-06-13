@@ -12,11 +12,11 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.110
-  CHANGELOG: worship import future-only preview with clearer errors and close action.
+  UI VERSION TAG: reg2-ui-2026-06-13.112
+  CHANGELOG: native CCF worship block import with sheet/row diagnostics.
   ============================================================
 
-  Changes (reg2-ui-2026-06-13.110): worship import future-only preview with clearer errors and close action.
+  Changes (reg2-ui-2026-06-13.112): native CCF worship block import with sheet/row diagnostics.
   [1] Scan QR -> Self menu with 3 options:
       - Details check/change
       - Attendance check (self only)
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.110</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.112</span></div>
     </header>
 
     <main id="app">
@@ -2335,16 +2335,16 @@ function viewSelfHoliday(m){
       function worshipPreviewTable_(res){
         var rows = [];
         var summary = (res && res.summary) || {};
-        (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED / 可匯入', message:'Will be written on confirm.' }); });
-        (Array.isArray((res||{}).warnings) ? res.warnings : []).forEach(function(w){ rows.push({ eventKey:w.eventKey||'', area:w.area||'SKIPPED', fieldName:w.fieldName||'', oldValue:'', newValue:w.detail||'', status:(w.code||'WARNING')+' '+(w.zh||w.en||''), message:(w.en||'Warning')+' / '+(w.zh||'提示') }); });
-        (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||''), message:(e.message||e.en||'Error')+' / '+(e.zh||'錯誤') }); });
-        var note = '<div class="msgBox warn"><b>只預覽及匯入今日或之後的敬拜安排 / Only today and future worship planning is imported.</b><div class="small">Today: '+escapeHtml((res&&res.todayYmd)||'')+' · Accepted: '+escapeHtml(String(summary.accepted||0))+' · Skipped past rows: '+escapeHtml(String(summary.skipped||0))+' · Errors: '+escapeHtml(String(summary.errors||0))+'</div><div class="miniBtnRow"><button id="wImportCloseTop" class="danger">關閉預覽 / Close preview</button></div></div>';
+        (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED / 可匯入', message:'Will be written on confirm.', source:((c.sheetName||'') + (c.rowNumber ? (' row ' + c.rowNumber) : '')) }); });
+        (Array.isArray((res||{}).warnings) ? res.warnings : []).forEach(function(w){ rows.push({ eventKey:w.eventKey||'', area:w.area||'SKIPPED', fieldName:w.fieldName||'', oldValue:'', newValue:w.detail||'', status:(w.code||'WARNING')+' '+(w.zh||w.en||''), message:(w.en||'Warning')+' / '+(w.zh||'提示'), source:((w.sheetName||'') + (w.rowNumber ? (' row ' + w.rowNumber) : '')) }); });
+        (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||''), message:(e.message||e.en||'Error')+' / '+(e.zh||'錯誤'), source:((e.sheetName||'') + (e.rowNumber ? (' row ' + e.rowNumber) : '')) }); });
+        var note = '<div class="msgBox warn"><b>只預覽及匯入今日或之後的敬拜安排 / Only today and future worship planning is imported.</b><div class="small">Today: '+escapeHtml((res&&res.todayYmd)||'')+' · Accepted: '+escapeHtml(String(summary.accepted||0))+' · Skipped past rows: '+escapeHtml(String(summary.skipped||0))+' · Warnings: '+escapeHtml(String(summary.warnings||0))+' · Errors: '+escapeHtml(String(summary.errors||0))+'</div><div class="miniBtnRow"><button id="wImportCloseTop" class="danger">關閉預覽 / Close preview</button></div></div>';
         if (!rows.length) return note + '<div class="small">沒有變更 / No changes</div>';
-        return note + '<div class="tableScroll"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
+        return note + '<div class="tableScroll"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Source</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
           var st = String(r.status||'');
           var bad = st.indexOf('ERROR') >= 0 || st.indexOf('E_WORSHIP_') >= 0 && st.indexOf('PAST_EVENT_SKIPPED') < 0;
           var warn = st.indexOf('SKIPPED') >= 0 || st.indexOf('WARNING') >= 0 || st.indexOf('PAST_EVENT_SKIPPED') >= 0;
-          return '<tr'+(bad?' style="background:#ffecec"':(warn?' style="background:#fff8db"':''))+'><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.area||'')+'</td><td>'+escapeHtml(r.fieldName||'')+'</td><td>'+escapeHtml(r.oldValue||'')+'</td><td>'+escapeHtml(r.newValue||'')+'</td><td>'+escapeHtml(r.status||'')+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
+          return '<tr'+(bad?' style="background:#ffecec"':(warn?' style="background:#fff8db"':''))+'><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.area||'')+'</td><td>'+escapeHtml(r.fieldName||'')+'</td><td>'+escapeHtml(r.oldValue||'')+'</td><td>'+escapeHtml(r.newValue||'')+'</td><td>'+escapeHtml(r.status||'')+'</td><td>'+escapeHtml(r.source||'')+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
         }).join('')+'</tbody></table></div>';
       }
       var importBtn = $('btnWorshipImportMenu');
