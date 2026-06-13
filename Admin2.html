@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.106
-  For Admin.gs: v2026-06-13.admin106
-  CHANGELOG: worship Google Sheet import/export with preview table.
+  UI VERSION TAG: admin2-ui-2026-06-13.107
+  For Admin.gs: v2026-06-13.admin107
+  CHANGELOG: sermon .docx import on sermon information page.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.106</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.107</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -469,6 +469,9 @@
       sermonDirty:{},
       sermonRowRev:{},
       sermonRowInflight:{},
+      sermonImportFile:null,
+      sermonImportOptions:null,
+      sermonImportPreview:null,
       financeRows:[],
       financeCanEdit:false,
       financeSaveTimers:{}
@@ -2831,6 +2834,7 @@ function eventDateYmdFromKey(ev){
           '<td><textarea class="inputMini" style="min-width:220px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonTitle">'+escapeHtml(String(r.sermonTitle||''))+'</textarea></td>'+
           '<td><textarea class="inputMini" style="min-width:240px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="sermonPassageRaw">'+escapeHtml(String(r.sermonPassageRaw||''))+'</textarea>'+parseUi_(r,'sermonPassage')+'</td>'+
           '<td><textarea class="inputMini" style="min-width:240px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="responsePassageRaw">'+escapeHtml(String(r.responsePassageRaw||''))+'</textarea>'+parseUi_(r,'responsePassage')+'</td>'+
+          '<td><textarea class="inputMini" style="min-width:180px;min-height:56px;resize:both;" data-sermon-input="1" data-ev="'+escapeHtml(ev)+'" data-key="responseSpeaker">'+escapeHtml(String(r.responseSpeaker||''))+'</textarea></td>'+
         '</tr>';
       }).join('');
       return ''+
@@ -2838,15 +2842,17 @@ function eventDateYmdFromKey(ev){
           '<div class="big">Set Sermon info / 設定講道資料</div>'+
           '<div class="miniBtnRow" style="align-items:flex-end;">'+
             '<div class="monthPick"><div class="small">月份 / Month</div><select id="sermonMonthSelect">'+opts+'</select></div>'+
+            '<button id="btnSermonImportDocx" class="btnPeriod btnSmall">匯入講道資料 / Import sermon information</button>'+
             '<button id="btnSermonManualSave" class="btnPeriod btnSmall">💾 手動儲存 / Manual save</button>'+
             '<button id="btnSermonBack" class="btnBack btnSmall">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="sermonSaveState" class="small" style="margin-top:8px;">❌ 未儲存 / Not saved</div>'+
           '<div id="sermonInfoMsg" class="small" style="margin-top:8px;"></div>'+
+          '<div id="sermonImportBox" class="small" style="margin-top:8px;"></div>'+
         '</div>'+
         '<div class="card">'+
-          '<div class="tableWrap"><table><thead><tr><th>Service Date<br/>YYYY-MM-DD</th><th>講員 / Speaker</th><th>講題 / Sermon title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th></tr></thead><tbody>'+
-          (tableRows || '<tr><td colspan="5" class="muted">No rows</td></tr>')+
+          '<div class="tableWrap"><table><thead><tr><th>Service Date<br/>YYYY-MM-DD</th><th>講員 / Speaker</th><th>講題 / Sermon title</th><th>講道經文 / Sermon passage</th><th>回應經文 / Response passage</th><th>回應講員 / Response speaker</th></tr></thead><tbody>'+
+          (tableRows || '<tr><td colspan="6" class="muted">No rows</td></tr>')+
           '</tbody></table></div>'+
         '</div>';
     }
@@ -2867,6 +2873,7 @@ function eventDateYmdFromKey(ev){
           row.responsePassageRaw = returnedRow.responsePassageRaw || '';
           row.responsePassageCanonical = returnedRow.responsePassageCanonical || '';
           row.responsePassageStatus = returnedRow.responsePassageStatus || 'EMPTY';
+          row.responseSpeaker = returnedRow.responseSpeaker || '';
           row.sermonParsed = returnedRow.sermonParsed || null;
           row.responseParsed = returnedRow.responseParsed || null;
           render();
@@ -2888,7 +2895,8 @@ function eventDateYmdFromKey(ev){
           speaker: String(row.speaker||''),
           sermonTitle: String(row.sermonTitle||''),
           sermonPassageRaw: String(row.sermonPassageRaw||''),
-          responsePassageRaw: String(row.responsePassageRaw||'')
+          responsePassageRaw: String(row.responsePassageRaw||''),
+          responseSpeaker: String(row.responseSpeaker||'')
         }).then(function(res){
           if(!res||!res.ok){ setSaveState_('❌','儲存失敗','Save failed'); App.sermonDirty[ev]=true; showBox('sermonInfoMsg','err','儲存失敗','Save failed'); return; }
           applyRowResult_(ev, res.row || {}, revStart);
@@ -2898,6 +2906,67 @@ function eventDateYmdFromKey(ev){
           if (App.sermonDirty[ev]) scheduleSave_(ev);
         });
       }
+
+      function sermonImportMonthOptions_(){
+        var months = ((App.sermonPayload||{}).months)||[];
+        return months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===App.sermonMonth?' selected':'')+'>'+escapeHtml(monthLabel_(m))+'</option>'; }).join('');
+      }
+      function sermonImportPreviewTable_(res){
+        var rows = (res && Array.isArray(res.rows)) ? res.rows : [];
+        if (!rows.length) return '<div class="msgBox warn">沒有可預覽資料 / No preview rows</div>';
+        return '<div class="tableWrap"><table><thead><tr><th>日期 / Date</th><th>EventKey</th><th>講道經文 / Sermon passage</th><th>講題 / Sermon title</th><th>講員 / Speaker</th><th>回應經文 / Response passage</th><th>回應講員 / Response speaker</th><th>狀態 / Status</th><th>訊息 / Message</th></tr></thead><tbody>'+rows.map(function(r){
+          var st=String(r.status||''); var bg=st==='ERROR'?' style="background:#ffecec"':(st==='WARNING'?' style="background:#fff8e1"':'');
+          return '<tr'+bg+'><td>'+escapeHtml(r.dateYmd||'')+'</td><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.sermonPassageRaw||'')+'</td><td>'+escapeHtml(r.sermonTitle||'')+'</td><td>'+escapeHtml(r.speaker||'')+'</td><td>'+escapeHtml(r.responsePassageRaw||'')+'</td><td>'+escapeHtml(r.responseSpeaker||'')+'</td><td>'+escapeHtml(st==='OK'?'OK / 可匯入':(st==='WARNING'?'Warning / 提示':'Error / 錯誤'))+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>';
+      }
+      function sermonImportChooseMonth_(message, cb){
+        var modal = openModal('<div class="big">選擇匯入月份 / Select import month</div><div class="small">'+escapeHtml(message||'')+'</div><select id="sermonImportMonthPick">'+sermonImportMonthOptions_()+'</select><div class="miniBtnRow"><button id="sermonImportMonthOk" class="btnPeriod">確認 / Confirm</button><button id="sermonImportMonthCancel" class="btnDanger">取消 / Cancel</button></div>');
+        modal.querySelector('#sermonImportMonthCancel').onclick=function(){ closeModal(modal); };
+        modal.querySelector('#sermonImportMonthOk').onclick=function(){ var ym=String(modal.querySelector('#sermonImportMonthPick').value||''); closeModal(modal); cb(ym); };
+      }
+      function sermonImportCallPreview_(fileObj, options){
+        var box=$('sermonImportBox'); if(box) box.innerHTML='<div class="msgBox warn">解析中… / Parsing…</div>';
+        options = options || {}; options.portalMonth = App.sermonMonth || ((App.sermonPayload||{}).month)||'';
+        return callApi('api_admin_sermon_docx_import_preview', App.token, fileObj, options).then(function(res){
+          if(!res || !res.ok){
+            if (res && res.code === 'SERMON_IMPORT_MONTH_NOT_FOUND'){
+              sermonImportChooseMonth_((res.zh||'')+' / '+(res.en||''), function(ym){ options.manualMonth=ym; options.confirmPortalMonth=true; sermonImportCallPreview_(fileObj, options); }); return;
+            }
+            if (res && res.code === 'SERMON_IMPORT_MONTH_CONFLICT'){
+              if (res.subCode === 'CONTENT_FILENAME'){
+                sermonImportChooseMonth_((res.detail||'')+' — 請選擇月份 / Please choose month', function(ym){ options.manualMonth=ym; options.confirmMonth=true; options.confirmPortalMonth=true; sermonImportCallPreview_(fileObj, options); }); return;
+              }
+              var msg=(res.zh||'')+' / '+(res.en||'')+'\n'+(res.detail||'');
+              if (confirm(msg+'\n\n繼續使用偵測月份？ / Continue with detected month?')){ options.confirmPortalMonth=true; sermonImportCallPreview_(fileObj, options); return; }
+            }
+            if(box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'SERMON_IMPORT_ERROR')+'</b><div>'+escapeHtml((res&&res.zh)||'匯入預覽失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Import preview failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>'; return;
+          }
+          App.sermonImportFile=fileObj; App.sermonImportOptions=options; App.sermonImportPreview=res;
+          if(box) box.innerHTML = '<div class="msgBox '+(res.hasHardErrors?'err':'ok')+'"><b>'+(res.hasHardErrors?'預覽有錯誤 / Preview has errors':'預覽完成 / Preview ready')+'</b><div class="small">Month: '+escapeHtml(res.month||'')+' ('+escapeHtml(res.monthSource||'')+')</div><div class="miniBtnRow"><button id="btnSermonImportCommit" class="btnPeriod" '+(res.hasHardErrors?'disabled':'')+'>確認匯入 / Confirm import</button></div></div>'+sermonImportPreviewTable_(res);
+          var commitBtn=$('btnSermonImportCommit'); if(commitBtn) commitBtn.onclick=function(){ sermonImportCommit_(); };
+        }).catch(function(err){ showErr('sermonInfoMsg', err || {code:'SERMON_IMPORT_DOCX_PARSE_FAILED', zh:'匯入預覽失敗', en:'Import preview failed'}); });
+      }
+      function sermonImportCommit_(){
+        var box=$('sermonImportBox'); if(box) box.innerHTML += '<div class="msgBox warn">寫入中… / Committing…</div>';
+        callApi('api_admin_sermon_docx_import_commit', App.token, App.sermonImportFile, App.sermonImportOptions||{}).then(function(res){
+          if(!res || !res.ok){ showErr('sermonInfoMsg', res); return; }
+          showBox('sermonInfoMsg','ok','匯入完成','Import completed','Changed: '+escapeHtml(String(res.changed||0)));
+          return callApi('api_admin_sermon_page', App.token, res.month || App.sermonMonth).then(function(page){ if(page&&page.ok){ App.sermonPayload=page; App.sermonMonth=page.month||App.sermonMonth; App.sermonDirty={}; App.sermonRowRev={}; App.sermonRowInflight={}; render(); } });
+        }).catch(function(err){ showErr('sermonInfoMsg', err || {code:'SERMON_IMPORT_COMMIT_FAILED', zh:'匯入失敗', en:'Import failed'}); });
+      }
+      if ($('btnSermonImportDocx')) $('btnSermonImportDocx').onclick = function(){
+        var modal = openModal('<div class="big">匯入講道資料 / Import sermon information</div><div class="small">只匯入講道資料欄位，不會匯入其他事奉排期欄位。/ Only sermon fields are imported; unrelated serving rota columns are ignored.</div><input id="sermonDocxFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" /><div class="miniBtnRow"><button id="sermonDocxPreview" class="btnPeriod">匯入預覽 / Import preview</button><button id="sermonDocxCancel" class="btnDanger">取消 / Cancel</button></div>');
+        modal.querySelector('#sermonDocxCancel').onclick=function(){ closeModal(modal); };
+        modal.querySelector('#sermonDocxPreview').onclick=function(){
+          var file=(modal.querySelector('#sermonDocxFile').files||[])[0];
+          if(!file){ showBox('sermonInfoMsg','err','請先選擇 .docx 檔案','Please choose a .docx file.'); return; }
+          if(!/\.docx$/i.test(file.name||'')){ showBox('sermonInfoMsg','err','只支援 .docx Word 檔案','Only .docx Word files are supported.'); return; }
+          var reader=new FileReader();
+          reader.onload=function(){ closeModal(modal); sermonImportCallPreview_({ name:file.name, mimeType:file.type, base64:String(reader.result||'').split(',').pop() }, {}); };
+          reader.onerror=function(){ showBox('sermonInfoMsg','err','讀取檔案失敗','Failed to read file.'); };
+          reader.readAsDataURL(file);
+        };
+      };
       if ($('btnSermonBack')) $('btnSermonBack').onclick = function(){ App.view='menu'; render(); };
       if ($('btnSermonManualSave')) $('btnSermonManualSave').onclick = function(){
         var rows=((App.sermonPayload||{}).rows)||[]; Promise.all(rows.map(function(r){ return saveRow_(String(r.eventKey||''), true); }));

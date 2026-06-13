@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin106
- * CHANGELOG: worship spreadsheet import/export with Worship_Alias.
+ * v2026-06-13.admin107
+ * CHANGELOG: sermon .docx import for existing sermon info page.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin106';
+const ADMIN_VERSION = '2026-06-13.admin107';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -473,6 +473,7 @@ function api_admin_sermon_save(token, payload){
   const sermonTitle = String(p.sermonTitle || p.title || '').trim();
   const sermonPassageRaw = String(p.sermonPassageRaw || p.sermonPassage || '').trim();
   const responsePassageRaw = String(p.responsePassageRaw || p.responsePassage || '').trim();
+  const responseSpeaker = String(p.responseSpeaker || '').trim();
   const sermonParsed = bible_parseReference_(sermonPassageRaw);
   const responseParsed = bible_parseReference_(responsePassageRaw);
   const row = admin_upsertSermonInfoRow_(eventKey, {
@@ -484,6 +485,7 @@ function api_admin_sermon_save(token, payload){
     ResponsePassageRaw: responsePassageRaw,
     ResponsePassageCanonical: responseParsed.canonical || '',
     ResponsePassageStatus: responseParsed.status || 'EMPTY',
+    ResponseSpeaker: responseSpeaker,
     UpdatedAt: admin_nowIso_(),
     UpdatedBy: String(s.actor.id || ''),
     UpdatedRole: String(s.actor.role || '')
@@ -493,6 +495,266 @@ function api_admin_sermon_save(token, payload){
   row.responseParsed = responseParsed;
   admin_audit_(s.actor, 'SERMON_SAVE', JSON.stringify({ eventKey: eventKey, actorId: String(s.actor.id || '') }), 'sermon_info');
   return { ok:true, row: row };
+}
+
+
+function sermonImportErr_(code, zh, en, detail, subCode){
+  const out = { ok:false, code:String(code||'SERMON_IMPORT_ERROR'), zh:String(zh||'講道資料匯入錯誤'), en:String(en||'Sermon import error') };
+  if (subCode) out.subCode = String(subCode);
+  if (detail !== undefined && detail !== null && String(detail) !== '') out.detail = String(detail);
+  return out;
+}
+
+function sermonImportRequireAuth_(token){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')) return admin_err_('E403','沒有權限','No permission');
+  return s;
+}
+
+function sermonImportXmlText_(xml){
+  return String(xml||'')
+    .replace(/<w:tab\/>/g, ' ')
+    .replace(/<w:br\/>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sermonImportNormalize_(v){
+  return String(v||'')
+    .replace(/[\u3000\t\r\n]+/g, ' ')
+    .replace(/[：:]/g, ':')
+    .replace(/[（）]/g, function(ch){ return ch === '（' ? '(' : ')'; })
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sermonImportHeaderKey_(header){
+  const h = sermonImportNormalize_(header).toLowerCase().replace(/[\s:：_\-\/\\()（）]+/g, '');
+  if (!h) return '';
+  if (/^(date|servicedate|sunday|日期|主日|崇拜日期)$/.test(h) || /日期|主日/.test(h)) return 'date';
+  if (/eventkey/.test(h)) return 'eventKey';
+  if (/回[應应].*(講員|讲员|speaker)|responsespeaker/.test(h)) return 'responseSpeaker';
+  if (/回[應应].*(經文|经文|詩|诗)|response(passage|scripture)/.test(h)) return 'responsePassageRaw';
+  if (/講題|讲题|題目|题目|sermontitle|topic|^title$/.test(h)) return 'sermonTitle';
+  if (/講員|讲员|preacher|speaker/.test(h)) return 'speaker';
+  if (/講道.*(經文|经文)|^(經文|经文)$|biblepassage|scripture|passage/.test(h)) return 'sermonPassageRaw';
+  return '';
+}
+
+function sermonImportExtractDocx_(file){
+  const f = file || {};
+  const name = String(f.name || f.filename || '').trim();
+  const mime = String(f.mimeType || '').trim();
+  const b64 = String(f.base64 || '').replace(/^data:.*?;base64,/, '');
+  if (!b64) return sermonImportErr_('SERMON_IMPORT_NO_FILE','請先選擇 .docx Word 檔案','Please choose a .docx Word file.');
+  if (name && !/\.docx$/i.test(name)) return sermonImportErr_('SERMON_IMPORT_UNSUPPORTED_FILE_TYPE','只支援 .docx Word 檔案','Only .docx Word files are supported.', name);
+  try{
+    const bytes = Utilities.base64Decode(b64);
+    const blob = Utilities.newBlob(bytes, mime || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', name || 'sermon.docx');
+    const files = Utilities.unzip(blob);
+    let docXml = '';
+    files.forEach(function(part){ if (String(part.getName()).replace(/^\//,'') === 'word/document.xml') docXml = part.getDataAsString('UTF-8'); });
+    if (!docXml) return sermonImportErr_('SERMON_IMPORT_DOCX_PARSE_FAILED','無法讀取 Word 文件內容','Could not read Word document content.', 'word/document.xml missing');
+    const tables = [];
+    const tableMatches = docXml.match(/<w:tbl[\s\S]*?<\/w:tbl>/g) || [];
+    tableMatches.forEach(function(tbl){
+      const rows = [];
+      (tbl.match(/<w:tr[\s\S]*?<\/w:tr>/g) || []).forEach(function(tr){
+        const cells = [];
+        (tr.match(/<w:tc[\s\S]*?<\/w:tc>/g) || []).forEach(function(tc){ cells.push(sermonImportXmlText_(tc)); });
+        if (cells.some(function(c){ return String(c||'').trim(); })) rows.push(cells);
+      });
+      if (rows.length) tables.push(rows);
+    });
+    const bodyText = sermonImportXmlText_(docXml);
+    return { ok:true, name:name, text:bodyText, tables:tables };
+  }catch(e){ return sermonImportErr_('SERMON_IMPORT_DOCX_PARSE_FAILED','Word 檔案解析失敗','Word document parsing failed.', String(e && e.message || e)); }
+}
+
+function sermonImportMonthNameToNumber_(raw){
+  const s = String(raw||'').trim().toLowerCase();
+  const names = { jan:1,january:1,feb:2,february:2,mar:3,march:3,apr:4,april:4,may:5,jun:6,june:6,jul:7,july:7,aug:8,august:8,sep:9,sept:9,september:9,oct:10,october:10,nov:11,november:11,dec:12,december:12 };
+  if (names[s]) return names[s];
+  const zh = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10,'十一':11,'十二':12 };
+  return zh[s.replace(/月/g,'')] || 0;
+}
+function sermonImportYm_(year, month){
+  const y = Number(year), m = Number(month);
+  if (!(y >= 2000 && y <= 2100 && m >= 1 && m <= 12)) return '';
+  return y + '-' + ('0'+m).slice(-2);
+}
+function sermonImportDetectMonth_(text, source){
+  const src = String(text||'');
+  const patterns = [
+    /(20\d{2})\s*年\s*(\d{1,2}|一|二|三|四|五|六|七|八|九|十|十一|十二)\s*月/,
+    /(\d{1,2}|一|二|三|四|五|六|七|八|九|十|十一|十二)\s*月\s*(20\d{2})/,
+    /\b(20\d{2})[-_\.\/ ](0?[1-9]|1[0-2])\b/,
+    /\b(20\d{2})(0[1-9]|1[0-2])\b/,
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[-_ ,]*(20\d{2})\b/i,
+    /\b(20\d{2})[-_ ,]*(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b/i
+  ];
+  for (let i=0;i<patterns.length;i++){
+    const m = src.match(patterns[i]);
+    if (!m) continue;
+    let ym = '';
+    if (i === 1) ym = sermonImportYm_(m[2], sermonImportMonthNameToNumber_(m[1]) || m[1]);
+    else if (i === 4) ym = sermonImportYm_(m[2], sermonImportMonthNameToNumber_(m[1]));
+    else if (i === 5) ym = sermonImportYm_(m[1], sermonImportMonthNameToNumber_(m[2]));
+    else ym = sermonImportYm_(m[1], sermonImportMonthNameToNumber_(m[2]) || m[2]);
+    if (ym) return { ym:ym, source:source, raw:m[0] };
+  }
+  return null;
+}
+function sermonImportResolveMonth_(doc, filename, options){
+  const opt = options || {};
+  const contentMonth = sermonImportDetectMonth_(doc.text || '', 'content');
+  const filenameMonth = sermonImportDetectMonth_(filename || '', 'filename');
+  const manual = /^\d{4}-\d{2}$/.test(String(opt.manualMonth||'')) ? { ym:String(opt.manualMonth), source:'manual', raw:String(opt.manualMonth) } : null;
+  if (contentMonth && filenameMonth && contentMonth.ym !== filenameMonth.ym && !opt.confirmMonth){
+    const err = sermonImportErr_('SERMON_IMPORT_MONTH_CONFLICT','Word 內容和檔名月份不一致，請選擇要匯入的月份','Word content and filename months differ; please choose the import month.', 'content=' + contentMonth.ym + ', filename=' + filenameMonth.ym, 'CONTENT_FILENAME'); err.contentMonth = contentMonth.ym; err.filenameMonth = filenameMonth.ym; return err;
+  }
+  const chosen = manual || contentMonth || filenameMonth;
+  if (!chosen){ const err = sermonImportErr_('SERMON_IMPORT_MONTH_NOT_FOUND','未能辨認月份/年份，請手動選擇','Could not detect month/year; please choose manually.'); err.manualRequired = true; return err; }
+  const portalMonth = String(opt.portalMonth||'').trim();
+  if (/^\d{4}-\d{2}$/.test(portalMonth) && chosen.ym !== portalMonth && !opt.confirmPortalMonth){
+    const err = sermonImportErr_('SERMON_IMPORT_MONTH_CONFLICT','Word 檔月份與目前頁面月份不同，請確認','Word document month differs from the selected portal month; please confirm.', 'detected=' + chosen.ym + ', portal=' + portalMonth, 'PORTAL_MONTH'); err.detectedMonth = chosen.ym; err.portalMonth = portalMonth; return err;
+  }
+  return { ok:true, ym:chosen.ym, source:chosen.source, raw:chosen.raw, contentMonth:contentMonth, filenameMonth:filenameMonth };
+}
+
+function sermonImportParseDate_(raw, ym){
+  const s = sermonImportNormalize_(raw);
+  if (!s) return '';
+  let m = s.match(/SundayService_(\d{4}-\d{2}-\d{2})/i);
+  if (m) return m[1];
+  m = s.match(/(20\d{2})[-\/年.](\d{1,2})[-\/月.](\d{1,2})/);
+  if (m) return sermonImportYmd_(m[1], m[2], m[3]);
+  m = s.match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+  if (m) return sermonImportYmd_(String(m[3]).length === 2 ? '20'+m[3] : m[3], m[2], m[1]);
+  m = s.match(/(?:^|\D)(\d{1,2})(?:日|號|号)?(?:\D|$)/);
+  if (m && /^\d{4}-\d{2}$/.test(ym)) return sermonImportYmd_(ym.slice(0,4), ym.slice(5,7), m[1]);
+  return '';
+}
+function sermonImportYmd_(y,m,d){
+  const yy=Number(y), mm=Number(m), dd=Number(d);
+  const dt = new Date(Date.UTC(yy, mm-1, dd));
+  if (dt.getUTCFullYear() !== yy || dt.getUTCMonth() !== mm-1 || dt.getUTCDate() !== dd) return '';
+  return yy + '-' + ('0'+mm).slice(-2) + '-' + ('0'+dd).slice(-2);
+}
+
+function sermonImportFindRows_(doc, ym){
+  const out = [];
+  let ignoredColumns = 0;
+  (doc.tables || []).forEach(function(table){
+    for (let r=0;r<table.length;r++){
+      const headers = table[r] || [];
+      const map = {};
+      headers.forEach(function(h, idx){ const key = sermonImportHeaderKey_(h); if (key && map[key] === undefined) map[key] = idx; else if (!key) ignoredColumns++; });
+      const hasSermon = map.speaker !== undefined || map.sermonPassageRaw !== undefined || map.sermonTitle !== undefined || map.responsePassageRaw !== undefined || map.responseSpeaker !== undefined;
+      if (!hasSermon) continue;
+      for (let rr=r+1; rr<table.length; rr++){
+        const row = table[rr] || [];
+        if (!row.some(function(c){ return String(c||'').trim(); })) continue;
+        const item = { sourceRow:rr+1, dateRaw:'', eventKey:'', speaker:'', sermonTitle:'', sermonPassageRaw:'', responsePassageRaw:'', responseSpeaker:'' };
+        Object.keys(map).forEach(function(k){ item[k] = sermonImportNormalize_(row[map[k]] || ''); });
+        if (!item.dateRaw) item.dateRaw = item.date || item.eventKey || row[0] || '';
+        if (item.eventKey && /^SundayService_/.test(item.eventKey)) item.dateYmd = item.eventKey.replace('SundayService_','');
+        else item.dateYmd = sermonImportParseDate_(item.dateRaw, ym);
+        if (item.dateYmd) item.eventKey = 'SundayService_' + item.dateYmd;
+        if ([item.speaker,item.sermonTitle,item.sermonPassageRaw,item.responsePassageRaw,item.responseSpeaker,item.dateYmd].some(Boolean)) out.push(item);
+      }
+      break;
+    }
+  });
+  if (!out.length) return { ok:false, rows:[], ignoredColumns:ignoredColumns };
+  return { ok:true, rows:out, ignoredColumns:ignoredColumns };
+}
+
+function sermonImportBuildPreview_(actor, file, options){
+  const doc = sermonImportExtractDocx_(file);
+  if (!doc.ok) return doc;
+  const month = sermonImportResolveMonth_(doc, doc.name, options || {});
+  if (!month.ok) return month;
+  const parsed = sermonImportFindRows_(doc, month.ym);
+  if (!parsed.ok) return sermonImportErr_('SERMON_IMPORT_NO_SERMON_COLUMNS','找不到講道資料表格/欄位','No sermon information table/columns found.');
+  const events = admin_getMonthSundayEvents_(month.ym);
+  const eventSet = {};
+  events.forEach(function(e){ eventSet[e.eventKey] = true; });
+  const current = admin_getSermonInfoForMonth_(events.map(function(e){ return e.eventKey; }));
+  const seen = {}, errors = [], warnings = [], rows = [], changes = [];
+  parsed.rows.forEach(function(r){
+    const rowErrors = [], rowWarnings = [];
+    if (!r.dateYmd || !admin_parseYmd_(r.dateYmd)) rowErrors.push('Cannot determine row date / 未能辨認列日期');
+    if (r.dateYmd && r.dateYmd.slice(0,7) !== month.ym) rowErrors.push('Date outside import month / 日期不屬於匯入月份');
+    if (r.eventKey && !eventSet[r.eventKey]) rowErrors.push('Event not found for selected month / 找不到該月份主日活動');
+    if (!r.speaker && !r.sermonPassageRaw) rowErrors.push('Missing sermon speaker and passage / 缺少講員及講道經文');
+    if (!r.sermonTitle) rowWarnings.push('Optional sermon title blank / 講題留空');
+    if (!r.responsePassageRaw) rowWarnings.push('Optional response passage blank / 回應經文留空');
+    if (!r.responseSpeaker) rowWarnings.push('Optional response speaker blank / 回應講員留空');
+    const sig = [r.speaker,r.sermonTitle,r.sermonPassageRaw,r.responsePassageRaw,r.responseSpeaker].join('|');
+    if (r.eventKey){
+      if (seen[r.eventKey] && seen[r.eventKey] !== sig) rowErrors.push('Duplicate conflicting row for same EventKey / 同一活動有不同匯入資料');
+      seen[r.eventKey] = sig;
+    }
+    const old = current[r.eventKey] || admin_sermonBlankFromEventKey_(r.eventKey);
+    const fields = ['speaker','sermonTitle','sermonPassageRaw','responsePassageRaw','responseSpeaker'];
+    fields.forEach(function(f){
+      const nv = String(r[f]||'').trim();
+      const ov = String((old && old[f]) || '').trim();
+      if (!nv && ov) return;
+      if (nv && nv !== ov){
+        changes.push({ eventKey:r.eventKey, fieldName:f, oldValue:ov, newValue:nv });
+        if (ov) rowWarnings.push('Will overwrite existing ' + f + ' / 將覆寫現有 ' + f);
+      }
+    });
+    const status = rowErrors.length ? 'ERROR' : (rowWarnings.length ? 'WARNING' : 'OK');
+    rows.push({ dateYmd:r.dateYmd||'', eventKey:r.eventKey||'', speaker:r.speaker||'', sermonTitle:r.sermonTitle||'', sermonPassageRaw:r.sermonPassageRaw||'', responsePassageRaw:r.responsePassageRaw||'', responseSpeaker:r.responseSpeaker||'', status:status, message:rowErrors.concat(rowWarnings).join(' | '), sourceRow:r.sourceRow });
+    rowErrors.forEach(function(msg){ errors.push({ code:'SERMON_IMPORT_ROW_DATE_INVALID', eventKey:r.eventKey||'', detail:'row ' + r.sourceRow + ': ' + msg }); });
+    rowWarnings.forEach(function(msg){ warnings.push({ code:'SERMON_IMPORT_WARNING', eventKey:r.eventKey||'', detail:'row ' + r.sourceRow + ': ' + msg }); });
+  });
+  if (parsed.ignoredColumns) warnings.push({ code:'SERMON_IMPORT_IGNORED_COLUMNS', detail:String(parsed.ignoredColumns) + ' unrelated/unknown columns ignored' });
+  return { ok:true, month:month.ym, monthSource:month.source, monthRaw:month.raw, rows:rows, changes:changes, warnings:warnings, errors:errors, hasHardErrors:errors.length > 0, canCommit:errors.length === 0 };
+}
+
+function api_admin_sermon_docx_import_preview(token, file, options){
+  try{
+    const s = sermonImportRequireAuth_(token);
+    if (!s.ok) return s;
+    return sermonImportBuildPreview_(s.actor, file, options || {});
+  }catch(e){ return sermonImportErr_('SERMON_IMPORT_DOCX_PARSE_FAILED','講道資料預覽失敗','Sermon import preview failed.', String(e && e.message || e)); }
+}
+
+function api_admin_sermon_docx_import_commit(token, file, options){
+  try{
+    const s = sermonImportRequireAuth_(token);
+    if (!s.ok) return s;
+    const preview = sermonImportBuildPreview_(s.actor, file, options || {});
+    if (!preview.ok) return preview;
+    if (preview.hasHardErrors) return sermonImportErr_('SERMON_IMPORT_COMMIT_FAILED','匯入仍有錯誤，請先修正 Word 檔','Import still has errors; please correct the Word file first.');
+    const byEvent = {};
+    (preview.changes || []).forEach(function(c){ if (!byEvent[c.eventKey]) byEvent[c.eventKey] = {}; byEvent[c.eventKey][c.fieldName] = c.newValue; });
+    const now = admin_nowIso_();
+    const written = [];
+    Object.keys(byEvent).forEach(function(ev){
+      const old = admin_getSermonRecordByEventKey_(ev);
+      const patch = byEvent[ev];
+      const nextSpeaker = Object.prototype.hasOwnProperty.call(patch,'speaker') ? patch.speaker : old.speaker;
+      const nextTitle = Object.prototype.hasOwnProperty.call(patch,'sermonTitle') ? patch.sermonTitle : old.sermonTitle;
+      const nextSermonPassage = Object.prototype.hasOwnProperty.call(patch,'sermonPassageRaw') ? patch.sermonPassageRaw : old.sermonPassageRaw;
+      const nextResponsePassage = Object.prototype.hasOwnProperty.call(patch,'responsePassageRaw') ? patch.responsePassageRaw : old.responsePassageRaw;
+      const nextResponseSpeaker = Object.prototype.hasOwnProperty.call(patch,'responseSpeaker') ? patch.responseSpeaker : old.responseSpeaker;
+      const sermonParsed = bible_parseReference_(nextSermonPassage);
+      const responseParsed = bible_parseReference_(nextResponsePassage);
+      const row = admin_upsertSermonInfoRow_(ev, { Speaker:nextSpeaker, SermonTitle:nextTitle, SermonPassageRaw:nextSermonPassage, SermonPassageCanonical:sermonParsed.canonical||'', SermonPassageStatus:sermonParsed.status||'EMPTY', ResponsePassageRaw:nextResponsePassage, ResponsePassageCanonical:responseParsed.canonical||'', ResponsePassageStatus:responseParsed.status||'EMPTY', ResponseSpeaker:nextResponseSpeaker, UpdatedAt:now, UpdatedBy:String(s.actor.id||''), UpdatedRole:String(s.actor.role||'') });
+      written.push(row);
+    });
+    (preview.changes || []).forEach(function(c){ admin_audit_(s.actor, 'SERMON_DOCX_IMPORT', JSON.stringify({ eventKey:c.eventKey, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, source:'SERMON_DOCX_IMPORT' }), 'sermon_info'); });
+    return { ok:true, month:preview.month, changed:(preview.changes||[]).length, rows:written };
+  }catch(e){ return sermonImportErr_('SERMON_IMPORT_COMMIT_FAILED','講道資料匯入寫入失敗','Sermon import commit failed.', String(e && e.message || e)); }
 }
 
 function admin_actorInFinance_(actor){
@@ -2157,7 +2419,7 @@ function admin_ensureSermonInfoSheet_(){
   let sh = ss.getSheetByName(ADMIN_SERMON_SHEET_NAME);
   const headers = [
     'EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus',
-    'ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole'
+    'ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole','ResponseSpeaker'
   ];
   if (!sh) sh = ss.insertSheet(ADMIN_SERMON_SHEET_NAME);
   const existingCols = Math.max(sh.getLastColumn(), headers.length);
@@ -2173,7 +2435,7 @@ function admin_ensureSermonInfoSheet_(){
   return sh;
 }
 function admin_getSermonInfoHeaderMap_(sh){
-  const lastCol = Math.max((sh && sh.getLastColumn()) || 0, 12);
+  const lastCol = Math.max((sh && sh.getLastColumn()) || 0, 13);
   const headers = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v||'').trim(); });
   const map = {};
   headers.forEach(function(h, idx){ if (h) map[h] = idx + 1; });
@@ -2224,9 +2486,9 @@ function admin_ensureSermonRowsForMonth_(sh, ym){
   }
   const toAppend = [];
   events.forEach(function(ev){
-    if (!existing[ev.eventKey]) toAppend.push([ev.eventKey,'','','','','','','','','','','']);
+    if (!existing[ev.eventKey]) toAppend.push([ev.eventKey,'','','','','','','','','','','','']);
   });
-  if (toAppend.length) sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 12).setValues(toAppend);
+  if (toAppend.length) sh.getRange(sh.getLastRow() + 1, 1, toAppend.length, 13).setValues(toAppend);
   return events;
 }
 function admin_sermonBlankFromEventKey_(eventKey){
@@ -2243,6 +2505,7 @@ function admin_sermonBlankFromEventKey_(eventKey){
     responsePassageRaw: '',
     responsePassageCanonical: '',
     responsePassageStatus: 'EMPTY',
+    responseSpeaker: '',
     updatedAt: '',
     updatedBy: '',
     updatedRole: ''
@@ -2262,6 +2525,7 @@ function admin_rowToSermonInfo_(row, colMap, fallbackEventKey){
     responsePassageRaw: String(row[(colMap['ResponsePassageRaw'] || 7) - 1] || '').trim(),
     responsePassageCanonical: String(row[(colMap['ResponsePassageCanonical'] || 8) - 1] || '').trim(),
     responsePassageStatus: String(row[(colMap['ResponsePassageStatus'] || 9) - 1] || '').trim() || 'EMPTY',
+    responseSpeaker: String(row[(colMap['ResponseSpeaker'] || 13) - 1] || '').trim(),
     updatedAt: String(row[(colMap['UpdatedAt'] || 10) - 1] || '').trim(),
     updatedBy: String(row[(colMap['UpdatedBy'] || 11) - 1] || '').trim(),
     updatedRole: String(row[(colMap['UpdatedRole'] || 12) - 1] || '').trim()
@@ -2274,7 +2538,7 @@ function admin_getSermonRecordByEventKey_(eventKey){
   const rowNumber = admin_findSermonInfoRowByEventKey_(sh, blank.eventKey);
   if (!rowNumber) return blank;
   const colMap = admin_getSermonInfoHeaderMap_(sh);
-  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 12)).getValues()[0];
+  const row = sh.getRange(rowNumber, 1, 1, Math.max(sh.getLastColumn(), 13)).getValues()[0];
   return admin_rowToSermonInfo_(row, colMap, blank.eventKey);
 }
 function admin_upsertSermonInfoRow_(eventKey, fields){
@@ -2282,11 +2546,11 @@ function admin_upsertSermonInfoRow_(eventKey, fields){
   const colMap = admin_getSermonInfoHeaderMap_(sh);
   let rowNumber = admin_findSermonInfoRowByEventKey_(sh, eventKey);
   if (!rowNumber){
-    sh.appendRow([String(eventKey||'').trim(),'','','','','','','','','','','']);
+    sh.appendRow([String(eventKey||'').trim(),'','','','','','','','','','','','']);
     rowNumber = sh.getLastRow();
   }
   const allFields = fields || {};
-  ['EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus','ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole'].forEach(function(k){
+  ['EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus','ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole','ResponseSpeaker'].forEach(function(k){
     if (!Object.prototype.hasOwnProperty.call(allFields, k) && k !== 'EventKey') return;
     const v = (k === 'EventKey') ? String(eventKey||'').trim() : String(allFields[k] || '').trim();
     sh.getRange(rowNumber, colMap[k] || 1).setValue(v);
