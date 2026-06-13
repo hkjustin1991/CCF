@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.102
-  For Admin.gs: v2026-06-13.admin102
-  CHANGELOG: fixed matrix status key/diagnostics, admin boot fallback, handoff recovery, mobile serving cards, and YYYY-MM month ordering.
+  UI VERSION TAG: admin2-ui-2026-06-13.103
+  For Admin.gs: v2026-06-13.admin103
+  CHANGELOG: changed matrix large/mobile mode to monthly summary matrix and added clean PDF export.
   ============================================================
   -->
 
@@ -121,6 +121,21 @@
     .chip{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted);background:#fff}
     .chip.bad{border-color:rgba(217,60,94,0.25);background:#fff1f4;color:#9f1239}
     .flag{margin-left:6px;font-weight:950}
+    .matrixMonthlyCell{min-width:92px;text-align:center;font-weight:950}
+    .matrixMonthlyCell button{padding:8px 10px;border-radius:999px;font-size:13px;min-height:0}
+    .matrixMonthlyPct{display:block;font-size:11px;color:var(--muted);font-weight:800;margin-top:2px}
+    .matrixPrintOnly{display:none}
+    .matrixPrintTitle{font-weight:950;font-size:18px;margin-bottom:6px}
+    .matrixPrintWarn{font-size:11px;color:#444;margin-bottom:8px}
+    @media print{
+      body{background:#fff!important}
+      body *{visibility:hidden!important}
+      #matrixPrintHost,#matrixPrintHost *{visibility:visible!important}
+      #matrixPrintHost{display:block!important;position:absolute;left:0;top:0;width:100%;padding:10px;background:#fff;color:#111}
+      #matrixPrintHost .tableWrap{display:block!important;overflow:visible!important;border:0!important}
+      #matrixPrintHost table{min-width:0!important;width:100%!important;font-size:10px}
+      #matrixPrintHost th,#matrixPrintHost td{padding:4px!important;white-space:normal!important;position:static!important}
+    }
     .groupBadge{
       display:inline-block;
       padding:2px 8px;
@@ -409,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.102</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.103</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -3969,6 +3984,7 @@ function viewAttendanceHome(){
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnLoad" class="btnMatrix">🔄 載入 / Load</button>'+
+            '<button id="btnMatrixPdf" class="btnSub hide">🖨️ Export PDF</button>'+
             '<button id="backAttendance" class="btnBack">⬅️ 返回 / Back</button>'+
           '</div>'+
           '<div id="filterWrap" class="hide">'+
@@ -3977,6 +3993,7 @@ function viewAttendanceHome(){
           '</div>'+
           '<div id="matrixMsg"></div>'+
           '<div id="matrixOut" style="margin-top:10px;"></div>'+
+          '<div id="matrixPrintHost" class="matrixPrintOnly"></div>'+
         '</div>';
     }
 
@@ -3990,14 +4007,19 @@ function viewAttendanceHome(){
       $('to').value = App.to || getTodayYmdUk();
       $('filterWrap').classList.add('hide');
       $('matrixOut').innerHTML = '';
+      if ($('matrixPrintHost')) $('matrixPrintHost').innerHTML = '';
+      if ($('btnMatrixPdf')) $('btnMatrixPdf').classList.add('hide');
       App.matrixState = null;
 
       $('backAttendance').onclick = function(){ App.view='attendanceHome'; render(); };
       $('btnLoad').onclick = function(){ loadMatrix(); };
+      if ($('btnMatrixPdf')) $('btnMatrixPdf').onclick = function(){ exportMatrixPdf_(); };
 
       function loadMatrix(){
         clear('matrixMsg');
         $('matrixOut').innerHTML = '';
+        if ($('matrixPrintHost')) $('matrixPrintHost').innerHTML = '';
+        if ($('btnMatrixPdf')) $('btnMatrixPdf').classList.add('hide');
         App.matrixState = null;
 
         var from = $('from').value;
@@ -4019,6 +4041,7 @@ function viewAttendanceHome(){
 
           App.matrixState = res;
           renderMatrixTable(res);
+          if ($('btnMatrixPdf')) $('btnMatrixPdf').classList.remove('hide');
 
           $('filterWrap').classList.remove('hide');
           $('filterLive').value = '';
@@ -4030,91 +4053,127 @@ function viewAttendanceHome(){
 
       function safeClassId(id){ return String(id||'').replace(/[^A-Za-z0-9]/g,'_'); }
 
-      function renderMatrixTable(res){
-        var events = (res.events || []).map(function(e){ return (typeof e==='string') ? {eventKey:e,label:eventDateYmdFromKey(e)||e} : e; });
+      function matrixEvents_(res){
+        return (res.events || []).map(function(e){ return (typeof e==='string') ? {eventKey:e, dateYmd:eventDateYmdFromKey(e)||'', label:eventDateYmdFromKey(e)||e} : e; });
+      }
+      function matrixMonthKey_(ev){
+        var ymd = ev.dateYmd || eventDateYmdFromKey(ev.eventKey) || ev.label || '';
+        var p = parseYmdParts_(ymd);
+        return p ? (String(p.y) + '-' + String(p.m).padStart(2,'0')) : String(ymd||'').slice(0,7);
+      }
+      function matrixMonthLabel_(ym){ return monthLabel_(ym); }
+      function renderDetailedMatrixHtml_(res, events, printMode){
         var members = res.members || [];
         var attended = res.attended || {};
-
-        var preferCards = isMobileLayout_() || (members.length * events.length > 1800);
-        if (members.length * events.length > 1800){ showBox('matrixMsg','warn','結果較大，已使用家庭卡片模式','Large result: using family-card mode.'); }
-        var html = '';
-        if (!preferCards){
-        html += '<div class="tableWrap desktopMatrixTableWrap"><table><thead><tr>';
+        var html = '<div class="tableWrap '+(printMode ? '' : 'desktopMatrixTableWrap')+'"><table><thead><tr>';
         html += '<th>Event / 活動</th>';
-
         for(var i=0;i<members.length;i++){
           var m = members[i];
           var cid = safeClassId(m.id);
           var flag = m.lowFlag ? ('<span class="flag" title="'+escapeHtml(m.lowFlagEn||'')+'">〽️</span>') : '';
-          html += '<th class="mcolh_'+cid+'">'+
-                    '<div class="clickable" data-mid="'+escapeHtml(m.id)+'">'+
-                      escapeHtml(m.id)+flag+
-                      '<br/><span class="muted">'+escapeHtml(m.nameZh||'')+'</span>'+
-                      '<br/><span class="muted">'+escapeHtml(m.nameEn||'')+'</span>'+
-                    '</div>'+
-                  '</th>';
+          html += '<th class="mcolh_'+cid+'"><div class="clickable" data-mid="'+escapeHtml(m.id)+'">'+escapeHtml(m.id)+flag+'<br/><span class="muted">'+escapeHtml(m.nameZh||'')+'</span><br/><span class="muted">'+escapeHtml(m.nameEn||'')+'</span></div></th>';
         }
         html += '</tr></thead><tbody>';
-
         for(var r=0;r<events.length;r++){
           var ev = events[r].eventKey;
           var ymd = events[r].label || eventDateYmdFromKey(ev) || ev;
-          html += '<tr>';
-          html += '<td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(ymd)+'</span></td>';
-
+          html += '<tr><td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(ymd)+'</span></td>';
           for(var c=0;c<members.length;c++){
             var mid = members[c].id;
             var cid2 = safeClassId(mid);
             var tick = attended[ev+'|'+mid] ? '✅' : '';
             var isAway = !!(res.away && res.away[mid] && res.away[mid][ev]);
             var mark = tick || (isAway ? '🏖️ Holiday' : '');
-            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+mark+'</span></td>'; 
+            html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+mark+'</span></td>';
           }
           html += '</tr>';
         }
-
         html += '</tbody></table></div>';
-        }
-        if (preferCards) html += renderMatrixCards_(res, events, true);
-        $('matrixOut').innerHTML = html;
-
-        // member clicks
-        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-mid]')).forEach(function(el){
-          el.onclick = function(){
-            var mid = el.getAttribute('data-mid');
-            openMemberDetail(mid, $('from').value, $('to').value);
-          };
-        });
-
-        // event clicks => unified service stats dialog
-        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-ev]')).forEach(function(el){
-          el.onclick = function(){
-            var ev = el.getAttribute('data-ev');
-            openEventStatsModal(ev);
-          };
-        });
+        return html;
       }
-      function renderMatrixCards_(res, events, forceShow){
-        var families = Array.isArray(res.families) ? res.families : [];
-        if (!families.length) return '';
-        var out = '<div class="mobileStackCards"'+(forceShow ? ' style="display:block"' : '')+'>';
-        families.forEach(function(f){
-          out += '<div class="familyCard"><div class="familyHead"><b>'+escapeHtml(f.displayLabel||f.familyKey||'')+'</b><span class="small">'+escapeHtml(String((f.summary&&f.summary.memberCount)||0))+'人 / members</span></div>';
-          (f.members||[]).forEach(function(m){
-            out += '<div style="margin-top:8px"><div><b>'+escapeHtml(m.nameZh||m.nameEn||m.id)+'</b> <span class="small">'+escapeHtml(m.id)+'</span></div><div>';
-            events.forEach(function(ev){
-              var k = ev.eventKey;
-              var mark = (m.attendedByEvent && m.attendedByEvent[k]) ? '✅' : '—';
-              out += '<span class="eventChip">'+escapeHtml((ev.label||k).replace('SundayService_',''))+': '+mark+'</span>';
-            });
-            out += '</div></div>';
+      function renderMonthlyMatrixHtml_(res, events){
+        var members = res.members || [];
+        var attended = res.attended || {};
+        var monthMap = {};
+        var monthKeys = [];
+        events.forEach(function(ev){
+          var key = matrixMonthKey_(ev);
+          if (!key) return;
+          if (!monthMap[key]){ monthMap[key] = []; monthKeys.push(key); }
+          monthMap[key].push(ev);
+        });
+        monthKeys.sort();
+        var html = '<div class="tableWrap"><table class="monthlyMatrixTable"><thead><tr><th>Month / 月份</th>';
+        members.forEach(function(m){
+          var cid = safeClassId(m.id);
+          var flag = m.lowFlag ? ('<span class="flag" title="'+escapeHtml(m.lowFlagEn||'')+'">〽️</span>') : '';
+          html += '<th class="mcolh_'+cid+'"><div class="clickable" data-mid="'+escapeHtml(m.id)+'">'+escapeHtml(m.id)+flag+'<br/><span class="muted">'+escapeHtml(m.nameZh||m.nameEn||'')+'</span></div></th>';
+        });
+        html += '</tr></thead><tbody>';
+        monthKeys.forEach(function(monthKey){
+          var monthEvents = monthMap[monthKey] || [];
+          html += '<tr><td><span class="chip">'+escapeHtml(matrixMonthLabel_(monthKey))+'</span></td>';
+          members.forEach(function(m){
+            var total = monthEvents.length;
+            var count = 0;
+            monthEvents.forEach(function(ev){ if(attended[ev.eventKey+'|'+m.id]) count++; });
+            var pct = total ? Math.round((count / total) * 100) : 0;
+            var cid = safeClassId(m.id);
+            html += '<td class="matrixMonthlyCell mcol_'+cid+'"><button type="button" class="btnBack btnMini" data-month-detail="'+escapeHtml(monthKey)+'" data-month-mid="'+escapeHtml(m.id)+'">'+count+'/'+total+'<span class="matrixMonthlyPct">'+pct+'%</span></button></td>';
           });
-          out += '</div>';
+          html += '</tr>';
         });
-        out += '</div>';
-        return out;
+        html += '</tbody></table></div>';
+        return html;
       }
+      function openMatrixMonthDetail_(res, monthKey, memberId){
+        var events = matrixEvents_(res).filter(function(ev){ return matrixMonthKey_(ev) === monthKey; });
+        var members = res.members || [];
+        var member = members.filter(function(m){ return String(m.id||'') === String(memberId||''); })[0] || { id:memberId };
+        var rows = events.map(function(ev){
+          var hit = !!(res.attended && res.attended[ev.eventKey+'|'+memberId]);
+          var away = !!(res.away && res.away[memberId] && res.away[memberId][ev.eventKey]);
+          return '<tr><td>'+escapeHtml(ev.label || ev.dateYmd || ev.eventKey)+'</td><td>'+escapeHtml(ev.eventKey||'')+'</td><td><b>'+(hit ? '✅' : '❌')+'</b>'+(away ? ' <span class="muted">🏖️ Holiday</span>' : '')+'</td></tr>';
+        }).join('');
+        var modal = openModal(
+          '<div class="big">'+escapeHtml(member.id||'')+' · '+escapeHtml(matrixMonthLabel_(monthKey))+'</div>'+
+          '<div class="small">'+escapeHtml(member.nameZh||member.nameEn||'')+'</div>'+
+          '<div class="tableWrap" style="margin-top:10px;"><table><thead><tr><th>Date / 日期</th><th>Event ID</th><th>Attendance / 出席</th></tr></thead><tbody>'+(rows || '<tr><td colspan="3">No events</td></tr>')+'</tbody></table></div>'+
+          '<div class="miniBtnRow"><button id="closeMatrixMonthDetail" class="btnBack">⬅️ 返回 / Back</button></div>'
+        );
+        modal.querySelector('#closeMatrixMonthDetail').onclick = function(){ closeModal(modal); };
+      }
+      function buildMatrixPrintWarning_(){
+        var stamp = new Date().toLocaleString('en-GB', { hour12:false });
+        return 'Generated at: ' + stamp + '. ⚠️ This export is an uncontrolled copy and may not be up to date. It is accurate only at generation time. Always refer to the latest online/live version.';
+      }
+      function exportMatrixPdf_(){
+        if(!App.matrixState) return;
+        var res = App.matrixState;
+        var events = matrixEvents_(res);
+        var host = $('matrixPrintHost');
+        if(!host) return;
+        var range = (res.range && res.range.from && res.range.to) ? (res.range.from + ' to ' + res.range.to) : (($('from') ? $('from').value : '') + ' to ' + ($('to') ? $('to').value : ''));
+        host.innerHTML = '<div class="matrixPrintTitle">Attendance matrix / 出席矩陣 · '+escapeHtml(range)+'</div><div class="matrixPrintWarn">'+escapeHtml(buildMatrixPrintWarning_())+'</div>'+renderDetailedMatrixHtml_(res, events, true);
+        window.print();
+      }
+      function renderMatrixTable(res){
+        var events = matrixEvents_(res);
+        var members = res.members || [];
+        var useMonthlyMatrix = isMobileLayout_() || (members.length * events.length > 1800);
+        if (members.length * events.length > 1800){ showBox('matrixMsg','warn','結果較大，已使用每月摘要矩陣','Large result: using monthly summary matrix.'); }
+        $('matrixOut').innerHTML = useMonthlyMatrix ? renderMonthlyMatrixHtml_(res, events) : renderDetailedMatrixHtml_(res, events, false);
 
+        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-month-detail]')).forEach(function(el){
+          el.onclick = function(){ openMatrixMonthDetail_(res, el.getAttribute('data-month-detail'), el.getAttribute('data-month-mid')); };
+        });
+        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-mid]')).forEach(function(el){
+          el.onclick = function(){ openMemberDetail(el.getAttribute('data-mid'), $('from').value, $('to').value); };
+        });
+        Array.prototype.slice.call($('matrixOut').querySelectorAll('[data-ev]')).forEach(function(el){
+          el.onclick = function(){ openEventStatsModal(el.getAttribute('data-ev')); };
+        });
+      }
       function applyMatrixFilter(text){
         if(!App.matrixState || !App.matrixState.members) return;
         var t = String(text||'').trim().toLowerCase();
