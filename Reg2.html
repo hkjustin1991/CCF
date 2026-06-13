@@ -12,7 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-05-24.101
+  UI VERSION TAG: reg2-ui-2026-06-13.105
+  CHANGELOG: improves admin handoff auto navigation and longer token recovery.
   ============================================================
 
   Changes (reg2-ui2):
@@ -201,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-05-24.101</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.105</span></div>
     </header>
 
     <main id="app">
@@ -241,6 +242,7 @@
       }catch(e){
         msg = 'Unknown boot error';
       }
+      var bootEsc = function(v){ return String(v == null ? '' : v).replace(/[&<>\"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]); }); };
       var token = 'BOOT-' + Date.now() + '-' + (msg.slice(0, 24).replace(/[^A-Za-z0-9]+/g, '_') || 'error');
       var diag = '';
       try{
@@ -251,10 +253,10 @@
           '<div class="card msgBox err" style="display:block">'+
             '<div class="big err">⚠️ 暫時未能開啟頁面 / We cannot open this page right now</div>'+
             '<div class="small" style="margin-top:8px">請稍後再試，或重新整理頁面。<br/>Please refresh and try again in a moment.</div>'+
-            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+escapeHtml(token)+'</b></div>'+
+            '<div class="small" style="margin-top:8px">如問題持續，請把以下編號提供給同工：<br/>If this keeps happening, share this token with staff: <b>'+bootEsc(token)+'</b></div>'+
             '<details style="margin-top:10px">'+
               '<summary style="cursor:pointer;font-weight:700">同工診斷資料 / Staff diagnostics</summary>'+
-              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+escapeHtml(diag)+'</pre>'+
+              '<pre style="white-space:pre-wrap;margin-top:8px;font-size:12px">'+bootEsc(diag)+'</pre>'+
             '</details>'+
           '</div>'+
         '</div>';
@@ -434,6 +436,26 @@
       }
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
+    function navigateTop_(url){
+      try{
+        var w = window.open(String(url || ''), '_top');
+        if (w !== null) return;
+      }catch(e){}
+      try{
+        var a = document.createElement('a');
+        a.href = String(url || '');
+        a.target = '_top';
+        a.rel = 'noopener';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function(){ try{ document.body.removeChild(a); }catch(e){} }, 500);
+        return;
+      }catch(e){}
+      try{ window.top.location.href = url; return; }catch(e){}
+      try{ window.location.href = url; }catch(e){}
+    }
+    function monthLabel_(ym){ var m=String(ym||'').match(/^(\d{4})-(\d{2})$/); if(!m) return String(ym||''); var y=Number(m[1]), mo=Number(m[2]); var en=new Date(Date.UTC(y,mo-1,1)).toLocaleString('en',{month:'short'}); return y+'年'+mo+'月 / '+en+' '+y; }
 
     const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>) || 120000;
 
@@ -1263,7 +1285,7 @@
 
       var monthButtons = months.map(function(k){
         var active = (k === selectedMonth) ? ' primary' : ' alt';
-        return '<button class="'+active+' btnSmall" data-serving-month="'+escapeHtml(k)+'">'+escapeHtml(k)+'</button>';
+        return '<button class="'+active+' btnSmall" data-serving-month="'+escapeHtml(k)+'">'+escapeHtml(monthLabel_(k))+'</button>';
       }).join('');
 
       var positions = (res.positions || []).filter(function(p){
@@ -1394,7 +1416,7 @@
       var months = Object.keys(monthMap).sort();
       var selectedMonth = (months.indexOf(State.worshipMonth) >= 0) ? State.worshipMonth : (months[0] || '');
       State.worshipMonth = selectedMonth;
-      var monthOptions = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(m)+'</option>'; }).join('');
+      var monthOptions = months.map(function(m){ return '<option value="'+escapeHtml(m)+'"'+(m===selectedMonth?' selected':'')+'>'+escapeHtml(monthLabel_(m))+'</option>'; }).join('');
       var monthEvents = selectedMonth && monthMap[selectedMonth] ? monthMap[selectedMonth] : events;
       State.worshipRenderCache = { month: selectedMonth, events: monthEvents };
       var gBadges = (viewer.servingGroups||[]).map(function(g){ return '<span class="groupBadge '+servingGroupCss(g)+'">'+escapeHtml(servingGroupLabel(g))+'</span>'; }).join('');
@@ -2198,15 +2220,10 @@ function viewSelfHoliday(m){
           if(!token){ $('selfMsg').innerHTML = showBox('err','未能建立登入憑證','Unable to create login token'); return; }
           var sep = (LIVE_PORTAL_URL.indexOf('?') >= 0) ? '&' : '?';
           var adminUrl = LIVE_PORTAL_URL + sep + 'mode=admin&handoffToken=' + encodeURIComponent(token);
+          var fallback = '<div class="small"><a target="_top" rel="noopener" href="'+escapeHtml(adminUrl)+'">如頁面沒有轉換，請按此進入管理頁面 / If the admin page does not open, tap here</a></div>';
           try{ localStorage.setItem('ccf_admin_handoff_token', token); }catch(e){}
-          var opened = null;
-          try{ opened = window.open(adminUrl, '_blank'); }catch(e){}
-          if(opened === null){
-            window.location.href = adminUrl;
-            return;
-          }
-          try{ if (opened) opened.opener = null; }catch(e){}
-          $('selfMsg').innerHTML = showBox('ok','已開啟管理頁面','Admin portal opened');
+          $('selfMsg').innerHTML = showBox('ok','正在進入管理頁面','Opening admin portal', fallback);
+          setTimeout(function(){ navigateTop_(adminUrl); }, 120);
         }).catch(function(){
           $('selfMsg').innerHTML = showBox('err','系統錯誤','System error');
         });

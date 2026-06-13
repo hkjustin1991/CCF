@@ -1,7 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-04-20.staff100
+ * v2026-06-13.staff102
+ * CHANGELOG: version alignment for responsiveness/admin handoff patch set.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -23,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-05-24.staff101';
+const APP_VERSION = '2026-06-13.staff102';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
