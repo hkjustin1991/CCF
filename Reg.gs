@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg113
- * CHANGELOG: worship import v113 defensive logical-block parser and sheet diagnostics.
+ * v2026-06-13.reg114
+ * CHANGELOG: worship import v114 avoids category-row/date-column role mapping.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg113';
+const REG_VERSION = '2026-06-13.reg114';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2926,6 +2926,7 @@ function worshipSheetMonthContext_(sheetName){
 function worshipNativeHeaderKey_(h){
   const n = worshipNormalizeAlias_(h).replace(/[\s\-_/／\\:：()（）\[\]【】.。]+/g,'');
   if (!n) return '';
+  if (/^(VOCALS|INSTRUMENTALS|WORSHIPSONGS|敬拜|樂器|乐器)$/.test(n)) return '';
   if (/(主領|主领|領詩|领诗|LEAD|WORSHIPLEADER)/.test(n)) return 'Worship_Lead';
   if (/(伴唱|和唱|和音|SINGER|VOCAL|VOCALS|BACKING)/.test(n)) return 'Worship_Singer';
   if (/(司琴|PIANIST|PIANO|KEYS|KEYBOARD)/.test(n)) return 'Worship_Pianist';
@@ -3007,6 +3008,12 @@ function worshipParseNativeCcfRows_(values, sheetName){
     if (count > best){ best = count; dateCol = c; }
   }
   if (dateCol < 0) dateCol = 1;
+  Object.keys(header.map).forEach(function(k){
+    const c = header.map[k];
+    let dateLike = 0;
+    for (let r=header.row+1; r<Math.min(values.length, header.row+12); r++) if (worshipDateCellToEventKey_((values[r]||[])[c], ctx)) dateLike++;
+    if (c === dateCol || dateLike >= 2) delete header.map[k];
+  });
   const rows = [], warnings = [];
   let current = null;
   function finish(){ if (current && current.EventKey) rows.push(current); }
@@ -3231,6 +3238,7 @@ function worshipPreviewImportChanges_(auth, input){
     }
     positions.forEach(function(pos){
       if (r[pos] === undefined) return;
+      if (worshipDateCellToEventKey_(r[pos], worshipSheetMonthContext_(r._sheetName||''))){ warnings.push({ code:'E_WORSHIP_ROLE_VALUE_LOOKS_LIKE_DATE', zh:'已略過看似日期的崗位值', en:'Skipped role value that looks like a date', detail:String(r[pos]||''), eventKey:ev, rowNumber:r._rowNumber||'', sheetName:r._sheetName||'', area:'WARNING', fieldName:pos }); return; }
       const cv = worshipCanonicalRotaValue_(r[pos], aliasMap, mi);
       if (!cv.ok){ errors.push(Object.assign(cv, { eventKey:ev, area:'ROTA', fieldName:pos, rowNumber:r._rowNumber||'', sheetName:r._sheetName||'' })); return; }
       const oldVal = String(((current[ev]||{}).rota||{})[pos] || '').trim();
