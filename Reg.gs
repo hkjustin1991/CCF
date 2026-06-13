@@ -34,7 +34,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-04-20.reg100';
+const REG_VERSION = '2026-05-24.reg101';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -139,12 +139,13 @@ function reg_publicRotaPassageEn_(rawOrCanonical){
   }
 }
 
-function reg_publicRotaNext8WeeksEvents_(fromYmd){
+function reg_publicRotaNextWeeksEvents_(fromYmd, weeks){
   const base = admin_parseYmd_(String(fromYmd || '').trim()) || admin_parseYmd_(admin_todayUkYmd_()) || new Date();
   let start = new Date(base.getTime());
   if (!admin_isSunday_(start)) start = admin_nextSunday_(start);
+  const totalWeeks = (Number(weeks) === 12) ? 12 : 8;
   const out = [];
-  for (let i=0; i<8; i++){
+  for (let i=0; i<totalWeeks; i++){
     const d = new Date(start.getTime());
     d.setUTCDate(d.getUTCDate() + (i * 7));
     out.push({ eventKey:'SundayService_' + admin_fmtYmd_(d), dateYmd: admin_fmtYmd_(d) });
@@ -152,7 +153,7 @@ function reg_publicRotaNext8WeeksEvents_(fromYmd){
   return out;
 }
 
-function api_public_rota_view(password){
+function api_public_rota_view(password, weeks){
   try{
     const inputPass = String(password || '').trim();
     const expected = reg_getPublicRotaPassword_();
@@ -161,7 +162,8 @@ function api_public_rota_view(password){
     }
 
     const from = admin_todayUkYmd_();
-    const events = reg_publicRotaNext8WeeksEvents_(from);
+    const weekCount = (Number(weeks) === 12) ? 12 : 8;
+    const events = reg_publicRotaNextWeeksEvents_(from, weekCount);
     const matrix = admin_getServingPlanMatrix_(events);
     const eventKeys = (matrix.events || []).map(function(ev){ return String(ev.eventKey || '').trim(); }).filter(Boolean);
     const sermonMap = admin_getSermonInfoForMonth_(eventKeys);
@@ -189,6 +191,7 @@ function api_public_rota_view(password){
       const eventKey = String((ev && ev.eventKey) || '').trim();
       const sermon = sermonMap[eventKey] || admin_sermonBlankFromEventKey_(eventKey);
       const rowPositions = {};
+      const rowPositionMeta = {};
 
       positionsOrder.forEach(function(pos){
         const entries = ((((matrix.cells || {})[eventKey] || {})[pos]) || []);
@@ -231,11 +234,13 @@ function api_public_rota_view(password){
 
         if (hasClosed){
           rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+          rowPositionMeta[pos] = { isClosed:true };
           return;
         }
 
         if (!displayItems.length){
           rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+          rowPositionMeta[pos] = { isClosed:false };
           return;
         }
 
@@ -244,9 +249,11 @@ function api_public_rota_view(password){
         });
         if (allDash){
           rowPositions[pos] = [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+          rowPositionMeta[pos] = { isClosed:false };
           return;
         }
         rowPositions[pos] = displayItems;
+        rowPositionMeta[pos] = { isClosed:false };
       });
 
       const sermonPassage = (String(sermon.sermonPassageStatus || '').trim() === 'OK')
@@ -267,7 +274,8 @@ function api_public_rota_view(password){
         sermonPassageEn: reg_publicRotaPassageEn_(sermonPassageZh) || sermonPassageZh,
         responsePassageZh: responsePassageZh,
         responsePassageEn: reg_publicRotaPassageEn_(responsePassageZh) || responsePassageZh,
-        positions: rowPositions
+        positions: rowPositions,
+        positionMeta: rowPositionMeta
       };
     });
 
@@ -284,13 +292,14 @@ function api_public_rota_view(password){
     return {
       ok:true,
       version: ROTA_PUBLIC_VERSION,
+      weeks: weekCount,
       generatedAt: admin_nowIso_(),
       generatedAtDisplay: reg_clientSafeDateTime_(new Date()),
       positions: positions,
       rows: rows
     };
   }catch(e){
-    return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
+    return regErr_('E_LIVE_ATTENDANCE','直播出席資料載入失敗。','Live attendance data load failed.', e);
   }
 }
 
@@ -1959,7 +1968,10 @@ function api_reg_self_live_service_public(qrPayload){
     const last = prevYmd ? ('SundayService_' + prevYmd) : '';
     const offeringMap = (typeof admin_getOfferingMap_ === 'function') ? admin_getOfferingMap_() : {};
 
+    const mi = admin_getMembersIndex_() || {};
+    const byId = mi.byId || {};
     const countByEvent = {};
+    const breakdownByEvent = {};
     const liveCountCacheKey = 'reg_live_counts_' + String(next || '') + '_' + String(last || '');
     const cachedCounts = reg_liveCacheGet_(liveCountCacheKey);
     if (cachedCounts && typeof cachedCounts.nextCount === 'number' && typeof cachedCounts.lastCount === 'number'){
@@ -1968,18 +1980,32 @@ function api_reg_self_live_service_public(qrPayload){
     }else{
       const check = admin_getCheckinsData_();
       if (check && check.ok){
+        const firstSundayByMember = {};
+        check.rows.forEach(function(r){
+          if (!admin_isSundayServiceKey_(r.eventKey) || !r.memberId) return;
+          const prev = firstSundayByMember[r.memberId];
+          if (!prev || String(r.eventKey) < prev) firstSundayByMember[r.memberId] = String(r.eventKey);
+        });
         check.rows.forEach(function(r){
           if (!admin_isSundayServiceKey_(r.eventKey)) return;
           if (r.eventKey !== next && r.eventKey !== last) return;
           if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
           countByEvent[r.eventKey].add(r.memberId);
         });
+        [next,last].forEach(function(ev){
+          const set = countByEvent[ev] || new Set();
+          var total = 0, newFriend = 0;
+          set.forEach(function(mid){
+            total++;
+            const st = regStatus_((((mi||{}).byId||{})[mid] || {}).status || '');
+            if (firstSundayByMember[mid] === ev && st !== 'STAFF' && st !== 'ADMIN') newFriend++;
+          });
+          breakdownByEvent[ev] = { totalAttendance: total, newFriendCount: newFriend, existingChurchgoerCount: Math.max(0, total - newFriend) };
+        });
       }
       reg_liveCachePut_(liveCountCacheKey, { nextCount: (countByEvent[next] ? countByEvent[next].size : 0), lastCount: (countByEvent[last] ? countByEvent[last].size : 0) }, 30);
     }
 
-    const mi = admin_getMembersIndex_() || {};
-    const byId = mi.byId || {};
     const eventKeys = events.map(function(ev){ return String((ev && ev.eventKey) || '').trim(); }).filter(Boolean);
     const servingMatrix = admin_getServingPlanMatrix_(events) || {};
     const positionMetaByKey = {};
@@ -2008,7 +2034,7 @@ function api_reg_self_live_service_public(qrPayload){
       defaultEventKey: next,
       serviceOptions: serviceOptions,
       servicesByEvent: servicesByEvent,
-      currentAttendance:{ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 },
+      currentAttendance:Object.assign({ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 }, breakdownByEvent[next] || {}),
       lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
       lastOffering:{
         eventKey:last,
@@ -2424,10 +2450,10 @@ function api_reg_self_worship_members_public(qrPayload){
 
 function reg_worship_song_save_with_auth_(auth, payload, actionSource){
   const base = reg_buildWorshipPagePayload_(auth, false);
-  if (!base.ok) return base;
+  if (!base.ok) return { ok:false, code:'E_WORSHIP_PERMISSION', zh:'你沒有權限修改敬拜資料', en:'No permission to edit worship data.' };
   const ev = String((payload && payload.eventKey) || '').trim();
   const section = String((payload && payload.songSection) || '').trim().toUpperCase();
-  if (!admin_isSundayServiceKey_(ev) || REG_WORSHIP_SECTIONS.indexOf(section) < 0) return { ok:false, code:'E416', zh:'資料格式錯誤', en:'Invalid payload.' };
+  if (!admin_isSundayServiceKey_(ev) || REG_WORSHIP_SECTIONS.indexOf(section) < 0) return { ok:false, code:'E_WORSHIP_SAVE', zh:'資料格式錯誤', en:'Invalid worship save payload.' };
   const p = payload || {};
   const sh = reg_ensureWorshipPlanningSheet_();
   const last = sh.getLastRow();
@@ -2456,7 +2482,7 @@ function reg_worship_song_save_with_auth_(auth, payload, actionSource){
   if (!next.linkTitle) next.linkTitle = String(old.linkTitle || '').trim();
   const linkChanged = String(next.linkUrl || '') !== String(old.linkUrl || '');
   const forceTitleFromLink = !!(p && p.forceTitleFromLink === true);
-  if (next.linkUrl && (linkChanged || forceTitleFromLink)){
+  if (next.linkUrl && (linkChanged || forceTitleFromLink) && !next.songTitle && !next.linkTitle){
     const yt = reg_tryFetchYoutubeMeta_(next.linkUrl);
     if (yt.ok && yt.title){
       next.linkTitle = yt.title;
@@ -2474,7 +2500,7 @@ function reg_worship_song_save_with_auth_(auth, payload, actionSource){
     auditRows.push([nowStamp, actor, ev, 'SONG', section + '.' + k, String(old[k]||''), String(next[k]||''), String(actionSource || 'SELF_WORSHIP_SONG_SAVE'), '']);
   });
   reg_writeWorshipAuditRows_(auditRows);
-  return { ok:true, eventKey:ev, songSection:section, saved:next };
+  return { ok:true, eventKey:ev, songSection:section, saved:next, lastUpdatedAt: nowStamp, lastUpdatedBy: actor };
 }
 
 function reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway, actionSource){

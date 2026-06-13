@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-04-20.100
+  UI VERSION TAG: admin2-ui-2026-05-24.101
   For Admin.gs: v2026-04-20.admin100
   PR REFRESH: admin107 follow-up submission
   ============================================================
@@ -224,6 +224,21 @@
     .groupContextBtn:disabled{opacity:.45;cursor:not-allowed}
 
     .sgColor-worship{background:#ffe3e8!important;border-color:rgba(217,60,94,0.35)!important;color:#8a1230!important}
+    .mobileStackCards{display:none}
+    .familyCard{border:1px solid var(--border);border-radius:12px;padding:10px;margin:8px 0;background:#fff}
+    .familyHead{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+    .eventChip{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:2px 8px;margin:2px;font-size:12px}
+    .mobileActionBtn{min-height:52px}
+    @media (max-width:700px){
+      .kv{grid-template-columns:1fr!important}
+      .miniBtnRow button,.btnMatrix,.btnBack{min-height:52px}
+      .tableWrap{display:none}
+      .mobileStackCards{display:block}
+    }
+    @media (max-width:430px){
+      input,select,textarea,button{font-size:16px}
+      .card{padding:12px}
+    }
     .sgColor-media{background:#e7f0ff!important;border-color:rgba(40,90,200,0.35)!important;color:#1a3d9a!important}
     .sgColor-logistic{background:#f5eadb!important;border-color:rgba(139,94,60,0.35)!important;color:#7a4a22!important}
     .sgColor-support{background:#e7fff2!important;border-color:rgba(26,168,108,0.35)!important;color:#0b6b40!important}
@@ -268,6 +283,21 @@
       background:#f8fbff;
       text-align:center;
       font-size:12px;
+    }
+    .servingPlanHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap}
+    .btnMobileCompact{width:auto;padding:8px 12px;border-radius:10px;font-size:12px;background:#285ac8}
+    .servingPlanCompactTable{width:100%;border-collapse:collapse;background:#fff}
+    .servingPlanCompactTable th,.servingPlanCompactTable td{border:1px solid var(--border);padding:6px 8px;vertical-align:top;text-align:left}
+    .servingPlanCompactTable th{background:#f5f8ff;font-size:12px}
+    .servingPlanCompactDate{min-width:102px;font-weight:900}
+    .servingPlanCompactPos{min-width:128px}
+    .servingPlanCompactAssign .servingPlanEntry{display:inline-block;margin:2px 4px 2px 0;padding:4px 8px;font-size:12px;border-radius:999px}
+    .servingPlanCompactAssign .emptySlotOutline{display:inline-block;margin:2px 4px 2px 0;padding:3px 7px;font-size:11px;border-radius:999px}
+    @media (max-width: 720px){
+      .servingPlanCompactTable th,.servingPlanCompactTable td{padding:5px 6px}
+      .servingPlanCompactDate{min-width:88px}
+      .servingPlanCompactPos{min-width:104px}
+      .btnMobileCompact{font-size:11px;padding:7px 9px}
     }
     .groupDialog{
       margin-top:10px;
@@ -365,11 +395,13 @@
         <div class="sub"><?= ADMIN_TITLE_EN ?></div>
         <div class="hint">
           ⚠️ 請避免用手機使用此管理平台，建議使用電腦或平板。<br/>
-          ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/><br/>
+          ⚠️ Please avoid using a mobile phone for this admin portal. Use a computer or tablet.<br/>
+          📱🧾 如需手機版，請進入「事奉排期」後按右上角手機/iPad按鈕。<br/>
+          📱🧾 For mobile/tablet compact view, open "Serving plan" and tap the top-right phone/iPad button.<br/><br/>
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-04-20.100</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-05-24.101</span></div>
     </header>
 
     <main id="app"></main>
@@ -401,6 +433,7 @@
       servingPlanInfoOpenGroups:{},
       servingGroupOverview:null,
       servingPlanTimer:null,
+      servingPlanMobileView:false,
       selectedServingGroup:null,
       glBackGuardArmed:false,
       worshipMonth:'',
@@ -822,14 +855,14 @@
 
     var ADMIN_MSG = Object.freeze({
       WORKING: { code:'S100', zh:'處理中…', en:'Working…' },
-      SCAN_START_CAMERA: { code:'S101', zh:'請按「啟動相機」以開始掃描', en:'Tap "Start camera" to begin scanning.' },
-      EXTERNAL_SCANNER_TIMEOUT: { code:'S421', zh:'外置掃描器逾時', en:'External scanner timed out.' },
-      EXTERNAL_SCANNER_CANCELLED: { code:'S422', zh:'外置掃描已取消', en:'External scanner cancelled.' },
+      SCAN_START_CAMERA: { code:'S101', zh:'請按「掃描 QR」以開始掃描', en:'Tap "Scan QR" to begin scanning.' },
+      EXTERNAL_SCANNER_TIMEOUT: { code:'S421', zh:'掃描未完成，請再試一次', en:'Scanning was not completed. Please try again.' },
+      EXTERNAL_SCANNER_CANCELLED: { code:'S422', zh:'掃描未完成，請再試一次', en:'Scanning was not completed. Please try again.' },
       EXTERNAL_SCANNER_POPUP_BLOCKED: { code:'E423', zh:'彈出視窗被封鎖', en:'Popup was blocked.' },
       LOGIN_READING_IMAGE: { code:'S110', zh:'讀取圖片中…', en:'Reading image…' },
       SCAN_CANCELLED: { code:'S424', zh:'已取消掃描', en:'Scan cancelled.' },
-      EXTERNAL_SCANNER_RECOMMENDED: { code:'S425', zh:'建議使用外部掃描器', en:'Opening external scanner is recommended in this browser.' },
-      EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN: { code:'E426', zh:'未能打開彈出視窗，請使用下方內置掃描器', en:'Popup blocked; please use built-in scanner below.' }
+      EXTERNAL_SCANNER_RECOMMENDED: { code:'S425', zh:'請在掃描器頁面完成掃描', en:'Please complete scanning in the scanner page.' },
+      EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN: { code:'E426', zh:'掃描未完成，請再試一次', en:'Scanning was not completed. Please try again.' }
     });
 
     function showStatus(targetId, kind, msgKey, detail){
@@ -1344,10 +1377,14 @@
             var scanModal = openModal(''+
               '<div class="big">➕ 新增組員（掃描目標會員 QR） / Add member (scan target member QR)</div>'+
               '<div class="small">群組長新增組員需掃描目標會員 QR。<br/>GL must scan target member QR to authorise adding member.</div>'+
-              '<div class="videoWrap" style="margin-top:10px;"><video id="vTargetQr" playsinline></video></div>'+
               '<div class="miniBtnRow">'+
+                '<button id="btnScanTargetQr" class="btnMain">📷 掃描 QR / Scan QR</button>'+
                 '<button id="btnCloseTargetQr" class="btnBack">取消 / Cancel</button>'+
               '</div>'+
+              '<details class="card" style="margin-top:10px;"><summary>進階：內置相機測試 / Advanced: built-in camera test</summary>'+
+                '<div class="videoWrap" style="margin-top:10px;"><video id="vTargetQr" playsinline></video></div>'+
+                '<div class="miniBtnRow"><button id="btnStartTargetCam" class="btnSub" type="button">▶️ 啟動相機 / Start camera</button></div>'+
+              '</details>'+
               '<div id="targetQrMsg"></div>'
             );
             scanModal.querySelector('#btnCloseTargetQr').onclick = function(){ stopScan(); closeModal(scanModal); };
@@ -1360,10 +1397,30 @@
                 loadServingGroupMembers_(host, groupKey, opts);
               });
             }
-            startScan(vEl, function(qr, err){
-              if(err){ showErr('targetQrMsg', err); return; }
-              handleTargetQr_(qr);
-            });
+            var btnStartTargetCam = scanModal.querySelector('#btnStartTargetCam');
+            if (btnStartTargetCam){
+              btnStartTargetCam.onclick = function(){
+                startScan(vEl, function(qr, err){
+                  if(err){ showErr('targetQrMsg', err); return; }
+                  handleTargetQr_(qr);
+                });
+              };
+            }
+            var btnScanTargetQr = scanModal.querySelector('#btnScanTargetQr');
+            if (btnScanTargetQr){
+              btnScanTargetQr.onclick = function(){
+                showBox('targetQrMsg','warn','正在開啟掃描器…','Opening scanner…','<div class="small">請在掃描器頁面完成掃描 / Please complete scanning in the scanner page.</div>');
+                if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('targetQrMsg', ['btnScanTargetQr']); return; }
+                openExternalScanner_({
+                  flow:'admin',
+                  onPayload:handleTargetQr_,
+                  onCancel:function(){ showBox('targetQrMsg','warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'); },
+                  onPopupBlocked:function(){ showBox('targetQrMsg','warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.'); },
+                  onError:function(msg){ showErr('targetQrMsg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail:String(msg||'')}); },
+                  onStatus:function(status){ if(status === 'config_invalid') showBox('targetQrMsg','warn','掃描器設定暫時未能使用，請聯絡影音同工。','Scanner settings are currently unavailable. Please contact the Media team.'); }
+                });
+              };
+            }
             var msgEl = scanModal.querySelector('#targetQrMsg');
             if (msgEl){
               msgEl.innerHTML = bindImageQrFallback_('targetQrMsg', function(decoded){
@@ -1757,16 +1814,51 @@ function eventDateYmdFromKey(ev){
         lines.push(escapeHtml('成員: ' + (c.memberId||'') + '｜離開期重疊: ' + String(c.from||'') + ' - ' + String(c.to||'') + ' / Member: ' + (c.memberId||'') + '｜Holiday overlap: ' + String(c.from||'') + ' - ' + String(c.to||'') + dateLabel));
       });
       duplicates.forEach(function(d){
-        var posLabelsZh = (d.positions||[]).map(function(p){
-          var label = SERVING_POSITION_LABELS[p] || {};
-          return label.zh || servingPositionLabel_({ position: p });
-        });
+        var existLabels = mapServingPosBilingual_(d.existingPositions || []);
+        var tryLabels = mapServingPosBilingual_(d.attemptedPositions || []);
+        var allLabels = mapServingPosBilingual_(d.positions || []);
+        if (!existLabels.length && allLabels.length) existLabels = allLabels.slice(0, Math.max(allLabels.length - 1, 1));
+        if (!tryLabels.length && allLabels.length > 1) tryLabels = [allLabels[allLabels.length - 1]];
+        if (!tryLabels.length && allLabels.length === 1) tryLabels = allLabels.slice();
         var lineDate = String(d.dateYmd || effectiveDate || '').trim();
         var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
-        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜重覆崗位: ' + posLabelsZh.join('、') + ' / Member: ' + (d.memberId||'') + '｜Duplicate positions: ' + posLabelsZh.join(', ') + dateLabel));
+        lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜已安排: ' + (existLabels.join('、') || '—') + '｜嘗試安排: ' + (tryLabels.join('、') || '—') + ' / Member: ' + (d.memberId||'') + '｜Already assigned: ' + (existLabels.join(', ') || '—') + '｜Trying to assign: ' + (tryLabels.join(', ') || '—') + dateLabel));
       });
       if (!lines.length) return '';
       return lines.join('<br/>');
+    }
+    function mapServingPosBilingual_(positions){
+      return (positions||[]).map(function(p){
+        var label = SERVING_POSITION_LABELS[p] || {};
+        var zh = String(label.zh || '').trim();
+        var en = String(label.en || '').trim();
+        if (zh && en) return zh + ' / ' + en;
+        if (zh) return zh;
+        if (en) return en;
+        return servingPositionLabel_({ position: p });
+      }).filter(Boolean);
+    }
+    function duplicateDetailHtml_(duplicates, fallbackDateYmd){
+      var list = Array.isArray(duplicates) ? duplicates : [];
+      if (!list.length) return '';
+      return list.map(function(d){
+        var existLabels = mapServingPosBilingual_(d.existingPositions || []);
+        var tryLabels = mapServingPosBilingual_(d.attemptedPositions || []);
+        var allLabels = mapServingPosBilingual_(d.positions || []);
+        if (!existLabels.length && allLabels.length) existLabels = allLabels.slice(0, Math.max(allLabels.length - 1, 1));
+        if (!tryLabels.length && allLabels.length > 1) tryLabels = [allLabels[allLabels.length - 1]];
+        if (!tryLabels.length && allLabels.length === 1) tryLabels = allLabels.slice();
+        var dateYmd = String(d.dateYmd || fallbackDateYmd || '').trim();
+        var dateLine = dateYmd ? ('日期 / Date: ' + formatYmdZhEn_(dateYmd)) : '';
+        return [
+          '成員 / Member: ' + (d.memberId || '—'),
+          '已安排 / Already assigned: ' + (existLabels.join('、') || '—'),
+          '嘗試安排 / Trying to assign: ' + (tryLabels.join('、') || '—'),
+          dateLine
+        ].filter(Boolean).map(function(line){
+          return '<div class="small">' + escapeHtml(line) + '</div>';
+        }).join('');
+      }).join('');
     }
 
     function overrideConfirmTitleByContext_(res){
@@ -1924,8 +2016,8 @@ function eventDateYmdFromKey(ev){
     }
 
     function scannerConfigWarningHtml_(){
-      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'External scanner settings are missing or invalid.');
-      return '<div class="msgBox warn"><div class="big warn">⚠️ 外置掃描器設定錯誤，已停用外置掃描按鈕</div><div style="margin-top:4px;font-size:16px;">⚠️ External scanner config is invalid. External scanner has been disabled.</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
+      var detail = escapeHtml(EXTERNAL_SCANNER_CONFIG_ERROR || 'Scanner settings are unavailable.');
+      return '<div class="msgBox warn"><div class="big warn">⚠️ 掃描器設定暫時未能使用，請聯絡影音同工。</div><div style="margin-top:4px;font-size:16px;">⚠️ Scanner settings are currently unavailable. Please contact the Media team.</div><div style="margin-top:10px;"><div class="small">'+detail+'</div></div></div>';
     }
 
     var EXTERNAL_SCANNER_CONFIG = validateExternalScannerConfig_();
@@ -1937,7 +2029,7 @@ function eventDateYmdFromKey(ev){
         var btn = $(id);
         if(btn){
           btn.disabled = true;
-          btn.title = 'External scanner config issue: ' + (EXTERNAL_SCANNER_CONFIG.message || 'invalid config');
+          btn.title = 'Scanner settings are currently unavailable';
         }
       });
       var msgEl = $(msgId || 'loginMsg');
@@ -2095,7 +2187,7 @@ function eventDateYmdFromKey(ev){
         '<div style="margin-top:10px;border-top:1px dashed #d6dcef;padding-top:10px;">'+
           '<div class="small">相機被封鎖時可改用圖片解碼 / If camera is blocked, decode from image</div>'+
           '<input id="'+inputId+'" type="file" accept="image/*" style="margin-top:6px;" />'+
-          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Decode QR image</button></div>'+
+          '<div style="margin-top:6px;"><button id="'+btnId+'" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button></div>'+
           '<div id="'+statusId+'" class="small" style="margin-top:6px;"></div>'+
         '</div>';
     }
@@ -2279,12 +2371,14 @@ function eventDateYmdFromKey(ev){
         var modal = openModal(
           '<div class="big">📷 掃描 QR / Scan QR</div>'+
           '<div class="small">請掃描你自己的同工 QR。<br/>Please scan your own staff QR.</div>'+
-          '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
           '<div class="miniBtnRow">'+
-            '<button id="btnStartCam" class="btnMain" type="button">▶️ 啟動相機 / Start camera</button>'+
-            '<button id="btnExtScan" class="btnSub">🌐 外置掃描器 / External scanner</button>'+
+            '<button id="btnExtScan" class="btnMain">📷 掃描 QR / Scan QR</button>'+
             '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
           '</div>'+
+          '<details class="card" style="margin-top:10px;"><summary>進階：內置相機測試 / Advanced: built-in camera test</summary>'+
+            '<div class="videoWrap" style="margin-top:10px;"><video id="vLogin" playsinline></video></div>'+
+            '<div class="miniBtnRow"><button id="btnStartCam" class="btnSub" type="button">▶️ 啟動相機 / Start camera</button></div>'+
+          '</details>'+
           '<div id="scanMsg"></div>'
         );
         modal.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(modal); };
@@ -2312,6 +2406,7 @@ function eventDateYmdFromKey(ev){
         modal.querySelector('#btnStartCam').onclick = beginScan;
         applyExternalScannerGuard_('scanMsg', ['btnExtScan']);
         modal.querySelector('#btnExtScan').onclick = function(){
+          showBox('scanMsg','warn','正在開啟掃描器…','Opening scanner…','<div class="small">請在掃描器頁面完成掃描 / Please complete scanning in the scanner page.</div>');
           if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('scanMsg', ['btnExtScan']); return; }
           stopScan();
           openExternalScanner_(function(payload, source){
@@ -2320,11 +2415,12 @@ function eventDateYmdFromKey(ev){
             if(status === 'success') return;
             if(status === 'timeout'){ showStatus('scanMsg','warn','EXTERNAL_SCANNER_TIMEOUT'); return; }
             if(status === 'cancel' || status === 'popup_closed'){ showStatus('scanMsg','warn','EXTERNAL_SCANNER_CANCELLED'); return; }
-            if(status === 'blocked'){ showStatus('scanMsg','err','EXTERNAL_SCANNER_POPUP_BLOCKED'); return; }
-            if(status === 'config_invalid'){ applyExternalScannerGuard_('scanMsg', ['btnExtScan']); }
+            if(status === 'blocked'){ showStatus('scanMsg','warn','EXTERNAL_SCANNER_CANCELLED'); return; }
+            if(status === 'config_invalid'){ showBox('scanMsg','warn','掃描器設定暫時未能使用，請聯絡影音同工。','Scanner settings are currently unavailable. Please contact the Media team.'); }
           });
         };
         showStatus('scanMsg','warn','SCAN_START_CAMERA');
+        modal.querySelector('#btnExtScan').onclick();
       };
 
       if($('btnUploadLoginQr') && $('loginQrImageInput')){
@@ -2837,10 +2933,16 @@ function viewAttendanceHome(){
     }
 
     function viewServingPlan(){
+      var mobileBtnLabel = App.servingPlanMobileView ? '🖥️ 標準檢視 / Standard view' : '📱📲 手機/iPad精簡檢視 / Mobile+iPad compact';
       return ''+
         '<div class="card" style="border-color:rgba(110,80,200,0.18);background:#f7f4ff;">'+
-          '<div class="big">🧩 事奉排期 / Serving plan</div>'+
-          '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
+          '<div class="servingPlanHead">'+
+            '<div>'+
+              '<div class="big">🧩 事奉排期 / Serving plan</div>'+
+              '<div class="small">先選擇月份，再選擇組別。<br/>Select month first, then expand groups.</div>'+
+            '</div>'+
+            '<button id="toggleServingMobileView" class="btnMobileCompact">'+mobileBtnLabel+'</button>'+
+          '</div>'+
           '<div id="servingPlanList" style="margin-top:10px;"></div>'+
           '<div class="miniBtnRow">'+
             '<button id="backServingPlan" class="btnBack">⬅️ 返回 / Back</button>'+
@@ -2851,6 +2953,13 @@ function viewAttendanceHome(){
 
     function bindServingPlan(){
       $('backServingPlan').onclick = function(){ App.view='menu'; render(); };
+      var mobileToggleBtn = $('toggleServingMobileView');
+      if (mobileToggleBtn){
+        mobileToggleBtn.onclick = function(){
+          App.servingPlanMobileView = !App.servingPlanMobileView;
+          render();
+        };
+      }
 
       var listEl = $('servingPlanList');
       function loadServingPlan(){
@@ -2919,6 +3028,42 @@ function viewAttendanceHome(){
               monthButtons+
             '</div>';
           var viewEvents = monthMap[App.servingPlanMonth] || [];
+          function compactRowsHtml_(groupKey, groupPositions, canEdit){
+            var rows = [];
+            viewEvents.forEach(function(ev){
+              groupPositions.forEach(function(pos){
+                var cell = (res.cells && res.cells[ev.eventKey]) ? res.cells[ev.eventKey][pos.key] : null;
+                var maxSlots = Number(pos.max || POSITION_MAX[pos.position] || 1);
+                if (!maxSlots || maxSlots < 1) maxSlots = 1;
+                var existingEntries = (cell && cell.length) ? cell : [];
+                var entries = existingEntries.map(function(entry, idx){
+                  var label = formatServingEntry_(entry);
+                  if (!label) return '';
+                  var rawValue = String(entry.rawValue || entry.memberId || '').trim();
+                  return '<button type="button" class="servingPlanEntry" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+idx+'" data-raw="'+escapeHtml(rawValue)+'">'+label+'</button>';
+                }).filter(Boolean);
+                var hasClosed = existingEntries.some(function(entry){
+                  var raw = String((entry && (entry.rawValue || entry.memberId)) || '').trim();
+                  return isServingClosedToken_(raw);
+                });
+                var vacantCount = hasClosed ? 0 : Math.max(0, maxSlots - entries.length);
+                if (vacantCount > 0){
+                  entries.push('<button type="button" class="servingPlanEntry emptySlotOutline" data-event="'+escapeHtml(ev.eventKey||'')+'" data-position="'+escapeHtml(pos.position||'')+'" data-group="'+escapeHtml(groupKey)+'" data-can-edit="'+(canEdit ? '1' : '0')+'" data-idx="'+entries.length+'" data-raw="">空缺 / Vacant x'+vacantCount+'</button>');
+                }
+                rows.push(
+                  '<tr>'+
+                    '<td class="servingPlanCompactDate">'+escapeHtml(eventLabel_(ev))+'</td>'+
+                    '<td class="servingPlanCompactPos">'+escapeHtml(servingPositionLabel_(pos))+'</td>'+
+                    '<td class="servingPlanCompactAssign">'+entries.join('')+'</td>'+
+                  '</tr>'
+                );
+              });
+            });
+            if (!rows.length){
+              return '<div class="small">暫無記錄 / No records</div>';
+            }
+            return '<div class="tableWrap"><table class="servingPlanCompactTable"><thead><tr><th>日期 / Date</th><th>崗位 / Position</th><th>安排 / Assignment</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';
+          }
           var groupSections = groupOrder.map(function(groupKey){
             var badge = SERVING_GROUP_BADGES[groupKey] || { zh: groupKey, en: groupKey, cls: '' };
             var groupPositions = positions.filter(function(pos){ return (POSITION_GROUP[pos.position] || '') === groupKey; });
@@ -2986,12 +3131,14 @@ function viewAttendanceHome(){
                     '<div></div>'+
                     (groupKey === 'other' ? '' : '<button class="btnBack groupSummaryMini servingGroupInfoToggle" data-group="'+groupKey+'">📌 摘要 / Summary</button>')+
                   '</div>'+
-                  '<div class="tableWrap">'+
-                    '<table class="servingPlanTable">'+
-                      '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
-                      '<tbody>'+bodyHtml+'</tbody>'+
-                    '</table>'+
-                  '</div>'+
+                  (App.servingPlanMobileView
+                    ? compactRowsHtml_(groupKey, groupPositions, canEdit)
+                    : ('<div class="tableWrap">'+
+                        '<table class="servingPlanTable">'+
+                          '<thead><tr><th class="servingPlanEvent">日期 / Date</th>'+headerHtml+'</tr></thead>'+
+                          '<tbody>'+bodyHtml+'</tbody>'+
+                        '</table>'+
+                      '</div>'))+
                 '</div>'+
               '</div>';
           }).join('');
@@ -3473,16 +3620,9 @@ function viewAttendanceHome(){
                     detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                   }
                   if (res2.duplicates && res2.duplicates.length){
-                    titleZh = '同一會員重覆崗位';
-                    titleEn = 'They are already serving this position.';
-                    detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                      var posLabelsZh = (d.positions||[]).map(function(p){
-                        var label = SERVING_POSITION_LABELS[p] || {};
-                        return label.zh || p;
-                      });
-                      var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                      return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                    }).join('<br/>');
+                    titleZh = '同一會員重覆崗位（已安排 vs 嘗試安排）';
+                    titleEn = 'Duplicate serving assignment (already assigned vs trying to assign).';
+                    detail = (detail ? (detail + '<br/>') : '') + duplicateDetailHtml_(res2.duplicates, res2.dateYmd);
                   }
                 showBox('servingEditMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                   var btnRow = document.createElement('div');
@@ -3624,16 +3764,9 @@ function viewAttendanceHome(){
                   detail = buildHolidayConflictDetailHtml_(res2.conflicts, memberMap);
                 }
                 if (res2.duplicates && res2.duplicates.length){
-                  titleZh = '同一會員重覆崗位';
-                  titleEn = 'They are already serving this position.';
-                  detail = (detail ? (detail + '<br/>') : '') + res2.duplicates.map(function(d){
-                    var posLabelsZh = (d.positions||[]).map(function(p){
-                      var label = SERVING_POSITION_LABELS[p] || {};
-                      return label.zh || p;
-                    });
-                    var dateLabel = formatYmdZhEn_(String(d.dateYmd || res2.dateYmd || '').trim());
-                    return escapeHtml((d.memberId||'') + ' → ' + posLabelsZh.join('、') + (dateLabel ? (' ｜ 日期: ' + dateLabel) : ''));
-                  }).join('<br/>');
+                  titleZh = '同一會員重覆崗位（已安排 vs 嘗試安排）';
+                  titleEn = 'Duplicate serving assignment (already assigned vs trying to assign).';
+                  detail = (detail ? (detail + '<br/>') : '') + duplicateDetailHtml_(res2.duplicates, res2.dateYmd);
                 }
                 showBox('quickMsg','warn', withErrorCodeTag_(titleZh, res2), titleEn, detail, true);
                 var btnRow = document.createElement('div');
@@ -3833,6 +3966,11 @@ function viewAttendanceHome(){
     }
 
     function bindMatrix(){
+      if (!App.from){
+        var d = new Date();
+        d.setDate(d.getDate() - 84);
+        App.from = d.toISOString().slice(0,10);
+      }
       $('from').value = App.from;
       $('to').value = App.to || getTodayYmdUk();
       $('filterWrap').classList.add('hide');
@@ -3852,11 +3990,11 @@ function viewAttendanceHome(){
         var v = validateRangeClient(from, to);
         if(!v.ok){ showBox('matrixMsg','err', escapeHtml(v.zh), escapeHtml(v.en)); return; }
 
-        showStatus('matrixMsg','warn','WORKING');
+        showStatus('matrixMsg','warn','WORKING / 載入中');
         logAction('MATRIX_LOAD', JSON.stringify({from:from,to:to}), 'matrix');
 
         callApi('api_admin_matrix', App.token, from, to, '').then(function(res){
-          if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+          if(!res || !res.ok){ showErr('matrixMsg', res || {code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席矩陣', en:'Unable to load attendance matrix.'}); return; }
 
           clear('matrixMsg');
           if(!res.events || !res.events.length){
@@ -3871,14 +4009,14 @@ function viewAttendanceHome(){
           $('filterLive').value = '';
           $('filterLive').oninput = function(){ applyMatrixFilter(String($('filterLive').value||'').trim()); };
         }).catch(function(err){
-          showErr('matrixMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
+          showErr('matrixMsg', err || {code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席矩陣', en:'Unable to load attendance matrix.'});
         });
       }
 
       function safeClassId(id){ return String(id||'').replace(/[^A-Za-z0-9]/g,'_'); }
 
       function renderMatrixTable(res){
-        var events = res.events || [];
+        var events = (res.events || []).map(function(e){ return (typeof e==='string') ? {eventKey:e,label:eventDateYmdFromKey(e)||e} : e; });
         var members = res.members || [];
         var attended = res.attended || {};
 
@@ -3900,15 +4038,15 @@ function viewAttendanceHome(){
         html += '</tr></thead><tbody>';
 
         for(var r=0;r<events.length;r++){
-          var ev = events[r];
-          var ymd = eventDateYmdFromKey(ev) || ev;
+          var ev = events[r].eventKey;
+          var ymd = events[r].label || eventDateYmdFromKey(ev) || ev;
           html += '<tr>';
           html += '<td class="clickable" data-ev="'+escapeHtml(ev)+'" title="'+escapeHtml(ev)+'"><span class="chip">'+escapeHtml(ymd)+'</span></td>';
 
           for(var c=0;c<members.length;c++){
             var mid = members[c].id;
             var cid2 = safeClassId(mid);
-            var tick = (attended[mid] && attended[mid][ev]) ? '✅' : '';
+            var tick = attended[ev+'|'+mid] ? '✅' : '';
             var isAway = !!(res.away && res.away[mid] && res.away[mid][ev]);
             var mark = tick || (isAway ? '🏖️ Holiday' : '');
             html += '<td class="clickable mcol_'+cid2+'" data-mid="'+escapeHtml(mid)+'"><span class="tick">'+mark+'</span></td>'; 
@@ -3917,6 +4055,7 @@ function viewAttendanceHome(){
         }
 
         html += '</tbody></table></div>';
+        html += renderMatrixCards_(res, events);
         $('matrixOut').innerHTML = html;
 
         // member clicks
@@ -3934,6 +4073,26 @@ function viewAttendanceHome(){
             openEventStatsModal(ev);
           };
         });
+      }
+      function renderMatrixCards_(res, events){
+        var families = Array.isArray(res.families) ? res.families : [];
+        if (!families.length) return '';
+        var out = '<div class="mobileStackCards">';
+        families.forEach(function(f){
+          out += '<div class="familyCard"><div class="familyHead"><b>'+escapeHtml(f.displayLabel||f.familyKey||'')+'</b><span class="small">'+escapeHtml(String((f.summary&&f.summary.memberCount)||0))+'人 / members</span></div>';
+          (f.members||[]).forEach(function(m){
+            out += '<div style="margin-top:8px"><div><b>'+escapeHtml(m.nameZh||m.nameEn||m.id)+'</b> <span class="small">'+escapeHtml(m.id)+'</span></div><div>';
+            events.forEach(function(ev){
+              var k = ev.eventKey;
+              var mark = (m.attendedByEvent && m.attendedByEvent[k]) ? '✅' : '—';
+              out += '<span class="eventChip">'+escapeHtml((ev.label||k).replace('SundayService_',''))+': '+mark+'</span>';
+            });
+            out += '</div></div>';
+          });
+          out += '</div>';
+        });
+        out += '</div>';
+        return out;
       }
 
       function applyMatrixFilter(text){
@@ -5041,11 +5200,14 @@ function viewAttendanceHome(){
       var m = openModal(
         '<div class="big">🔐 最後確認 / Final confirm</div>'+
         '<div class="small">請掃描你本人同工 QR 作確認。<br/>Please scan your own staff QR to confirm.</div>'+
-        '<div class="videoWrap" style="margin-top:10px;"><video id="vReauth" playsinline></video></div>'+
         '<div class="miniBtnRow">'+
-          '<button id="btnOpenExternal" class="btnBack" type="button">🌐 使用外部掃描器 / Open external scanner</button>'+
+          '<button id="btnOpenExternal" class="btnMain" type="button">📷 掃描 QR / Scan QR</button>'+
           '<button id="btnCancel" class="btnDanger">取消 / Cancel</button>'+
         '</div>'+
+        '<details class="card" style="margin-top:10px;"><summary>進階：內置相機測試 / Advanced: built-in camera test</summary>'+
+          '<div class="videoWrap" style="margin-top:10px;"><video id="vReauth" playsinline></video></div>'+
+          '<div class="miniBtnRow"><button id="btnStartReauthCam" class="btnSub" type="button">▶️ 啟動相機 / Start camera</button></div>'+
+        '</details>'+
         '<div id="msg"></div>'
       );
       m.querySelector('#btnCancel').onclick = function(){ stopScan(); closeModal(m); };
@@ -5097,38 +5259,41 @@ function viewAttendanceHome(){
         });
       }
 
-      startScan(vEl, function(qr, err){
-        if(err){ showErr('msg', err); return; }
-        handleReauthPayload_(qr);
-      });
+
+      var btnStartReauthCam = m.querySelector('#btnStartReauthCam');
+      if (btnStartReauthCam){
+        btnStartReauthCam.onclick = function(){
+          startScan(vEl, function(qr, err){
+            if(err){ showErr('msg', err); return; }
+            handleReauthPayload_(qr);
+          });
+        };
+      }
 
       var btnOpenExternal = m.querySelector('#btnOpenExternal');
       if(btnOpenExternal){
         applyExternalScannerGuard_('msg', ['btnOpenExternal']);
         btnOpenExternal.onclick = function(){
           if(!EXTERNAL_SCANNER_CONFIG.ok){ applyExternalScannerGuard_('msg', ['btnOpenExternal']); return; }
-          clear('msg');
+          showBox('msg','warn','正在開啟掃描器…','Opening scanner…','<div class="small">請在掃描器頁面完成掃描 / Please complete scanning in the scanner page.</div>');
           openExternalScanner_({
             flow:'admin',
             onPayload:handleReauthPayload_,
             onCancel:function(){
-              showStatus('msg','warn','SCAN_CANCELLED');
+              showBox('msg','warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.');
             },
             onPopupBlocked:function(){
-              showStatus('msg','warn','EXTERNAL_SCANNER_POPUP_BLOCKED_USE_BUILTIN');
+              showBox('msg','warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.');
             },
             onError:function(msg){
               showErr('msg', {code:'E500', zh:'掃描器出現問題', en:'Scanner error', detail: String(msg||'')});
             }
           });
         };
+        btnOpenExternal.onclick();
       }
 
-      if(shouldPreferExternalScanner_() && btnOpenExternal){
-        btnOpenExternal.classList.remove('btnBack');
-        btnOpenExternal.classList.add('btnMain');
-        showStatus('msg','warn','EXTERNAL_SCANNER_RECOMMENDED');
-      }
+
     }
 
     function renderContactResult_(modalOverlay, res){

@@ -23,7 +23,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-04-20.staff100';
+const APP_VERSION = '2026-05-24.staff101';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -1466,12 +1466,18 @@ function api_get_live_page(token, eventKeyOptional) {
 
   const checkedInSet = new Set(ids);
   const servingToday = getServingForEvent_(eventKey, members, checkedInSet);
+  const totalAttendance = names.length;
+  const newFriendCount = newCount;
+  const existingChurchgoerCount = Math.max(0, totalAttendance - newFriendCount);
 
   const payload = {
     ok:true,
     eventKey,
     checkedInCount: names.length,
     newCount: newCount,
+    totalAttendance: totalAttendance,
+    newFriendCount: newFriendCount,
+    existingChurchgoerCount: existingChurchgoerCount,
     lastSignIn,
     names,
     servingToday

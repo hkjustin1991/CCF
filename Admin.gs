@@ -47,7 +47,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-04-20.admin100';
+const ADMIN_VERSION = '2026-05-24.admin101';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -963,11 +963,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         admin_servingPositionLabel_(r.position) + ': ' + ids.join(', ')
       );
     }
-    const minAllowed = admin_servingMinRequired_(r.position);
-    const filledSlots = admin_countServingFilledSlots_(r.value);
-    if (minAllowed && filledSlots > 0 && filledSlots < minAllowed){
-      return admin_conflict_('崗位人數不足','Not enough people for this position.', '', 'POSITION_MIN_REQUIRED', 'SERVING_ASSIGNMENT');
-    }
     ids.forEach(function(id){
       const groupKey = ADMIN_SERVING_POSITION_GROUP[r.position] || '';
       if (!admin_memberHasServingGroup_(membersById[id], groupKey)){
@@ -1003,7 +998,15 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
-    duplicateDetails.push({ memberId: id, positions: effectivePositions.slice(0, 2), dateYmd: eventDateYmd, newlyIntroduced:true });
+    const attemptedPositions = normalized.filter(function(p){ return existing.indexOf(p) < 0; });
+    duplicateDetails.push({
+      memberId: id,
+      positions: effectivePositions.slice(0, 2),
+      existingPositions: existing.slice(0, 2),
+      attemptedPositions: attemptedPositions.slice(0, 2),
+      dateYmd: eventDateYmd,
+      newlyIntroduced:true
+    });
   });
 
   const evDate = admin_eventDateFromKey_(ev);
@@ -1562,26 +1565,27 @@ function api_admin_period_stats(token, fromDate, toDate){
  * - includes low attendance flag
  */
 function api_admin_matrix(token, fromDate, toDate, q){
-  const s = admin_requireSession_(token);
-  if (!s.ok) return s;
-  const glBlock = admin_requireNonGl_(s.actor);
-  if (glBlock) return glBlock;
+  try{
+    const s = admin_requireSession_(token);
+    if (!s.ok) return s;
+    const glBlock = admin_requireNonGl_(s.actor);
+    if (glBlock) return glBlock;
 
-  const range = admin_validateRange_(s.actor, fromDate, toDate);
-  if (!range.ok) return range;
+    const range = admin_validateRange_(s.actor, fromDate, toDate);
+    if (!range.ok) return range;
 
   const query = String(q||'').trim();
   const qU = query.toUpperCase();
   const qL = query.toLowerCase();
 
-  const check = admin_getCheckinsDataCached_();
-  if (!check.ok) return check;
+    const check = admin_getCheckinsDataCached_();
+    if (!check || !check.ok) return check || { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'未能載入出席資料', en:'Unable to load attendance data.' };
 
   const evSet = new Set();
-  const attended = {};
+  const attendanceSet = {};
   const attendeeIds = new Set();
 
-  for (const r of check.rows){
+  for (const r of (Array.isArray(check.rows) ? check.rows : [])){
     const ev = r.eventKey;
     if (!admin_isSundayServiceKey_(ev)) continue;
 
@@ -1595,8 +1599,7 @@ function api_admin_matrix(token, fromDate, toDate, q){
     evSet.add(ev);
     attendeeIds.add(mid);
 
-    if (!attended[mid]) attended[mid] = {};
-    attended[mid][ev] = 1;
+    attendanceSet[ev + '|' + mid] = 1;
   }
 
   const events = Array.from(evSet).sort((a,b)=>{
@@ -1604,12 +1607,13 @@ function api_admin_matrix(token, fromDate, toDate, q){
     return (da && db) ? (da.getTime() - db.getTime()) : a.localeCompare(b);
   });
 
-  const mi = admin_getMembersIndex_();
-  const flags = admin_getLowAttendanceFlagsCached_();
+  const mi = admin_getMembersIndex_() || { byId:{} };
+  const flags = admin_getLowAttendanceFlagsCached_() || { flagById:{} };
+  const memberIndexById = mi.byId || {};
 
   const members = [];
   for (const id of attendeeIds){
-    const m = mi.byId[id];
+    const m = memberIndexById[id];
     if (!m) continue;
 
     const st = admin_normStatus_(m.status);
@@ -1631,6 +1635,31 @@ function api_admin_matrix(token, fromDate, toDate, q){
   }
 
   members.sort((a,b)=> a.id.localeCompare(b.id));
+  const familiesByKey = {};
+  members.forEach(function(m){
+    const src = memberIndexById[m.id] || {};
+    const familyIdRaw = String(src.familyId || src.FamilyID || '').trim();
+    const familyKey = familyIdRaw ? familyIdRaw : ('INDIVIDUAL_' + m.id);
+    if (!familiesByKey[familyKey]){
+      familiesByKey[familyKey] = {
+        familyKey: familyKey,
+        familyId: familyIdRaw || '',
+        displayLabel: familyIdRaw ? ('Family ' + familyIdRaw) : 'Individual',
+        members: [],
+        summary: { memberCount:0, attendanceCount:0, possibleCount:0, percent:0 }
+      };
+    }
+    const letter = String(src.memberLetter || src.MemberLetter || '').trim();
+    familiesByKey[familyKey].members.push({
+      id: m.id,
+      memberLetter: letter,
+      nameZh: m.nameZh || '',
+      nameEn: m.nameEn || '',
+      status: String(src.status || ''),
+      lowFlag: !!m.lowFlag,
+      attendedByEvent: {}
+    });
+  });
 
   const away = {};
   const historyMap = admin_getAwayHistoryPeriodsMap_(members.map(function(m){ return m.id; }));
@@ -1654,16 +1683,51 @@ function api_admin_matrix(token, fromDate, toDate, q){
     });
   });
 
-  admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length}), 'matrix');
+  const familyList = Object.keys(familiesByKey).map(function(k){ return familiesByKey[k]; });
+  familyList.forEach(function(fam){
+    fam.members.sort(function(a,b){
+      const la = String(a.memberLetter||'').trim();
+      const lb = String(b.memberLetter||'').trim();
+      if (la && lb && la !== lb) return la.localeCompare(lb);
+      if (la && !lb) return -1;
+      if (!la && lb) return 1;
+      const na = (a.nameZh || a.nameEn || a.id);
+      const nb = (b.nameZh || b.nameEn || b.id);
+      return String(na).localeCompare(String(nb));
+    });
+    var attendedCount = 0;
+    fam.members.forEach(function(m){
+      events.forEach(function(ev){
+        const hit = !!attendanceSet[ev + '|' + m.id];
+        if (hit) attendedCount++;
+        m.attendedByEvent[ev] = hit;
+      });
+    });
+    const possible = fam.members.length * events.length;
+    fam.summary = {
+      memberCount: fam.members.length,
+      attendanceCount: attendedCount,
+      possibleCount: possible,
+      percent: possible ? Math.round((attendedCount / possible) * 1000) / 10 : 0
+    };
+  });
+  familyList.sort(function(a,b){ return String(a.familyKey||'').localeCompare(String(b.familyKey||'')); });
+
+  admin_audit_(s.actor, 'MATRIX_LOAD', JSON.stringify({from:String(fromDate||''), to:String(toDate||''), members:members.length, events:events.length, families:familyList.length}), 'matrix');
 
   return {
     ok:true,
     range:{ from: admin_fmtYmd_(range.from), to: admin_fmtYmd_(range.to) },
-    events: events,
+    events: events.map(function(ev){ return { eventKey:ev, dateYmd: admin_fmtYmd_(admin_eventDateFromKey_(ev) || new Date()), label: ev.replace('SundayService_','') }; }),
     members: members,
-    attended: attended,
-    away: away
+    attended: attendanceSet,
+    away: away,
+    families: familyList,
+    totals: { eventCount: events.length, familyCount: familyList.length, memberCount: members.length, checkinCount: Object.keys(attendanceSet).length }
   };
+  }catch(e){
+    return { ok:false, code:'E_ATT_MATRIX_LOAD', zh:'出席矩陣載入失敗', en:'Attendance matrix load failed.', detail:String(e&&e.message||e) };
+  }
 }
 
 /**
@@ -2244,6 +2308,65 @@ function bible_normalizeReferenceInput_(raw){
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+var __BIBLE_S2T_CHAR_MAP = {
+  '创':'創','记':'記','亚':'亞','师':'師','历':'歷','诗':'詩','传':'傳','赛':'賽','结':'結','弥':'彌','鸿':'鴻','该':'該','玛':'瑪',
+  '马':'馬','约':'約','罗':'羅','后':'後','门':'門','启':'啟','录':'錄','犹':'猶','书':'書','翰':'翰','众':'眾','灵':'靈','颂':'頌'
+};
+var __BIBLE_T2S_CHAR_MAP = null;
+function bible_toTraditionalZh_(text){
+  var src = String(text || '');
+  return src.split('').map(function(ch){ return __BIBLE_S2T_CHAR_MAP[ch] || ch; }).join('');
+}
+function bible_toSimplifiedZh_(text){
+  if (!__BIBLE_T2S_CHAR_MAP){
+    __BIBLE_T2S_CHAR_MAP = {};
+    Object.keys(__BIBLE_S2T_CHAR_MAP).forEach(function(k){
+      var t = __BIBLE_S2T_CHAR_MAP[k];
+      if (!__BIBLE_T2S_CHAR_MAP[t]) __BIBLE_T2S_CHAR_MAP[t] = k;
+    });
+  }
+  var src = String(text || '');
+  return src.split('').map(function(ch){ return __BIBLE_T2S_CHAR_MAP[ch] || ch; }).join('');
+}
+function bible_expandZhAliasVariants_(alias){
+  var out = [];
+  function add(v){
+    var s = String(v || '').trim();
+    if (!s) return;
+    if (out.indexOf(s) < 0) out.push(s);
+  }
+  var base = String(alias || '').trim();
+  if (!base) return out;
+  add(base);
+  add(bible_toTraditionalZh_(base));
+  add(bible_toSimplifiedZh_(base));
+  var snapshot = out.slice();
+  snapshot.forEach(function(v){
+    if (/[㐀-鿿]/.test(v) && v.length >= 3) add(v.slice(0, -1));
+  });
+  return out;
+}
+function bible_derivedZhAliases_(zhName){
+  var zh = String(zhName || '').trim();
+  if (!zh) return [];
+  var out = [];
+  function add(v){
+    var k = String(v || '').trim();
+    if (!k || k === zh) return;
+    if (out.indexOf(k) < 0) out.push(k);
+  }
+  if (/福音$/.test(zh)) add(zh.replace(/福音$/, ''));
+  if (/行傳$/.test(zh)) add(zh.replace(/行傳$/, ''));
+  if (/啟示錄$/.test(zh)) add(zh.replace(/錄$/, ''));
+  if (/篇$/.test(zh)) add(zh.replace(/篇$/, ''));
+  if (/書$/.test(zh)) add(zh.replace(/書$/, ''));
+  if (/記$/.test(zh)) add(zh.replace(/記$/, ''));
+  if (/記([上下])$/.test(zh)) add(zh.replace(/記([上下])$/, '$1'));
+  if (/紀([上下])$/.test(zh)) add(zh.replace(/紀([上下])$/, '$1'));
+  if (/志([上下])$/.test(zh)) add(zh.replace(/志([上下])$/, '$1'));
+  return out;
+}
 function bible_buildBookAliasMap_(){
   if (typeof __BIBLE_ALIAS_CACHE !== 'undefined' && __BIBLE_ALIAS_CACHE) return __BIBLE_ALIAS_CACHE;
   var books = [
@@ -2257,7 +2380,7 @@ function bible_buildBookAliasMap_(){
     ['HOS','何西阿書','Hosea',['何','hos']],['JOL','約珥書','Joel',['珥','jol']],['AMO','阿摩司書','Amos',['摩','amo']],['OBA','俄巴底亞書','Obadiah',['俄','oba']],['JON','約拿書','Jonah',['拿','jon']],
     ['MIC','彌迦書','Micah',['彌','mic']],['NAM','那鴻書','Nahum',['鴻','nam']],['HAB','哈巴谷書','Habakkuk',['哈','hab']],['ZEP','西番雅書','Zephaniah',['番','zep']],['HAG','哈該書','Haggai',['該','hag']],
     ['ZEC','撒迦利亞書','Zechariah',['亞','zec']],['MAL','瑪拉基書','Malachi',['瑪','mal']],['MAT','馬太福音','Matthew',['太','馬太福音','matthew','matt','mt']],['MRK','馬可福音','Mark',['可','馬可福音','mark','mk']],
-    ['LUK','路加福音','Luke',['路','路加福音','luke','lk']],['JHN','約翰福音','John',['約','約翰福音','john','jn']],['ACT','使徒行傳','Acts',['徒','使徒行傳','acts','ac']],['ROM','羅馬書','Romans',['羅','羅馬書','romans','rom']],
+    ['LUK','路加福音','Luke',['路','路加','路加福音','luke','lk']],['JHN','約翰福音','John',['約','約翰福音','john','jn']],['ACT','使徒行傳','Acts',['徒','使徒行傳','acts','ac']],['ROM','羅馬書','Romans',['羅','羅馬書','romans','rom']],
     ['1CO','哥林多前書','1 Corinthians',['林前','1co','1 cor']],['2CO','哥林多後書','2 Corinthians',['林後','2co','2 cor']],['GAL','加拉太書','Galatians',['加','gal']],['EPH','以弗所書','Ephesians',['弗','eph']],['PHP','腓立比書','Philippians',['腓','php','phil']],
     ['COL','歌羅西書','Colossians',['西','col']],['1TH','帖撒羅尼迦前書','1 Thessalonians',['帖前','1th']],['2TH','帖撒羅尼迦後書','2 Thessalonians',['帖後','2th']],['1TI','提摩太前書','1 Timothy',['提前','1ti']],['2TI','提摩太後書','2 Timothy',['提後','2ti']],
     ['TIT','提多書','Titus',['多','tit']],['PHM','腓利門書','Philemon',['門','phm']],['HEB','希伯來書','Hebrews',['來','heb']],['JAS','雅各書','James',['雅','jas']],['1PE','彼得前書','1 Peter',['彼前','1pe']],
@@ -2266,11 +2389,14 @@ function bible_buildBookAliasMap_(){
   var map = {};
   books.forEach(function(b){
     var meta = { key:b[0], zh:b[1], en:b[2] };
-    [b[1], b[2]].concat(b[3]||[]).forEach(function(a){
-      var k = String(a||'').trim().toLowerCase();
-      if (!k) return;
-      map[k] = meta;
-      map[k.replace(/\s+/g,'')] = meta;
+    [b[1], b[2]].concat(b[3]||[]).concat(bible_derivedZhAliases_(b[1])).forEach(function(a){
+      bible_expandZhAliasVariants_(a).forEach(function(v){
+        var k = String(v||'').trim().toLowerCase();
+        if (!k) return;
+        if (!map[k]) map[k] = meta;
+        var kNoSpace = k.replace(/\s+/g,'');
+        if (!map[kNoSpace]) map[kNoSpace] = meta;
+      });
     });
   });
   __BIBLE_ALIAS_CACHE = map;
@@ -2328,7 +2454,6 @@ function bible_expandCanonicalSegments_(parsed){
   return parsed && Array.isArray(parsed.segments) ? parsed.segments : [];
 }
 function bible_bookShortZhByKey_(bookKey){
-  var key = String(bookKey || '').trim().toUpperCase();
   var map = {
     GEN:'創',EXO:'出',LEV:'利',NUM:'民',DEU:'申',JOS:'書',JDG:'士',RUT:'得',
     '1SA':'撒上','2SA':'撒下','1KI':'王上','2KI':'王下','1CH':'代上','2CH':'代下',

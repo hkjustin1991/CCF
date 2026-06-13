@@ -106,6 +106,7 @@
       .sermonToggle input{margin:0}
       .nameSelect{border:1px solid #c4b5fd;border-radius:8px;padding:5px 8px;font-size:11px;background:#fff;color:#2b1755}
       .warnText{display:none;margin-top:6px;font-size:10px;color:#7c2d12;background:#ffedd5;border:1px solid #fdba74;border-radius:6px;padding:5px 7px}
+      .printTitle{display:none}
       .headRight{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
       .langToggle{border-radius:999px;padding:4px 10px}
       .btnSecondary{background:#4c1d95}
@@ -129,6 +130,7 @@
         body{background:#fff;color:#111}
         .screen,.card{padding:0;box-shadow:none;border-radius:0}
         .header,.controls{display:none!important}
+        .printTitle{display:block;font-size:14px;font-weight:900;margin:0 0 8px 0;color:#111}
         .tableWrap{max-height:none;overflow:visible;border:0}
         .tableWrap table{
           transform-origin:top left;
@@ -173,17 +175,20 @@
         <div class="controls">
           <button id="btnPdf" type="button" class="btnSecondary">Export PDF</button>
           <label class="sermonToggle"><input type="checkbox" id="toggleSermon" checked /><span id="toggleSermonLabel">講道</span></label>
+          <label class="sermonToggle"><input type="checkbox" id="toggleVacancy" checked /><span id="toggleVacancyLabel">空缺</span></label>
           <select id="nameMode" class="nameSelect"></select>
           <div id="groupToggles"></div>
         </div>
         <div class="warnText" id="printWarn"></div>
+        <div class="printTitle" id="printTitle"></div>
         <div class="tableWrap" id="tableWrap"></div>
+        <div class="controls"><button id="btnWeeks" type="button" class="btnSecondary">Expand to 12 weeks</button></div>
       </div>
     </div>
 
     <script>
       function $(id){ return document.getElementById(id); }
-      var State = { lang:'zh', data:null, groupEnabled:{}, nameMode:'preferred', showSermon:true };
+      var State = { lang:'zh', data:null, groupEnabled:{}, nameMode:'preferred', showSermon:true, showVacancy:true, weeks:8, password:'' };
       function esc(v){ return String(v==null?'':v).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 
       function callApi(fn){
@@ -201,7 +206,7 @@
               .withFailureHandler(function(err){
                 reject(new Error((err && err.message) ? err.message : String(err || 'API failed')));
               });
-            runner.api_public_rota_view(String(args[0] || ''));
+            runner.api_public_rota_view(String(args[0] || ''), Number(args[1] || 8));
           }catch(e){
             reject(e);
           }
@@ -214,12 +219,16 @@
         if ($('btnLangLogin')) $('btnLangLogin').textContent = State.lang === 'zh' ? 'EN' : '中文';
         if ($('btnLangRota')) $('btnLangRota').textContent = State.lang === 'zh' ? 'EN' : '中文';
         if ($('loginTitle')) $('loginTitle').textContent = State.lang === 'zh' ? '🧩 CCF 事奉排期' : '🧩 CCF Serving Rota';
-        if ($('loginSub')) $('loginSub').textContent = State.lang === 'zh' ? '只供查閱：未來 8 週排期' : 'Read-only: next 8 weeks rota';
+        if ($('loginSub')) $('loginSub').textContent = State.lang === 'zh' ? ('只供查閱：未來 ' + State.weeks + ' 週排期') : ('Read-only: next ' + State.weeks + ' weeks rota');
         if ($('pwd')) $('pwd').placeholder = State.lang === 'zh' ? '輸入密碼' : 'Enter password';
         if ($('btnOpen')) $('btnOpen').textContent = State.lang === 'zh' ? '進入' : 'Open';
         if ($('rotaTitle')) $('rotaTitle').textContent = State.lang === 'zh' ? '🗓️ 事奉排期' : '🗓️ Serving Rota';
         if ($('btnPdf')) $('btnPdf').textContent = State.lang === 'zh' ? 'Export PDF' : 'Export PDF';
+        if ($('btnWeeks')) $('btnWeeks').textContent = State.weeks === 8
+          ? t('展開至 12 週', 'Expand to 12 weeks')
+          : t('收合至 8 週', 'Collapse to 8 weeks');
         if ($('toggleSermonLabel')) $('toggleSermonLabel').textContent = State.lang === 'zh' ? '講道' : 'Sermon';
+        if ($('toggleVacancyLabel')) $('toggleVacancyLabel').textContent = State.lang === 'zh' ? '空缺' : 'Vacancies';
         if ($('nameMode')){
           var opt = [];
           opt.push('<option value="preferred">'+esc(t('稱呼：常用', 'Names: Preferred'))+'</option>');
@@ -229,6 +238,7 @@
           $('nameMode').value = State.nameMode;
         }
         if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        if ($('printTitle')) $('printTitle').textContent = buildPrintTitle_();
         if (State.data){
           if ($('groupToggles')) $('groupToggles').innerHTML = renderGroupToggles(State.data.positions || []);
           if ($('tableWrap')) $('tableWrap').innerHTML = renderTable(State.data);
@@ -242,6 +252,12 @@
           '生成時間：' + stamp + '。⚠️ 此文件一經匯出即屬非受控版本，可能不是最新版本，只反映匯出當刻。請以最新線上版本為準。',
           'Generated at: ' + stamp + '. ⚠️ This export is an uncontrolled copy and may not be up to date. It is accurate only at generation time. Always refer to the latest online/live version.'
         );
+      }
+      function buildPrintTitle_(){
+        var stamp = displayGeneratedAt_(State.data || null);
+        var suffix = State.lang === 'zh' ? (' · 未來 ' + State.weeks + ' 週') : (' · Next ' + State.weeks + ' weeks');
+        if (!stamp) return t('🗓️ 事奉排期', '🗓️ Serving Rota') + suffix;
+        return t('🗓️ 事奉排期', '🗓️ Serving Rota') + ' · ' + stamp + suffix;
       }
 
       function displayGeneratedAt_(data){
@@ -346,17 +362,31 @@
 
           activePositions.forEach(function(p){
             var list = ((r.positions || {})[p.key]) || [{ textZh:'-', textEn:'-', textPreferred:'-', isVacancy:false }];
+            var cellMeta = (((r || {}).positionMeta || {})[p.key]) || {};
             var html;
             if (!list.length || (list.length===1 && String(itemText_(list[0]) || '').trim()==='-')){
               html = '<span class="dash">-</span>';
             } else {
-              html = '<div class="stack">' + list.map(function(it){
-                var cls = 'bubble';
-                if (it && it.isVacancy) cls += ' vacancy';
-                else cls += ' ' + groupClass_(p.group);
-                var text = itemText_(it);
-                return '<span class="'+cls+'">'+esc(text || '-')+'</span>';
-              }).join('') + '</div>';
+              var assigned = [];
+              var vacancyCount = 0;
+              list.forEach(function(it){
+                if (it && it.isVacancy) vacancyCount += 1;
+                else assigned.push(it);
+              });
+              var bubbleHtml = assigned.map(function(it){
+                return '<span class="bubble '+groupClass_(p.group)+'">'+esc(itemText_(it) || '-')+'</span>';
+              });
+              if (State.showVacancy && vacancyCount > 0){
+                var vacText = vacancyCount >= 2
+                  ? (State.lang === 'zh' ? ('空缺 x' + vacancyCount) : ('Vacant x' + vacancyCount))
+                  : itemText_({ textZh:'空缺', textEn:'Vacant', textPreferred:'Vacant', isVacancy:true });
+                bubbleHtml.push('<span class="bubble vacancy">'+esc(vacText)+'</span>');
+              }
+              if (!State.showVacancy && !assigned.length){
+                html = cellMeta && cellMeta.isClosed ? '<span class="dash">-</span>' : '';
+              } else {
+                html = bubbleHtml.length ? ('<div class="stack">' + bubbleHtml.join('') + '</div>') : '<span class="dash">-</span>';
+              }
             }
             cells.push('<td>'+html+'</td>');
           });
@@ -371,7 +401,7 @@
         var pwd = String(($('pwd').value || '')).trim();
         $('msg').className = 'msg';
         $('msg').textContent = '載入中... / Loading...';
-        callApi('api_public_rota_view', pwd).then(function(res){
+        callApi('api_public_rota_view', pwd, State.weeks).then(function(res){
           if (!res || !res.ok){
             $('msg').className = 'msg err';
             $('msg').textContent = (res && (res.zh || res.en || res.code)) || '無法載入排期 / Unable to load rota.';
@@ -381,14 +411,17 @@
             var g = String((p && p.group) || '').trim();
             if (g && typeof State.groupEnabled[g] === 'undefined') State.groupEnabled[g] = true;
           });
+          State.weeks = (Number(res.weeks) === 12) ? 12 : 8;
           var stamp = displayGeneratedAt_(res);
           $('meta').textContent = (State.lang === 'zh')
-            ? ('生成時間：' + stamp + ' · 未來 8 週')
-            : ('Generated: ' + stamp + ' · Next 8 weeks');
+            ? ('生成時間：' + stamp + ' · 未來 ' + State.weeks + ' 週')
+            : ('Generated: ' + stamp + ' · Next ' + State.weeks + ' weeks');
           State.data = res;
+          State.password = pwd;
           $('groupToggles').innerHTML = renderGroupToggles(res.positions || []);
           $('tableWrap').innerHTML = renderTable(res);
           if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+          if ($('printTitle')) $('printTitle').textContent = buildPrintTitle_();
           $('loginCard').classList.add('hide');
           $('rotaCard').classList.remove('hide');
         }).catch(function(err){
@@ -406,8 +439,8 @@
         if (State.data && $('meta')){
           var stamp = displayGeneratedAt_(State.data);
           $('meta').textContent = (State.lang === 'zh')
-            ? ('生成時間：' + stamp + ' · 未來 8 週')
-            : ('Generated: ' + stamp + ' · Next 8 weeks');
+            ? ('生成時間：' + stamp + ' · 未來 ' + State.weeks + ' 週')
+            : ('Generated: ' + stamp + ' · Next ' + State.weeks + ' weeks');
         }
         applyLang_();
       }
@@ -424,8 +457,28 @@
       });
       if ($('btnPdf')) $('btnPdf').onclick = function(){
         if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        if ($('printTitle')) $('printTitle').textContent = buildPrintTitle_();
         preparePrintLayout_();
         window.print();
+      };
+      if ($('btnWeeks')) $('btnWeeks').onclick = function(){
+        if (!State.password) return;
+        State.weeks = (State.weeks === 8) ? 12 : 8;
+        applyLang_();
+        callApi('api_public_rota_view', State.password, State.weeks).then(function(res){
+          if (!res || !res.ok) return;
+          State.weeks = (Number(res.weeks) === 12) ? 12 : 8;
+          State.data = res;
+          var stamp = displayGeneratedAt_(res);
+          if ($('meta')){
+            $('meta').textContent = (State.lang === 'zh')
+              ? ('生成時間：' + stamp + ' · 未來 ' + State.weeks + ' 週')
+              : ('Generated: ' + stamp + ' · Next ' + State.weeks + ' weeks');
+          }
+          if ($('tableWrap')) $('tableWrap').innerHTML = renderTable(res);
+          if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+          if ($('printTitle')) $('printTitle').textContent = buildPrintTitle_();
+        }).catch(function(){});
       };
       if ($('nameMode')) $('nameMode').addEventListener('change', function(e){
         var next = String((e && e.target && e.target.value) || '').trim().toLowerCase();
@@ -443,10 +496,18 @@
           if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
         }
       });
+      if ($('toggleVacancy')) $('toggleVacancy').addEventListener('change', function(e){
+        State.showVacancy = !!(e && e.target && e.target.checked);
+        if (State.data && $('tableWrap')){
+          $('tableWrap').innerHTML = renderTable(State.data);
+          if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        }
+      });
       if ($('btnLangLogin')) $('btnLangLogin').onclick = toggleLang_;
       if ($('btnLangRota')) $('btnLangRota').onclick = toggleLang_;
       window.addEventListener('beforeprint', function(){
         if ($('printWarn')) $('printWarn').textContent = buildPrintWarning_();
+        if ($('printTitle')) $('printTitle').textContent = buildPrintTitle_();
         preparePrintLayout_();
       });
       applyLang_();
