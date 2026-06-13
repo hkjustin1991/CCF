@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.104
-  CHANGELOG: navigates admin handoff through top window to avoid Apps Script iframe refusal.
+  UI VERSION TAG: reg2-ui-2026-06-13.105
+  CHANGELOG: improves admin handoff auto navigation and longer token recovery.
   ============================================================
 
   Changes (reg2-ui2):
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.104</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.105</span></div>
     </header>
 
     <main id="app">
@@ -437,6 +437,10 @@
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
     function navigateTop_(url){
+      try{
+        var w = window.open(String(url || ''), '_top');
+        if (w !== null) return;
+      }catch(e){}
       try{
         var a = document.createElement('a');
         a.href = String(url || '');

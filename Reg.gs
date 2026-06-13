@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg104
- * CHANGELOG: top-window admin handoff navigation, fallback support, and rota public version alignment.
+ * v2026-06-13.reg105
+ * CHANGELOG: longer admin handoff TTL, delayed consume, top-window navigation support.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg104';
+const REG_VERSION = '2026-06-13.reg105';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -56,7 +56,7 @@ const REG_SERMON_SHEET = 'Sermon_Info';
 const REG_BIBLE_CACHE_PREFIX = 'reg_bible_v1_';
 const REG_BIBLE_CACHE_TTL = 6 * 60 * 60;
 const REG_ADMIN_HANDOFF_CACHE_PREFIX = 'reg_admin_handoff_';
-const REG_ADMIN_HANDOFF_TTL_SECONDS = 90;
+const REG_ADMIN_HANDOFF_TTL_SECONDS = 10 * 60;
 const ROTA_PUBLIC_VERSION = '2026-06-13.rota102';
 
 
@@ -1076,7 +1076,8 @@ function reg_consumeAdminHandoffToken_(handoffToken){
   const key = REG_ADMIN_HANDOFF_CACHE_PREFIX + token;
   const raw = cache.get(key);
   if (!raw) return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
-  cache.remove(key); // one-time use token
+  // Do not remove here: admin login removes only after a successful session is created.
+  // This avoids consuming the token during failed iframe/top-window navigation attempts.
 
   let payload = null;
   try{
@@ -1089,6 +1090,12 @@ function reg_consumeAdminHandoffToken_(handoffToken){
   if (!id) return { ok:false, code:'E_HANDOFF_EXPIRED', zh:'登入連結已過期', en:'Handoff link expired.' };
 
   return { ok:true, memberId:id, source:String((payload && payload.source) || '') };
+}
+
+function reg_removeAdminHandoffToken_(handoffToken){
+  const token = String(handoffToken || '').trim();
+  if (!token) return;
+  try{ CacheService.getScriptCache().remove(REG_ADMIN_HANDOFF_CACHE_PREFIX + token); }catch(e){}
 }
 
 function regDisplayNameForPortal_(m){
