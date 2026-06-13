@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg109
- * CHANGELOG: worship upload multi-sheet header detection and clearer external Google Sheet permission errors.
+ * v2026-06-13.reg110
+ * CHANGELOG: worship import future-only preview, clearer skipped/error messages, and closeable preview UI.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg109';
+const REG_VERSION = '2026-06-13.reg110';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -3021,13 +3021,22 @@ function worshipPreviewImportChanges_(auth, input){
   if (!parsed.ok) return parsed;
   const mi = admin_getMembersIndex_();
   const aliasMap = worshipReadAliasMap_();
-  const eventKeys = parsed.rows.map(function(r){ return String(r.EventKey||'').trim(); }).filter(Boolean);
+  const todayYmd = Utilities.formatDate(regNow_(), 'Europe/London', 'yyyy-MM-dd');
+  const eventKeys = parsed.rows.map(function(r){ return String(r.EventKey||'').trim(); }).filter(function(ev){
+    const m = String(ev||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+    return !!(m && m[1] >= todayYmd);
+  });
   const current = worshipGetCurrentImportState_(eventKeys);
-  const changes = [], errors = [];
+  const changes = [], errors = [], warnings = [];
   const positions = ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'];
   parsed.rows.forEach(function(r){
     const ev = String(r.EventKey||'').trim();
-    if (!admin_isSundayServiceKey_(ev)){ errors.push(Object.assign(worshipError_('E_WORSHIP_INVALID_EVENT','活動日期/代碼錯誤','Invalid date/event', ev), { eventKey:ev, rowNumber:r._rowNumber||'' })); return; }
+    if (!admin_isSundayServiceKey_(ev)){ errors.push(Object.assign(worshipError_('E_WORSHIP_INVALID_EVENT','活動日期/代碼錯誤','Invalid date/event', ev || ('row ' + (r._rowNumber||''))), { eventKey:ev, rowNumber:r._rowNumber||'', message:'請檢查日期欄或標題列是否正確 / Check the date column or header row.' })); return; }
+    const evYmd = (ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/) || [,''])[1];
+    if (evYmd && evYmd < todayYmd){
+      warnings.push({ ok:false, code:'E_WORSHIP_PAST_EVENT_SKIPPED', zh:'已略過過去日期', en:'Past event skipped', detail:evYmd + ' < ' + todayYmd, eventKey:ev, rowNumber:r._rowNumber||'', area:'SKIPPED', fieldName:'EventDate', status:'SKIPPED' });
+      return;
+    }
     positions.forEach(function(pos){
       if (r[pos] === undefined) return;
       const cv = worshipCanonicalRotaValue_(r[pos], aliasMap, mi);
@@ -3074,7 +3083,7 @@ function worshipPreviewImportChanges_(auth, input){
       conflicts.forEach(function(c){ errors.push(Object.assign(worshipError_('E_WORSHIP_HOLIDAY_CONFLICT','事奉安排與假期重疊','Serving assignment overlaps holiday period', (c.memberId||'') + ' ' + (c.from||'') + ' - ' + (c.to||'')), { eventKey:ev, area:'ROTA', fieldName:'holiday' })); });
     }
   });
-  return { ok:true, source:parsed.source || {}, changes:changes, accepted:changes, errors:errors, rejected:errors, hasHardErrors:errors.length > 0, canCommit:errors.length === 0 };
+  return { ok:true, source:parsed.source || {}, changes:changes, accepted:changes, errors:errors, warnings:warnings, skipped:warnings, rejected:errors, hasHardErrors:errors.length > 0, canCommit:errors.length === 0, futureOnly:true, todayYmd:todayYmd, summary:{ accepted:changes.length, errors:errors.length, skipped:warnings.length } };
 }
 
 function worshipCommitImportChanges_(auth, input, overrideAway, actionSource){

@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-13.admin110
- * CHANGELOG: sermon .docx upload unzip ContentType fix.
+ * v2026-06-13.admin111
+ * CHANGELOG: worship preview future-only messaging and closeable preview UI.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-13.admin110';
+const ADMIN_VERSION = '2026-06-13.admin111';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
