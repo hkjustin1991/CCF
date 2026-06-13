@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.103
-  CHANGELOG: changed admin handoff to same-tab navigation and hardened boot diagnostics.
+  UI VERSION TAG: reg2-ui-2026-06-13.104
+  CHANGELOG: navigates admin handoff through top window to avoid Apps Script iframe refusal.
   ============================================================
 
   Changes (reg2-ui2):
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
         
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.103</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.104</span></div>
     </header>
 
     <main id="app">
@@ -436,6 +436,21 @@
       }
     }
     function getUA(){ try{ return navigator.userAgent || ''; }catch(e){ return ''; } }
+    function navigateTop_(url){
+      try{
+        var a = document.createElement('a');
+        a.href = String(url || '');
+        a.target = '_top';
+        a.rel = 'noopener';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function(){ try{ document.body.removeChild(a); }catch(e){} }, 500);
+        return;
+      }catch(e){}
+      try{ window.top.location.href = url; return; }catch(e){}
+      try{ window.location.href = url; }catch(e){}
+    }
     function monthLabel_(ym){ var m=String(ym||'').match(/^(\d{4})-(\d{2})$/); if(!m) return String(ym||''); var y=Number(m[1]), mo=Number(m[2]); var en=new Date(Date.UTC(y,mo-1,1)).toLocaleString('en',{month:'short'}); return y+'年'+mo+'月 / '+en+' '+y; }
 
     const EXTERNAL_SCANNER_TIMEOUT_MS = Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>) || 120000;
@@ -2201,10 +2216,10 @@ function viewSelfHoliday(m){
           if(!token){ $('selfMsg').innerHTML = showBox('err','未能建立登入憑證','Unable to create login token'); return; }
           var sep = (LIVE_PORTAL_URL.indexOf('?') >= 0) ? '&' : '?';
           var adminUrl = LIVE_PORTAL_URL + sep + 'mode=admin&handoffToken=' + encodeURIComponent(token);
-          var fallback = '<div class="small"><a href="'+escapeHtml(adminUrl)+'">如新頁面沒有開啟，請按此進入管理頁面 / If the admin page does not open, tap here</a></div>';
+          var fallback = '<div class="small"><a target="_top" rel="noopener" href="'+escapeHtml(adminUrl)+'">如頁面沒有轉換，請按此進入管理頁面 / If the admin page does not open, tap here</a></div>';
           try{ localStorage.setItem('ccf_admin_handoff_token', token); }catch(e){}
           $('selfMsg').innerHTML = showBox('ok','正在進入管理頁面','Opening admin portal', fallback);
-          setTimeout(function(){ window.location.assign(adminUrl); }, 120);
+          setTimeout(function(){ navigateTop_(adminUrl); }, 120);
         }).catch(function(){
           $('selfMsg').innerHTML = showBox('err','系統錯誤','System error');
         });

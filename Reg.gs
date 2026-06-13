@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-13.reg103
- * CHANGELOG: same-tab admin handoff navigation, fallback support, and rota public version alignment.
+ * v2026-06-13.reg104
+ * CHANGELOG: top-window admin handoff navigation, fallback support, and rota public version alignment.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-13.reg103';
+const REG_VERSION = '2026-06-13.reg104';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
