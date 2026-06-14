@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-14.reg116
- * CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
+ * v2026-06-14.reg117
+ * CHANGELOG: Worship import v117: fixed .xlsx XML cell extraction for self-closing cells; preserves native B:H month-sheet geometry.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-14.reg116';
+const REG_VERSION = '2026-06-14.reg117';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2070,7 +2070,7 @@ const REG_WORSHIP_IMPORT_HEADERS = [
   'ResponseSong2Title','ResponseSong2Key','ResponseSong2Capo','ResponseSong2Version','ResponseSong2Link'
 ];
 const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_MAIN_3','WORSHIP_MAIN_4','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
-const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship116';
+const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship117';
 
 
 function reg_openSsForWorship_(){
@@ -2797,6 +2797,36 @@ function worshipColumnLettersToIndex_(letters){
   return n;
 }
 
+
+function worshipExtractXlsxCellsFromRowXml_(rowXml, shared){
+  const row = [];
+  const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  let m;
+  while ((m = cellRe.exec(String(rowXml || ''))) !== null){
+    const attrs = String(m[1] || '');
+    const body = String(m[2] || '');
+    const ref = (attrs.match(/\br="([A-Z]+)\d+"/) || [,''])[1];
+    const idx = ref ? (worshipColumnLettersToIndex_(ref) - 1) : row.length;
+    const type = (attrs.match(/\bt="([^"]+)"/) || [,''])[1];
+    let v = '';
+    if (body){
+      if (type === 'inlineStr'){
+        const texts = [];
+        (body.match(/<t[^>]*>[\s\S]*?<\/t>/g) || []).forEach(function(t){
+          texts.push(worshipDecodeXml_(t.replace(/<[^>]+>/g, '')));
+        });
+        v = texts.join('');
+      } else {
+        v = (body.match(/<v[^>]*>([\s\S]*?)<\/v>/) || [,''])[1];
+        if (type === 's') v = shared[Number(v)] || '';
+        else v = worshipDecodeXml_(v);
+      }
+    }
+    if (idx >= 0) row[idx] = String(v || '').trim();
+  }
+  return row;
+}
+
 function worshipReadUploadedSpreadsheetFormat_(file){
   const f = file || {};
   const name = String(f.name || f.filename || '').trim();
@@ -2853,22 +2883,7 @@ function worshipReadUploadedSpreadsheetFormat_(file){
       const xml = byName[key].getDataAsString('UTF-8');
       const rows = [];
       (xml.match(/<row[\s\S]*?<\/row>/g) || []).forEach(function(rowXml){
-        const row = [];
-        (rowXml.match(/<c[\s\S]*?<\/c>/g) || []).forEach(function(cXml){
-          const ref = (cXml.match(/\br="([A-Z]+)\d+"/) || [,''])[1];
-          const idx = ref ? worshipColumnLettersToIndex_(ref) : (row.length + 1);
-          const type = (cXml.match(/\bt="([^"]+)"/) || [,''])[1];
-          let v = '';
-          if (type === 'inlineStr'){
-            v = (cXml.match(/<t[^>]*>([\s\S]*?)<\/t>/) || [,''])[1];
-            v = worshipDecodeXml_(v);
-          } else {
-            v = (cXml.match(/<v[^>]*>([\s\S]*?)<\/v>/) || [,''])[1];
-            if (type === 's') v = shared[Number(v)] || '';
-            else v = worshipDecodeXml_(v);
-          }
-          row[idx - 1] = String(v || '').trim();
-        });
+        const row = worshipExtractXlsxCellsFromRowXml_(rowXml, shared);
         if (row.some(function(x){ return String(x||'').trim(); })) rows.push(row.map(function(x){ return x || ''; }));
       });
       const shortName = key.replace(/^xl\/worksheets\//,''); return { sheetName:workbookSheetNames[shortName] || shortName, values:rows };
