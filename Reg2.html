@@ -12,11 +12,11 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-14.115
-  CHANGELOG: Worship import v115: fixed native CCF Excel fixed-profile parser, hard parser geometry errors, clear service-level preview.
+  UI VERSION TAG: reg2-ui-2026-06-14.116
+  CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
   ============================================================
 
-  Changes (reg2-ui-2026-06-14.115): Worship import v115: fixed native CCF Excel fixed-profile parser, hard parser geometry errors, clear service-level preview.
+  Changes (reg2-ui-2026-06-14.116): Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
   [1] Scan QR -> Self menu with 3 options:
       - Details check/change
       - Attendance check (self only)
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-14.115</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-14.116</span></div>
     </header>
 
     <main id="app">
@@ -2364,7 +2364,7 @@ function viewSelfHoliday(m){
           '<label>Google Sheet URL / ID</label><input id="wImportSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/... 或 spreadsheet ID" />'+
           '<div class="small">或上載 .xlsx/.csv/.tsv / Or upload .xlsx/.csv/.tsv</div><input id="wImportFile" type="file" accept=".xlsx,.csv,.tsv,text/csv,text/tab-separated-values" />'+
           '<div id="wImportPreviewBox" class="msgBox small">貼上 Google Sheet URL/ID 後按預覽。/ Paste a Google Sheet URL/ID, then preview.</div>'+
-          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">匯入預覽 / Import preview</button><button id="wImportCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
+          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">匯入預覽 / Import preview</button><button id="wImportProbe" class="btnWorship">診斷 / Probe</button><button id="wImportCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
         );
         var confirmedInput = '';
         function readWorshipImportInput_(cb){
@@ -2376,7 +2376,24 @@ function viewSelfHoliday(m){
           reader.onerror = function(){ var box=modal.querySelector('#wImportPreviewBox'); if(box) box.innerHTML = showBox('err','讀取檔案失敗','Failed to read file'); };
           reader.readAsDataURL(file);
         }
+        function worshipImportDiagHtml_(res){
+          var diag = (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) ? res.diagnostics.sheets : (res && Array.isArray(res.sheets) ? res.sheets : null);
+          if (!diag) return '';
+          var monthFail = (res && (res.code === 'E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED' || res.code === 'E_WORSHIP_NO_MONTH_SHEETS_PARSED')) ? '<div class="msgBox err">找到月份工作表，但未能讀取任何主日安排。/ Month sheets were found, but no Sunday service blocks could be read.<br/>請把診斷資料傳給管理員或開發人員。/ Please send diagnostics to admin/developer.</div>' : '';
+          return monthFail + '<details class="small" open><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(diag, null, 2))+'</pre></details>';
+        }
         modal.querySelector('#wImportClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#wImportProbe').onclick = function(){
+          var box0 = modal.querySelector('#wImportPreviewBox'); if (box0) box0.innerHTML = showBox('warn','匯入診斷處理中…','Preparing import probe…');
+          readWorshipImportInput_(function(input){
+            var box1 = modal.querySelector('#wImportPreviewBox'); if (box1) box1.innerHTML = showBox('warn','伺服器診斷中…','Server is probing…');
+            callApi('api_reg_self_worship_import_probe_public', State.authQrPayload, input).then(function(res){
+              var box = modal.querySelector('#wImportPreviewBox');
+              if (!res || !res.ok){ if (box) box.innerHTML = showServerErr(res) + worshipImportDiagHtml_(res); return; }
+              if (box) box.innerHTML = showBox('ok','診斷完成','Probe complete','<div class="small">Engine: '+escapeHtml(res.importEngineVersion||'')+'</div>') + worshipImportDiagHtml_(res);
+            }).catch(function(err){ showWorshipErr_('診斷失敗','Probe failed', err); });
+          });
+        };
         modal.querySelector('#wImportPreview').onclick = function(){
           modal.querySelector('#wImportCommit').disabled = true;
           var box0 = modal.querySelector('#wImportPreviewBox'); if (box0) box0.innerHTML = showBox('warn','匯入預覽處理中…','Preparing import preview…');
@@ -2384,7 +2401,7 @@ function viewSelfHoliday(m){
           var box1 = modal.querySelector('#wImportPreviewBox'); if (box1) box1.innerHTML = showBox('warn','伺服器解析中…','Server is parsing…');
           callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, input).then(function(res){
             var box = modal.querySelector('#wImportPreviewBox');
-            if(!res || !res.ok){ if (box) box.innerHTML = showServerErr(res); return; }
+            if(!res || !res.ok){ if (box) box.innerHTML = showServerErr(res) + worshipImportDiagHtml_(res); return; }
             confirmedInput = input;
             if (box) box.innerHTML = (res.hasHardErrors ? showBox('err','預覽有錯誤','Preview has errors','<div class="small">請查看紅色錯誤列，修正試算表後再上載。/ Check red error rows, correct the spreadsheet, then upload again.</div>') : showBox('ok','預覽完成','Preview ready')) + worshipPreviewTable_(res);
             var closeTop = modal.querySelector('#wImportCloseTop'); if (closeTop) closeTop.onclick = function(){ closeModal(modal); };

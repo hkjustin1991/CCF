@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-14.reg115
- * CHANGELOG: Worship import v115: fixed native CCF Excel fixed-profile parser, hard parser geometry errors, clear service-level preview.
+ * v2026-06-14.reg116
+ * CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-14.reg115';
+const REG_VERSION = '2026-06-14.reg116';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2070,7 +2070,7 @@ const REG_WORSHIP_IMPORT_HEADERS = [
   'ResponseSong2Title','ResponseSong2Key','ResponseSong2Capo','ResponseSong2Version','ResponseSong2Link'
 ];
 const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_MAIN_3','WORSHIP_MAIN_4','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
-const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship115';
+const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship116';
 
 
 function reg_openSsForWorship_(){
@@ -2627,6 +2627,14 @@ function api_admin_worship_rota_gl_save(token, eventKey, rows, overrideAway){
     if (!auth.ok) return auth;
     return reg_worship_rota_gl_save_with_auth_(auth, eventKey, rows, overrideAway, 'ADMIN_WORSHIP_GL_SAVE');
   }catch(e){ return regErr_('E500','系統錯誤（E500）。','System error (E500).', e); }
+}
+
+function api_admin_worship_import_probe(token, input){
+  try{
+    const auth = reg_getWorshipAuthFromAdminToken_(token);
+    if (!auth.ok) return auth;
+    return worshipBuildImportProbe_(input);
+  }catch(e){ return regErr_('E_WORSHIP_PROBE_FAILED','匯入診斷失敗','Import probe failed', e); }
 }
 
 function api_admin_worship_import_preview(token, spreadsheetUrlOrId){
@@ -3197,46 +3205,172 @@ function worshipRowHasMeaningfulImportContent_(row){
   return ['Worship_Lead','Worship_Singer','Worship_Pianist','Worship_Drum','Worship_Instrument'].some(function(k){ return String(r[k]||'').trim(); }) || REG_WORSHIP_SECTIONS.some(function(sec){ return ['songTitle','songKey','capo','versionNote','linkUrl'].some(function(k){ return String(r[sec+'.'+k]||'').trim(); }); });
 }
 
-function worshipImportParseInput_(input){
-  if (Array.isArray(input)) return { ok:true, rows:reg_parseWorshipImportRows_(input).filter(function(r){ return !!r.EventKey; }), warnings:[], diagnostics:{ sheets:[] } };
-  if (input && typeof input === 'object'){
+
+function worshipIsExpectedMonthSheet_(sheetName){
+  const s = String(sheetName || '').trim();
+  if (!s) return false;
+  if (worshipShouldSkipImportSheet_(s).skip) return false;
+  if (worshipSheetMonthContext_(s)) return true;
+  return /^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)[A-Z]*\s*\d{2,4}$/i.test(s) || /^20\d{2}\s*[-_/]\s*\d{1,2}$/.test(s) || /^20\d{2}\s*年\s*\d{1,2}\s*月$/.test(s);
+}
+
+function worshipFirstVisibleRows_(values){
+  return (values || []).slice(0, 8).map(function(row){
+    const out = [];
+    for (let c=0; c<8; c++) out.push(String(((row || [])[c]) || ''));
+    return out;
+  });
+}
+
+function worshipParserOutcome_(res){
+  if (!res || !res.ok) return { ok:false, code:(res && res.code) || 'E_WORSHIP_PARSE_FAILED', detail:(res && (res.detail || res.en || res.zh)) || '' };
+  return { ok:true, mode:res.mode || '', headerRow:res.headerRow || 0, dateCol:res.dateColumn || 0, logicalBlocksProduced:(res.rows || []).filter(function(r){ return r && r.EventKey; }).length, warnings:(res.warnings || []).length };
+}
+
+function worshipProbeSheet_(sheetName, values){
+  values = Array.isArray(values) ? values : [];
+  const skip = worshipShouldSkipImportSheet_(sheetName);
+  const ctx = worshipSheetMonthContext_(sheetName || '');
+  const headerIdx = worshipFindNativeFixedHeaderRow_(values);
+  const headerScore = headerIdx >= 0 ? worshipNativeFixedHeaderScore_(values[headerIdx] || []) : 0;
+  const diag = {
+    sheetName:String(sheetName || ''),
+    physicalRowsRead:values.length,
+    firstRows:worshipFirstVisibleRows_(values),
+    skipDecision:skip.skip ? { skip:true, code:skip.code, zh:skip.zh, en:skip.en } : { skip:false },
+    expectedMonthSheet:worshipIsExpectedMonthSheet_(sheetName),
+    monthContext:ctx || null,
+    fixedHeaderRowScore:headerScore,
+    fixedHeaderRowIndex:headerIdx >= 0 ? headerIdx + 1 : 0,
+    fixedParserOutcome:null,
+    flexibleParserOutcome:null,
+    rowLevelParseErrors:[]
+  };
+  if (skip.skip) return diag;
+  try{ diag.fixedParserOutcome = worshipParserOutcome_(worshipParseNativeCcfFixedProfile_(values, sheetName || '')); }
+  catch(e){ diag.fixedParserOutcome = { ok:false, code:'E_WORSHIP_FIXED_PROBE_EXCEPTION', detail:String(e && e.message || e) }; }
+  try{ diag.flexibleParserOutcome = worshipParserOutcome_(worshipParseNativeCcfRows_(values, sheetName || '')); }
+  catch(e){ diag.flexibleParserOutcome = { ok:false, code:'E_WORSHIP_FLEX_PROBE_EXCEPTION', detail:String(e && e.message || e) }; }
+  if (diag.fixedParserOutcome && !diag.fixedParserOutcome.ok) diag.rowLevelParseErrors.push({ parser:'fixed', code:diag.fixedParserOutcome.code, detail:diag.fixedParserOutcome.detail || '' });
+  if (diag.flexibleParserOutcome && !diag.flexibleParserOutcome.ok) diag.rowLevelParseErrors.push({ parser:'flexible', code:diag.flexibleParserOutcome.code, detail:diag.flexibleParserOutcome.detail || '' });
+  return diag;
+}
+
+function worshipBuildImportProbe_(input){
+  const out = { ok:true, importEngineVersion:WORSHIP_IMPORT_ENGINE_VERSION, source:{}, sheets:[] };
+  if (input && typeof input === 'object' && !Array.isArray(input)){
     const upload = worshipReadUploadedSpreadsheetFormat_(input);
-    if (!upload.ok) return upload;
+    if (!upload.ok){ upload.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return upload; }
     const sheets = upload.sheets && upload.sheets.length ? upload.sheets : [{ sheetName:upload.sheetName || '', values:upload.values || [] }];
-    let nativeRows = [], nativeWarnings = [], bestFlat = null, firstError = null, diagnostics = [];
-    sheets.forEach(function(sh){
-      const sheetName = sh.sheetName || upload.sheetName || '';
-      const skip = worshipShouldSkipImportSheet_(sheetName);
-      if (skip.skip){
-        nativeWarnings.push({ code:skip.code, zh:skip.zh, en:skip.en, detail:sheetName, sheetName:sheetName, area:'SKIPPED', fieldName:'Sheet' });
-        diagnostics.push({ sheetName:sheetName, mode:'SKIPPED', headerRow:0, dateCol:0, physicalRowsRead:(sh.values||[]).length, logicalBlocksProduced:0, ignoredRows:(sh.values||[]).length, skippedPastRows:0, invalidRows:0 });
-        return;
-      }
-      const parsed = worshipRowsFromValues_(sh.values || [], sheetName);
-      if (parsed.ok){
-        const cleanRows = (parsed.rows || []).filter(function(r){ return r && r.EventKey; });
-        parsed.source = { uploadName:String(input.name || input.filename || ''), sheetName:sheetName, via:'UPLOAD', mode:parsed.mode || '' };
-        diagnostics.push({ sheetName:sheetName, mode:parsed.mode || 'FLAT', headerRow:parsed.headerRow || 0, dateCol:parsed.dateColumn || 0, physicalRowsRead:(sh.values||[]).length, logicalBlocksProduced:cleanRows.length, ignoredRows:Math.max(0, (sh.values||[]).length - cleanRows.length), skippedPastRows:0, invalidRows:(parsed.rows||[]).length - cleanRows.length });
-        if (parsed.mode === 'NATIVE_CCF_WORSHIP' || parsed.mode === 'NATIVE_CCF_FIXED_PROFILE'){
-          nativeRows = nativeRows.concat(cleanRows);
-          nativeWarnings = nativeWarnings.concat(parsed.warnings || []);
-        } else if (!bestFlat || cleanRows.length > (bestFlat.rows || []).length) { parsed.rows = cleanRows; bestFlat = parsed; }
-      } else if (!firstError) firstError = parsed;
-    });
-    if (nativeRows.length) return { ok:true, rows:nativeRows, warnings:nativeWarnings, source:{ uploadName:String(input.name || input.filename || ''), via:'UPLOAD', mode:'NATIVE_CCF_FIXED_PROFILE' }, diagnostics:{ sheets:diagnostics } };
-    if (bestFlat){ bestFlat.diagnostics = { sheets:diagnostics }; return bestFlat; }
-    if (diagnostics.length) return { ok:true, rows:[], warnings:nativeWarnings, source:{ uploadName:String(input.name || input.filename || ''), via:'UPLOAD', mode:'NO_IMPORTABLE_SHEETS' }, diagnostics:{ sheets:diagnostics } };
-    return firstError || worshipError_('E_WORSHIP_INVALID_FORMAT','找不到標題列','Header row not found');
+    out.source = { uploadName:String(input.name || input.filename || ''), via:'UPLOAD', sheetCount:sheets.length };
+    out.sheets = sheets.map(function(sh){ return worshipProbeSheet_(sh.sheetName || upload.sheetName || '', sh.values || []); });
+    return out;
   }
   const parsed = worshipParseSpreadsheetUrlOrId_(input);
-  if (!parsed.ok) return parsed;
+  if (!parsed.ok){ parsed.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return parsed; }
   const read = worshipReadExistingSheetFormat_(parsed.spreadsheetId, parsed.sheetNameOrGid);
-  if (!read.ok) return read;
-  const rows = worshipRowsFromValues_(read.values, read.sheetName || '');
-  if (!rows.ok) return rows;
+  if (!read.ok){ read.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return read; }
+  out.source = { spreadsheetId:parsed.spreadsheetId, sheetName:read.sheetName || '', gid:read.gid || '', via:read.via || 'SHEET' };
+  out.sheets = [worshipProbeSheet_(read.sheetName || 'Google Sheet', read.values || [])];
+  return out;
+}
+
+function worshipMonthSheetsFailedError_(code, diagnostics, failedSheets){
+  const detail = (failedSheets || []).map(function(f){ return f.sheetName + ': ' + (f.code || '') + ' ' + (f.detail || ''); }).join(' | ');
+  const err = worshipError_(code || 'E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED', '找到月份工作表，但未能讀取敬拜排期', 'Month sheets were found, but worship rota data could not be read', detail || 'Expected month sheets failed');
+  err.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION;
+  err.diagnostics = { sheets:diagnostics || [] };
+  err.failedSheets = failedSheets || [];
+  err.hasHardErrors = true;
+  err.canCommit = false;
+  return err;
+}
+
+function worshipImportParseInput_(input){
+  if (Array.isArray(input)) return { ok:true, importEngineVersion:WORSHIP_IMPORT_ENGINE_VERSION, rows:reg_parseWorshipImportRows_(input).filter(function(r){ return !!r.EventKey; }), warnings:[], diagnostics:{ sheets:[] } };
+  if (input && typeof input === 'object'){
+    const upload = worshipReadUploadedSpreadsheetFormat_(input);
+    if (!upload.ok){ upload.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return upload; }
+    const sheets = upload.sheets && upload.sheets.length ? upload.sheets : [{ sheetName:upload.sheetName || '', values:upload.values || [] }];
+    let nativeRows = [], nativeWarnings = [], bestFlat = null, diagnostics = [], expectedCount = 0, parsedExpected = 0;
+    const failedExpected = [];
+    sheets.forEach(function(sh){
+      const sheetName = sh.sheetName || upload.sheetName || '';
+      const values = sh.values || [];
+      const diag = worshipProbeSheet_(sheetName, values);
+      const skip = worshipShouldSkipImportSheet_(sheetName);
+      if (skip.skip){
+        diag.mode = 'SKIPPED';
+        diag.logicalBlocksProduced = 0;
+        diag.ignoredRows = values.length;
+        diagnostics.push(diag);
+        nativeWarnings.push({ code:skip.code, zh:skip.zh, en:skip.en, detail:sheetName, sheetName:sheetName, area:'SKIPPED', fieldName:'Sheet' });
+        return;
+      }
+      const expected = worshipIsExpectedMonthSheet_(sheetName);
+      if (expected) expectedCount++;
+      let parsed = null;
+      if (expected){
+        parsed = worshipParseNativeCcfFixedProfile_(values, sheetName);
+        diag.mode = 'EXPECTED_MONTH_FIXED_PROFILE';
+        diag.fixedParserOutcome = worshipParserOutcome_(parsed);
+        if (!parsed.ok){
+          failedExpected.push({ sheetName:sheetName, code:parsed.code || 'E_WORSHIP_FIXED_PROFILE_FAILED', detail:parsed.detail || parsed.en || parsed.zh || '' });
+          diag.error = { code:parsed.code || '', detail:parsed.detail || '' };
+          diagnostics.push(diag);
+          return;
+        }
+      } else {
+        parsed = worshipRowsFromValues_(values, sheetName);
+        diag.mode = parsed && parsed.ok ? (parsed.mode || 'FLAT') : 'UNPARSED_NON_MONTH_SHEET';
+        if (!parsed.ok){
+          diag.error = { code:parsed.code || '', detail:parsed.detail || '' };
+          diagnostics.push(diag);
+          return;
+        }
+      }
+      const cleanRows = (parsed.rows || []).filter(function(r){ return r && r.EventKey; });
+      diag.headerRow = parsed.headerRow || diag.fixedHeaderRowIndex || 0;
+      diag.dateCol = parsed.dateColumn || 0;
+      diag.logicalBlocksProduced = cleanRows.length;
+      diag.ignoredRows = Math.max(0, values.length - cleanRows.length);
+      diag.invalidRows = Math.max(0, (parsed.rows || []).length - cleanRows.length);
+      diagnostics.push(diag);
+      if (expected && !cleanRows.length){
+        failedExpected.push({ sheetName:sheetName, code:'E_WORSHIP_NO_SERVICE_BLOCKS', detail:'Fixed-profile parser returned zero logical service blocks' });
+        return;
+      }
+      if (parsed.mode === 'NATIVE_CCF_WORSHIP' || parsed.mode === 'NATIVE_CCF_FIXED_PROFILE'){
+        if (expected) parsedExpected++;
+        nativeRows = nativeRows.concat(cleanRows);
+        nativeWarnings = nativeWarnings.concat(parsed.warnings || []);
+      } else if (!expected && cleanRows.length && (!bestFlat || cleanRows.length > (bestFlat.rows || []).length)){
+        parsed.rows = cleanRows;
+        bestFlat = parsed;
+      }
+    });
+    if (failedExpected.length){
+      return worshipMonthSheetsFailedError_('E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED', diagnostics, failedExpected);
+    }
+    if (expectedCount > 0 && parsedExpected === 0){
+      return worshipMonthSheetsFailedError_('E_WORSHIP_NO_MONTH_SHEETS_PARSED', diagnostics, [{ sheetName:'(all expected month sheets)', code:'E_WORSHIP_NO_MONTH_SHEETS_PARSED', detail:'Expected month sheets were present but no service blocks were produced.' }]);
+    }
+    if (nativeRows.length) return { ok:true, importEngineVersion:WORSHIP_IMPORT_ENGINE_VERSION, rows:nativeRows, warnings:nativeWarnings, source:{ uploadName:String(input.name || input.filename || ''), via:'UPLOAD', mode:'NATIVE_CCF_FIXED_PROFILE' }, diagnostics:{ sheets:diagnostics } };
+    if (bestFlat){ bestFlat.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; bestFlat.diagnostics = { sheets:diagnostics }; return bestFlat; }
+    return worshipMonthSheetsFailedError_('E_WORSHIP_NO_MONTH_SHEETS_PARSED', diagnostics, [{ sheetName:'(workbook)', code:'E_WORSHIP_NO_MONTH_SHEETS_PARSED', detail:'No importable worship month sheets or flat import table parsed.' }]);
+  }
+  const parsed = worshipParseSpreadsheetUrlOrId_(input);
+  if (!parsed.ok){ parsed.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return parsed; }
+  const read = worshipReadExistingSheetFormat_(parsed.spreadsheetId, parsed.sheetNameOrGid);
+  if (!read.ok){ read.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return read; }
+  const expected = worshipIsExpectedMonthSheet_(read.sheetName || '');
+  const diag = worshipProbeSheet_(read.sheetName || '', read.values || []);
+  const rows = expected ? worshipParseNativeCcfFixedProfile_(read.values || [], read.sheetName || '') : worshipRowsFromValues_(read.values, read.sheetName || '');
+  if (!rows.ok) return worshipMonthSheetsFailedError_(expected ? 'E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED' : (rows.code || 'E_WORSHIP_INVALID_FORMAT'), [diag], [{ sheetName:read.sheetName || '', code:rows.code || '', detail:rows.detail || '' }]);
+  rows.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION;
   rows.rows = (rows.rows || []).filter(function(r){ return r && r.EventKey; });
   rows.source = { spreadsheetId:parsed.spreadsheetId, sheetName:read.sheetName, gid:read.gid, mode:rows.mode || '' };
-  rows.diagnostics = { sheets:[{ sheetName:read.sheetName || '', mode:rows.mode || 'FLAT', headerRow:rows.headerRow || 0, dateCol:rows.dateColumn || 0, physicalRowsRead:(read.values||[]).length, logicalBlocksProduced:(rows.rows||[]).length, ignoredRows:Math.max(0, (read.values||[]).length - (rows.rows||[]).length), skippedPastRows:0, invalidRows:0 }] };
+  rows.diagnostics = { sheets:[Object.assign(diag, { mode:rows.mode || 'FLAT', headerRow:rows.headerRow || 0, dateCol:rows.dateColumn || 0, logicalBlocksProduced:(rows.rows||[]).length, ignoredRows:Math.max(0, (read.values||[]).length - (rows.rows||[]).length), skippedPastRows:0, invalidRows:0 })] };
   return rows;
 }
 
@@ -3428,6 +3562,11 @@ function worshipBuildExportRowsFromExistingRotaAndSongs_(auth){
     return row;
   });
   return { ok:true, headers:headers, rows:rows };
+}
+
+function api_reg_self_worship_import_probe_public(qrPayload, input){
+  try{ const auth = regGetSelfMemberByQr_(qrPayload); if (!auth.ok) return auth; return worshipBuildImportProbe_(input); }
+  catch(e){ return regErr_('E_WORSHIP_PROBE_FAILED','匯入診斷失敗','Import probe failed', e); }
 }
 
 function api_reg_self_worship_import_preview_public(qrPayload, spreadsheetUrlOrId){

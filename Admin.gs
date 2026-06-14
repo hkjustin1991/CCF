@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-14.admin115
- * CHANGELOG: Worship import v115: fixed native CCF Excel fixed-profile parser, hard parser geometry errors, clear service-level preview.
+ * v2026-06-14.admin116
+ * CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-14.admin115';
+const ADMIN_VERSION = '2026-06-14.admin116';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.

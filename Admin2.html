@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-14.115
-  For Admin.gs: v2026-06-14.admin115
-  CHANGELOG: Worship import v115: fixed native CCF Excel fixed-profile parser, hard parser geometry errors, clear service-level preview.
+  UI VERSION TAG: admin2-ui-2026-06-14.116
+  For Admin.gs: v2026-06-14.admin116
+  CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-14.115</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-14.116</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -2690,7 +2690,7 @@ function eventDateYmdFromKey(ev){
         '<div class="card"><div class="topRow"><div class="big">🎵 敬拜排期 / Worship planning</div><button id="btnWorshipPlanBack" class="btnDanger">⬅️ 返回 / Back</button></div>'+
         '<div class="small">CCF ID: <b>'+escapeHtml(viewer.id||'')+'</b></div>'+
         '<div class="small">月份 / Month</div><select id="worshipMonthSelect">'+(monthOpts||'<option value="">ALL</option>')+'</select>'+
-        '<div class="miniBtnRow"><button id="btnAdminWorshipImport" class="btnWorship">匯入預覽 / Import preview</button><button id="btnAdminWorshipCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="btnAdminWorshipExport" class="btnWorship">匯出 / Export</button></div>'+
+        '<div class="miniBtnRow"><button id="btnAdminWorshipImport" class="btnWorship">匯入預覽 / Import preview</button><button id="btnAdminWorshipProbe" class="btnWorship">診斷 / Probe</button><button id="btnAdminWorshipCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="btnAdminWorshipExport" class="btnWorship">匯出 / Export</button></div>'+
         '<input id="adminWorshipSheetUrl" placeholder="Google Sheet URL / ID" />'+
         '<div class="small">或上載 .xlsx/.csv/.tsv / Or upload .xlsx/.csv/.tsv</div><input id="adminWorshipImportFile" type="file" accept=".xlsx,.csv,.tsv,text/csv,text/tab-separated-values" />'+
         '<div id="adminWorshipPreviewBox" class="small"></div>'+
@@ -2761,6 +2761,7 @@ function eventDateYmdFromKey(ev){
         }).join('')+'</tbody></table></div>';
       }
       var adminImportBtn = $('btnAdminWorshipImport');
+      var adminProbeBtn = $('btnAdminWorshipProbe');
       var adminCommitBtn = $('btnAdminWorshipCommit');
       var adminExportBtn = $('btnAdminWorshipExport');
       var adminPreviewInput = '';
@@ -2774,6 +2775,24 @@ function eventDateYmdFromKey(ev){
         reader.onerror = function(){ showErr('worshipPlanMsg', { code:'E_WORSHIP_UPLOAD_READ_FAILED', zh:'讀取檔案失敗', en:'Failed to read file.' }); };
         reader.readAsDataURL(file);
       }
+      function adminWorshipImportDiagHtml_(res){
+        var diag = (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) ? res.diagnostics.sheets : (res && Array.isArray(res.sheets) ? res.sheets : null);
+        if (!diag) return '';
+        var monthFail = (res && (res.code === 'E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED' || res.code === 'E_WORSHIP_NO_MONTH_SHEETS_PARSED')) ? '<div class="msgBox err">找到月份工作表，但未能讀取任何主日安排。/ Month sheets were found, but no Sunday service blocks could be read.<br/>請把診斷資料傳給管理員或開發人員。/ Please send diagnostics to admin/developer.</div>' : '';
+        return monthFail + '<details class="small" open><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(diag, null, 2))+'</pre></details>';
+      }
+      if (adminProbeBtn) adminProbeBtn.onclick = function(){
+        if (adminCommitBtn) adminCommitBtn.disabled = true;
+        var box0=$('adminWorshipPreviewBox'); if (box0) box0.innerHTML = '<div class="msgBox warn">匯入診斷處理中… / Preparing import probe…</div>';
+        readAdminWorshipImportInput_(function(input){
+          var box1=$('adminWorshipPreviewBox'); if (box1) box1.innerHTML = '<div class="msgBox warn">伺服器診斷中… / Server is probing…</div>';
+          callApi('api_admin_worship_import_probe', App.token, input).then(function(res){
+            var box=$('adminWorshipPreviewBox');
+            if (!res || !res.ok){ if (box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'E_WORSHIP_PROBE_FAILED')+'</b><div>'+escapeHtml((res&&res.zh)||'診斷失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Probe failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>' + adminWorshipImportDiagHtml_(res); return; }
+            if (box) box.innerHTML = '<div class="msgBox ok">診斷完成 / Probe complete<div class="small">Engine: '+escapeHtml(res.importEngineVersion||'')+'</div></div>' + adminWorshipImportDiagHtml_(res);
+          }).catch(function(err){ showErr('worshipPlanMsg', err || {code:'E_WORSHIP_PROBE_FAILED', zh:'診斷失敗', en:'Probe failed'}); });
+        });
+      };
       if (adminImportBtn) adminImportBtn.onclick = function(){
         if (adminCommitBtn) adminCommitBtn.disabled = true;
         var box0=$('adminWorshipPreviewBox'); if (box0) box0.innerHTML = '<div class="msgBox warn">匯入預覽處理中… / Preparing import preview…</div>';
@@ -2781,7 +2800,7 @@ function eventDateYmdFromKey(ev){
         var box1=$('adminWorshipPreviewBox'); if (box1) box1.innerHTML = '<div class="msgBox warn">伺服器解析中… / Server is parsing…</div>';
         callApi('api_admin_worship_import_preview', App.token, input).then(function(res){
           var box = $('adminWorshipPreviewBox');
-          if(!res || !res.ok){ if (box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'E_WORSHIP_PREVIEW_FAILED')+'</b><div>'+escapeHtml((res&&res.zh)||'預覽失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Preview failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>'; return; }
+          if(!res || !res.ok){ if (box) box.innerHTML = '<div class="msgBox err"><b>'+escapeHtml((res&&res.code)||'E_WORSHIP_PREVIEW_FAILED')+'</b><div>'+escapeHtml((res&&res.zh)||'預覽失敗')+'</div><div>'+escapeHtml((res&&res.en)||'Preview failed')+'</div><div class="small">'+escapeHtml((res&&res.detail)||'')+'</div></div>' + adminWorshipImportDiagHtml_(res); return; }
           adminPreviewInput = input;
           if (box) box.innerHTML = (res.hasHardErrors ? '<div class="msgBox err">預覽有錯誤 / Preview has errors<div class="small">請查看紅色錯誤列，修正試算表後再上載。/ Check red error rows, correct the spreadsheet, then upload again.</div></div>' : '<div class="msgBox ok">預覽完成 / Preview ready</div>') + adminWorshipPreviewTable_(res);
           var clearBtn = $('btnAdminWorshipPreviewClear'); if (clearBtn) clearBtn.onclick = function(){ if (box) box.innerHTML=''; if (adminCommitBtn) adminCommitBtn.disabled = true; adminPreviewInput = ''; };
