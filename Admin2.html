@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-13.113
-  For Admin.gs: v2026-06-13.admin113
-  CHANGELOG: worship v113 logical-block parser diagnostics and defensive preview guard.
+  UI VERSION TAG: admin2-ui-2026-06-14.115
+  For Admin.gs: v2026-06-14.admin115
+  CHANGELOG: Worship import v115: fixed native CCF Excel fixed-profile parser, hard parser geometry errors, clear service-level preview.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-13.113</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-14.115</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -2741,10 +2741,19 @@ function eventDateYmdFromKey(ev){
         (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED / 可匯入', message:'Will be written on confirm.', source:((c.sheetName||'') + (c.rowNumber ? (' row ' + c.rowNumber) : '')) }); });
         (Array.isArray((res||{}).warnings) ? res.warnings : []).forEach(function(w){ rows.push({ eventKey:w.eventKey||'', area:w.area||'SKIPPED', fieldName:w.fieldName||'', oldValue:'', newValue:w.detail||'', status:(w.code||'WARNING')+' '+(w.zh||w.en||''), message:(w.en||'Warning')+' / '+(w.zh||'提示'), source:((w.sheetName||'') + (w.rowNumber ? (' row ' + w.rowNumber) : '')) }); });
         (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||''), message:(e.message||e.en||'Error')+' / '+(e.zh||'錯誤'), source:((e.sheetName||'') + (e.rowNumber ? (' row ' + e.rowNumber) : '')) }); });
-        var note = '<div class="msgBox warn"><b>只預覽及匯入今日或之後的敬拜安排 / Only today and future worship planning is imported.</b><div class="small">Today: '+escapeHtml((res&&res.todayYmd)||'')+' · Accepted: '+escapeHtml(String(summary.accepted||0))+' · Skipped past rows: '+escapeHtml(String(summary.skipped||0))+' · Warnings: '+escapeHtml(String(summary.warnings||0))+' · Errors: '+escapeHtml(String(summary.errors||0))+'</div><div class="miniBtnRow"><button id="btnAdminWorshipPreviewClear" class="danger">關閉預覽 / Close preview</button></div></div>';
-        var diag = (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) ? '<details class="small"><summary>解析診斷 / Parser diagnostics</summary><pre>'+escapeHtml(JSON.stringify(res.diagnostics.sheets, null, 2))+'</pre></details>' : '';
-        if (!rows.length) return note + diag + '<div class="msgBox ok">沒有變更 / No changes</div>';
-        return note + diag + '<div class="tableWrap"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Source</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
+        var svc = Array.isArray((res||{}).parsedServices) ? res.parsedServices : [];
+        var changesByEv = {}; rows.filter(function(r){ return String(r.status||'').indexOf('ACCEPTED') === 0; }).forEach(function(r){ changesByEv[r.eventKey]=true; });
+        var noChangeSvc = svc.filter(function(x){ return x.status === 'FUTURE' && !changesByEv[x.eventKey]; });
+        var correctionRows = rows.filter(function(r){ return String(r.status||'').indexOf('ERROR') >= 0 || (String(r.status||'').indexOf('E_WORSHIP_') >= 0 && String(r.status||'').indexOf('PAST_EVENT_SKIPPED') < 0); });
+        var importMsg = '';
+        if (Number(summary.servicesFutureParsed||0) > 0 && Number(summary.changesAccepted||summary.accepted||0) === 0) importMsg = '<div class="msgBox ok">已讀取 '+escapeHtml(String(summary.servicesFutureParsed||0))+' 個今日或之後的主日，但沒有新變更。 / '+escapeHtml(String(summary.servicesFutureParsed||0))+' current/future services were recognised, but there are no new changes.</div>';
+        if (Number(summary.servicesFutureParsed||0) === 0) importMsg = '<div class="msgBox warn">未有可匯入的今日或之後主日安排。 / No current/future worship services were recognised for import.</div>';
+        var note = '<div class="msgBox warn"><b>匯入預覽 / Import preview</b><div class="small">Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+' · Today: '+escapeHtml((res&&res.todayYmd)||'')+'</div><ul class="small"><li>已讀取主日 / Services recognised: '+escapeHtml(String(summary.servicesParsedTotal||0))+'</li><li>今日或之後 / Today or future: '+escapeHtml(String(summary.servicesFutureParsed||0))+'</li><li>將會更新 / Changes to import: '+escapeHtml(String(summary.changesAccepted||summary.accepted||0))+'</li><li>已略過過去日期 / Past services skipped: '+escapeHtml(String(summary.servicesPastSkipped||summary.skipped||0))+'</li><li>需要處理 / Needs correction: '+escapeHtml(String(summary.errors||0))+'</li></ul>'+importMsg+'<div class="miniBtnRow"><button id="btnAdminWorshipPreviewClear" class="danger">關閉預覽 / Close preview</button></div></div>';
+        var noChangeHtml = noChangeSvc.length ? '<div class="msgBox ok"><b>已讀取但無變更 / Recognised but no change</b><div class="small">'+noChangeSvc.map(function(x){ return escapeHtml(x.eventKey||''); }).join('<br/>')+'</div></div>' : '';
+        var correctionHtml = correctionRows.length ? '<div class="msgBox err"><b>需要處理 / Needs correction</b><div class="small">'+correctionRows.map(function(r){ return escapeHtml((r.eventKey||'')+' '+(r.fieldName||'')+' '+(r.message||r.status||'')); }).join('<br/>')+'</div></div>' : '';
+        var diag = (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) ? '<details class="small"><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(res.diagnostics.sheets, null, 2))+'</pre></details>' : '';
+        if (!rows.length) return note + noChangeHtml + correctionHtml + diag + '<div class="msgBox ok">沒有變更 / No changes</div>';
+        return note + noChangeHtml + correctionHtml + '<div class="msgBox ok"><b>將會匯入 / Will import</b></div>' + diag + '<div class="tableWrap"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Source</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
           var st = String(r.status||'');
           var bad = st.indexOf('ERROR') >= 0 || st.indexOf('E_WORSHIP_') >= 0 && st.indexOf('PAST_EVENT_SKIPPED') < 0;
           var warn = st.indexOf('SKIPPED') >= 0 || st.indexOf('WARNING') >= 0 || st.indexOf('PAST_EVENT_SKIPPED') >= 0;
