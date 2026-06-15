@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-14.reg117
- * CHANGELOG: Worship import v117: fixed .xlsx XML cell extraction for self-closing cells; preserves native B:H month-sheet geometry.
+ * v2026-06-14.reg118
+ * CHANGELOG: Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-14.reg117';
+const REG_VERSION = '2026-06-14.reg118';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2070,7 +2070,7 @@ const REG_WORSHIP_IMPORT_HEADERS = [
   'ResponseSong2Title','ResponseSong2Key','ResponseSong2Capo','ResponseSong2Version','ResponseSong2Link'
 ];
 const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_MAIN_3','WORSHIP_MAIN_4','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
-const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship117';
+const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship118';
 
 
 function reg_openSsForWorship_(){
@@ -2985,19 +2985,66 @@ function worshipAppendNativeValue_(obj, key, value){
 
 function worshipStripInstrumentPrefix_(raw){
   const s = String(raw || '').trim();
-  const m = s.match(/^\s*(CAJON|DRUMS?|DRUMMER|鼓手?|GUITARS?|BASS|吉他|結他|乐器|樂器|INSTRUMENT)\s*[:：-]\s*(.+)$/i);
+  const m = s.match(/^\s*(CAJON|DRUMS?|DRUMMER|鼓手?|GUITARS?|BASS|吉他|結他|乐器|樂器|INSTRUMENT)\s*(?:[:：-]\s*|\s+)(.+)$/i);
   return m ? { role:m[1], name:m[2].trim(), hadPrefix:true } : { role:'', name:s, hadPrefix:false };
 }
 
+function worshipRoleHintForCombinedName_(name, roleHints){
+  const key = worshipNormalizeAlias_(name);
+  const hint = key && roleHints && roleHints.byAlias ? roleHints.byAlias[key] : null;
+  if (!hint) return '';
+  if (hint.drummer && !hint.guitarist) return 'DRUM';
+  if (hint.guitarist && !hint.drummer) return 'INSTRUMENT';
+  if (hint.drummer && hint.guitarist) return 'BOTH';
+  return '';
+}
+
 function worshipAppendCombinedInstrument_(obj, value, warnings, meta){
+  const roleHints = meta && meta.roleHints;
   String(value || '').split(/[\n\r,，;；]+/).map(function(x){ return x.trim(); }).filter(Boolean).forEach(function(part){
     const x = worshipStripInstrumentPrefix_(part);
     const role = String(x.role || '').toUpperCase();
     const probe = String(part).toUpperCase();
-    if (/CAJON|DRUM|鼓/.test(role) || (/CAJON|DRUM|鼓/.test(probe) && x.hadPrefix)) worshipAppendNativeValue_(obj, 'Worship_Drum', x.name);
-    else if (/GUITAR|BASS|吉他|結他|樂器|乐器|INSTRUMENT/.test(role) || (/GUITAR|BASS|吉他|結他|樂器|乐器|INSTRUMENT/.test(probe) && x.hadPrefix)) worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name);
-    else { worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name); if (warnings) warnings.push({ code:'E_WORSHIP_NATIVE_INSTRUMENT_ROLE_UNKNOWN', zh:'未能辨認樂器角色，已放入樂器欄', en:'Unknown instrument role; placed in Instrument', detail:x.name, sheetName:meta && meta.sheetName, rowNumber:meta && meta.rowNumber, area:'WARNING', fieldName:'Worship_Instrument' }); }
+    if (/CAJON|DRUM|鼓/.test(role) || (/CAJON|DRUM|鼓/.test(probe) && x.hadPrefix)) { worshipAppendNativeValue_(obj, 'Worship_Drum', x.name); return; }
+    if (/GUITAR|BASS|吉他|結他|樂器|乐器|INSTRUMENT/.test(role) || (/GUITAR|BASS|吉他|結他|樂器|乐器|INSTRUMENT/.test(probe) && x.hadPrefix)) { worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name); return; }
+    const hint = worshipRoleHintForCombinedName_(x.name, roleHints);
+    if (hint === 'DRUM') { worshipAppendNativeValue_(obj, 'Worship_Drum', x.name); return; }
+    if (hint === 'BOTH' && warnings) warnings.push({ code:'E_WORSHIP_NATIVE_INSTRUMENT_ROLE_HINT_BOTH', zh:'成員同時列於鼓手及結他手提示，已放入樂器欄', en:'Member appears in both drummer and guitarist hints; placed in Instrument', detail:x.name, sheetName:meta && meta.sheetName, rowNumber:meta && meta.rowNumber, area:'WARNING', fieldName:'Worship_Instrument' });
+    worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name);
   });
+}
+
+function worshipBuildNativeMemberRoleHints_(sheets){
+  const hints = { byAlias:{} };
+  (sheets || []).forEach(function(sh){
+    const sheetName = String((sh && sh.sheetName) || '');
+    if (!/CURRENT\s*MEMBERS|MEMBERS/i.test(sheetName)) return;
+    const values = (sh && sh.values) || [];
+    let headerRow = -1, drummerCol = -1, guitaristCol = -1;
+    for (let r=0; r<Math.min(values.length, 20); r++){
+      (values[r] || []).forEach(function(cell, c){
+        const n = worshipNormalizeAlias_(cell).replace(/\s+/g, '');
+        if (/^DRUMMER$|鼓手|鼓$/i.test(n)) drummerCol = c;
+        if (/^GUITARIST$|^GUITAR$|結他|吉他|^BASS$/i.test(n)) guitaristCol = c;
+      });
+      if (drummerCol >= 0 || guitaristCol >= 0){ headerRow = r; break; }
+    }
+    if (headerRow < 0) return;
+    function add(raw, key){
+      String(raw || '').split(/[\n\r,，;；\/|+＋]+/).map(function(x){ return String(x||'').trim(); }).filter(Boolean).forEach(function(name){
+        const alias = worshipNormalizeAlias_(name);
+        if (!alias) return;
+        if (!hints.byAlias[alias]) hints.byAlias[alias] = { drummer:false, guitarist:false, sourceSheet:sheetName };
+        hints.byAlias[alias][key] = true;
+      });
+    }
+    for (let r=headerRow+1; r<values.length; r++){
+      const row = values[r] || [];
+      if (drummerCol >= 0) add(row[drummerCol], 'drummer');
+      if (guitaristCol >= 0) add(row[guitaristCol], 'guitarist');
+    }
+  });
+  return hints;
 }
 
 function worshipDetectNativeHeader_(values){
@@ -3051,7 +3098,7 @@ function worshipFixedRowHasImportContent_(row){
   return [2,3,4,5,6,7].some(function(c){ return String((row||[])[c] || '').trim(); });
 }
 
-function worshipParseNativeCcfFixedProfile_(values, sheetName){
+function worshipParseNativeCcfFixedProfile_(values, sheetName, roleHints){
   values = Array.isArray(values) ? values : [];
   const ctx = worshipSheetMonthContext_(sheetName || '');
   const headerRow = worshipFindNativeFixedHeaderRow_(values);
@@ -3077,7 +3124,7 @@ function worshipParseNativeCcfFixedProfile_(values, sheetName){
     worshipAppendNativeValue_(current, 'Worship_Lead', worshipNormalizeNativePersonCell_(row[leadCol]));
     worshipAppendNativeValue_(current, 'Worship_Singer', worshipNormalizeNativePersonCell_(row[singerCol]));
     worshipAppendNativeValue_(current, 'Worship_Pianist', worshipNormalizeNativePersonCell_(row[pianistCol]));
-    worshipAppendCombinedInstrument_(current, worshipNormalizeNativePersonCell_(row[combinedCol]), warnings, { sheetName:sheetName, rowNumber:r+1 });
+    worshipAppendCombinedInstrument_(current, worshipNormalizeNativePersonCell_(row[combinedCol]), warnings, { sheetName:sheetName, rowNumber:r+1, roleHints:roleHints });
     worshipPushNativeSong_(current, 'WORSHIP_MAIN', row[worshipCol], 4);
     worshipPushNativeSong_(current, 'WORSHIP_RESPONSE', row[responseCol], 2);
   }
@@ -3092,7 +3139,7 @@ function worshipParsedServiceFields_(row){
   REG_WORSHIP_SECTIONS.forEach(function(sec){ parsed[sec] = { songTitle:String((row||{})[sec+'.songTitle']||'').trim(), songKey:String((row||{})[sec+'.songKey']||'').trim(), capo:String((row||{})[sec+'.capo']||'').trim(), versionNote:String((row||{})[sec+'.versionNote']||'').trim(), linkUrl:String((row||{})[sec+'.linkUrl']||'').trim() }; });
   return parsed;
 }
-function worshipParseNativeCcfRows_(values, sheetName){
+function worshipParseNativeCcfRows_(values, sheetName, roleHints){
   values = Array.isArray(values) ? values : [];
   const header = worshipDetectNativeHeader_(values);
   if (!header) return worshipError_('E_WORSHIP_NATIVE_NOT_DETECTED','不是原生 CCF 敬拜 Excel 格式','Not native CCF worship Excel format');
@@ -3125,7 +3172,7 @@ function worshipParseNativeCcfRows_(values, sheetName){
     Object.keys(header.map).forEach(function(k){
       const raw = String(row[header.map[k]] || '').trim();
       if (!raw) return;
-      if (k === 'Worship_CombinedInstrument') worshipAppendCombinedInstrument_(current, raw, warnings, { sheetName:sheetName, rowNumber:r+1 });
+      if (k === 'Worship_CombinedInstrument') worshipAppendCombinedInstrument_(current, raw, warnings, { sheetName:sheetName, rowNumber:r+1, roleHints:roleHints });
       else if (k === 'WorshipSongs') worshipPushNativeSong_(current, 'WORSHIP_MAIN', raw, 4);
       else if (k === 'ResponseSongs') worshipPushNativeSong_(current, 'WORSHIP_RESPONSE', raw, 2);
       else worshipAppendNativeValue_(current, k, raw);
@@ -3165,12 +3212,12 @@ function worshipDateCellToEventKey_(value, context){
   return '';
 }
 
-function worshipRowsFromValues_(values, sheetName){
+function worshipRowsFromValues_(values, sheetName, roleHints){
   values = Array.isArray(values) ? values : [];
   if (worshipLooksLikeNativeCcfMonthSheet_(sheetName || '', values)){
-    return worshipParseNativeCcfFixedProfile_(values, sheetName || '');
+    return worshipParseNativeCcfFixedProfile_(values, sheetName || '', roleHints);
   }
-  const native = worshipParseNativeCcfRows_(values, sheetName || '');
+  const native = worshipParseNativeCcfRows_(values, sheetName || '', roleHints);
   if (native && native.ok) return native;
   let headerRow = -1, map = {}, bestScore = -1, best = null;
   const maxScan = Math.min(values.length, 80);
@@ -3242,7 +3289,7 @@ function worshipParserOutcome_(res){
   return { ok:true, mode:res.mode || '', headerRow:res.headerRow || 0, dateCol:res.dateColumn || 0, logicalBlocksProduced:(res.rows || []).filter(function(r){ return r && r.EventKey; }).length, warnings:(res.warnings || []).length };
 }
 
-function worshipProbeSheet_(sheetName, values){
+function worshipProbeSheet_(sheetName, values, roleHints){
   values = Array.isArray(values) ? values : [];
   const skip = worshipShouldSkipImportSheet_(sheetName);
   const ctx = worshipSheetMonthContext_(sheetName || '');
@@ -3262,9 +3309,9 @@ function worshipProbeSheet_(sheetName, values){
     rowLevelParseErrors:[]
   };
   if (skip.skip) return diag;
-  try{ diag.fixedParserOutcome = worshipParserOutcome_(worshipParseNativeCcfFixedProfile_(values, sheetName || '')); }
+  try{ diag.fixedParserOutcome = worshipParserOutcome_(worshipParseNativeCcfFixedProfile_(values, sheetName || '', roleHints)); }
   catch(e){ diag.fixedParserOutcome = { ok:false, code:'E_WORSHIP_FIXED_PROBE_EXCEPTION', detail:String(e && e.message || e) }; }
-  try{ diag.flexibleParserOutcome = worshipParserOutcome_(worshipParseNativeCcfRows_(values, sheetName || '')); }
+  try{ diag.flexibleParserOutcome = worshipParserOutcome_(worshipParseNativeCcfRows_(values, sheetName || '', roleHints)); }
   catch(e){ diag.flexibleParserOutcome = { ok:false, code:'E_WORSHIP_FLEX_PROBE_EXCEPTION', detail:String(e && e.message || e) }; }
   if (diag.fixedParserOutcome && !diag.fixedParserOutcome.ok) diag.rowLevelParseErrors.push({ parser:'fixed', code:diag.fixedParserOutcome.code, detail:diag.fixedParserOutcome.detail || '' });
   if (diag.flexibleParserOutcome && !diag.flexibleParserOutcome.ok) diag.rowLevelParseErrors.push({ parser:'flexible', code:diag.flexibleParserOutcome.code, detail:diag.flexibleParserOutcome.detail || '' });
@@ -3277,8 +3324,9 @@ function worshipBuildImportProbe_(input){
     const upload = worshipReadUploadedSpreadsheetFormat_(input);
     if (!upload.ok){ upload.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return upload; }
     const sheets = upload.sheets && upload.sheets.length ? upload.sheets : [{ sheetName:upload.sheetName || '', values:upload.values || [] }];
+    const roleHints = worshipBuildNativeMemberRoleHints_(sheets);
     out.source = { uploadName:String(input.name || input.filename || ''), via:'UPLOAD', sheetCount:sheets.length };
-    out.sheets = sheets.map(function(sh){ return worshipProbeSheet_(sh.sheetName || upload.sheetName || '', sh.values || []); });
+    out.sheets = sheets.map(function(sh){ return worshipProbeSheet_(sh.sheetName || upload.sheetName || '', sh.values || [], roleHints); });
     return out;
   }
   const parsed = worshipParseSpreadsheetUrlOrId_(input);
@@ -3286,7 +3334,7 @@ function worshipBuildImportProbe_(input){
   const read = worshipReadExistingSheetFormat_(parsed.spreadsheetId, parsed.sheetNameOrGid);
   if (!read.ok){ read.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return read; }
   out.source = { spreadsheetId:parsed.spreadsheetId, sheetName:read.sheetName || '', gid:read.gid || '', via:read.via || 'SHEET' };
-  out.sheets = [worshipProbeSheet_(read.sheetName || 'Google Sheet', read.values || [])];
+  out.sheets = [worshipProbeSheet_(read.sheetName || 'Google Sheet', read.values || [], null)];
   return out;
 }
 
@@ -3307,12 +3355,13 @@ function worshipImportParseInput_(input){
     const upload = worshipReadUploadedSpreadsheetFormat_(input);
     if (!upload.ok){ upload.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return upload; }
     const sheets = upload.sheets && upload.sheets.length ? upload.sheets : [{ sheetName:upload.sheetName || '', values:upload.values || [] }];
+    const roleHints = worshipBuildNativeMemberRoleHints_(sheets);
     let nativeRows = [], nativeWarnings = [], bestFlat = null, diagnostics = [], expectedCount = 0, parsedExpected = 0;
     const failedExpected = [];
     sheets.forEach(function(sh){
       const sheetName = sh.sheetName || upload.sheetName || '';
       const values = sh.values || [];
-      const diag = worshipProbeSheet_(sheetName, values);
+      const diag = worshipProbeSheet_(sheetName, values, roleHints);
       const skip = worshipShouldSkipImportSheet_(sheetName);
       if (skip.skip){
         diag.mode = 'SKIPPED';
@@ -3326,7 +3375,7 @@ function worshipImportParseInput_(input){
       if (expected) expectedCount++;
       let parsed = null;
       if (expected){
-        parsed = worshipParseNativeCcfFixedProfile_(values, sheetName);
+        parsed = worshipParseNativeCcfFixedProfile_(values, sheetName, roleHints);
         diag.mode = 'EXPECTED_MONTH_FIXED_PROFILE';
         diag.fixedParserOutcome = worshipParserOutcome_(parsed);
         if (!parsed.ok){
@@ -3336,7 +3385,7 @@ function worshipImportParseInput_(input){
           return;
         }
       } else {
-        parsed = worshipRowsFromValues_(values, sheetName);
+        parsed = worshipRowsFromValues_(values, sheetName, roleHints);
         diag.mode = parsed && parsed.ok ? (parsed.mode || 'FLAT') : 'UNPARSED_NON_MONTH_SHEET';
         if (!parsed.ok){
           diag.error = { code:parsed.code || '', detail:parsed.detail || '' };
@@ -3379,8 +3428,8 @@ function worshipImportParseInput_(input){
   const read = worshipReadExistingSheetFormat_(parsed.spreadsheetId, parsed.sheetNameOrGid);
   if (!read.ok){ read.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION; return read; }
   const expected = worshipIsExpectedMonthSheet_(read.sheetName || '');
-  const diag = worshipProbeSheet_(read.sheetName || '', read.values || []);
-  const rows = expected ? worshipParseNativeCcfFixedProfile_(read.values || [], read.sheetName || '') : worshipRowsFromValues_(read.values, read.sheetName || '');
+  const diag = worshipProbeSheet_(read.sheetName || '', read.values || [], null);
+  const rows = expected ? worshipParseNativeCcfFixedProfile_(read.values || [], read.sheetName || '', null) : worshipRowsFromValues_(read.values, read.sheetName || '', null);
   if (!rows.ok) return worshipMonthSheetsFailedError_(expected ? 'E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED' : (rows.code || 'E_WORSHIP_INVALID_FORMAT'), [diag], [{ sheetName:read.sheetName || '', code:rows.code || '', detail:rows.detail || '' }]);
   rows.importEngineVersion = WORSHIP_IMPORT_ENGINE_VERSION;
   rows.rows = (rows.rows || []).filter(function(r){ return r && r.EventKey; });
@@ -3436,6 +3485,26 @@ function worshipCanonicalRotaValue_(raw, aliasMap, mi){
   return { ok:true, value:out.join(', ') };
 }
 
+
+function worshipRotaValuesEquivalent_(oldVal, newVal){
+  const a = String(oldVal || '').trim();
+  const b = String(newVal || '').trim();
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (/^(CLOSED|N\/A)$/i.test(a) || /^(CLOSED|N\/A)$/i.test(b)) return a.toUpperCase() === b.toUpperCase();
+  const aa = admin_extractMemberIdsFromServingValue_(a).slice().sort();
+  const bb = admin_extractMemberIdsFromServingValue_(b).slice().sort();
+  return aa.length > 0 && aa.length === bb.length && aa.join('|') === bb.join('|');
+}
+
+function worshipSongValuesEquivalent_(fieldName, oldVal, newVal){
+  const a = String(oldVal || '').trim();
+  const b = String(newVal || '').trim();
+  if (a === b) return true;
+  if (/\.songTitle$/.test(String(fieldName || ''))) return worshipCleanNativeSong_(a) === worshipCleanNativeSong_(b);
+  return false;
+}
+
 function worshipPreviewImportChanges_(auth, input){
   const base = reg_buildWorshipPagePayload_(auth, false);
   if (!base.ok) return base;
@@ -3474,8 +3543,8 @@ function worshipPreviewImportChanges_(auth, input){
       if (!cv.ok){ errors.push(Object.assign(cv, { eventKey:ev, area:'ROTA', fieldName:pos, rowNumber:r._rowNumber||'', sheetName:r._sheetName||'' })); return; }
       const oldVal = String(((current[ev]||{}).rota||{})[pos] || '').trim();
       if (String(r[pos]||'').trim()) fieldsParsed++;
-      if (oldVal === cv.value) noChangeFields++;
-      if (oldVal !== cv.value) changes.push({ eventKey:ev, area:'ROTA', fieldName:pos, oldValue:oldVal, newValue:cv.value, status:'ACCEPTED', sheetName:r._sheetName||'', rowNumber:r._rowNumber||'' });
+      if (worshipRotaValuesEquivalent_(oldVal, cv.value)) noChangeFields++;
+      if (!worshipRotaValuesEquivalent_(oldVal, cv.value)) changes.push({ eventKey:ev, area:'ROTA', fieldName:pos, oldValue:oldVal, newValue:cv.value, status:'ACCEPTED', sheetName:r._sheetName||'', rowNumber:r._rowNumber||'' });
     });
     REG_WORSHIP_SECTIONS.forEach(function(sec){
       ['songTitle','songKey','capo','versionNote','linkUrl'].forEach(function(k){
@@ -3484,8 +3553,8 @@ function worshipPreviewImportChanges_(auth, input){
         let nv = String(r[key]||'').trim();
         const oldVal = String(((((current[ev]||{}).songs||{})[sec]||{})[k]) || '').trim();
         if (nv) fieldsParsed++;
-        if (oldVal === nv && nv) noChangeFields++;
-        if (oldVal !== nv) changes.push({ eventKey:ev, area:'SONG', fieldName:key, oldValue:oldVal, newValue:nv, status:'ACCEPTED', sheetName:r._sheetName||'', rowNumber:r._rowNumber||'' });
+        if (worshipSongValuesEquivalent_(key, oldVal, nv) && nv) noChangeFields++;
+        if (!worshipSongValuesEquivalent_(key, oldVal, nv)) changes.push({ eventKey:ev, area:'SONG', fieldName:key, oldValue:oldVal, newValue:nv, status:'ACCEPTED', sheetName:r._sheetName||'', rowNumber:r._rowNumber||'' });
       });
     });
   });

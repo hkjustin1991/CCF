@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-14.116
+  UI VERSION TAG: admin2-ui-2026-06-14.118
   For Admin.gs: v2026-06-14.admin116
-  CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
+  CHANGELOG: Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-14.116</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-14.118</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -2736,29 +2736,35 @@ function eventDateYmdFromKey(ev){
       });
 
       function adminWorshipPreviewTable_(res){
-        var rows = [];
         var summary = (res && res.summary) || {};
-        (Array.isArray((res||{}).changes) ? res.changes : []).forEach(function(c){ rows.push({ eventKey:c.eventKey, area:c.area, fieldName:c.fieldName, oldValue:c.oldValue, newValue:c.newValue, status:'ACCEPTED / 可匯入', message:'Will be written on confirm.', source:((c.sheetName||'') + (c.rowNumber ? (' row ' + c.rowNumber) : '')) }); });
-        (Array.isArray((res||{}).warnings) ? res.warnings : []).forEach(function(w){ rows.push({ eventKey:w.eventKey||'', area:w.area||'SKIPPED', fieldName:w.fieldName||'', oldValue:'', newValue:w.detail||'', status:(w.code||'WARNING')+' '+(w.zh||w.en||''), message:(w.en||'Warning')+' / '+(w.zh||'提示'), source:((w.sheetName||'') + (w.rowNumber ? (' row ' + w.rowNumber) : '')) }); });
-        (Array.isArray((res||{}).errors) ? res.errors : []).forEach(function(e){ rows.push({ eventKey:e.eventKey||'', area:e.area||'', fieldName:e.fieldName||'', oldValue:'', newValue:e.detail||'', status:(e.code||'ERROR')+' '+(e.zh||e.en||''), message:(e.message||e.en||'Error')+' / '+(e.zh||'錯誤'), source:((e.sheetName||'') + (e.rowNumber ? (' row ' + e.rowNumber) : '')) }); });
+        var changes = Array.isArray((res||{}).changes) ? res.changes : [];
+        var warnings = Array.isArray((res||{}).warnings) ? res.warnings : [];
+        var errors = Array.isArray((res||{}).errors) ? res.errors : [];
         var svc = Array.isArray((res||{}).parsedServices) ? res.parsedServices : [];
-        var changesByEv = {}; rows.filter(function(r){ return String(r.status||'').indexOf('ACCEPTED') === 0; }).forEach(function(r){ changesByEv[r.eventKey]=true; });
+        var changesByEv = {}; changes.forEach(function(c){ changesByEv[c.eventKey]=true; });
         var noChangeSvc = svc.filter(function(x){ return x.status === 'FUTURE' && !changesByEv[x.eventKey]; });
-        var correctionRows = rows.filter(function(r){ return String(r.status||'').indexOf('ERROR') >= 0 || (String(r.status||'').indexOf('E_WORSHIP_') >= 0 && String(r.status||'').indexOf('PAST_EVENT_SKIPPED') < 0); });
         var importMsg = '';
         if (Number(summary.servicesFutureParsed||0) > 0 && Number(summary.changesAccepted||summary.accepted||0) === 0) importMsg = '<div class="msgBox ok">已讀取 '+escapeHtml(String(summary.servicesFutureParsed||0))+' 個今日或之後的主日，但沒有新變更。 / '+escapeHtml(String(summary.servicesFutureParsed||0))+' current/future services were recognised, but there are no new changes.</div>';
         if (Number(summary.servicesFutureParsed||0) === 0) importMsg = '<div class="msgBox warn">未有可匯入的今日或之後主日安排。 / No current/future worship services were recognised for import.</div>';
-        var note = '<div class="msgBox warn"><b>匯入預覽 / Import preview</b><div class="small">Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+' · Today: '+escapeHtml((res&&res.todayYmd)||'')+'</div><ul class="small"><li>已讀取主日 / Services recognised: '+escapeHtml(String(summary.servicesParsedTotal||0))+'</li><li>今日或之後 / Today or future: '+escapeHtml(String(summary.servicesFutureParsed||0))+'</li><li>將會更新 / Changes to import: '+escapeHtml(String(summary.changesAccepted||summary.accepted||0))+'</li><li>已略過過去日期 / Past services skipped: '+escapeHtml(String(summary.servicesPastSkipped||summary.skipped||0))+'</li><li>需要處理 / Needs correction: '+escapeHtml(String(summary.errors||0))+'</li></ul>'+importMsg+'<div class="miniBtnRow"><button id="btnAdminWorshipPreviewClear" class="danger">關閉預覽 / Close preview</button></div></div>';
-        var noChangeHtml = noChangeSvc.length ? '<div class="msgBox ok"><b>已讀取但無變更 / Recognised but no change</b><div class="small">'+noChangeSvc.map(function(x){ return escapeHtml(x.eventKey||''); }).join('<br/>')+'</div></div>' : '';
-        var correctionHtml = correctionRows.length ? '<div class="msgBox err"><b>需要處理 / Needs correction</b><div class="small">'+correctionRows.map(function(r){ return escapeHtml((r.eventKey||'')+' '+(r.fieldName||'')+' '+(r.message||r.status||'')); }).join('<br/>')+'</div></div>' : '';
-        var diag = (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) ? '<details class="small"><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(res.diagnostics.sheets, null, 2))+'</pre></details>' : '';
-        if (!rows.length) return note + noChangeHtml + correctionHtml + diag + '<div class="msgBox ok">沒有變更 / No changes</div>';
-        return note + noChangeHtml + correctionHtml + '<div class="msgBox ok"><b>將會匯入 / Will import</b></div>' + diag + '<div class="tableWrap"><table><thead><tr><th>Date/Event</th><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Status</th><th>Source</th><th>Message</th></tr></thead><tbody>'+rows.map(function(r){
-          var st = String(r.status||'');
-          var bad = st.indexOf('ERROR') >= 0 || st.indexOf('E_WORSHIP_') >= 0 && st.indexOf('PAST_EVENT_SKIPPED') < 0;
-          var warn = st.indexOf('SKIPPED') >= 0 || st.indexOf('WARNING') >= 0 || st.indexOf('PAST_EVENT_SKIPPED') >= 0;
-          return '<tr'+(bad?' style="background:#ffecec"':(warn?' style="background:#fff8db"':''))+'><td>'+escapeHtml(r.eventKey||'')+'</td><td>'+escapeHtml(r.area||'')+'</td><td>'+escapeHtml(r.fieldName||'')+'</td><td>'+escapeHtml(r.oldValue||'')+'</td><td>'+escapeHtml(r.newValue||'')+'</td><td>'+escapeHtml(r.status||'')+'</td><td>'+escapeHtml(r.source||'')+'</td><td>'+escapeHtml(r.message||'')+'</td></tr>';
-        }).join('')+'</tbody></table></div>';
+        var note = '<div class="msgBox warn"><b>匯入預覽 / Import preview</b><div class="small">Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+' · Today: '+escapeHtml((res&&res.todayYmd)||'')+'</div><ul class="small"><li>已讀取主日 / Services recognised: '+escapeHtml(String(summary.servicesParsedTotal||0))+'</li><li>今日或之後 / Today or future: '+escapeHtml(String(summary.servicesFutureParsed||0))+'</li><li>將會更新 / Changes to import: '+escapeHtml(String(summary.changesAccepted||summary.accepted||0))+'</li><li>已略過過去日期 / Past services skipped: '+escapeHtml(String(summary.servicesPastSkipped||summary.skipped||0))+'</li><li>需要處理 / Blocking issues: '+escapeHtml(String(errors.length||0))+'</li></ul>'+importMsg+'<div class="miniBtnRow"><button id="btnAdminWorshipPreviewClear" class="danger">關閉預覽 / Close preview</button></div></div>';
+        function changeTable(list){
+          if (!list.length) return '<div class="small">沒有 / None</div>';
+          var by = {}; list.forEach(function(c){ if(!by[c.eventKey]) by[c.eventKey]=[]; by[c.eventKey].push(c); });
+          return Object.keys(by).sort().map(function(ev){ return '<div class="small"><b>'+escapeHtml(ev)+'</b></div><div class="tableScroll"><table><thead><tr><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Source</th></tr></thead><tbody>'+by[ev].map(function(c){ return '<tr><td>'+escapeHtml(c.area||'')+'</td><td>'+escapeHtml(c.fieldName||'')+'</td><td>'+escapeHtml(c.oldValue||'')+'</td><td>'+escapeHtml(c.newValue||'')+'</td><td>'+escapeHtml((c.sheetName||'')+(c.rowNumber?' row '+c.rowNumber:''))+'</td></tr>'; }).join('')+'</tbody></table></div>'; }).join('');
+        }
+        function issueList(list, isErr){
+          if (!list.length) return '<div class="small">沒有 / None</div>';
+          return '<div class="small">'+list.map(function(e){ return escapeHtml(((e.eventKey||'')+' '+(e.fieldName||'')+' '+(e.code||'')+' '+(e.en||e.zh||'')+' '+(e.detail||'')).trim()); }).join('<br/>')+'</div>';
+        }
+        var errOpen = errors.length ? ' open' : '';
+        var importOpen = (!errors.length && changes.length) ? ' open' : '';
+        var html = note;
+        html += '<details'+errOpen+'><summary>需要處理 / Blocking issues ('+escapeHtml(String(errors.length))+')</summary><div class="msgBox err">'+issueList(errors, true)+'</div></details>';
+        html += '<details'+importOpen+'><summary>將會匯入 / Will import ('+escapeHtml(String(changes.length))+')</summary>'+changeTable(changes)+'</details>';
+        html += '<details><summary>提示及已略過 / Warnings and skipped ('+escapeHtml(String(warnings.length))+')</summary><div class="msgBox warn">'+issueList(warnings, false)+'</div></details>';
+        html += '<details><summary>已讀取但無變更 / Recognised but no change ('+escapeHtml(String(noChangeSvc.length))+')</summary><div class="msgBox ok"><div class="small">'+(noChangeSvc.map(function(x){ return escapeHtml(x.eventKey||''); }).join('<br/>') || '沒有 / None')+'</div></div></details>';
+        if (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) html += '<details class="small"><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(res.diagnostics.sheets, null, 2))+'</pre></details>';
+        return html;
       }
       var adminImportBtn = $('btnAdminWorshipImport');
       var adminProbeBtn = $('btnAdminWorshipProbe');
