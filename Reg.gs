@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-14.reg118
- * CHANGELOG: Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
+ * v2026-06-15.reg119
+ * CHANGELOG: Worship import v119: unprefixed native combined drum/guitar entries default to Drum to avoid false duplicates.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-14.reg118';
+const REG_VERSION = '2026-06-15.reg119';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -2070,7 +2070,7 @@ const REG_WORSHIP_IMPORT_HEADERS = [
   'ResponseSong2Title','ResponseSong2Key','ResponseSong2Capo','ResponseSong2Version','ResponseSong2Link'
 ];
 const REG_WORSHIP_SECTIONS = ['WORSHIP_MAIN_1','WORSHIP_MAIN_2','WORSHIP_MAIN_3','WORSHIP_MAIN_4','WORSHIP_RESPONSE_1','WORSHIP_RESPONSE_2'];
-const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-14.worship118';
+const WORSHIP_IMPORT_ENGINE_VERSION = '2026-06-15.worship119';
 
 
 function reg_openSsForWorship_(){
@@ -3001,6 +3001,7 @@ function worshipRoleHintForCombinedName_(name, roleHints){
 
 function worshipAppendCombinedInstrument_(obj, value, warnings, meta){
   const roleHints = meta && meta.roleHints;
+  const defaultUnprefixedRole = String((meta && meta.defaultUnprefixedRole) || '').toUpperCase();
   String(value || '').split(/[\n\r,，;；]+/).map(function(x){ return x.trim(); }).filter(Boolean).forEach(function(part){
     const x = worshipStripInstrumentPrefix_(part);
     const role = String(x.role || '').toUpperCase();
@@ -3009,6 +3010,8 @@ function worshipAppendCombinedInstrument_(obj, value, warnings, meta){
     if (/GUITAR|BASS|吉他|結他|樂器|乐器|INSTRUMENT/.test(role) || (/GUITAR|BASS|吉他|結他|樂器|乐器|INSTRUMENT/.test(probe) && x.hadPrefix)) { worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name); return; }
     const hint = worshipRoleHintForCombinedName_(x.name, roleHints);
     if (hint === 'DRUM') { worshipAppendNativeValue_(obj, 'Worship_Drum', x.name); return; }
+    if (hint === 'INSTRUMENT') { worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name); return; }
+    if (defaultUnprefixedRole === 'DRUM') { worshipAppendNativeValue_(obj, 'Worship_Drum', x.name); return; }
     if (hint === 'BOTH' && warnings) warnings.push({ code:'E_WORSHIP_NATIVE_INSTRUMENT_ROLE_HINT_BOTH', zh:'成員同時列於鼓手及結他手提示，已放入樂器欄', en:'Member appears in both drummer and guitarist hints; placed in Instrument', detail:x.name, sheetName:meta && meta.sheetName, rowNumber:meta && meta.rowNumber, area:'WARNING', fieldName:'Worship_Instrument' });
     worshipAppendNativeValue_(obj, 'Worship_Instrument', x.name);
   });
@@ -3124,7 +3127,7 @@ function worshipParseNativeCcfFixedProfile_(values, sheetName, roleHints){
     worshipAppendNativeValue_(current, 'Worship_Lead', worshipNormalizeNativePersonCell_(row[leadCol]));
     worshipAppendNativeValue_(current, 'Worship_Singer', worshipNormalizeNativePersonCell_(row[singerCol]));
     worshipAppendNativeValue_(current, 'Worship_Pianist', worshipNormalizeNativePersonCell_(row[pianistCol]));
-    worshipAppendCombinedInstrument_(current, worshipNormalizeNativePersonCell_(row[combinedCol]), warnings, { sheetName:sheetName, rowNumber:r+1, roleHints:roleHints });
+    worshipAppendCombinedInstrument_(current, worshipNormalizeNativePersonCell_(row[combinedCol]), warnings, { sheetName:sheetName, rowNumber:r+1, roleHints:roleHints, defaultUnprefixedRole:'DRUM' });
     worshipPushNativeSong_(current, 'WORSHIP_MAIN', row[worshipCol], 4);
     worshipPushNativeSong_(current, 'WORSHIP_RESPONSE', row[responseCol], 2);
   }
