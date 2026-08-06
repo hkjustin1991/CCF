@@ -12,11 +12,11 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-13.105
-  CHANGELOG: improves admin handoff auto navigation and longer token recovery.
+  UI VERSION TAG: reg2-ui-2026-06-14.118
+  CHANGELOG: Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
   ============================================================
 
-  Changes (reg2-ui2):
+  Changes (reg2-ui-2026-06-14.118): Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
   [1] Scan QR -> Self menu with 3 options:
       - Details check/change
       - Attendance check (self only)
@@ -200,9 +200,9 @@
         <div class="title">粵語基督徒團契 會員登記及自助服務平台</div>
         <div class="sub">CCF registration and self service portal</div>
         <div id="globalClock" class="sub"></div>
-        
+
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-13.105</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-14.118</span></div>
     </header>
 
     <main id="app">
@@ -2332,29 +2332,102 @@ function viewSelfHoliday(m){
         el.onchange=function(){ syncKeyField_(String(el.getAttribute('data-target')||'')); };
       });
 
+      function worshipPreviewTable_(res){
+        var summary = (res && res.summary) || {};
+        var changes = Array.isArray((res||{}).changes) ? res.changes : [];
+        var warnings = Array.isArray((res||{}).warnings) ? res.warnings : [];
+        var errors = Array.isArray((res||{}).errors) ? res.errors : [];
+        var svc = Array.isArray((res||{}).parsedServices) ? res.parsedServices : [];
+        var changesByEv = {}; changes.forEach(function(c){ changesByEv[c.eventKey]=true; });
+        var noChangeSvc = svc.filter(function(x){ return x.status === 'FUTURE' && !changesByEv[x.eventKey]; });
+        var importMsg = '';
+        if (Number(summary.servicesFutureParsed||0) > 0 && Number(summary.changesAccepted||summary.accepted||0) === 0) importMsg = '<div class="msgBox ok">已讀取 '+escapeHtml(String(summary.servicesFutureParsed||0))+' 個今日或之後的主日，但沒有新變更。 / '+escapeHtml(String(summary.servicesFutureParsed||0))+' current/future services were recognised, but there are no new changes.</div>';
+        if (Number(summary.servicesFutureParsed||0) === 0) importMsg = '<div class="msgBox warn">未有可匯入的今日或之後主日安排。 / No current/future worship services were recognised for import.</div>';
+        var note = '<div class="msgBox warn"><b>匯入預覽 / Import preview</b><div class="small">Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+' · Today: '+escapeHtml((res&&res.todayYmd)||'')+'</div><ul class="small"><li>已讀取主日 / Services recognised: '+escapeHtml(String(summary.servicesParsedTotal||0))+'</li><li>今日或之後 / Today or future: '+escapeHtml(String(summary.servicesFutureParsed||0))+'</li><li>將會更新 / Changes to import: '+escapeHtml(String(summary.changesAccepted||summary.accepted||0))+'</li><li>已略過過去日期 / Past services skipped: '+escapeHtml(String(summary.servicesPastSkipped||summary.skipped||0))+'</li><li>需要處理 / Blocking issues: '+escapeHtml(String(errors.length||0))+'</li></ul>'+importMsg+'<div class="miniBtnRow"><button id="wImportCloseTop" class="danger">關閉預覽 / Close preview</button></div></div>';
+        function changeTable(list){
+          if (!list.length) return '<div class="small">沒有 / None</div>';
+          var by = {}; list.forEach(function(c){ if(!by[c.eventKey]) by[c.eventKey]=[]; by[c.eventKey].push(c); });
+          return Object.keys(by).sort().map(function(ev){ return '<div class="small"><b>'+escapeHtml(ev)+'</b></div><div class="tableScroll"><table><thead><tr><th>Area</th><th>Field</th><th>Old</th><th>New</th><th>Source</th></tr></thead><tbody>'+by[ev].map(function(c){ return '<tr><td>'+escapeHtml(c.area||'')+'</td><td>'+escapeHtml(c.fieldName||'')+'</td><td>'+escapeHtml(c.oldValue||'')+'</td><td>'+escapeHtml(c.newValue||'')+'</td><td>'+escapeHtml((c.sheetName||'')+(c.rowNumber?' row '+c.rowNumber:''))+'</td></tr>'; }).join('')+'</tbody></table></div>'; }).join('');
+        }
+        function issueList(list, isErr){
+          if (!list.length) return '<div class="small">沒有 / None</div>';
+          return '<div class="small">'+list.map(function(e){ return escapeHtml(((e.eventKey||'')+' '+(e.fieldName||'')+' '+(e.code||'')+' '+(e.en||e.zh||'')+' '+(e.detail||'')).trim()); }).join('<br/>')+'</div>';
+        }
+        var errOpen = errors.length ? ' open' : '';
+        var importOpen = (!errors.length && changes.length) ? ' open' : '';
+        var html = note;
+        html += '<details'+errOpen+'><summary>需要處理 / Blocking issues ('+escapeHtml(String(errors.length))+')</summary><div class="msgBox err">'+issueList(errors, true)+'</div></details>';
+        html += '<details'+importOpen+'><summary>將會匯入 / Will import ('+escapeHtml(String(changes.length))+')</summary>'+changeTable(changes)+'</details>';
+        html += '<details><summary>提示及已略過 / Warnings and skipped ('+escapeHtml(String(warnings.length))+')</summary><div class="msgBox warn">'+issueList(warnings, false)+'</div></details>';
+        html += '<details><summary>已讀取但無變更 / Recognised but no change ('+escapeHtml(String(noChangeSvc.length))+')</summary><div class="msgBox ok"><div class="small">'+(noChangeSvc.map(function(x){ return escapeHtml(x.eventKey||''); }).join('<br/>') || '沒有 / None')+'</div></div></details>';
+        if (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) html += '<details class="small"><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(res.diagnostics.sheets, null, 2))+'</pre></details>';
+        return html;
+      }
       var importBtn = $('btnWorshipImportMenu');
       if (importBtn) importBtn.onclick = function(){
         var modal = openModal(
-          '<div class="big">匯入 / Import</div>'+ 
-          '<textarea id="wImportBox" placeholder="貼上 CSV/TSV（Worship_Import 欄位） / Paste CSV/TSV (Worship_Import columns)"></textarea>'+
-          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">📥 匯入預覽 / Import preview</button><button id="wImportCommit" class="btnWorship">✅ 確認匯入 / Import commit</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
+          '<div class="big">匯入 / Import</div>'+
+          '<label>Google Sheet URL / ID</label><input id="wImportSheetUrl" placeholder="https://docs.google.com/spreadsheets/d/... 或 spreadsheet ID" />'+
+          '<div class="small">或上載 .xlsx/.csv/.tsv / Or upload .xlsx/.csv/.tsv</div><input id="wImportFile" type="file" accept=".xlsx,.csv,.tsv,text/csv,text/tab-separated-values" />'+
+          '<div id="wImportPreviewBox" class="msgBox small">貼上 Google Sheet URL/ID 後按預覽。/ Paste a Google Sheet URL/ID, then preview.</div>'+
+          '<div class="miniBtnRow"><button id="wImportPreview" class="btnWorship">匯入預覽 / Import preview</button><button id="wImportProbe" class="btnWorship">診斷 / Probe</button><button id="wImportCommit" class="btnWorship" disabled>確認匯入 / Confirm import</button><button id="wImportClose" class="danger">關閉 / Close</button></div>'
         );
+        var confirmedInput = '';
+        function readWorshipImportInput_(cb){
+          var file = (modal.querySelector('#wImportFile').files || [])[0];
+          if (!file){ cb(String(modal.querySelector('#wImportSheetUrl').value || '').trim()); return; }
+          var readBox = modal.querySelector('#wImportPreviewBox'); if (readBox) readBox.innerHTML = showBox('warn','讀取檔案中…','Reading file…');
+          var reader = new FileReader();
+          reader.onload = function(){ cb({ name:file.name, mimeType:file.type, base64:String(reader.result||'').split(',').pop() }); };
+          reader.onerror = function(){ var box=modal.querySelector('#wImportPreviewBox'); if(box) box.innerHTML = showBox('err','讀取檔案失敗','Failed to read file'); };
+          reader.readAsDataURL(file);
+        }
+        function worshipImportDiagHtml_(res){
+          var diag = (res && res.diagnostics && Array.isArray(res.diagnostics.sheets)) ? res.diagnostics.sheets : (res && Array.isArray(res.sheets) ? res.sheets : null);
+          if (!diag) return '';
+          var monthFail = (res && (res.code === 'E_WORSHIP_EXPECTED_MONTH_SHEETS_FAILED' || res.code === 'E_WORSHIP_NO_MONTH_SHEETS_PARSED')) ? '<div class="msgBox err">找到月份工作表，但未能讀取任何主日安排。/ Month sheets were found, but no Sunday service blocks could be read.<br/>請把診斷資料傳給管理員或開發人員。/ Please send diagnostics to admin/developer.</div>' : '';
+          return monthFail + '<details class="small" open><summary>解析診斷 / Parser diagnostics</summary><div>Engine: '+escapeHtml((res&&res.importEngineVersion)||'')+'</div><pre>'+escapeHtml(JSON.stringify(diag, null, 2))+'</pre></details>';
+        }
         modal.querySelector('#wImportClose').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#wImportProbe').onclick = function(){
+          var box0 = modal.querySelector('#wImportPreviewBox'); if (box0) box0.innerHTML = showBox('warn','匯入診斷處理中…','Preparing import probe…');
+          readWorshipImportInput_(function(input){
+            var box1 = modal.querySelector('#wImportPreviewBox'); if (box1) box1.innerHTML = showBox('warn','伺服器診斷中…','Server is probing…');
+            callApi('api_reg_self_worship_import_probe_public', State.authQrPayload, input).then(function(res){
+              var box = modal.querySelector('#wImportPreviewBox');
+              if (!res || !res.ok){ if (box) box.innerHTML = showServerErr(res) + worshipImportDiagHtml_(res); return; }
+              if (box) box.innerHTML = showBox('ok','診斷完成','Probe complete','<div class="small">Engine: '+escapeHtml(res.importEngineVersion||'')+'</div>') + worshipImportDiagHtml_(res);
+            }).catch(function(err){ showWorshipErr_('診斷失敗','Probe failed', err); });
+          });
+        };
         modal.querySelector('#wImportPreview').onclick = function(){
-          var rows = parseImportTextRows_(modal.querySelector('#wImportBox').value || '');
-          callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, rows).then(function(res){
-            var msgEl = worshipMsgEl_();
-            if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-            State.worshipImportRows = rows;
-            if (msgEl) msgEl.innerHTML = showBox('ok','預覽完成','Preview ready','<div class="small">Rows: '+escapeHtml(String(res.count||0))+'</div>');
+          modal.querySelector('#wImportCommit').disabled = true;
+          var box0 = modal.querySelector('#wImportPreviewBox'); if (box0) box0.innerHTML = showBox('warn','匯入預覽處理中…','Preparing import preview…');
+          readWorshipImportInput_(function(input){
+          var box1 = modal.querySelector('#wImportPreviewBox'); if (box1) box1.innerHTML = showBox('warn','伺服器解析中…','Server is parsing…');
+          callApi('api_reg_self_worship_import_preview_public', State.authQrPayload, input).then(function(res){
+            var box = modal.querySelector('#wImportPreviewBox');
+            if(!res || !res.ok){ if (box) box.innerHTML = showServerErr(res) + worshipImportDiagHtml_(res); return; }
+            confirmedInput = input;
+            if (box) box.innerHTML = (res.hasHardErrors ? showBox('err','預覽有錯誤','Preview has errors','<div class="small">請查看紅色錯誤列，修正試算表後再上載。/ Check red error rows, correct the spreadsheet, then upload again.</div>') : showBox('ok','預覽完成','Preview ready')) + worshipPreviewTable_(res);
+            var closeTop = modal.querySelector('#wImportCloseTop'); if (closeTop) closeTop.onclick = function(){ closeModal(modal); };
+            modal.querySelector('#wImportCommit').disabled = !!res.hasHardErrors;
           }).catch(function(err){ showWorshipErr_('預覽失敗','Preview failed', err); });
+          });
         };
         modal.querySelector('#wImportCommit').onclick = function(){
-          var rows = State.worshipImportRows.length ? State.worshipImportRows : parseImportTextRows_(modal.querySelector('#wImportBox').value || '');
-          callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, rows, false).then(function(res){
+          var input = confirmedInput;
+          if (!input){ var msgStart0 = worshipMsgEl_(); if (msgStart0) msgStart0.innerHTML = showBox('warn','匯入寫入中…','Committing import…'); readWorshipImportInput_(function(latestInput){ callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, latestInput, false).then(function(res){
             var msgEl = worshipMsgEl_();
             if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
-            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed');
+            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed','<div class="small">Changed: '+escapeHtml(String(res.changed||0))+'</div>');
+            closeModal(modal);
+          }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); }); }); return; }
+          var msgStart = worshipMsgEl_(); if (msgStart) msgStart.innerHTML = showBox('warn','匯入寫入中…','Committing import…');
+          callApi('api_reg_self_worship_import_commit_public', State.authQrPayload, input, false).then(function(res){
+            var msgEl = worshipMsgEl_();
+            if(!res || !res.ok){ if (msgEl) msgEl.innerHTML = showServerErr(res); return; }
+            if (msgEl) msgEl.innerHTML = showBox('ok','匯入完成','Import completed','<div class="small">Changed: '+escapeHtml(String(res.changed||0))+'</div>');
             closeModal(modal);
           }).catch(function(err){ showWorshipErr_('匯入失敗','Import failed', err); });
         };
@@ -3200,7 +3273,7 @@ function viewSelfHoliday(m){
       render();
     }
 
-    
+
     function updateGlobalClock_(){
       var el = $('globalClock');
       if(!el) return;
