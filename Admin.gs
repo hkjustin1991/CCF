@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-06-14.admin116
- * CHANGELOG: Worship import v116: diagnostic-first parser probe; no silent failure of expected month sheets; fixed-profile B:H month-sheet import.
+ * v2026-08-06.admin117
+ * CHANGELOG: operational hotfixes for serving event creation, Bible loading and duplicate-assignment feedback.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-06-14.admin116';
+const ADMIN_VERSION = '2026-08-06.admin117';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -1301,7 +1301,18 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         const labels = (d.positions || []).map(admin_servingPositionLabel_);
         return d.memberId + ': ' + labels.join(', ');
       }).join(' | ');
-      return admin_conflict_('該會員已在此崗位事奉','They are already serving this position.', detail, 'DUPLICATE_ASSIGNMENT', 'SERVING_ASSIGNMENT');
+      return {
+        ok:false,
+        code:'E409',
+        subCode:'DUPLICATE_ASSIGNMENT',
+        subGroup:'SERVING_ASSIGNMENT',
+        zh:'同一會員在同一次聚會被安排到多個崗位',
+        en:'The same member is assigned to multiple positions in this service.',
+        detail:detail,
+        duplicates:duplicateDetails,
+        dateYmd:eventDateYmd,
+        canOverride:false
+      };
     }
     if (!overrideAway){
       return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
@@ -2751,6 +2762,7 @@ function bible_bookShortZhByKey_(bookKey){
     MAT:'太',MRK:'可',LUK:'路',JHN:'約',ACT:'徒',ROM:'羅',
     '1CO':'林前','2CO':'林後',GAL:'加',EPH:'弗',PHP:'腓',COL:'西','1TH':'帖前','2TH':'帖後','1TI':'提前','2TI':'提後',TIT:'多',PHM:'門',HEB:'來',JAS:'雅','1PE':'彼前','2PE':'彼後','1JN':'約一','2JN':'約二','3JN':'約三',JUD:'猶',REV:'啟'
   };
+  var key = String(bookKey || '').trim().toUpperCase();
   return map[key] || '';
 }
 
@@ -2814,27 +2826,34 @@ function admin_ensureServingSheet_(){
 function admin_ensureServingEventKeys_(sh){
   const events = admin_getUpcomingSundayEventKeys_(admin_todayUkYmd_(), ADMIN_SERVING_MONTHS_AHEAD);
   if (!events.length) return;
-  const rows = events.length;
-  const existing = sh.getRange(2, 1, rows, 1).getValues();
-  const emptyRows = [];
-  for (let i=0;i<rows;i++){
-    const current = String((existing[i] && existing[i][0]) || '').trim();
-    if (!current) emptyRows.push(i);
+
+  // Existing rows may contain past services. Do not assume that future events
+  // belong at the same zero-based row as the generated event list: that left
+  // valid future buttons visible in the portal without a writable sheet row.
+  const lastRow = sh.getLastRow();
+  const existing = lastRow >= 2
+    ? sh.getRange(2, 1, lastRow - 1, 1).getValues()
+    : [];
+  const existingKeys = {};
+  existing.forEach(function(row){
+    const eventKey = String((row && row[0]) || '').trim();
+    if (eventKey) existingKeys[eventKey] = true;
+  });
+
+  const missing = events.filter(function(ev){
+    return ev && ev.eventKey && !existingKeys[ev.eventKey];
+  });
+  if (!missing.length) return;
+
+  const startRow = Math.max(2, lastRow + 1);
+  const requiredLastRow = startRow + missing.length - 1;
+  const maxRows = sh.getMaxRows();
+  if (requiredLastRow > maxRows){
+    sh.insertRowsAfter(maxRows, requiredLastRow - maxRows);
   }
-  if (!emptyRows.length) return;
-  const first = emptyRows[0];
-  const last = emptyRows[emptyRows.length - 1];
-  const isContiguous = (emptyRows.length === (last - first + 1));
-  if (isContiguous){
-    const values = [];
-    for (let i=first; i<=last; i++) values.push([events[i].eventKey]);
-    sh.getRange(2 + first, 1, values.length, 1).setValues(values);
-    return;
-  }
-  for (let k=0; k<emptyRows.length; k++){
-    const i = emptyRows[k];
-    sh.getRange(2 + i, 1).setValue(events[i].eventKey);
-  }
+  sh.getRange(startRow, 1, missing.length, 1).setValues(
+    missing.map(function(ev){ return [ev.eventKey]; })
+  );
 }
 function admin_ensureServingHeaders_(sh){
   const lastRow = sh.getLastRow();

@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-06-14.118
-  For Admin.gs: v2026-06-14.admin116
-  CHANGELOG: Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
+  UI VERSION TAG: admin2-ui-2026-08-06.119
+  For Admin.gs: v2026-08-06.admin117
+  CHANGELOG: operational hotfixes for serving-event availability and duplicate-position feedback.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-06-14.118</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-06.119</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -1875,7 +1875,8 @@ function eventDateYmdFromKey(ev){
     function duplicateDetailHtml_(duplicates, fallbackDateYmd){
       var list = Array.isArray(duplicates) ? duplicates : [];
       if (!list.length) return '';
-      return list.map(function(d){
+      var reason = '<div class="small"><b>原因 / Reason:</b> 同一會員在同一次聚會被安排到多個崗位 / The same member is assigned to multiple positions in this service.</div>';
+      return reason + list.map(function(d){
         var existLabels = mapServingPosBilingual_(d.existingPositions || []);
         var tryLabels = mapServingPosBilingual_(d.attemptedPositions || []);
         var allLabels = mapServingPosBilingual_(d.positions || []);
@@ -3796,6 +3797,15 @@ function viewAttendanceHome(){
                   showBox('servingEditMsg','err',withErrorCodeTag_(mismatchTitle.zh, res2), mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
                   return;
                 }
+                if (res2 && res2.code === 'E409' && res2.subCode === 'DUPLICATE_ASSIGNMENT' && !res2.canOverride){
+                  var duplicateDetail = duplicateDetailHtml_(res2.duplicates || [], res2.dateYmd);
+                  if (!duplicateDetail && res2.detail){
+                    duplicateDetail = '<div class="small"><b>原因 / Reason:</b> 同一會員在同一次聚會被安排到多個崗位 / The same member is assigned to multiple positions in this service.</div>'+
+                      '<div class="small">'+escapeHtml(String(res2.detail || ''))+'</div>';
+                  }
+                  showBox('servingEditMsg','err',withErrorCodeTag_('同一會員重覆崗位', res2),'Duplicate serving assignment.',duplicateDetail,true);
+                  return;
+                }
                 if (res2 && res2.code === 'E409' && res2.canOverride){
                   var detail = '';
                   var titlePair = toBilingualText_(res2, '事奉安排衝突，請確認', 'Serving assignment conflict. Please review.');
@@ -3940,6 +3950,15 @@ function viewAttendanceHome(){
                 showBox('quickMsg','err',withErrorCodeTag_(mismatchTitle.zh, res2), mismatchTitle.en, res2 && res2.detail ? formatServingGroupMismatchDetailHtml_(res2.detail) : '', true);
                 return;
               }
+              if (res2 && res2.code === 'E409' && res2.subCode === 'DUPLICATE_ASSIGNMENT' && !res2.canOverride){
+                var duplicateDetail = duplicateDetailHtml_(res2.duplicates || [], res2.dateYmd);
+                if (!duplicateDetail && res2.detail){
+                  duplicateDetail = '<div class="small"><b>原因 / Reason:</b> 同一會員在同一次聚會被安排到多個崗位 / The same member is assigned to multiple positions in this service.</div>'+
+                    '<div class="small">'+escapeHtml(String(res2.detail || ''))+'</div>';
+                }
+                showBox('quickMsg','err',withErrorCodeTag_('同一會員重覆崗位', res2),'Duplicate serving assignment.',duplicateDetail,true);
+                return;
+              }
               if (res2 && res2.code === 'E409' && res2.canOverride){
                 var detail = '';
                 var titlePair = toBilingualText_(res2, '事奉安排衝突，請確認', 'Serving assignment conflict. Please review.');
@@ -4071,7 +4090,7 @@ function viewAttendanceHome(){
           '<div id="quickMsg"></div>';
 
         modal.querySelector('#btnQuickClose').onclick = function(){ closeModal(modal); };
-        
+
         var btnQuickSave = modal.querySelector('#btnQuickSave');
         if (btnQuickSave) btnQuickSave.onclick = function(){
           var newValue = draftClosed ? SERVING_CLOSED_TOKEN : draftSlots.filter(Boolean).join(', ');

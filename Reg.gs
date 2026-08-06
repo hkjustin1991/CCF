@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-06-15.reg119
- * CHANGELOG: Worship import v119: unprefixed native combined drum/guitar entries default to Drum to avoid false duplicates.
+ * v2026-08-06.reg120
+ * CHANGELOG: operational hotfixes for self-service login resilience and serving sign-up availability.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-06-15.reg119';
+const REG_VERSION = '2026-08-06.reg120';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -858,8 +858,53 @@ function api_reg_self_bootstrap_public(qrPayload){
   try{
     const lookup = api_reg_self_lookup_public(qrPayload);
     if (!lookup || !lookup.ok) return lookup || { ok:false, code:'E500', zh:'系統錯誤', en:'System error.' };
-    const snapshot = api_reg_self_portal_snapshot_public(qrPayload);
-    return { ok: !!(snapshot && snapshot.ok), member: lookup.member, snapshot: (snapshot && snapshot.ok) ? snapshot : null, error: (snapshot && snapshot.ok) ? null : snapshot };
+    let snapshot;
+    try {
+      snapshot = api_reg_self_portal_snapshot_public(qrPayload);
+    } catch (snapshotErr) {
+      snapshot = {
+        ok:false,
+        code:'E500',
+        subCode:'SELF_PORTAL_SNAPSHOT_FAILED',
+        zh:'部分資料暫時未能載入',
+        en:'Some dashboard data is temporarily unavailable.',
+        detail:String(snapshotErr && snapshotErr.message || snapshotErr)
+      };
+    }
+    if (snapshot && snapshot.ok){
+      return { ok:true, member:lookup.member, snapshot:snapshot, warning:null };
+    }
+
+    // A valid QR remains usable when optional attendance/serving dashboard
+    // data is temporarily unavailable. Keep the failure visible as a warning.
+    const m = lookup.member || {};
+    const fallbackSnapshot = {
+      ok:true,
+      partial:true,
+      member:{
+        id:String(m.id || '').trim().toUpperCase(),
+        status:regStatus_(m.status || ''),
+        nameZh:String(m.nameZh || ''),
+        nameEn:String(m.nameEn || ''),
+        preferredName:String(m.preferredName || ''),
+        displayName:regDisplayNameForPortal_(m),
+        servingGroups:[],
+        servingGLGroups:[],
+        isGl:false,
+        away:{ from1:'', to1:'', from2:'', to2:'' },
+        memberSinceEarliest:''
+      },
+      attendance:{ attended:0, total:0, percent:0, unavailable:true },
+      attendanceEvents:{ attendedEventKeys:[] },
+      memberSinceEarliest:'',
+      upcoming4:[]
+    };
+    return {
+      ok:true,
+      member:m,
+      snapshot:fallbackSnapshot,
+      warning:snapshot || { ok:false, code:'E500', zh:'部分資料暫時未能載入', en:'Some dashboard data is temporarily unavailable.' }
+    };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }

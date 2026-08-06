@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-06-14.118
-  CHANGELOG: Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
+  UI VERSION TAG: reg2-ui-2026-08-06.119
+  CHANGELOG: operational hotfixes for PENDING visibility, partial login and serving sign-up feedback.
   ============================================================
 
   Changes (reg2-ui-2026-06-14.118): Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-06-14.118</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-08-06.119</span></div>
     </header>
 
     <main id="app">
@@ -717,6 +717,7 @@
       lastResult: null,
       lastSubmit: null,
       snapshot: null,
+      bootstrapWarning: null,
       servingMonth: '',
       servingGroup: '',
       servingRefreshTimer: null,
@@ -1101,6 +1102,13 @@
         return '<span class="groupBadge">'+escapeHtml(servingGroupLabel(canonicalGroup))+'</span>';
       }).join('');
       var isPending = (rawStatus === 'PENDING');
+      var isPartialSnapshot = !!snap.partial;
+      var bootstrapWarningHtml = State.bootstrapWarning
+        ? ('<div class="msgBox warn" style="margin-top:10px;">'+
+            '<div><b>⚠️ 已登入，但部分資料暫時未能載入 / Logged in, but some information is temporarily unavailable.</b></div>'+
+            '<div class="small" style="margin-top:6px;">請稍後重新登入；如問題持續，請向影音同工提供錯誤編號 '+escapeHtml(String(State.bootstrapWarning.code || 'E500'))+'。<br/>Please sign in again later. If this continues, give the Media team error code '+escapeHtml(String(State.bootstrapWarning.code || 'E500'))+'.</div>'+
+          '</div>')
+        : '';
       var up4 = Array.isArray(snap.upcoming4) ? snap.upcoming4 : [];
       var up4Html = up4.length ? up4.map(function(r){ return '<li>'+escapeHtml(r.dateYmd+' · '+(r.labelZh||r.position||'')+' · '+r.eventKey)+'</li>'; }).join('') : '<li>'+((snap.member && snap.member.away && (snap.member.away.from1||snap.member.away.from2)) ? '休假中 / On holiday' : '未有編更 / Not serving')+'</li>';
       var away = (snap.member && snap.member.away) ? snap.member.away : {};
@@ -1116,10 +1124,11 @@
           '<div class="small">CCF ID：<b>'+escapeHtml(m.id||'')+'</b>'+(memberSince ? ('<br/>Member since / 入會日期：'+escapeHtml(memberSince)) : '')+'</div>'+
           '<div class="big" style="margin-top:8px;">'+greetZh+' / '+greetEn+' '+escapeHtml(displayName)+'</div>'+
           '<div class="small">歡迎來到 CCF 自助服務平台。若有問題，請聯絡影音同工。<br/>Welcome to CCF self service portal. Please ask the media team should there be any issues.</div>'+
-          '<div class="msgBox warn" style="margin-top:10px;cursor:pointer;" id="btnOpenAttStats">'+
+          bootstrapWarningHtml+
+          (isPartialSnapshot ? '' : ('<div class="msgBox warn" style="margin-top:10px;cursor:pointer;" id="btnOpenAttStats">'+
             '<div><b>出席服務次數 / Service attended:</b> '+escapeHtml(String(serviceAttended))+'</div>'+
             '<div><b>出席率 / Attendance:</b> '+escapeHtml(String(attPercent))+'%</div>'+
-          '</div>'+
+          '</div>'))+
           '<div class="msgBox" style="margin-top:10px;">'+
             '<div><b>會員狀態 / Membership status:</b> '+escapeHtml(statusUi.zh)+' / '+escapeHtml(statusUi.en)+'</div>'+
             (isGl ? ('<div style="margin-top:8px;"><b>組長身份 / Group leader:</b> '+(glHtml ? ('Group Leader of '+glHtml) : 'Group Leader')+'</div>') : '')+
@@ -1131,17 +1140,19 @@
                 '<div class="small" style="margin-top:6px;">使用一次性短效登入憑證 / Uses a one-time short-lived login token.</div>'+
               '</div>')
             : '')+
-          '<div class="msgBox" style="margin-top:10px;">'+
-            '<div><b>所屬事奉組別 / Member of:</b></div>'+
-            '<div style="margin-top:6px;">'+(groupHtml || '—')+'</div>'+
-          '</div>'+
-          '<div class="msgBox" style="margin-top:10px;">'+
-            '<div><b>未來 4 週事奉 / Next 4 weeks serving</b></div>'+
-            '<ul style="margin:6px 0 0 18px;padding:0;">'+up4Html+'</ul>'+
-          '</div>'+
-          '<div class="msgBox" style="margin-top:10px;">'+
-            '<div><b>假期 / Holiday</b></div>'+awayHtml+
-          '</div>'+
+          (isPending ? '' : (
+            '<div class="msgBox" style="margin-top:10px;">'+
+              '<div><b>所屬事奉組別 / Member of:</b></div>'+
+              '<div style="margin-top:6px;">'+(groupHtml || '—')+'</div>'+
+            '</div>'+
+            '<div class="msgBox" style="margin-top:10px;">'+
+              '<div><b>未來 4 週事奉 / Next 4 weeks serving</b></div>'+
+              '<ul style="margin:6px 0 0 18px;padding:0;">'+up4Html+'</ul>'+
+            '</div>'+
+            '<div class="msgBox" style="margin-top:10px;">'+
+              '<div><b>假期 / Holiday</b></div>'+awayHtml+
+            '</div>'
+          ))+
         '</div>'+
         '<div class="card">'+
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'+
@@ -1149,10 +1160,10 @@
           '</div>'+
           '<div class="selfMainGrid">'+
             '<button id="btnSelfDetails" class="primary selfMainBtn">🪪 更改資料 / Change details</button>'+
-            '<button id="btnSelfServing" class="alt selfMainBtn">🧩 事奉報名/更改 / Serving</button>'+
-            (hasWorship ? '<button id="btnSelfWorship" class="btnWorship selfMainBtn">🎵 敬拜排期 / Worship planning</button>' : '')+
+            (!isPending ? '<button id="btnSelfServing" class="alt selfMainBtn">🧩 事奉報名/更改 / Serving</button>' : '')+
+            (!isPending && hasWorship ? '<button id="btnSelfWorship" class="btnWorship selfMainBtn">🎵 敬拜排期 / Worship planning</button>' : '')+
             '<button id="btnSelfLive" class="alt selfMainBtn">📡 聚會資訊 / Service information</button>'+
-            '<button id="btnSelfHoliday" class="alt selfMainBtn">🏖️ 請假 / Absence</button>'+
+            (!isPending ? '<button id="btnSelfHoliday" class="alt selfMainBtn">🏖️ 請假 / Absence</button>' : '')+
           '</div>'+
           '<div class="miniBtnRow">'+
             '<button id="btnSelfBack" class="danger">⬅️ 返回 / Back</button>'+
@@ -1975,6 +1986,7 @@ function viewSelfHoliday(m){
       State.prefill = boot.member || null;
       State.lastResult = null;
       State.snapshot = boot.snapshot || null;
+      State.bootstrapWarning = boot.warning || null;
       render();
       return true;
     }
@@ -2120,8 +2132,8 @@ function viewSelfHoliday(m){
         render();
       };
 
-      $('btnSelfServing').onclick = function(){
-        if (isPending){ showPendingActivationMessage(); return; }
+      var servingBtn = $('btnSelfServing');
+      if (servingBtn) servingBtn.onclick = function(){
         var groups = (((State.snapshot||{}).member||{}).servingGroups) || [];
         if (!groups.length){
           $('selfMsg').innerHTML = showBox('warn','你尚未加入任何事奉組別。請聯絡相關組長開始事奉（詳見 CCF WhatsApp Community）。','You are not in any serving group yet. Please speak to the relevant group leader to start serving (details in CCF WhatsApp Community).');
@@ -2192,12 +2204,11 @@ function viewSelfHoliday(m){
       };
 
       var holidayBtn = $('btnSelfHoliday');
-      if (!holidayBtn){
+      if (!holidayBtn && !isPending){
         console.error('[bindSelfHome] Missing #btnSelfHoliday at bind time.');
         if (selfMsgEl) selfMsgEl.innerHTML = showBox('err','請假按鈕未載入，請重新整理頁面。','Absence button failed to load. Please refresh the page.');
-      } else {
+      } else if (holidayBtn) {
         holidayBtn.onclick = function(){
-          if (isPending){ showPendingActivationMessage(); return; }
           try{
             State.view = 'selfHoliday';
             render();

@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-06-13.staff102
- * CHANGELOG: version alignment for responsiveness/admin handoff patch set.
+ * v2026-08-06.staff103
+ * CHANGELOG: operational hotfixes for login/check-in flows and PENDING activation.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-06-13.staff102';
+const APP_VERSION = '2026-08-06.staff103';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -595,6 +595,10 @@ function getMembersIndex_(opts) {
 
 function clearMembersIndexCache_(){
   try{ CacheService.getScriptCache().remove('membersIndex_staff_v1'); }catch(e){}
+  try{ CacheService.getScriptCache().remove('membersIndex_v6'); }catch(e){}
+  try{
+    if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
+  }catch(e){}
 }
 
 /******** System sheets ********/
@@ -1140,14 +1144,17 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
 
   try {
     const sh = getCheckinsSheet_();
+    const stNorm = normalizeStatus_(m.status);
 
     const existing = findExistingCheckin_(sh, eventKey, m.id);
     if (existing) {
+      // Repair members left in PENDING by the former broken promotion path.
+      const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
       return {
         ok:true,
         result:'ALREADY',
         eventKey,
-        status: v.status,
+        status: promotedToActive ? STATUS_ACTIVE : v.status,
         member:{
           id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
           preferredName: m.preferredName || '',
@@ -1160,7 +1167,6 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
 
     // New friend = no prior check-in ever and not STAFF/ADMIN
     const hadAny = hasAnyCheckinEver_(sh, m.id);
-    const stNorm = normalizeStatus_(m.status);
     const isNewFriend = (!hadAny && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
 
     const ts = nowUk_();
@@ -1182,7 +1188,7 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
-    const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+    const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
     const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
 
     return {
@@ -1231,14 +1237,17 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
 
   try {
     const sh = getCheckinsSheet_();
+    const stNorm = normalizeStatus_(m.status);
 
     const existing = findExistingCheckin_(sh, eventKey, m.id);
     if (existing) {
+      // Repair members left in PENDING by the former broken promotion path.
+      const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
       return {
         ok:true,
         result:'ALREADY',
         eventKey,
-        status: v.status,
+        status: promotedToActive ? STATUS_ACTIVE : v.status,
         member:{
           id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
           preferredName: m.preferredName || '',
@@ -1250,7 +1259,6 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
     }
 
     const hadAny = hasAnyCheckinEver_(sh, m.id);
-    const stNorm = normalizeStatus_(m.status);
     const isNewFriend = (!hadAny && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
 
     const ts = nowUk_();
@@ -1272,7 +1280,7 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
 
-    const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+    const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
     const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
 
     return {
@@ -2381,6 +2389,15 @@ function api_selfcheck_mark_completed(token, deviceId, ua){
 }
 
 /******** Members sheet row helpers ********/
+function getMembersColMap_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function(h){ return String(h || '').trim(); });
+  const cols = {};
+  headers.forEach(function(h, i){ if (h) cols[h] = i; });
+  return cols;
+}
+
 function findMemberRowById_(sh, cols, id){
   const idx = cols['ID'];
   if (idx === undefined) return null;

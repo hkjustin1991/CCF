@@ -11,9 +11,9 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff-ui-2026-06-13.102
-   * For Code.gs: v2026-06-13.staff102
-   * CHANGELOG: version alignment for staff/live portal patch set.
+   * UI VERSION: staff-ui-2026-08-06.103
+   * For Code.gs: v2026-08-06.staff103
+   * CHANGELOG: operational hotfixes for visible login feedback and check-in deletion reauthentication.
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -176,7 +176,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-06-13.102</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-06.103</span></div>
     </header>
 
     <main id="app"></main>
@@ -1295,7 +1295,7 @@
               '<button id="btnSwitchCamLogin" class="alt">🔄 切換相機 / Switch camera</button>'+
               '<button id="btnCancelLoginScan" class="danger">取消 / Cancel</button>'+
             '</div>'+
-          '</details>'+
+          '</div>'+
           '<div class="divider"></div>'+
           '<div>'+
             '<div class="label">For internal use only</div>'+
@@ -1304,7 +1304,7 @@
               '<button id="btnInternalOk" class="alt">OK</button>'+
             '</div>'+
           '</div>'+
-          '<div id="msg"></div>'+
+          '<div id="msg" role="alert" aria-live="assertive"></div>'+
           '<div class="small" style="margin-top:10px;">如問題持續，請聯絡影音同工。<br/>Contact Media team if issue persists.</div>'+
         '</div>';
     }
@@ -2836,7 +2836,7 @@ if (btnC) {
         (isSuper
           ? '<div class="small" style="margin-top:8px;">SUPERUSER 可直接確認 / SUPERUSER can proceed.</div>'
           : '<div class="miniBtnRow" id="undoCam" style="margin-top:10px;">'+
-                '<button id="btnSwitchCamUndo" class="primary">📷 掃描 QR / Scan QR</button>'+
+                '<button id="btnScanUndo" class="primary">📷 掃描 QR / Scan QR</button>'+
                 '<button id="btnStopUndo" class="danger">取消 / Cancel</button>'+
               '</div>'+
               '<div class="hide"><video id="videoUndo" playsinline></video></div>'
@@ -2875,7 +2875,12 @@ if (btnC) {
         showBox('undoMsg','warn','已掃描，請確認刪除','Scanned. Please confirm.');
       }
 
-      camBindSwitchButton_('btnSwitchCamUndo', function(){ startScan('videoUndo', handleScan, 'undoMsg'); });
+      var btnScanUndo = modal.querySelector('#btnScanUndo');
+      if (btnScanUndo){
+        btnScanUndo.onclick = function(){
+          startScan('videoUndo', handleScan, 'undoMsg', { externalFlow:'undo_checkin' });
+        };
+      }
       modal.querySelector('#btnStopUndo').onclick = function(){ stopScan(); };
       attachScrollControls_(modal);
     }
