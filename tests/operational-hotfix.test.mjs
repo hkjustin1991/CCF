@@ -199,6 +199,71 @@ test('GL/STAFF duplicate conflict carries reason, positions and date', () => {
   assert.ok(ui.includes("res2.subCode === 'DUPLICATE_ASSIGNMENT' && !res2.canOverride"));
 });
 
+test('group-member serving summary is independent of attendance date limits', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), context, { filename:'Admin.gs' });
+  let audited = false;
+  let actorRole = 'STAFF';
+  context.admin_requireSession_ = () => ({ ok:true, actor:{ id:'CCF0001', role:actorRole, glGroups:['MEDIA'] } });
+  context.admin_normalizeServingGroup_ = value => String(value || '').trim().toLowerCase();
+  context.admin_getMembersIndex_ = () => ({
+    byId:{
+      CCF0123:{
+        id:'CCF0123', nameZh:'測試', nameEn:'Test', preferredName:'Tester',
+        status:'ACTIVE', servingGroups:['MEDIA'], servingGLGroups:[]
+      }
+    }
+  });
+  context.admin_memberHasServingGroup_ = () => true;
+  context.admin_getServingInsightsForMember_ = id => ({ byGroup:{ media:{ memberId:id } } });
+  context.admin_audit_ = () => { audited = true; };
+  context.admin_validateRange_ = () => { throw new Error('attendance range must not be consulted'); };
+
+  const result = context.api_admin_serving_group_member_summary('token', 'media', 'CCF0123');
+  assert.equal(result.ok, true);
+  assert.equal(result.member.id, 'CCF0123');
+  assert.equal(result.servingInsights.byGroup.media.memberId, 'CCF0123');
+  assert.equal(audited, true);
+
+  actorRole = 'GL';
+  const glResult = context.api_admin_serving_group_member_summary('token', 'media', 'CCF0123');
+  assert.equal(glResult.ok, true);
+
+  const ui = read('Admin2.html');
+  const flow = ui.slice(
+    ui.indexOf('function openServingGroupMemberSummary_'),
+    ui.indexOf('function loadServingGroupMembers_')
+  );
+  assert.ok(flow.includes("callApi('api_admin_serving_group_member_summary', App.token, groupKey, memberId)"));
+  assert.ok(!flow.includes("callApi('api_admin_member_detail'"));
+  assert.ok(flow.includes('btnCloseMemberSummaryError'));
+  assert.ok(ui.includes('function clampAppDateRangeForRole_()'));
+  assert.ok(ui.includes('if(App.actor) clampAppDateRangeForRole_();'));
+  const showErrFlow = ui.slice(ui.indexOf('function showErr('), ui.indexOf('function bindGasRetryButton_'));
+  assert.ok(showErrFlow.includes("code:String(res.code || 'E500')"));
+  assert.ok(showErrFlow.includes("renderMsg_(targetId, 'err'"));
+  assert.ok(!showErrFlow.includes('withErrorCodeTag_(titles.zh'));
+
+  const clampSource = ui.slice(
+    ui.indexOf('function clampAppDateRangeForRole_()'),
+    ui.indexOf('function displayMemberStatusLabel')
+  );
+  const clampContext = vm.createContext({
+    App:{ actor:{ role:'STAFF' }, from:'2026-01-11', to:'2026-08-07' },
+    Date,
+    getTodayYmdUk(){ return '2026-08-07'; },
+    parseYmd(value){
+      const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      return match ? new Date(Date.UTC(+match[1], +match[2]-1, +match[3])) : null;
+    },
+    maxDaysForRole(){ return 181; },
+    daysBetween(a, b){ return Math.floor((b.getTime() - a.getTime()) / 86400000); }
+  });
+  vm.runInContext(clampSource, clampContext);
+  clampContext.clampAppDateRangeForRole_();
+  assert.equal(clampContext.App.from, '2026-02-08');
+});
+
 test('source and visible UI version tags identify this hotfix', () => {
   const liveBackend = read('Code.gs');
   const liveUi = read('index.html');
@@ -212,10 +277,10 @@ test('source and visible UI version tags identify this hotfix', () => {
   assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-06.103'));
   assert.ok(liveUi.includes('ui staff-ui-2026-08-06.103'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-06.admin117';"));
-  assert.ok(adminBackend.includes('* v2026-08-06.admin117'));
-  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-06.119'));
-  assert.ok(adminUi.includes('ui admin2-ui-2026-08-06.119'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-07.admin118';"));
+  assert.ok(adminBackend.includes('* v2026-08-07.admin118'));
+  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-07.120'));
+  assert.ok(adminUi.includes('ui admin2-ui-2026-08-07.120'));
 
   assert.ok(regBackend.includes("const REG_VERSION = '2026-08-06.reg120';"));
   assert.ok(regBackend.includes('* v2026-08-06.reg120'));

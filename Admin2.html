@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-08-06.119
-  For Admin.gs: v2026-08-06.admin117
-  CHANGELOG: operational hotfixes for serving-event availability and duplicate-position feedback.
+  UI VERSION TAG: admin2-ui-2026-08-07.120
+  For Admin.gs: v2026-08-07.admin118
+  CHANGELOG: date-independent group-member data, role-safe ranges and single-code error display.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-06.119</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-07.120</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -844,6 +844,7 @@
         detailEn: String(r.detailEn || ''),
         detailHtml: r.detailHtml,
         trustedDetailHtml: !!r.trustedDetailHtml,
+        subGroup: String(r.subGroup || ''),
         subCode: String(r.subCode || '')
       };
     }
@@ -1033,7 +1034,16 @@
       res = normalizeErrResForRender_(res);
       var titles = toBilingualText_(res, '系統錯誤', 'System error');
       var detailObj = buildErrDetailHtml_(res);
-      showBox(targetId,'err',withErrorCodeTag_(titles.zh, res),titles.en,detailObj.html,detailObj.allow);
+      renderMsg_(targetId, 'err', {
+        ok:false,
+        code:String(res.code || 'E500'),
+        subGroup:String(res.subGroup || ''),
+        subCode:String(res.subCode || ''),
+        zh:titles.zh,
+        en:titles.en,
+        detailHtml:detailObj.html,
+        trustedDetailHtml:detailObj.allow
+      });
     }
 
 
@@ -1205,6 +1215,24 @@
       var max = maxDaysForRole();
       if(days > max) return { ok:false, zh:'所選日期範圍過長（最多 '+max+' 日）', en:'Date range too long (max '+max+' days).' };
       return { ok:true };
+    }
+    function clampAppDateRangeForRole_(){
+      if (!App.actor) return;
+      var todayYmd = getTodayYmdUk();
+      var toYmd = App.to || todayYmd;
+      var toDate = parseYmd(toYmd) || parseYmd(todayYmd);
+      if (!toDate){ App.from = todayYmd; App.to = todayYmd; return; }
+
+      var fromDate = parseYmd(App.from);
+      var maxDays = maxDaysForRole();
+      var invalid = !fromDate || fromDate.getTime() > toDate.getTime();
+      if (!invalid) invalid = (daysBetween(fromDate, toDate) + 1) > maxDays;
+      if (!invalid) return;
+
+      var clamped = new Date(toDate.getTime());
+      clamped.setUTCDate(clamped.getUTCDate() - (maxDays - 1));
+      App.from = clamped.toISOString().slice(0,10);
+      App.to = toYmd;
     }
 
     function displayMemberStatusLabel(st){
@@ -1503,10 +1531,20 @@
     }
     function openServingGroupMemberSummary_(memberId, groupKey){
       var m = openModal(buildMsgHtml_('warn', { code:'S101', zh:'載入中…', en:'Loading…', detailZh:'請稍候', detailEn:'Please wait' }));
-      callApi('api_admin_member_detail', App.token, memberId, App.from || getTodayYmdUk(), App.to || getTodayYmdUk()).then(function(res){
+      function showMemberSummaryError_(err){
+        var panel = m && m.querySelector ? m.querySelector('.modal') : null;
+        if (!panel){ showErr('app', err || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+        panel.innerHTML =
+          buildMsgHtml_('err', err || {code:'E500', zh:'未能載入組員資料', en:'Unable to load group member data.'})+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="btnCloseMemberSummaryError" class="btnBack">⬅️ 返回 / Back</button>'+
+          '</div>';
+        var back = panel.querySelector('#btnCloseMemberSummaryError');
+        if (back) back.onclick = function(){ closeModal(m); };
+      }
+      callApi('api_admin_serving_group_member_summary', App.token, groupKey, memberId).then(function(res){
         if(!res || !res.ok){
-          closeModal(m);
-          showErr('app', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          showMemberSummaryError_(res);
           return;
         }
         var member = res.member || {};
@@ -1648,10 +1686,7 @@
             if (el) el.classList.toggle('hide');
           };
         });
-      }).catch(function(err){
-        closeModal(m);
-        showErr('app', err || {code:'E500', zh:'系統錯誤', en:'System error'});
-      });
+      }).catch(function(err){ showMemberSummaryError_(err); });
     }
 
     function loadServingGroupMembers_(host, groupKey, options){
@@ -5618,6 +5653,7 @@ function viewAttendanceHome(){
 
     function render(){
       if(!App.to) App.to = getTodayYmdUk();
+      if(App.actor) clampAppDateRangeForRole_();
       if (App.view === 'servingPlan' && App.servingPlanMobileView === false && isMobileLayout_()) App.servingPlanMobileView = true;
       var root = $('app');
       var servingRotaMode = (App.view === 'servingPlan' || App.view === 'worshipPlan' || App.view === 'sermonInfo');

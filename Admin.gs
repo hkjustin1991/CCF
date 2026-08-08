@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-06.admin117
- * CHANGELOG: operational hotfixes for serving event creation, Bible loading and duplicate-assignment feedback.
+ * v2026-08-07.admin118
+ * CHANGELOG: group-member serving summaries no longer depend on attendance date ranges.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-06.admin117';
+const ADMIN_VERSION = '2026-08-07.admin118';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -1000,6 +1000,52 @@ function api_admin_serving_group_members(token, groupKey){
   const canManage = (role === 'ADMIN' || role === 'SUPERUSER' || (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; })));
 
   return { ok:true, group:key, count:members.length, members:members, canManage:canManage };
+}
+
+/**
+ * Serving-only member summary for the group-management UI.
+ * This deliberately has no attendance date range: the previous UI reused
+ * api_admin_member_detail(), so an unrelated STAFF/GL range limit (E424)
+ * could prevent group members from being opened.
+ */
+function api_admin_serving_group_member_summary(token, groupKey, memberId){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return admin_err_('E416','組別格式錯誤','Invalid group key.');
+  if (!admin_actorCanAccessServingGroup_(s.actor, key)){
+    return admin_err_('E403','沒有權限查看此組別','No permission to view this group.');
+  }
+
+  const id = String(memberId||'').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)){
+    return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+  }
+
+  const mi = admin_getMembersIndex_();
+  const member = (mi && mi.byId) ? mi.byId[id] : null;
+  if (!member) return admin_err_('E412','找不到此會員','Member not found.');
+  if (!admin_memberHasServingGroup_(member, key)){
+    return admin_err_('E412','此會員不在所選組別','Member is not in the selected group.');
+  }
+
+  const result = {
+    ok:true,
+    group:key,
+    member:{
+      id:member.id,
+      nameZh:member.nameZh||'',
+      nameEn:member.nameEn||'',
+      preferredName:String(member.preferredName||'').trim(),
+      status:admin_normStatus_(member.status||''),
+      servingGroups:member.servingGroups||[],
+      servingGLGroups:member.servingGLGroups||[]
+    },
+    servingInsights:admin_getServingInsightsForMember_(id)
+  };
+  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_SUMMARY', JSON.stringify({ group:key, memberId:id }), 'serving_group');
+  return result;
 }
 
 function admin_actorCanAccessServingGroup_(actor, groupKey){
