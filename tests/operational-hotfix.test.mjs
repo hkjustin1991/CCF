@@ -573,6 +573,36 @@ test('member labels never degrade to only a CCF ID when names are missing', () =
   assert.doesNotMatch(ui, /row\.label\|\|row\.id\|\|/);
 });
 
+test('public rota requires the Script Property and has no fallback credential', () => {
+  const context = appsScriptContext({
+    PropertiesService:{
+      getScriptProperties(){
+        return { getProperty(){ return ''; } };
+      }
+    }
+  });
+  vm.runInContext(read('Reg.gs'), context, { filename:'Reg.gs' });
+  assert.equal(context.reg_getPublicRotaPassword_(), '');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.api_public_rota_view('', 8))),
+    {
+      ok:false,
+      code:'E503_ROTA_PASSWORD',
+      zh:'公開事奉輪值尚未啟用；請聯絡管理員。',
+      en:'Public serving rota is not configured; please contact an administrator.'
+    }
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.api_public_serving_rota(''))),
+    {
+      ok:false,
+      code:'E503_ROTA_PASSWORD',
+      zh:'公開事奉輪值尚未啟用；請聯絡管理員。',
+      en:'Public serving rota is not configured; please contact an administrator.'
+    }
+  );
+});
+
 test('browser scripts parse after Apps Script template substitution', () => {
   for (const file of ['index.html','Admin2.html','Reg2.html']){
     const html = read(file);
@@ -603,8 +633,8 @@ test('source and visible UI version tags identify this hotfix', () => {
   assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-11.122'));
   assert.ok(adminUi.includes('ui admin2-ui-2026-08-11.122'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-11.reg121';"));
-  assert.ok(regBackend.includes('* v2026-08-11.reg121'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-11.reg122';"));
+  assert.ok(regBackend.includes('* v2026-08-11.reg122'));
   assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-11.120'));
   assert.ok(regUi.includes('ui reg2-ui-2026-08-11.120'));
 });

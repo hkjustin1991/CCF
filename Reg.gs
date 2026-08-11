@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-11.reg121
- * CHANGELOG: family registration, independent email changes, and safeguarded minor serving.
+ * v2026-08-11.reg122
+ * CHANGELOG: require the ROTA_PUBLIC_PASSWORD Script Property; no hardcoded fallback.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-11.reg121';
+const REG_VERSION = '2026-08-11.reg122';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -91,7 +91,16 @@ function reg_getPublicRotaPassword_(){
     const configured = String((p && p.getProperty('ROTA_PUBLIC_PASSWORD')) || '').trim();
     if (configured) return configured;
   }catch(e){}
-  return '16.9';
+  return '';
+}
+
+function reg_publicRotaNotConfigured_(){
+  return {
+    ok:false,
+    code:'E503_ROTA_PASSWORD',
+    zh:'公開事奉輪值尚未啟用；請聯絡管理員。',
+    en:'Public serving rota is not configured; please contact an administrator.'
+  };
 }
 
 function reg_publicRotaTokenType_(raw){
@@ -159,6 +168,7 @@ function api_public_rota_view(password, weeks){
   try{
     const inputPass = String(password || '').trim();
     const expected = reg_getPublicRotaPassword_();
+    if (!expected) return reg_publicRotaNotConfigured_();
     if (!inputPass || inputPass !== expected){
       return { ok:false, code:'E401', zh:'密碼不正確', en:'Invalid password.' };
     }
@@ -308,14 +318,9 @@ function api_public_rota_view(password, weeks){
 function api_public_serving_rota(password){
   try{
     const provided = String(password || '');
-    const expected = (function(){
-      try{
-        return String(PropertiesService.getScriptProperties().getProperty('ROTA_PUBLIC_PASSWORD') || '');
-      }catch(e){
-        return '';
-      }
-    })();
-    if (!provided || !expected || provided !== expected){
+    const expected = reg_getPublicRotaPassword_();
+    if (!expected) return reg_publicRotaNotConfigured_();
+    if (!provided || provided !== expected){
       return { ok:false, code:'E401', zh:'認證失敗', en:'Authentication failed.' };
     }
 
