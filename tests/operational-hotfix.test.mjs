@@ -152,6 +152,7 @@ test('an existing check-in self-heals a member formerly stuck in PENDING', () =>
   context.findExistingCheckin_ = () => ({ eventKey:'SundayService_2026-08-02', timeUk:'13:00:00' });
   context.getDefaultEventKey_ = () => 'SundayService_2026-08-02';
   context.promotePendingMemberToActive_ = () => { promoted += 1; return true; };
+  context.classifyNewFriend_ = () => ({ isNewFriend:true, reason:'FIRST_EVENT' });
   const result = context.api_checkin_scan('token', 'CCF0123|k123', null, '', '');
   assert.equal(result.ok, true);
   assert.equal(result.result, 'ALREADY');
@@ -340,6 +341,250 @@ test('GL STAFF and ADMIN group-membership controls follow one permission policy'
   assert.ok(ui.includes("(res.canManage ? '<button id=\"btnRemoveThisGroup\""));
 });
 
+test('New Friend remains event-level through rescans and ends on handling or the next event', () => {
+  const context = appsScriptContext({
+    SpreadsheetApp:{},
+    PropertiesService:{ getScriptProperties(){ return { getProperty(){ return ''; } }; } },
+    Utilities:{}, ContentService:{}, HtmlService:{}, LockService:{}, MailApp:{}
+  });
+  vm.runInContext(read('Code.gs'), context, { filename:'Code.gs' });
+  let suppressed = false;
+  context.isNewFriendSuppressed_ = () => suppressed;
+
+  const first = context.classifyNewFriendFromFirstEvent_('SundayService_2026-08-09', 'CCF0101', 'ACTIVE', 'SundayService_2026-08-09');
+  const rescan = context.classifyNewFriendFromFirstEvent_('SundayService_2026-08-09', 'CCF0101', 'ACTIVE', 'SundayService_2026-08-09');
+  const next = context.classifyNewFriendFromFirstEvent_('SundayService_2026-08-16', 'CCF0101', 'ACTIVE', 'SundayService_2026-08-09');
+  const staff = context.classifyNewFriendFromFirstEvent_('SundayService_2026-08-09', 'CCF0001', 'STAFF', 'SundayService_2026-08-09');
+  assert.equal(first.isNewFriend, true);
+  assert.equal(rescan.isNewFriend, true);
+  assert.equal(next.isNewFriend, false);
+  assert.equal(next.reason, 'PRIOR_ATTENDANCE');
+  assert.equal(staff.isNewFriend, false);
+  assert.equal(staff.reason, 'STAFF_EXCLUDED');
+
+  suppressed = true;
+  const handled = context.classifyNewFriendFromFirstEvent_('SundayService_2026-08-09', 'CCF0101', 'ACTIVE', 'SundayService_2026-08-09');
+  assert.equal(handled.isNewFriend, false);
+  assert.equal(handled.reason, 'SUPPRESSED');
+
+  const sheet = {
+    getLastRow(){ return 5; },
+    getRange(){ return { getValues(){ return [
+      ['SundayService_2026-08-16','CCF0101'],
+      ['SundayService_2026-08-09','CCF0101'],
+      ['SundayService_2026-08-02','CCF0999'],
+      ['SundayService_2026-08-23','CCF0101']
+    ]; } }; }
+  };
+  assert.equal(context.firstAttendedEventForMember_(sheet, 'ccf0101'), 'SundayService_2026-08-09');
+});
+
+test('young volunteers require approval, Logistics and an adult in the exact position', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), context, { filename:'Admin.gs' });
+  const child = {
+    id:'CCF0101', status:'ACTIVE', isMinor:true, familyId:'FAM-1',
+    minorServingApprovedGroups:['LOGISTIC'], minorServingSelfSignup:true
+  };
+  const sameFamilyAdult = { id:'CCF0102', status:'ACTIVE', isMinor:false, familyId:'FAM-1' };
+  const otherAdult = { id:'CCF0103', status:'ACTIVE', isMinor:false, familyId:'FAM-2' };
+  const members = { CCF0101:child, CCF0102:sameFamilyAdult, CCF0103:otherAdult };
+
+  let result = context.admin_validateMinorServingValues_({ Logistic_Welcome:'CCF0101' }, members, ['Logistic_Welcome']);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'MINOR_ADULT_PAIR_REQUIRED');
+
+  result = context.admin_validateMinorServingValues_({ Logistic_Welcome:'CCF0101, CCF0102' }, members, ['Logistic_Welcome']);
+  assert.equal(result.ok, true);
+  assert.equal(result.warnings.length, 0);
+
+  result = context.admin_validateMinorServingValues_({ Logistic_Welcome:'CCF0101, CCF0103' }, members, ['Logistic_Welcome']);
+  assert.equal(result.ok, true);
+  assert.equal(result.warnings[0].code, 'MINOR_DIFFERENT_FAMILY_ADULT');
+
+  result = context.admin_validateMinorServingValues_({ Media_AV:'CCF0101, CCF0102' }, members, ['Media_AV']);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'MINOR_GROUP_NOT_ALLOWED');
+
+  child.minorServingApprovedGroups = [];
+  result = context.admin_validateMinorServingValues_({ Logistic_Venue:'CCF0101, CCF0102' }, members, ['Logistic_Venue']);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].code, 'MINOR_NOT_APPROVED');
+});
+
+test('Logistics overview uses 8-week children and gaps with rolling 26-week activity', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), context, { filename:'Admin.gs' });
+  const members = [
+    { id:'CCF0101', status:'ACTIVE', nameEn:'Child', isMinor:true, familyId:'FAM-1', servingGroups:['LOGISTIC'], servingGLGroups:[] },
+    { id:'CCF0102', status:'ACTIVE', nameEn:'Parent', isMinor:false, familyId:'FAM-1', servingGroups:['LOGISTIC'], servingGLGroups:[] },
+    { id:'CCF0103', status:'ACTIVE', nameEn:'Volunteer', isMinor:false, familyId:'FAM-2', servingGroups:['LOGISTIC'], servingGLGroups:[] },
+    { id:'CCF0104', status:'ACTIVE', nameEn:'Idle Member', isMinor:false, familyId:'', servingGroups:['LOGISTIC'], servingGLGroups:[] }
+  ];
+  const byId = Object.fromEntries(members.map(member => [member.id, member]));
+  const rows = [
+    ['SundayService_2026-08-09','CCF0102'],
+    ['SundayService_2026-08-16','CCF0101, CCF0102'],
+    ['SundayService_2026-08-23','CCF0101, CCF0103'],
+    ['SundayService_2026-08-30',''],
+    ['SundayService_2026-10-18','CCF0101, CCF0102']
+  ];
+  const sheet = {
+    getLastRow(){ return rows.length + 1; },
+    getLastColumn(){ return 2; },
+    getRange(){ return { getValues(){ return rows; } }; }
+  };
+  context.admin_getMembersIndex_ = () => ({ all:members, byId });
+  context.admin_getServingSheet_ = () => sheet;
+  context.admin_getServingMatrix_ = () => ({ positions:[{ group:'logistic', position:'Logistic_Welcome', colIndex:2 }] });
+  const result = context.admin_buildServingGroupOverview_('2026-08-11').byGroup.logistic;
+  assert.equal(result.upcomingChildren.length, 2);
+  assert.equal(result.upcomingChildren[0].sameFamilyAdult, true);
+  assert.equal(result.upcomingChildren[1].sameFamilyAdult, false);
+  assert.equal(result.upcomingChildren.some(row => row.dateYmd === '2026-10-18'), false);
+  assert.equal(result.gaps.length, 1);
+  assert.equal(result.gaps[0].dateYmd, '2026-08-30');
+  assert.equal(result.activity.top[0].memberId, 'CCF0102');
+  assert.equal(result.activity.bottom.some(row => row.memberId === 'CCF0104' && row.count === 0), true);
+});
+
+test('family registration enforces the four-record email cap and labels independent rows', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Reg.gs'), context, { filename:'Reg.gs' });
+  const ms = {
+    dataRows:[
+      { Status:'ACTIVE', Email:'family@example.com', NameZh:'一', NameEn:'One' },
+      { Status:'PENDING', Email:'family@example.com', NameZh:'二', NameEn:'Two' },
+      { Status:'ACTIVE', Email:'family@example.com', NameZh:'三', NameEn:'Three' },
+      { Status:'DISABLED', Email:'family@example.com', NameZh:'停', NameEn:'Disabled' }
+    ]
+  };
+  const batch = [
+    { email:'family@example.com', nameZh:'四', nameEn:'Four' },
+    { email:'family@example.com', nameZh:'五', nameEn:'Five' }
+  ];
+  const blocked = context.regEnforceFamilyBatchHardStops_(ms, batch);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.code, 'E452');
+  assert.equal(context.regEnforceFamilyBatchHardStops_(ms, batch.slice(0, 1)).ok, true);
+
+  const headers = ['FamilyID','MemberLetter','ID','Key','Status','IsMinor','MinorServingApprovedGroups','MinorServingSelfSignup'];
+  const col = Object.fromEntries(headers.map((header, index) => [header, index]));
+  const row = context.regBuildAppendRow_({ lastCol:headers.length, col }, {
+    familyId:'FAM-XYZ', memberLetter:'B', id:'CCF0102', key:'k2', status:'PENDING', isMinor:true
+  });
+  assert.deepEqual(Array.from(row), ['FAM-XYZ','B','CCF0102','k2','PENDING','YES','','NO']);
+});
+
+test('family registration sends one combined email with labelled QR attachments', () => {
+  let sent = null;
+  const context = appsScriptContext({
+    MailApp:{
+      getRemainingDailyQuota(){ return 20; },
+      sendEmail(message){ sent = message; }
+    }
+  });
+  vm.runInContext(read('Reg.gs'), context, { filename:'Reg.gs' });
+  context.regFetchQrPngBlob_ = (payload, size, filename) => ({ payload, size, filename });
+  const result = context.regSendFamilyRegistrationEmail_({
+    toEmail:'family@example.com', familyId:'FAM-XYZ', members:[
+      { memberId:'CCF0101', memberLetter:'A', nameZh:'甲', nameEn:'One', qrPayload:'CCF0101|k1' },
+      { memberId:'CCF0102', memberLetter:'B', nameZh:'乙', nameEn:'Two', qrPayload:'CCF0102|k2' }
+    ]
+  });
+  assert.equal(result.sentToNew, true);
+  assert.equal(sent.to, 'family@example.com');
+  assert.equal(sent.attachments.length, 3);
+  assert.match(sent.htmlBody, /CCF0101/);
+  assert.match(sent.htmlBody, /CCF0102/);
+  assert.match(sent.body, /change email independently/);
+});
+
+test('a later family email change preserves identity, status and approval fields', () => {
+  const writes = [];
+  const context = appsScriptContext();
+  vm.runInContext(read('Reg.gs'), context, { filename:'Reg.gs' });
+  context.regReadRow_ = () => ({
+    FamilyID:'FAM-XYZ', MemberLetter:'B', ID:'CCF0102', Key:'k2', Status:'PENDING',
+    NameZh:'乙', NameEn:'Two', PreferredName:'', Email:'old@example.com', Mobile:'+447700900001',
+    Notes:'', OptOutEmail:'', HasCar:'NO', VRM:'', VRM2:'', IsMinor:'YES',
+    ParentEmail:'parent@example.com', Gender:'FEMALE', ReferredBy:'',
+    MinorServingApprovedGroups:'LOGISTIC', MinorServingSelfSignup:'YES',
+    MinorServingApprovedBy:'CCF0001', MinorServingApprovedAt:'2026-08-01T10:00:00Z',
+    ServingGroups:'LOGISTIC'
+  });
+  context.regWriteCell_ = (ms, row, field, value) => writes.push({ field, value });
+  context.regSendEmails_ = () => ({ sentToNew:true, reason:'SENT' });
+  context.regLogActivity_ = () => {};
+  const result = context.regApplyUpdate_({}, 2, 'CCF0102', 'PENDING', false, {
+    nameZh:'乙', nameEn:'Two', preferredName:'', email:'new@example.com', mobile:'+447700900001',
+    notes:'', optInEmail:true, hasCar:false, vrm:'', vrm2:'', isMinor:true,
+    parentEmail:'parent@example.com', gender:'FEMALE', referredBy:''
+  }, { keepExistingQr:true, deviceId:'test', ua:'node' });
+  const written = Object.fromEntries(writes.map(item => [item.field, item.value]));
+  assert.equal(result.qrPayload, 'CCF0102|k2');
+  assert.equal(result.keepExistingQr, true);
+  assert.equal(written.Status, 'PENDING');
+  for (const protectedField of [
+    'FamilyID','MemberLetter','ID','Key','MinorServingApprovedGroups','MinorServingSelfSignup',
+    'MinorServingApprovedBy','MinorServingApprovedAt','ServingGroups'
+  ]) assert.equal(Object.hasOwn(written, protectedField), false, protectedField);
+});
+
+test('all non-check-in QR confirmations expose image upload', () => {
+  const liveUi = read('index.html');
+  const adminUi = read('Admin2.html');
+  const regUi = read('Reg2.html');
+  const scannerUi = read('scanner/index.html');
+  const scannerJs = read('scanner/scanner.js');
+  assert.ok(liveUi.includes('id="btnUploadAuth1"'));
+  assert.ok(liveUi.includes('id="btnUploadAuth2"'));
+  assert.ok(liveUi.includes('id="btnUploadUndo"'));
+  assert.ok(liveUi.includes("decodeQrFromImageFile_(file).then(handleScan)"));
+  assert.ok(adminUi.includes("bindImageQrFallback_('msg'"));
+  assert.ok(adminUi.includes("bindImageQrFallback_('targetQrMsg'"));
+  assert.ok(regUi.includes('id="btnDeleteQrUpload"'));
+  assert.ok(regUi.includes("decodeQrImageFile_(file).then(submitDeleteQr_)"));
+  assert.ok(scannerUi.includes('id="btnUpload"'));
+  assert.ok(scannerJs.includes('function decodeUploadedQr(file)'));
+});
+
+test('registration UI offers up to three family members and renders every QR', () => {
+  const ui = read('Reg2.html');
+  assert.ok(ui.includes('一併登記家庭成員 / Add family members'));
+  assert.ok(ui.includes("[1,2,3].find"));
+  assert.ok(ui.includes("out.familyMembers = Array.prototype.slice.call"));
+  assert.ok(ui.includes("res.mode === 'FAMILY_CREATE'"));
+  assert.ok(ui.includes("drawQr('qrTargetFamily'+index"));
+  assert.ok(ui.includes('You may change your email independently; your CCF ID, current QR, Family ID, attendance and serving history are preserved.'));
+});
+
+test('member labels never degrade to only a CCF ID when names are missing', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), context, { filename:'Admin.gs' });
+  const ui = read('Admin2.html');
+  const missing = context.admin_memberLabelCompact_({ id:'CCF0199' });
+  assert.equal(missing.nameFound, false);
+  assert.match(missing.label, /Member name not found/);
+  const child = context.admin_memberLabelCompact_({ id:'CCF0101', nameEn:'Child', isMinor:true });
+  assert.match(child.label, /^🧒 CCF0101/);
+  assert.doesNotMatch(ui, /row\.name\|\|row\.memberId/);
+  assert.doesNotMatch(ui, /row\.label\|\|row\.memberId/);
+  assert.doesNotMatch(ui, /row\.label\|\|row\.id\|\|/);
+});
+
+test('browser scripts parse after Apps Script template substitution', () => {
+  for (const file of ['index.html','Admin2.html','Reg2.html']){
+    const html = read(file);
+    const scripts = Array.from(html.matchAll(/<script(?![^>]*src=)[^>]*>([\s\S]*?)<\/script>/gi));
+    for (const [index, match] of scripts.entries()){
+      const js = match[1].replace(/<\?[\s\S]*?\?>/g, 'null');
+      assert.doesNotThrow(() => new Function(js), `${file} inline script ${index + 1}`);
+    }
+  }
+  assert.doesNotThrow(() => new vm.Script(read('scanner/scanner.js')));
+});
+
 test('source and visible UI version tags identify this hotfix', () => {
   const liveBackend = read('Code.gs');
   const liveUi = read('index.html');
@@ -348,18 +593,18 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-06.staff103';"));
-  assert.ok(liveBackend.includes('* v2026-08-06.staff103'));
-  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-06.103'));
-  assert.ok(liveUi.includes('ui staff-ui-2026-08-06.103'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-11.staff104';"));
+  assert.ok(liveBackend.includes('* v2026-08-11.staff104'));
+  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-11.104'));
+  assert.ok(liveUi.includes('ui staff-ui-2026-08-11.104'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-11.admin119';"));
-  assert.ok(adminBackend.includes('* v2026-08-11.admin119'));
-  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-11.121'));
-  assert.ok(adminUi.includes('ui admin2-ui-2026-08-11.121'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-11.admin120';"));
+  assert.ok(adminBackend.includes('* v2026-08-11.admin120'));
+  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-11.122'));
+  assert.ok(adminUi.includes('ui admin2-ui-2026-08-11.122'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-06.reg120';"));
-  assert.ok(regBackend.includes('* v2026-08-06.reg120'));
-  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-06.119'));
-  assert.ok(regUi.includes('ui reg2-ui-2026-08-06.119'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-11.reg121';"));
+  assert.ok(regBackend.includes('* v2026-08-11.reg121'));
+  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-11.120'));
+  assert.ok(regUi.includes('ui reg2-ui-2026-08-11.120'));
 });

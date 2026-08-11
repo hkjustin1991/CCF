@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-06.staff103
- * CHANGELOG: operational hotfixes for login/check-in flows and PENDING activation.
+ * v2026-08-11.staff104
+ * CHANGELOG: authoritative first-event New Friend classification and minor-serving fields.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-06.staff103';
+const APP_VERSION = '2026-08-11.staff104';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -38,6 +38,8 @@ const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
 const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
 const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
 const NEW_FRIEND_HANDLED_SHEET_NAME = 'NewFriendHandled';
+const NEW_FRIEND_HANDLED_INDEX_CACHE_KEY = 'newHandled_index_v1';
+var NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = null;
 
 // Healthcheck (self-test) sheet (NEW)
 const HEALTHCHECK_SHEET_NAME = 'Healthcheck';
@@ -76,6 +78,10 @@ const MEMBERS_OPTIONAL_HEADERS = [
   'RoleExpires',
   'PreferredName',
   'IsMinor',
+  'MinorServingApprovedGroups',
+  'MinorServingSelfSignup',
+  'MinorServingApprovedBy',
+  'MinorServingApprovedAt',
   'ServingGroups',
   'ServingGLGroups',
   'AwayFrom1',
@@ -574,6 +580,10 @@ function getMembersIndex_(opts) {
       nameEn: String(row[col['NameEn']] || '').trim(),
       preferredName: preferredName,
       isMinor: !!isMinor,
+      minorServingApprovedGroups: ('MinorServingApprovedGroups' in col) ? parseGroupsCsv_(row[col['MinorServingApprovedGroups']]) : [],
+      minorServingSelfSignup: ('MinorServingSelfSignup' in col) ? String(row[col['MinorServingSelfSignup']] || '').trim().toUpperCase() === 'YES' : false,
+      minorServingApprovedBy: ('MinorServingApprovedBy' in col) ? String(row[col['MinorServingApprovedBy']] || '').trim() : '',
+      minorServingApprovedAt: ('MinorServingApprovedAt' in col) ? String(row[col['MinorServingApprovedAt']] || '').trim() : '',
       email: String(row[col['Email']] || '').trim(),
       mobile: String(row[col['Mobile']] || '').trim(),
       status: String(row[col['Status']] || '').trim(),
@@ -792,24 +802,36 @@ function ensureNewFriendHandledSheet_(){
 function newFriendHandledKey_(eventKey, memberId){
   return 'newHandled_' + String(eventKey||'').trim() + '_' + String(memberId||'').trim().toUpperCase();
 }
-function isNewFriendSuppressed_(eventKey, memberId){
-  const key = newFriendHandledKey_(eventKey, memberId);
+function getNewFriendHandledIndex_(){
+  if (NEW_FRIEND_HANDLED_RUNTIME_INDEX_) return NEW_FRIEND_HANDLED_RUNTIME_INDEX_;
+  const cache = CacheService.getScriptCache();
   try{
-    if (CacheService.getScriptCache().get(key)) return true;
+    const cached = cache.get(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY);
+    if (cached){
+      NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = JSON.parse(cached) || {};
+      return NEW_FRIEND_HANDLED_RUNTIME_INDEX_;
+    }
   }catch(e){}
+  const index = {};
   const sh = ensureNewFriendHandledSheet_();
   const lastRow = sh.getLastRow();
-  if (lastRow < 2) return false;
-  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  if (lastRow >= 2){
+    const data = sh.getRange(2,1,lastRow-1,3).getValues();
+    data.forEach(function(row){
+      const ev = String((row && row[1]) || '').trim();
+      const mid = String((row && row[2]) || '').trim().toUpperCase();
+      if (ev && mid) index[ev + '|' + mid] = true;
+    });
+  }
+  NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = index;
+  try{ cache.put(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY, JSON.stringify(index), 5 * 60); }catch(e){}
+  return index;
+}
+function isNewFriendSuppressed_(eventKey, memberId){
   const ev = String(eventKey||'').trim();
   const mid = String(memberId||'').trim().toUpperCase();
-  for (let i=0;i<data.length;i++){
-    if (String(data[i][1]||'').trim() === ev && String(data[i][2]||'').trim().toUpperCase() === mid){
-      try{ CacheService.getScriptCache().put(key, '1', 12 * 60 * 60); }catch(e){}
-      return true;
-    }
-  }
-  return false;
+  if (!ev || !mid) return false;
+  return !!getNewFriendHandledIndex_()[ev + '|' + mid];
 }
 function setNewFriendSuppressed_(eventKey, memberId, staff){
   const sh = ensureNewFriendHandledSheet_();
@@ -821,10 +843,22 @@ function setNewFriendSuppressed_(eventKey, memberId, staff){
     staff && staff.nameZh ? staff.nameZh : '',
     staff && staff.nameEn ? staff.nameEn : ''
   ]);
-  try{ CacheService.getScriptCache().put(newFriendHandledKey_(eventKey, memberId), '1', 12 * 60 * 60); }catch(e){}
+  const ev = String(eventKey||'').trim();
+  const mid = String(memberId||'').trim().toUpperCase();
+  if (NEW_FRIEND_HANDLED_RUNTIME_INDEX_ && ev && mid) NEW_FRIEND_HANDLED_RUNTIME_INDEX_[ev + '|' + mid] = true;
+  try{
+    const cache = CacheService.getScriptCache();
+    cache.remove(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY);
+    cache.put(newFriendHandledKey_(eventKey, memberId), '1', 12 * 60 * 60);
+  }catch(e){}
 }
 function clearNewFriendSuppressed_(eventKey, memberId){
-  try{ CacheService.getScriptCache().remove(newFriendHandledKey_(eventKey, memberId)); }catch(e){}
+  NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = null;
+  try{
+    const cache = CacheService.getScriptCache();
+    cache.remove(newFriendHandledKey_(eventKey, memberId));
+    cache.remove(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY);
+  }catch(e){}
   const sh = ensureNewFriendHandledSheet_();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return;
@@ -847,6 +881,61 @@ function hasAnyCheckinEver_(sh, memberId){
   const rng = sh.getRange(2, 3, lastRow - 1, 1); // MemberId col
   const hit = rng.createTextFinder(id).matchEntireCell(true).findNext();
   return !!hit;
+}
+
+/**
+ * New Friend is an event-level state, not a one-response state. A non-staff
+ * member remains new for their earliest attended Sunday service, including a
+ * repeat scan during that service, until staff explicitly marks it handled.
+ */
+function newFriendEventSortKey_(eventKey){
+  const ev = String(eventKey || '').trim();
+  const m = ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+  return m ? m[1] : ev;
+}
+function newFriendEarlierEvent_(a, b){
+  const av = String(a || '').trim();
+  const bv = String(b || '').trim();
+  if (!av) return bv;
+  if (!bv) return av;
+  return newFriendEventSortKey_(av) <= newFriendEventSortKey_(bv) ? av : bv;
+}
+function firstAttendedEventForMember_(sh, memberId){
+  if (!sh || typeof sh.getLastRow !== 'function') return '';
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return '';
+  const id = String(memberId || '').trim().toUpperCase();
+  if (!id) return '';
+  const rows = sh.getRange(2, 2, lastRow - 1, 2).getValues();
+  let first = '';
+  rows.forEach(function(row){
+    const ev = String((row && row[0]) || '').trim();
+    const mid = String((row && row[1]) || '').trim().toUpperCase();
+    if (mid !== id || !ev) return;
+    first = newFriendEarlierEvent_(first, ev);
+  });
+  return first;
+}
+function classifyNewFriendFromFirstEvent_(eventKey, memberId, status, firstEventKey){
+  const ev = String(eventKey || '').trim();
+  const id = String(memberId || '').trim().toUpperCase();
+  const st = normalizeStatus_(status);
+  if (st === STATUS_STAFF || st === STATUS_ADMIN){
+    return { isNewFriend:false, reason:'STAFF_EXCLUDED', firstEventKey:String(firstEventKey || '') };
+  }
+  const first = String(firstEventKey || ev).trim();
+  if (first && first !== ev){
+    return { isNewFriend:false, reason:'PRIOR_ATTENDANCE', firstEventKey:first };
+  }
+  if (isNewFriendSuppressed_(ev, id)){
+    return { isNewFriend:false, reason:'SUPPRESSED', firstEventKey:first || ev };
+  }
+  return { isNewFriend:true, reason:'FIRST_EVENT', firstEventKey:first || ev };
+}
+function classifyNewFriend_(sh, eventKey, member){
+  const m = member || {};
+  const first = firstAttendedEventForMember_(sh, m.id);
+  return classifyNewFriendFromFirstEvent_(eventKey, m.id, m.status, first || eventKey);
 }
 
 /******** Sessions ********/
@@ -1150,6 +1239,7 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
     if (existing) {
       // Repair members left in PENDING by the former broken promotion path.
       const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+      const newFriend = classifyNewFriend_(sh, eventKey, m);
       return {
         ok:true,
         result:'ALREADY',
@@ -1159,15 +1249,14 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
           id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
           preferredName: m.preferredName || '',
           isMinor: !!m.isMinor,
-          isNewFriend: false
+          isNewFriend: !!newFriend.isNewFriend,
+          newFriendReason: newFriend.reason
         },
         already: existing
       };
     }
 
-    // New friend = no prior check-in ever and not STAFF/ADMIN
-    const hadAny = hasAnyCheckinEver_(sh, m.id);
-    const isNewFriend = (!hadAny && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
+    const newFriend = classifyNewFriend_(sh, eventKey, m);
 
     const ts = nowUk_();
     const receiptId = makeReceiptId_(ts);
@@ -1187,6 +1276,7 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
     ]);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
     const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
     const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
@@ -1201,7 +1291,8 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
         id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
         preferredName: m.preferredName || '',
         isMinor: !!m.isMinor,
-        isNewFriend: !!isNewFriend
+        isNewFriend: !!newFriend.isNewFriend,
+        newFriendReason: newFriend.reason
       },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
@@ -1243,6 +1334,7 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
     if (existing) {
       // Repair members left in PENDING by the former broken promotion path.
       const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+      const newFriend = classifyNewFriend_(sh, eventKey, m);
       return {
         ok:true,
         result:'ALREADY',
@@ -1252,14 +1344,14 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
           id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
           preferredName: m.preferredName || '',
           isMinor: !!m.isMinor,
-          isNewFriend: false
+          isNewFriend: !!newFriend.isNewFriend,
+          newFriendReason: newFriend.reason
         },
         already: existing
       };
     }
 
-    const hadAny = hasAnyCheckinEver_(sh, m.id);
-    const isNewFriend = (!hadAny && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
+    const newFriend = classifyNewFriend_(sh, eventKey, m);
 
     const ts = nowUk_();
     const receiptId = makeReceiptId_(ts);
@@ -1279,6 +1371,7 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
     ]);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
     const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
     const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
@@ -1293,7 +1386,8 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
         id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
         preferredName: m.preferredName || '',
         isMinor: !!m.isMinor,
-        isNewFriend: !!isNewFriend
+        isNewFriend: !!newFriend.isNewFriend,
+        newFriendReason: newFriend.reason
       },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
@@ -1408,7 +1502,7 @@ function api_get_live_page(token, eventKeyOptional) {
   const members = getMembersIndex_().byId;
 
   const latestById = {};
-  const hadPriorEvent = new Set(); // any check-in with eventKey != current
+  const firstEventById = {};
   let lastSignIn = null;
 
   if (lastRow >= 2) {
@@ -1417,13 +1511,10 @@ function api_get_live_page(token, eventKeyOptional) {
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
       const ev = String(row[1] || '').trim();
-      const mid = String(row[2] || '').trim();
+      const mid = String(row[2] || '').trim().toUpperCase();
       if (!mid) continue;
-
-      if (ev !== eventKey) {
-        hadPriorEvent.add(mid);
-        continue;
-      }
+      if (ev) firstEventById[mid] = newFriendEarlierEvent_(firstEventById[mid], ev);
+      if (ev !== eventKey) continue;
 
       const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
       const t = ts.getTime();
@@ -1455,11 +1546,8 @@ function api_get_live_page(token, eventKeyOptional) {
   for (const id of ids) {
     const n = latestById[id];
     const m = members[id];
-    const stNorm = m ? normalizeStatus_(m.status) : '';
-
-    const isNewHistory = (!hadPriorEvent.has(id) && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
-    const suppressed = isNewHistory ? isNewFriendSuppressed_(eventKey, id) : false;
-    const isNew = isNewHistory && !suppressed;
+    const classification = classifyNewFriendFromFirstEvent_(eventKey, id, m ? m.status : '', firstEventById[id]);
+    const isNew = !!classification.isNewFriend;
 
     if (isNew) newCount++;
 
@@ -1469,6 +1557,7 @@ function api_get_live_page(token, eventKeyOptional) {
       preferredName: m ? (m.preferredName || '') : '',
       id: id,
       isNew: isNew,
+      newFriendReason: classification.reason,
       isMinor: !!(m && m.isMinor)
     });
   }
@@ -1782,7 +1871,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
   let today = null;
   const eventKeys = [];
-  let hadPriorEvent = false;
+  let firstEventKey = '';
 
   if (lastRow >= 2){
     const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
@@ -1803,7 +1892,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
       if (mid !== id) continue;
 
-      if (ev && ev !== eventKey) hadPriorEvent = true;
+      if (ev) firstEventKey = newFriendEarlierEvent_(firstEventKey, ev);
       if (!today && ev === eventKey){
         const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
         today = {
@@ -1817,8 +1906,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
       if (ev && !seenEv.has(ev)){
         seenEv.add(ev);
-        eventKeys.push(ev);
-        if (eventKeys.length >= 4) break;
+        if (eventKeys.length < 4) eventKeys.push(ev);
       }
     }
   }
@@ -1841,6 +1929,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
     familyMembers.sort(function(a,b){ return String(a.id||'').localeCompare(String(b.id||'')); });
   }
 
+  const newFriend = classifyNewFriendFromFirstEvent_(eventKey, id, m.status, firstEventKey);
   return {
     ok:true,
     member:{
@@ -1853,12 +1942,8 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       vrm2: m.vrm2||'',
       familyId: familyIdVal,
       status: normalizeStatus_(m.status),
-      isNewFriend: (function(){
-        const stNorm = normalizeStatus_(m.status);
-        const isNewHistory = (!hadPriorEvent && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
-        if (!isNewHistory) return false;
-        return !isNewFriendSuppressed_(eventKey, id);
-      })()
+      isNewFriend:newFriend.isNewFriend,
+      newFriendReason:newFriend.reason
     },
     familyMembers: familyMembers,
     today: today,
@@ -2101,6 +2186,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
 
     clearNewFriendSuppressed_(eventKey, targetId);
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
     const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel);
 
@@ -2214,6 +2300,7 @@ function api_checkin_delete(token, memberId, eventKeyOptional){
 
     clearNewFriendSuppressed_(eventKey, targetId);
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
     const logSh = ensureActivityLogSheet_();
     logSh.appendRow([

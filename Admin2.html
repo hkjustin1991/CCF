@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-08-11.121
-  For Admin.gs: v2026-08-11.admin119
-  CHANGELOG: bilingual, role-aligned serving-group membership management.
+  UI VERSION TAG: admin2-ui-2026-08-11.122
+  For Admin.gs: v2026-08-11.admin120
+  CHANGELOG: Logistics index, child-serving approval/pairing, names, and QR uploads.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-11.121</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-11.122</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -1654,6 +1654,7 @@
         var upSummary = summarizeByPosition_(upcoming);
         var totalSoFar = historical.length;
         var namesLine = [member.preferredName, member.nameZh, member.nameEn].filter(Boolean).join(' / ');
+        if (!namesLine) namesLine = '⚠️ 找不到會員姓名 / Member name not found';
 
         var allGroupKeys = [];
         var ownGroups = (member.servingGroups||[]).concat(member.servingGLGroups||[]);
@@ -1685,7 +1686,7 @@
 
         m.querySelector('.modal').innerHTML = ''+
           '<div class="groupDialogHeader">'+
-            '<div class="big">👤 '+escapeHtml(member.id||memberId||'')+'</div>'+
+            '<div class="big">'+(member.isMinor ? '🧒 ' : '👤 ')+escapeHtml(member.id||memberId||'')+'</div>'+
             (res.canManage ? '<button id="btnRemoveThisGroup" class="btnDanger btnMini">🗑️ 從本組移除 / Remove from this group</button>' : '')+
           '</div>'+
           '<div class="small">'+escapeHtml(namesLine || '—')+'</div>'+
@@ -1821,6 +1822,63 @@
       var bucket = byGroup[groupKey] || {};
       var label = SERVING_GROUP_BADGES[groupKey] || { zh:groupKey||'—', en:'' };
       var themeCls = 'groupTheme-' + groupKey;
+      if (groupKey === 'logistic'){
+        var activity = bucket.activity || { top:[], bottom:[] };
+        var currentMembers = Array.isArray(bucket.currentMembers) ? bucket.currentMembers : [];
+        var previous = Array.isArray(bucket.previous) ? bucket.previous : [];
+        var upcoming = Array.isArray(bucket.upcoming) ? bucket.upcoming : [];
+        var children = Array.isArray(bucket.upcomingChildren) ? bucket.upcomingChildren : [];
+        function activityRows_(rows){
+          if (!rows || !rows.length) return '<div class="small">沒有記錄 / No records</div>';
+          return '<ul class="groupDialogList">'+rows.map(function(row){
+            return '<li>'+escapeHtml(row.label||'⚠️ 找不到會員姓名 / Member name not found')+' · <b>'+escapeHtml(String(row.count||0))+'</b> 次 / assignments · '+
+              escapeHtml(row.lastDateYmd ? ('最近 / Last: '+row.lastDateYmd) : '尚未事奉 / Not served yet')+'</li>';
+          }).join('')+'</ul>';
+        }
+        function assignmentRows_(rows){
+          if (!rows || !rows.length) return '<div class="small">沒有記錄 / No records</div>';
+          return '<ul class="groupDialogList">'+rows.map(function(row){
+            return '<li><b>'+escapeHtml(row.dateYmd||row.eventKey||'')+'</b> · '+escapeHtml(row.label||row.position||'')+' · '+
+              (row.isMinor ? '🧒 ' : '')+escapeHtml(row.name||'⚠️ 找不到會員姓名 / Member name not found')+'</li>';
+          }).join('')+'</ul>';
+        }
+        function childRows_(){
+          if (!children.length) return buildMsgHtml_('warn', { code:'S108', zh:'未來 8 週沒有兒童事奉安排', en:'No young volunteers scheduled in the next 8 weeks' });
+          return '<div class="listWrap">'+children.map(function(row){
+            var pair = row.pairedAdult
+              ? (row.sameFamilyAdult ? '✅ 同一家庭成人已安排 / Adult from same family assigned' : '⚠️ 沒有同一家庭成人安排；由其他成年同工配對 / No same-family adult; paired with another adult')
+              : '⛔ 缺少成年同工配對 / Adult pairing missing';
+            var pairClass = row.pairedAdult ? (row.sameFamilyAdult ? 'ok' : 'warn') : 'err';
+            return '<div class="nameItem">'+
+              '<div class="zh">🧒 '+escapeHtml(row.name||'⚠️ 找不到會員姓名 / Member name not found')+'</div>'+
+              '<div class="en">'+escapeHtml(row.dateYmd||row.eventKey||'')+' · '+escapeHtml(row.label||row.position||'')+'</div>'+
+              '<div class="small '+pairClass+'">'+escapeHtml(pair)+'</div>'+
+              (row.adultLabels && row.adultLabels.length ? '<div class="small">成人 / Adult: '+escapeHtml(row.adultLabels.join(', '))+'</div>' : '')+
+            '</div>';
+          }).join('')+'</div>';
+        }
+        return ''+
+          '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
+            '<div class="groupDialogHeader"><div class="groupDialogTitle">'+escapeHtml(label.zh)+' / '+escapeHtml(label.en)+'</div><button type="button" class="btnMini btnBack" id="btnGroupSummaryClose">✖ 關閉 / Close</button></div>'+
+            '<div class="small">選擇索引項目展開內容。 / Select an index bubble to expand it.</div>'+
+            '<div class="memberBubbleWrap" style="margin-top:10px;"><div class="memberBubbleList">'+
+              '<button class="memberBubble sgColor-logistic" data-log-index="gaps">⚠️ 未來 8 週空缺 / Gaps in next 8 weeks</button>'+
+              '<button class="memberBubble sgColor-logistic" data-log-index="activity">📊 事奉活躍度 / Serving activity</button>'+
+              '<button class="memberBubble sgColor-logistic" data-log-index="members">👥 組員管理 / Group members</button>'+
+              '<button class="memberBubble sgColor-logistic" data-log-index="history">🗓️ 以往及未來事奉 / Previous and upcoming serving</button>'+
+            '</div></div>'+
+            '<div id="logIndexGaps" class="groupDialogSection hide"><div class="label">⚠️ 未來 8 週空缺 / Gaps in next 8 weeks</div><div id="groupGapResult"></div></div>'+
+            '<div id="logIndexActivity" class="groupDialogSection hide">'+
+              '<div class="label">🏆 最活躍 3 位（過去 26 週） / Top 3 (previous 26 weeks)</div>'+activityRows_(activity.top||[])+
+              '<div class="label" style="margin-top:10px;">🌙 最少活躍 3 位（過去 26 週） / Bottom 3 (previous 26 weeks)</div>'+activityRows_(activity.bottom||[])+
+            '</div>'+
+            '<div id="logIndexMembers" class="groupDialogSection hide"><div class="label">👥 組員 / Members</div><div class="memberBubbleList">'+
+              (currentMembers.length ? currentMembers.map(function(row){ return '<button class="memberBubble sgColor-logistic" data-log-member="'+escapeHtml(row.id||'')+'">'+escapeHtml(row.label||'⚠️ 找不到會員姓名 / Member name not found')+'</button>'; }).join('') : '<div class="small">沒有組員 / No members</div>')+
+            '</div></div>'+
+            '<div id="logIndexHistory" class="groupDialogSection hide"><div class="label">以往 26 週 / Previous 26 weeks</div>'+assignmentRows_(previous)+'<div class="label" style="margin-top:10px;">未來 8 週 / Next 8 weeks</div>'+assignmentRows_(upcoming)+'</div>'+
+            '<div class="groupDialogSection"><div class="label">🧒 未來 8 週兒童事奉 / Children serving in next 8 weeks</div>'+childRows_()+'</div>'+
+          '</div>';
+      }
       return ''+
         '<div class="groupDialog '+themeCls+'" style="margin-top:8px;">'+
           '<div class="groupDialogHeader">'+
@@ -1849,7 +1907,8 @@
         var d = parseYmd(ymd);
         if (!today || !d) return false;
         var diff = daysBetween(today, d);
-        return diff >= 0 && diff < maxDays && Number(g.totalMissing||0) > 0;
+        var inWindow = (groupKey === 'logistic') ? (diff <= maxDays) : (diff < maxDays);
+        return diff >= 0 && inWindow && Number(g.totalMissing||0) > 0;
       });
       if (!filtered.length){
         hostEl.innerHTML = buildMsgHtml_('warn', { code:'S103', zh:'沒有空缺', en:'No vacancies' });
@@ -1858,6 +1917,9 @@
       hostEl.innerHTML = '<ul class="groupDialogList">'+filtered.map(function(g){
         var posText = (g.positions || []).map(function(p){
           var missing = Number(p.missing||0);
+          if (p.pairingMissing){
+            return (p.label || p.position || '—') + '（缺少成年同工配對） / ' + (p.label || p.position || '—') + ' (adult pairing missing)';
+          }
           return (p.label || p.position || '—') + '（尚欠 ' + missing + '） / ' + (p.label || p.position || '—') + ' (left ' + missing + ' to minimum)';
         }).join(', ');
         return '<li><b>'+escapeHtml(g.eventKey||'')+'</b> · '+escapeHtml(posText)+'</li>';
@@ -1914,7 +1976,8 @@ function eventDateYmdFromKey(ev){
         id: id,
         nameZh: entry.nameZh || '',
         nameEn: entry.nameEn || '',
-        preferredName: entry.preferredName || ''
+        preferredName: entry.preferredName || '',
+        isMinor: !!entry.isMinor
       });
     }
     function splitServingValues_(raw){
@@ -1927,6 +1990,7 @@ function eventDateYmdFromKey(ev){
       var lines = [];
       var conflicts = Array.isArray(w.conflicts) ? w.conflicts : [];
       var duplicates = Array.isArray(w.duplicates) ? w.duplicates : [];
+      var minorPairing = Array.isArray(w.minorPairing) ? w.minorPairing : [];
       var effectiveDate = String(dateYmd || '').trim();
       conflicts.forEach(function(c){
         var lineDate = String(c.dateYmd || effectiveDate || '').trim();
@@ -1943,6 +2007,10 @@ function eventDateYmdFromKey(ev){
         var lineDate = String(d.dateYmd || effectiveDate || '').trim();
         var dateLabel = lineDate ? ('｜日期: ' + formatYmdZhEn_(lineDate)) : '';
         lines.push(escapeHtml('成員: ' + (d.memberId||'') + '｜已安排: ' + (existLabels.join('、') || '—') + '｜嘗試安排: ' + (tryLabels.join('、') || '—') + ' / Member: ' + (d.memberId||'') + '｜Already assigned: ' + (existLabels.join(', ') || '—') + '｜Trying to assign: ' + (tryLabels.join(', ') || '—') + dateLabel));
+      });
+      minorPairing.forEach(function(item){
+        var pos = mapServingPosBilingual_([item.position || '']).join(', ') || String(item.position || '');
+        lines.push(escapeHtml('⚠️ 未有同一家庭成人安排：' + (item.memberId||'') + ' · ' + pos + ' / No same-family adult assigned: ' + (item.memberId||'') + ' · ' + pos));
       });
       if (!lines.length) return '';
       return lines.join('<br/>');
@@ -2021,11 +2089,12 @@ function eventDateYmdFromKey(ev){
       var id = String(o.id || o.memberId || '').trim().toUpperCase();
       var zh = String(o.nameZh || '').trim();
       var en = String(o.nameEn || '').trim();
+      var isMinor = !!o.isMinor;
       if (!zh && !en){
         var pref = String(o.preferredName || '').trim();
         if (pref) en = pref;
       }
-      return { id: formatCcfidLine_(id), zh: zh, en: en };
+      return { id: (isMinor ? '🧒 ' : '') + formatCcfidLine_(id), zh: zh, en: en, isMinor:isMinor };
     }
     function renderServingPersonLabelHtml_(m){
       var lines = servingPersonLines_(m);
@@ -3464,11 +3533,27 @@ function viewAttendanceHome(){
               var closeBtn = sumModal.querySelector('#btnGroupSummaryClose');
               if (closeBtn) closeBtn.onclick = function(){ closeModal(sumModal); };
               var gapHost = sumModal.querySelector('#groupGapResult');
-              renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84);
+              renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, key === 'logistic' ? 56 : 84);
               var btn6 = sumModal.querySelector('#btnGroupGap6');
               var btn12 = sumModal.querySelector('#btnGroupGap12');
               if (btn6) btn6.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 42); };
               if (btn12) btn12.onclick = function(){ renderGroupOverviewGaps_(gapHost, App.servingGroupOverview || {}, key, 84); };
+              Array.prototype.forEach.call(sumModal.querySelectorAll('[data-log-index]'), function(indexBtn){
+                indexBtn.onclick = function(){
+                  var section = String(indexBtn.getAttribute('data-log-index')||'');
+                  var map = { gaps:'logIndexGaps', activity:'logIndexActivity', members:'logIndexMembers', history:'logIndexHistory' };
+                  var target = sumModal.querySelector('#'+(map[section]||''));
+                  if (target) target.classList.toggle('hide');
+                };
+              });
+              Array.prototype.forEach.call(sumModal.querySelectorAll('[data-log-member]'), function(memberBtn){
+                memberBtn.onclick = function(){
+                  var memberId = String(memberBtn.getAttribute('data-log-member')||'');
+                  if (!memberId) return;
+                  closeModal(sumModal);
+                  openServingGroupMemberSummary_(memberId, 'logistic');
+                };
+              });
             };
           });
           Array.prototype.slice.call(listEl.querySelectorAll('.monthPick')).forEach(function(btn){
@@ -3934,7 +4019,7 @@ function viewAttendanceHome(){
                     callApi('api_admin_serving_event_save', App.token, ev, payload, true, filterGroupKey).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
                       var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {}, (res3 && res3.dateYmd) || ev.replace('SundayService_',''));
-                      showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
+                      showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（有提示）' : '已儲存', warnHtml ? 'Saved with warnings.' : 'Saved.', warnHtml);
                       closeModal(modal);
                       if (App.refreshServingPlan) App.refreshServingPlan();
                     }).catch(function(err){ showErr('servingEditMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
@@ -3953,7 +4038,7 @@ function viewAttendanceHome(){
                 return;
               }
               var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {}, (res2 && res2.dateYmd) || ev.replace('SundayService_',''));
-              showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
+              showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（有提示）' : '已儲存', warnHtml ? 'Saved with warnings.' : 'Saved.', warnHtml);
               closeModal(modal);
               if (App.refreshServingPlan) App.refreshServingPlan();
             }).catch(function(err){
@@ -4100,7 +4185,7 @@ function viewAttendanceHome(){
               return;
             }
             var warnHtml = buildAdminOverrideWarningHtml_(res2.warnings || {}, (res2 && res2.dateYmd) || ev.replace('SundayService_',''));
-            showBox('quickMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（ADMIN 覆蓋）' : '已儲存', warnHtml ? 'Saved with ADMIN override.' : 'Saved.', warnHtml);
+            showBox('quickMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（有提示）' : '已儲存', warnHtml ? 'Saved with warnings.' : 'Saved.', warnHtml);
             closeModal(modal);
             if (App.refreshServingPlan) App.refreshServingPlan();
           }).catch(function(err){
@@ -5164,9 +5249,13 @@ function viewAttendanceHome(){
         var attList = att.map(function(ev){ return '<li>'+escapeHtml(ev)+'</li>'; }).join('');
         var canContact = !roleIsGl();
         var canStats = !roleIsGl();
+        var actorRole = String((App.actor && App.actor.role) || '').toUpperCase();
+        var canApproveMinor = (actorRole === 'STAFF' || actorRole === 'ADMIN' || actorRole === 'SUPERUSER');
+        var minorApproved = (m.minorServingApprovedGroups || []).some(function(g){ return normalizeServingGroupKey_(g) === 'logistic'; });
 
         var topBtns = '<div class="modalTopBtns">'+
           (canContact ? '<button id="btnContact" class="btnPink">📇 查看聯絡/車牌 / View contact/VRM</button>' : '')+
+          ((m.isMinor && canApproveMinor) ? '<button id="btnMinorServing" class="btnPeriod">🧒 未成年事奉批准 / Young-volunteer approval</button>' : '')+
           ((isGroupManagementMode || roleIsGl()) ? '' : '<button id="btnStatus" class="btnPink">🛠 更改狀態 / Change status</button>')+
         '</div>';
 
@@ -5230,6 +5319,9 @@ function viewAttendanceHome(){
             '<div>中文名</div><div>'+escapeHtml(m.nameZh||'')+'</div>'+
             '<div>English</div><div>'+escapeHtml(m.nameEn||'')+'</div>'+
             '<div>Preferred</div><div>'+escapeHtml(m.preferredName||'')+'</div>'+
+            '<div>未滿 18 歲 / Under 18</div><div>'+(m.isMinor ? '🧒 是 / Yes' : '否 / No')+'</div>'+
+            (m.isMinor ? ('<div>後勤事奉批准 / Logistics approval</div><div>'+(minorApproved ? '✅ 已批准 / Approved' : '⛔ 未批准 / Not approved')+'</div>'+
+              '<div>自行報名 / Self sign-up</div><div>'+(m.minorServingSelfSignup ? '✅ 已允許 / Allowed' : '⛔ 不允許 / Not allowed')+'</div>') : '')+
             '<div>Member since</div><div>'+escapeHtml(m.memberSince||'')+'</div>'+
             statusRowHtml+
           '</div>'+
@@ -5272,6 +5364,12 @@ function viewAttendanceHome(){
         if (btnStatus){
           btnStatus.onclick = function(){
             openStatusFlow_(m.id, m.status||'');
+          };
+        }
+        var btnMinorServing = modal.querySelector('#btnMinorServing');
+        if (btnMinorServing){
+          btnMinorServing.onclick = function(){
+            openMinorServingApprovalFlow_(m, function(){ closeModal(modal); openMemberDetail(memberId, fromYmd, toYmd, options); });
           };
         }
 
@@ -5432,6 +5530,49 @@ function viewAttendanceHome(){
         closeModal(modal);
         showErr('app', err || {code:'E500', zh:'系統錯誤', en:'System error'});
       });
+    }
+    function openMinorServingApprovalFlow_(member, onDone){
+      var current = member || {};
+      var approved = (current.minorServingApprovedGroups || []).some(function(g){ return normalizeServingGroupKey_(g) === 'logistic'; });
+      var modal = openModal(
+        '<div class="big">🧒 未成年事奉批准 / Young-volunteer approval</div>'+
+        '<div class="small">批准方格只記錄已完成所需批准；請勿在本平台儲存同意書或敏感保障備註。<br/>The checkbox records that required approval is complete; do not store consent forms or sensitive safeguarding notes here.</div>'+
+        '<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;">'+
+          '<input id="minorApproved" type="checkbox" style="width:auto;transform:scale(1.1);margin-top:4px;" '+(approved?'checked':'')+' />'+
+          '<span><b>已確認所需批准，並准許參與後勤事奉</b><br/>Required approval has been confirmed; approved to serve in Logistics</span>'+
+        '</label>'+
+        '<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;">'+
+          '<input id="minorSelfSignup" type="checkbox" style="width:auto;transform:scale(1.1);margin-top:4px;" '+(current.minorServingSelfSignup?'checked':'')+' />'+
+          '<span><b>准許本人自行報名及取消</b><br/>Allow this young volunteer to self-sign up and cancel</span>'+
+        '</label>'+
+        '<div class="small" style="margin-top:8px;">自行報名只可在同一崗位已有成年同工時進行。<br/>Self sign-up is permitted only when an adult is already assigned to the same position.</div>'+
+        '<div class="miniBtnRow" style="margin-top:12px;">'+
+          '<button id="minorApprovalNext" class="btnPeriod">💾 儲存並掃描 QR / Save & scan QR</button>'+
+          '<button id="minorMarkAdult" class="btnBack">🎂 確認已滿 18 歲 / Confirm now 18+</button>'+
+          '<button id="minorApprovalCancel" class="btnDanger">取消 / Cancel</button>'+
+        '</div>'+
+        '<div id="minorApprovalMsg"></div>'
+      );
+      var approvedBox = modal.querySelector('#minorApproved');
+      var selfBox = modal.querySelector('#minorSelfSignup');
+      function syncSelf_(){
+        selfBox.disabled = !approvedBox.checked;
+        if (!approvedBox.checked) selfBox.checked = false;
+      }
+      approvedBox.onchange = syncSelf_;
+      syncSelf_();
+      modal.querySelector('#minorApprovalCancel').onclick = function(){ closeModal(modal); };
+      modal.querySelector('#minorApprovalNext').onclick = function(){
+        var opts = { approved:!!approvedBox.checked, selfSignup:!!selfBox.checked, markAdult:false };
+        closeModal(modal);
+        openReauthScan_('minor_serving', current.id, opts, onDone);
+      };
+      modal.querySelector('#minorMarkAdult').onclick = function(){
+        if (!confirm('確認此會員已滿 18 歲？此操作會清除未成年事奉批准。\nConfirm this member is now 18 or over? Young-volunteer approval will be cleared.')) return;
+        var removeParent = confirm('是否同時移除家長／監護人電郵？\nAlso remove the parent/guardian email?');
+        closeModal(modal);
+        openReauthScan_('minor_serving', current.id, { markAdult:true, approved:false, selfSignup:false, removeParentEmail:removeParent }, onDone);
+      };
     }
     function openContactFlow_(memberId){
       logAction('CLICK_CONTACT', memberId, 'contact');
@@ -5609,6 +5750,24 @@ function viewAttendanceHome(){
           return;
         }
 
+        if(mode === 'minor_serving'){
+          callApi('api_admin_member_minor_serving_update', App.token, memberId, payload || {}, qr).then(function(res){
+            if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
+            m.querySelector('.modal').innerHTML =
+              '<div class="big ok">✅ 已更新未成年事奉設定 / Young-volunteer settings updated</div>'+
+              '<div class="small">此操作已被記錄。 / This action is logged.</div>'+
+              '<div class="kv" style="margin-top:10px;">'+
+                '<div>Member</div><div><b>'+escapeHtml(res.memberId||memberId||'')+'</b></div>'+
+                '<div>未滿 18 歲 / Under 18</div><div>'+(res.isMinor ? '是 / Yes' : '否 / No')+'</div>'+
+                (res.isMinor ? ('<div>後勤批准 / Logistics approval</div><div>'+(res.approved ? '✅ 已批准 / Approved' : '⛔ 未批准 / Not approved')+'</div>'+
+                  '<div>自行報名 / Self sign-up</div><div>'+(res.selfSignup ? '✅ 已允許 / Allowed' : '⛔ 不允許 / Not allowed')+'</div>') : '')+
+              '</div>'+
+              '<div class="miniBtnRow" style="margin-top:12px;"><button id="btnClose" class="btnBack">⬅️ 返回 / Back</button></div>';
+            m.querySelector('#btnClose').onclick = function(){ closeModal(m); if (typeof onDone === 'function') onDone(res); };
+          }).catch(function(err){ showErr('msg', err || {code:'E500', zh:'系統錯誤', en:'System error'}); });
+          return;
+        }
+
         callApi('api_admin_member_status_change', App.token, memberId, payload, qr).then(function(res){
           if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
           renderStatusResult_(m, res);
@@ -5649,6 +5808,11 @@ function viewAttendanceHome(){
           });
         };
         btnOpenExternal.onclick();
+      }
+
+      var reauthMsg = m.querySelector('#msg');
+      if (reauthMsg){
+        reauthMsg.innerHTML = bindImageQrFallback_('msg', function(decoded){ stopScan(); handleReauthPayload_(decoded); });
       }
 
 

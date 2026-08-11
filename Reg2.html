@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-08-06.119
-  CHANGELOG: operational hotfixes for PENDING visibility, partial login and serving sign-up feedback.
+  UI VERSION TAG: reg2-ui-2026-08-11.120
+  CHANGELOG: family registration, independent email updates, child-serving safeguards, and QR uploads.
   ============================================================
 
   Changes (reg2-ui-2026-06-14.118): Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-08-06.119</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-08-11.120</span></div>
     </header>
 
     <main id="app">
@@ -1266,9 +1266,10 @@
         var mid = String(id||'').trim().toUpperCase();
         if (!mid || mid === 'N/A') return '';
         var raw = String(labelsById[mid] || '').trim();
-        var base = raw.replace(/\([^()]*\)\s*$/,'').trim();
+        var isChild = /^🧒\s*/.test(raw);
+        var base = raw.replace(/^🧒\s*/, '').replace(/\([^()]*\)\s*$/,'').trim();
         base = base.replace(/^CCF\d{4}\s*[·•-]?\s*/i, '').trim();
-        var out = base;
+        var out = base ? ((isChild ? '🧒 ' : '') + base) : '';
         if (out) return out;
         return isSelf ? mid : '未命名 / Unknown';
       }
@@ -1345,6 +1346,7 @@
               var txt = memberDisplay_(v, isSelf);
               if (isSelf){
                 mineInPosition = true;
+                if (cell.canSelfRemove === false) return '<span class="chip">'+escapeHtml(txt || v)+'</span>';
                 return '<button class="primary btnSmall" data-del-self="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'">'+escapeHtml(txt || v)+'</button>';
               }
               return '<span class="chip">'+escapeHtml(txt)+'</span>';
@@ -1362,8 +1364,21 @@
               action = '<button class="alt btnSmall btnSignupSquare" data-add="1" data-chg="'+(cell.canChange===false?'0':'1')+'" data-ev="'+escapeHtml(ev.eventKey)+'" data-pos="'+escapeHtml(p.position)+'" data-slot="'+slotToUse+'">報名 / Sign up</button>';
             }
 
+            var pairingHtml = '';
+            if (m.isMinor){
+              var pairing = cell.pairing || {};
+              var adults = Array.isArray(pairing.adultIds) ? pairing.adultIds : [];
+              if (adults.length && pairing.sameFamily){
+                pairingHtml = '<div class="small ok" style="margin-top:6px;">🟢 同一家庭成人配對 / Same-family adult paired</div>';
+              }else if (adults.length){
+                pairingHtml = '<div class="small warn" style="margin-top:6px;">🟠 其他成年同工配對 / Paired with another adult</div>';
+              }else{
+                pairingHtml = '<div class="small warn" style="margin-top:6px;">⛔ 需要同崗位成年同工 / Adult required in this exact position</div>';
+              }
+            }
+
             var linesHtml = slotLines.length ? ('<div class="assignListPlain">'+slotLines.join('')+'</div>') : '';
-            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;">'+linesHtml+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+'</td>';
+            row += '<td style="border:1px solid var(--border);padding:8px;vertical-align:top;">'+linesHtml+(action ? ('<div style="margin-top:6px;">'+action+'</div>') : '')+pairingHtml+'</td>';
           });
           row += '</tr>';
           return row;
@@ -1374,6 +1389,15 @@
 
       return ''+
         '<div class="card"><div class="big">🧩 事奉 / Serving</div></div>'+
+        (m.isMinor ? (
+          '<div class="card"><div class="msgBox '+(m.canSelfManageMinorServing?'ok':'warn')+'">'+
+            '<div class="big '+(m.canSelfManageMinorServing?'ok':'warn')+'">🧒 未成年後勤事奉 / Young Logistics volunteer</div>'+
+            '<div class="small">'+
+              (m.minorServingApproved ? '✅ 已獲 STAFF／ADMIN 批准 / Approved by STAFF/ADMIN<br/>' : '⛔ 尚未獲批准 / Not yet approved<br/>')+
+              (m.minorServingSelfSignup ? '✅ 可自行報名及取消 / Self sign-up and cancellation allowed' : '⛔ 排期須由組長／同工處理 / Rota changes must be made by a GL or staff member')+
+              '<br/>每次必須在同一聚會、同一崗位與成年同工配對。 / An adult must be paired in the exact same position and service.'+
+            '</div></div></div>'
+        ) : '')+
         '<div class="card">'+
           '<div class="small"><b>月份 / Month</b></div>'+
           '<div class="miniBtnRow">'+(monthButtons || '<span class="pill">—</span>')+'</div>'+
@@ -1675,6 +1699,41 @@ function viewSelfHoliday(m){
         '<div class="miniBtnRow"><button id="btnHolidaySave" class="primary">✅ 儲存 / Save</button><button id="btnHolidayBack" class="danger">⬅️ 返回 / Back</button></div><div id="holidayMsg"></div></div>';
     }
 
+    function familyMemberCardHtml_(index){
+      var p = 'fam' + index + '_';
+      return ''+
+        '<div class="card" data-family-member="1" data-family-index="'+index+'" data-has-car="">'+
+          '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">'+
+            '<div class="big" style="font-size:18px;">👤 家庭成員 '+index+' / Family member '+index+'</div>'+
+            '<button class="danger btnSmall" type="button" data-family-remove="'+index+'">移除 / Remove</button>'+
+          '</div>'+
+          '<div class="label" style="margin-top:12px;">中文名 / Chinese name</div><input id="'+p+'nameZh" autocomplete="name" />'+
+          '<div class="label" style="margin-top:10px;">英文名 / English name</div><input id="'+p+'nameEn" autocomplete="name" placeholder="First Last" />'+
+          '<div class="label" style="margin-top:10px;">常用稱呼 / Preferred name（可選 / optional）</div><input id="'+p+'preferredName" />'+
+          '<div class="label" style="margin-top:10px;">性別 / Gender（必填 / required）</div>'+
+          '<select id="'+p+'gender"><option value="">請選擇 / Please choose</option><option value="MALE">男 / Male</option><option value="FEMALE">女 / Female</option><option value="OTHER">其他 / Other</option><option value="PREFER_NOT">不便透露 / Prefer not to say</option></select>'+
+          '<div class="divider"></div>'+
+          '<label style="display:flex;gap:10px;align-items:center;"><input id="'+p+'shareEmail" type="checkbox" checked style="width:auto;transform:scale(1.1);"/><span style="font-weight:900;">共用主要登記人的電郵 / Use primary member email</span></label>'+
+          '<div id="'+p+'emailOwnBlock" class="hide" style="margin-top:8px;">'+
+            '<div class="label">獨立電郵 / Separate email</div><input id="'+p+'email" type="email" autocomplete="email" />'+
+            '<label style="display:flex;gap:10px;align-items:center;margin-top:6px;"><input id="'+p+'optInEmail" type="checkbox" checked style="width:auto;transform:scale(1.1);"/><span>接收電郵 / Email opt-in</span></label>'+
+          '</div>'+
+          '<label style="display:flex;gap:10px;align-items:center;margin-top:12px;"><input id="'+p+'shareMobile" type="checkbox" checked style="width:auto;transform:scale(1.1);"/><span style="font-weight:900;">共用主要登記人的手機 / Use primary member mobile</span></label>'+
+          '<div id="'+p+'mobileOwnBlock" class="hide" style="margin-top:8px;">'+
+            '<div class="label">手機 / Mobile</div><div style="display:flex;gap:10px;align-items:center;"><div style="padding:12px;border:1px solid var(--border);border-radius:14px;background:#fff;font-weight:900;">+</div><input id="'+p+'phoneCc" style="max-width:140px;" inputmode="numeric" value="44"/><input id="'+p+'phoneNat" inputmode="numeric" autocomplete="tel"/></div>'+
+          '</div>'+
+          '<div class="divider"></div>'+
+          '<label style="display:flex;gap:10px;align-items:center;"><input id="'+p+'isMinor" type="checkbox" style="width:auto;transform:scale(1.1);"/><span style="font-weight:950;">未滿 18 歲 / Under 18</span></label>'+
+          '<div id="'+p+'parentEmailBlock" class="hide" style="margin-top:8px;"><div class="label">家長／監護人電郵（可選） / Parent or guardian email (optional)</div><input id="'+p+'parentEmail" type="email" autocomplete="email"/><div class="small">必須與該成員電郵不同 / Must differ from that member\'s email.</div></div>'+
+          '<div class="divider"></div>'+
+          '<div class="label">是否有車？ / Do you have a car?</div>'+
+          '<div class="miniBtnRow"><button class="alt" type="button" data-family-car="YES" data-family-index="'+index+'">🚗 有車 / Yes</button><button class="alt" type="button" data-family-car="NO" data-family-index="'+index+'">🚶 無車 / No</button></div>'+
+          '<div id="'+p+'carState" class="carState">（必填 / Required）</div>'+
+          '<div id="'+p+'vrmBlock" class="hide" style="margin-top:8px;"><div class="label">車牌 1 / VRM 1</div><input id="'+p+'vrm"/><div class="label" style="margin-top:8px;">車牌 2 / VRM 2（可選 / optional）</div><input id="'+p+'vrm2"/></div>'+
+          '<div class="label" style="margin-top:10px;">備註 / Notes（可選 / optional）</div><textarea id="'+p+'notes"></textarea>'+
+        '</div>';
+    }
+
     function viewForm(prefill){
       prefill = prefill || {};
       var hasCar = (prefill.hasCar === true);
@@ -1693,6 +1752,7 @@ function viewSelfHoliday(m){
       }
 
       var isSelf = (State.flow === 'self_update');
+      var lockMinor = isSelf && isMinor;
       return ''+
         '<div class="card"><div class="big">📝 填寫資料 / Details</div><div class="small">只作登記，不會自動簽到 / Registration only (no auto check-in)<br/>完成後請交給接待同工掃描 QR。After completion, ask Welcome team to scan the QR.</div></div>'+
 
@@ -1722,6 +1782,7 @@ function viewSelfHoliday(m){
 
           '<div class="label">電郵 / Email</div>'+
           '<input id="email" type="email" autocomplete="email" value="'+escapeHtml(prefill.email||'')+'" />'+
+          (isSelf ? '<div class="small" style="margin-top:6px;">你可獨立更改電郵；CCF ID、現有 QR、Family ID、出席及事奉記錄會保留。<br/>You may change your email independently; your CCF ID, current QR, Family ID, attendance and serving history are preserved.</div>' : '')+
           '<div style="margin-top:6px;display:flex;gap:10px;align-items:center;">'+
             '<input id="optInEmail" type="checkbox" style="width:auto;transform:scale(1.1);" '+(prefill.optInEmail===false?'':'checked')+' />'+
             '<div style="font-weight:900;">接收電郵 / Email opt-in</div>'+
@@ -1741,9 +1802,10 @@ function viewSelfHoliday(m){
           '<div class="divider"></div>'+
 
           '<div style="display:flex;gap:10px;align-items:center;">'+
-            '<input id="isMinor" type="checkbox" style="width:auto;transform:scale(1.1);" '+(isMinor?'checked':'')+' />'+
+            '<input id="isMinor" type="checkbox" style="width:auto;transform:scale(1.1);" '+(isMinor?'checked':'')+' '+(lockMinor?'disabled':'')+' />'+
             '<div style="font-weight:950;">未滿 18 歲 / Under 18</div>'+
           '</div>'+
+          (lockMinor ? '<div class="small" style="margin-top:6px;">未滿 18 歲狀態只可由 STAFF／ADMIN 在確認成年後移除。<br/>Under-18 status can only be removed by STAFF/ADMIN after adulthood is confirmed.</div>' : '')+
           '<div id="parentEmailBlock" class="'+(isMinor?'':'hide')+'" style="margin-top:10px;">'+
             '<div class="label">家長/監護人電郵（可選） / Parent email (optional)</div>'+
             '<input id="parentEmail" type="email" autocomplete="email" value="'+escapeHtml(prefill.parentEmail||'')+'" />'+
@@ -1773,6 +1835,17 @@ function viewSelfHoliday(m){
           '<div class="label">備註 / Notes</div>'+
           '<textarea id="notes">'+escapeHtml(prefill.notes||'')+'</textarea>'+
           '<div id="notesHelp" class="small hide">提示：家人關係／短住探訪／特殊需要<br/>Tip: family relationship / visiting / special needs</div>'+
+
+          (!isSelf ? (
+            '<div class="divider"></div>'+
+            '<details class="msgBox" style="margin-bottom:10px;" open>'+
+              '<summary class="big">👨‍👩‍👧‍👦 一併登記家庭成員 / Add family members</summary>'+
+              '<div class="small">可加入最多 3 位（合共最多 4 個獨立 CCF ID／QR）。系統只發一封合併家庭登記電郵；每位成員日後仍可用自己的 QR 獨立更改電郵。<br/>Add up to 3 people (maximum 4 independent CCF IDs/QRs). One combined family registration email is sent; each member can later use their own QR to change email independently.</div>'+
+              '<div class="miniBtnRow"><button id="btnAddFamilyMember" class="alt" type="button">➕ 加入家庭成員 / Add family member</button></div>'+
+              '<div id="familyMemberCount" class="small">0 / 3</div>'+
+              '<div id="familyMembersHost"></div>'+
+            '</details>'
+          ) : '')+
 
           (isSelf ?
             '<div class="msgBox warn" style="margin-bottom:10px;">'+
@@ -1877,6 +1950,7 @@ function viewSelfHoliday(m){
 
     function viewSuccess(res){
       var keep = !!(res && res.keepExistingQr);
+      var familyRows = (res && res.mode === 'FAMILY_CREATE' && Array.isArray(res.members)) ? res.members : [];
       var gz = (res && res.greet && res.greet.zh) ? res.greet.zh : '';
       var ge = (res && res.greet && res.greet.en) ? res.greet.en : '';
       if (!gz && !ge && res && res.member && res.member.greet){
@@ -1895,12 +1969,23 @@ function viewSelfHoliday(m){
       var instruction = keep
         ? ('請交給接待同工掃描此 QR 以完成簽到。<br/>Please ask Welcome team to scan this QR to check-in.')
         : ('請交給接待同工掃描此「新」QR 以完成簽到。<br/>Please ask Welcome team to scan this NEW QR to check-in.');
+      if (familyRows.length){
+        instruction = '每位家庭成員都有獨立 QR。請分別保存，並在簽到時出示正確的 QR。<br/>Each family member has an independent QR. Save each one separately and present the correct QR at check-in.';
+      }
+      var familyQrHtml = familyRows.map(function(member, index){
+        var name = [member.nameZh, member.nameEn].filter(Boolean).join(' / ') || member.memberId || '';
+        return '<div class="msgBox" style="margin-top:10px;text-align:center;">'+
+          '<div class="big">'+escapeHtml(String(member.memberLetter || String.fromCharCode(65+index))+' · '+name)+'</div>'+
+          '<div style="margin-top:6px;"><b>CCF ID: '+escapeHtml(member.memberId||'')+'</b></div>'+
+          '<div class="qrWrap"><div id="qrTargetFamily'+index+'"></div></div>'+
+        '</div>';
+      }).join('');
 
       return ''+
         '<div class="card">'+
           '<div class="big ok">✅ 完成 / Done</div>'+
           '<div class="msgBox ok" style="margin-top:10px;">'+
-            '<div class="big ok">CCF ID：'+escapeHtml(res.memberId||'')+'</div>'+
+            '<div class="big ok">'+(familyRows.length ? ('Family ID：'+escapeHtml(res.familyId||'')) : ('CCF ID：'+escapeHtml(res.memberId||'')))+'</div>'+
             '<div style="margin-top:6px;font-size:16px;">'+
               helloLine + instruction +
             '</div>'+
@@ -1910,7 +1995,7 @@ function viewSelfHoliday(m){
                 '<div class="small">請由現在起只使用「新」QR，並銷毀舊 QR。</div>')
             : ''
           )+
-          '<div class="qrWrap"><div id="qrTarget"></div></div>'+
+          (familyRows.length ? familyQrHtml : '<div class="qrWrap"><div id="qrTarget"></div></div>')+
           emailUiBlock(res)+
           '<div class="miniBtnRow">'+
             '<button id="btnHome" class="alt" type="button">🏠 返回主頁 / Home</button>'+
@@ -1962,7 +2047,14 @@ function viewSelfHoliday(m){
         if(State.view === 'form'){ $('app').innerHTML = viewForm(State.prefill || {}); bindForm(); return; }
         if(State.view === 'success'){
           $('app').innerHTML = viewSuccess(State.lastResult || {});
-          try{ drawQr('qrTarget', (State.lastResult||{}).qrPayload ); }catch(e){}
+          try{
+            var familyRows = Array.isArray((State.lastResult||{}).members) ? (State.lastResult||{}).members : [];
+            if ((State.lastResult||{}).mode === 'FAMILY_CREATE' && familyRows.length){
+              familyRows.forEach(function(member, index){ drawQr('qrTargetFamily'+index, member.qrPayload); });
+            }else{
+              drawQr('qrTarget', (State.lastResult||{}).qrPayload);
+            }
+          }catch(e){}
           $('btnHome').onclick = function(){ State.view='home'; State.lastResult=null; State.lastSubmit=null; State.prefill=null; State.authQrPayload=null; State.keepExistingQr=false; render(); };
           return;
         }
@@ -2773,7 +2865,9 @@ function viewSelfHoliday(m){
           $('servingMsg').innerHTML = showBox('warn','處理中…','Saving...');
           callApi('api_reg_self_serving_remove_public', State.authQrPayload, ev, pos).then(function(r){
             if(!r||!r.ok){ $('servingMsg').innerHTML = showServerErr(r); return; }
-            $('servingMsg').innerHTML = showBox('ok','已取消報名','Removed from rota', '<div class="small">'+escapeHtml(ev+' '+pos)+'</div>');
+            var removedHtml = showBox('ok','已取消報名','Removed from rota', '<div class="small">'+escapeHtml(ev+' '+pos)+'</div>');
+            if (r.warning && (r.warning.zh || r.warning.en)) removedHtml += showBox('warn', r.warning.zh || '配對提示', r.warning.en || 'Pairing notice');
+            $('servingMsg').innerHTML = removedHtml;
             return callApi('api_reg_self_serving_data_public', State.authQrPayload).then(function(res){ State.lastResult=res; render(); });
           }).catch(function(err){
             var msg = (err && err.message) ? err.message : String(err||'');
@@ -2926,6 +3020,61 @@ function viewSelfHoliday(m){
         $('parentEmailBlock').classList.toggle('hide', !$('isMinor').checked);
       });
 
+      function refreshFamilyCount_(){
+        var cards = Array.prototype.slice.call(document.querySelectorAll('[data-family-member="1"]'));
+        if ($('familyMemberCount')) $('familyMemberCount').textContent = cards.length + ' / 3';
+        if ($('btnAddFamilyMember')) $('btnAddFamilyMember').disabled = cards.length >= 3;
+      }
+      function bindFamilyCard_(card){
+        if (!card) return;
+        var index = String(card.getAttribute('data-family-index') || '');
+        var p = 'fam' + index + '_';
+        function refreshShares_(){
+          if ($(p+'emailOwnBlock')) $(p+'emailOwnBlock').classList.toggle('hide', !!($(p+'shareEmail') && $(p+'shareEmail').checked));
+          if ($(p+'mobileOwnBlock')) $(p+'mobileOwnBlock').classList.toggle('hide', !!($(p+'shareMobile') && $(p+'shareMobile').checked));
+        }
+        if ($(p+'shareEmail')) $(p+'shareEmail').onchange = refreshShares_;
+        if ($(p+'shareMobile')) $(p+'shareMobile').onchange = refreshShares_;
+        if ($(p+'isMinor')) $(p+'isMinor').onchange = function(){
+          if ($(p+'parentEmailBlock')) $(p+'parentEmailBlock').classList.toggle('hide', !$(p+'isMinor').checked);
+        };
+        Array.prototype.slice.call(card.querySelectorAll('button[data-family-car]')).forEach(function(btn){
+          btn.onclick = function(){
+            var value = String(btn.getAttribute('data-family-car') || '');
+            card.setAttribute('data-has-car', value);
+            var yes = card.querySelector('button[data-family-car="YES"]');
+            var no = card.querySelector('button[data-family-car="NO"]');
+            if (yes) yes.classList.toggle('btnSelGood', value === 'YES');
+            if (no) no.classList.toggle('btnSelBad', value === 'NO');
+            if ($(p+'carState')){
+              $(p+'carState').className = 'carState ' + (value === 'YES' ? 'good' : 'bad');
+              $(p+'carState').textContent = value === 'YES' ? '✅ 已選擇：有車 / Selected: Yes' : '❌ 已選擇：無車 / Selected: No';
+            }
+            if ($(p+'vrmBlock')) $(p+'vrmBlock').classList.toggle('hide', value !== 'YES');
+            if (value !== 'YES'){
+              if ($(p+'vrm')) $(p+'vrm').value = '';
+              if ($(p+'vrm2')) $(p+'vrm2').value = '';
+            }
+          };
+        });
+        var remove = card.querySelector('button[data-family-remove]');
+        if (remove) remove.onclick = function(){ card.remove(); refreshFamilyCount_(); };
+        refreshShares_();
+      }
+      if ($('btnAddFamilyMember') && $('familyMembersHost')) $('btnAddFamilyMember').onclick = function(){
+        var existing = Array.prototype.slice.call(document.querySelectorAll('[data-family-member="1"]'));
+        if (existing.length >= 3) return;
+        var used = existing.map(function(card){ return Number(card.getAttribute('data-family-index') || 0); });
+        var index = [1,2,3].find(function(n){ return used.indexOf(n) < 0; }) || (existing.length + 1);
+        var holder = document.createElement('div');
+        holder.innerHTML = familyMemberCardHtml_(index);
+        var card = holder.firstElementChild;
+        $('familyMembersHost').appendChild(card);
+        bindFamilyCard_(card);
+        refreshFamilyCount_();
+      };
+      refreshFamilyCount_();
+
       function setCar(v){
         window._hasCar = v;
         if(v === 'YES'){
@@ -3050,14 +3199,51 @@ function viewSelfHoliday(m){
 
       if ($('btnDeleteMembership')) $('btnDeleteMembership').onclick = function(){
         if(!confirm('刪除會籍後不可還原，是否繼續？\nThis is irreversible. Continue?')) return;
-        var q = prompt('請輸入目前登入 QR payload 以確認\nPaste current signed-in QR payload to confirm');
-        if(!q) return;
-        $('formMsg').innerHTML = showBox('warn','處理中…','Processing…');
-        callApi('api_reg_self_delete_membership_public', State.authQrPayload, q).then(function(r){
-          if(!r||!r.ok){ $('formMsg').innerHTML = showServerErr(r); return; }
-          $('formMsg').innerHTML = showBox('ok','已停用會籍，請重新登入','Membership disabled. Please log in again.');
-          setTimeout(function(){ State.view='home'; State.authQrPayload=null; State.prefill=null; State.snapshot=null; render(); }, 900);
-        }).catch(function(){ $('formMsg').innerHTML = showBox('err','系統錯誤','System error'); });
+        var modal = openModal(
+          '<div class="big">🔐 再次確認 QR / Confirm QR again</div>'+
+          '<div class="small" style="margin-top:8px;">請掃描目前登入的 QR，或上傳該 QR 圖片。<br/>Scan the currently signed-in QR or upload its image.</div>'+
+          '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="btnDeleteQrScan" class="primary" type="button">📷 掃描 QR / Scan QR</button>'+
+            '<button id="btnDeleteQrUpload" class="alt" type="button">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
+            '<button id="btnDeleteQrCancel" class="danger" type="button">取消 / Cancel</button>'+
+          '</div>'+
+          '<input id="deleteQrImageInput" type="file" accept="image/*" class="hide"/>'+
+          '<div id="deleteQrMsg"></div>'
+        );
+        function submitDeleteQr_(payload){
+          if (!payload) return;
+          var msg = modal.querySelector('#deleteQrMsg');
+          if (msg) msg.innerHTML = showBox('warn','處理中…','Processing…');
+          callApi('api_reg_self_delete_membership_public', State.authQrPayload, payload).then(function(r){
+            if(!r||!r.ok){ if (msg) msg.innerHTML = showServerErr(r); return; }
+            closeModal(modal);
+            $('formMsg').innerHTML = showBox('ok','已停用會籍，請重新登入','Membership disabled. Please log in again.');
+            setTimeout(function(){ State.view='home'; State.authQrPayload=null; State.prefill=null; State.snapshot=null; render(); }, 900);
+          }).catch(function(){ if (msg) msg.innerHTML = showBox('err','系統錯誤','System error'); });
+        }
+        modal.querySelector('#btnDeleteQrCancel').onclick = function(){ closeModal(modal); };
+        modal.querySelector('#btnDeleteQrScan').onclick = function(){
+          var msg = modal.querySelector('#deleteQrMsg');
+          if (msg) msg.innerHTML = showBox('warn','正在開啟掃描器…','Opening scanner…');
+          openExternalScanner_(submitDeleteQr_, function(status){
+            if (status === 'success') return;
+            if (msg) msg.innerHTML = status === 'config_invalid'
+              ? scannerConfigWarningHtml_()
+              : showBox('warn','掃描未完成，請再試一次','Scanning was not completed. Please try again.');
+          });
+        };
+        modal.querySelector('#btnDeleteQrUpload').onclick = function(){
+          var input = modal.querySelector('#deleteQrImageInput');
+          input.value = '';
+          input.click();
+        };
+        modal.querySelector('#deleteQrImageInput').onchange = function(ev){
+          var file = ev && ev.target && ev.target.files && ev.target.files[0];
+          var msg = modal.querySelector('#deleteQrMsg');
+          if (!file) return;
+          if (msg) msg.innerHTML = showBox('warn','讀取圖片中…','Reading image…');
+          decodeQrImageFile_(file).then(submitDeleteQr_).catch(function(err){ if (msg) msg.innerHTML = showServerErr(err); });
+        };
       };
     }
 
@@ -3082,7 +3268,7 @@ function viewSelfHoliday(m){
 
       if (ccDig === '44' && !natDig) ccDig = '';
 
-      return {
+      var out = {
         nameZh: $('nameZh').value.trim(),
         nameEn: $('nameEn').value.trim(),
         preferredName: $('preferredName').value.trim(),
@@ -3107,43 +3293,82 @@ function viewSelfHoliday(m){
         deviceId: getDeviceId(),
         ua: getUA()
       };
+      if (State.flow === 'create'){
+        out.familyMembers = Array.prototype.slice.call(document.querySelectorAll('[data-family-member="1"]')).map(function(card){
+          var index = String(card.getAttribute('data-family-index') || '');
+          var p = 'fam' + index + '_';
+          var shareEmail = !!($(p+'shareEmail') && $(p+'shareEmail').checked);
+          var shareMobile = !!($(p+'shareMobile') && $(p+'shareMobile').checked);
+          var ownCc = $(p+'phoneCc') ? $(p+'phoneCc').value.replace(/\D/g,'') : '';
+          var ownNat = $(p+'phoneNat') ? $(p+'phoneNat').value.replace(/\D/g,'') : '';
+          if (ownCc === '44' && !ownNat) ownCc = '';
+          return {
+            nameZh:$(p+'nameZh') ? $(p+'nameZh').value.trim() : '',
+            nameEn:$(p+'nameEn') ? $(p+'nameEn').value.trim() : '',
+            preferredName:$(p+'preferredName') ? $(p+'preferredName').value.trim() : '',
+            referredBy:out.referredBy,
+            gender:$(p+'gender') ? String($(p+'gender').value || '').trim().toUpperCase() : '',
+            email:shareEmail ? out.email : ($(p+'email') ? $(p+'email').value.trim() : ''),
+            optInEmail:shareEmail ? out.optInEmail : !!($(p+'optInEmail') && $(p+'optInEmail').checked),
+            phoneCc:shareMobile ? out.phoneCc : ownCc,
+            phoneNat:shareMobile ? out.phoneNat : ownNat,
+            isMinor:!!($(p+'isMinor') && $(p+'isMinor').checked),
+            parentEmail:$(p+'parentEmail') ? $(p+'parentEmail').value.trim() : '',
+            hasCar:String(card.getAttribute('data-has-car') || ''),
+            vrm:normalizeVrm($(p+'vrm') ? $(p+'vrm').value : ''),
+            vrm2:normalizeVrm($(p+'vrm2') ? $(p+'vrm2').value : ''),
+            notes:$(p+'notes') ? $(p+'notes').value.trim() : '',
+            deviceId:out.deviceId,
+            ua:out.ua
+          };
+        });
+      }
+      return out;
     }
 
     function validateLocal(d){
-      if (d.email && d.parentEmail && d.email.trim().toLowerCase() === d.parentEmail.trim().toLowerCase()){
-        return { ok:false, zh:'家長電郵與本人電郵相同，請刪除其中一個或改用不同電郵。', en:'Parent email equals member email. Remove one or use a different email.' };
-      }
-
-      if (d.optInEmail && !d.email){
-        return { ok:false, zh:'如選擇接收電郵，請填寫電郵；或取消勾選後再繼續', en:'Email is required if email opt-in is checked.' };
-      }
-
-      var hasPhone = (d.phoneCc && d.phoneNat);
-      if (!d.email && !hasPhone){
-        return { ok:false, zh:'請填寫手機或電郵（至少一項）', en:'Please provide phone or email (at least one).' };
-      }
-
-      if(hasPhone){
-        if (d.phoneCc === '852' && d.phoneNat.length !== 8){
-          return { ok:false, zh:'香港號碼必須為 8 位數。', en:'Hong Kong number must be 8 digits.' };
+      function validateOne_(member, label){
+        var prefixZh = label ? (label + '：') : '';
+        var prefixEn = label ? (label + ': ') : '';
+        if (member.email && member.parentEmail && member.email.trim().toLowerCase() === member.parentEmail.trim().toLowerCase()){
+          return { ok:false, zh:prefixZh+'家長電郵與本人電郵相同，請刪除其中一個或改用不同電郵。', en:prefixEn+'Parent email equals member email. Remove one or use a different email.' };
         }
-        if (d.phoneCc === '44'){
-          var okUk = (d.phoneNat.length === 10) || (d.phoneNat.length === 11 && d.phoneNat[0] === '0');
-          if(!okUk) return { ok:false, zh:'英國號碼格式不正確（10 位數，或 11 位並以 0 開頭）。', en:'UK number invalid.' };
+        if (member.optInEmail && !member.email){
+          return { ok:false, zh:prefixZh+'如選擇接收電郵，請填寫電郵；或取消勾選後再繼續', en:prefixEn+'Email is required if email opt-in is checked.' };
         }
+        var hasPhone = (member.phoneCc && member.phoneNat);
+        if (!member.email && !hasPhone){
+          return { ok:false, zh:prefixZh+'請填寫手機或電郵（至少一項）', en:prefixEn+'Please provide phone or email (at least one).' };
+        }
+        if(hasPhone){
+          if (member.phoneCc === '852' && member.phoneNat.length !== 8){
+            return { ok:false, zh:prefixZh+'香港號碼必須為 8 位數。', en:prefixEn+'Hong Kong number must be 8 digits.' };
+          }
+          if (member.phoneCc === '44'){
+            var okUk = (member.phoneNat.length === 10) || (member.phoneNat.length === 11 && member.phoneNat[0] === '0');
+            if(!okUk) return { ok:false, zh:prefixZh+'英國號碼格式不正確（10 位數，或 11 位並以 0 開頭）。', en:prefixEn+'UK number invalid.' };
+          }
+        }
+        if(!member.nameZh && !member.nameEn) return { ok:false, zh:prefixZh+'請填寫中文名或英文名（至少一項）', en:prefixEn+'Please provide Chinese or English name (at least one).' };
+        if(!member.nameZh && member.nameEn){
+          var parts = member.nameEn.split(/\s+/).filter(Boolean);
+          if(parts.length < 2) return { ok:false, zh:prefixZh+'只填英文名時，請同時填寫名及姓', en:prefixEn+'If only English name, include first and last name.' };
+        }
+        if (!member.gender) return { ok:false, zh:prefixZh+'請選擇性別', en:prefixEn+'Please select gender.' };
+        if(['MALE','FEMALE','OTHER','PREFER_NOT'].indexOf(member.gender) < 0) return { ok:false, zh:prefixZh+'性別選項不正確', en:prefixEn+'Invalid gender option.' };
+        if(member.hasCar !== 'YES' && member.hasCar !== 'NO') return { ok:false, zh:prefixZh+'請選擇是否有車', en:prefixEn+'Please choose whether you have a car.' };
+        if(member.hasCar === 'YES' && !member.vrm && !member.vrm2) return { ok:false, zh:prefixZh+'如有車，請填寫至少一個車牌', en:prefixEn+'If you have a car, provide at least one VRM.' };
+        return { ok:true };
       }
 
-      if(!d.nameZh && !d.nameEn) return { ok:false, zh:'請填寫中文名或英文名（至少一項）', en:'Please provide Chinese or English name (at least one).' };
-      if(!d.nameZh && d.nameEn){
-        var parts = d.nameEn.split(/\s+/).filter(Boolean);
-        if(parts.length < 2) return { ok:false, zh:'只填英文名時，請同時填寫名及姓', en:'If only English name, include first and last name.' };
+      var primaryValidation = validateOne_(d, '主要登記人 / Primary member');
+      if (!primaryValidation.ok) return primaryValidation;
+      var familyMembers = Array.isArray(d.familyMembers) ? d.familyMembers : [];
+      if (familyMembers.length > 3) return { ok:false, zh:'最多只可加入 3 位家庭成員', en:'You can add at most three family members.' };
+      for (var familyIndex=0; familyIndex<familyMembers.length; familyIndex++){
+        var familyValidation = validateOne_(familyMembers[familyIndex], '家庭成員 '+(familyIndex+1)+' / Family member '+(familyIndex+1));
+        if (!familyValidation.ok) return familyValidation;
       }
-
-      if (!d.gender) return { ok:false, zh:'請選擇性別', en:'Please select gender.' };
-      if(['MALE','FEMALE','OTHER','PREFER_NOT'].indexOf(d.gender) < 0) return { ok:false, zh:'性別選項不正確', en:'Invalid gender option.' };
-      if(d.hasCar !== 'YES' && d.hasCar !== 'NO') return { ok:false, zh:'請選擇是否有車', en:'Please choose whether you have a car.' };
-      if(d.hasCar === 'YES' && !d.vrm && !d.vrm2) return { ok:false, zh:'如有車，請填寫至少一個車牌', en:'If you have a car, provide at least one VRM.' };
-
       return { ok:true };
     }
 

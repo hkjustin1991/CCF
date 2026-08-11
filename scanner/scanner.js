@@ -9,7 +9,9 @@
   var video = document.getElementById('video');
   var statusEl = document.getElementById('status');
   var btnRetry = document.getElementById('btnRetry');
+  var btnUpload = document.getElementById('btnUpload');
   var btnCancel = document.getElementById('btnCancel');
+  var qrImageInput = document.getElementById('qrImageInput');
 
   var scanner = {
     stream:null,
@@ -172,7 +174,41 @@
     });
   }
 
+  function decodeUploadedQr(file){
+    if(!file){ setStatus('請先選擇圖片 / Please choose an image first.'); return; }
+    stopScan();
+    setStatus('讀取圖片中… / Reading image…');
+    var reader = new FileReader();
+    reader.onload = function(){
+      var image = new Image();
+      image.onload = function(){
+        try{
+          var canvas = document.createElement('canvas');
+          canvas.width = image.naturalWidth || image.width;
+          canvas.height = image.naturalHeight || image.height;
+          var ctx = canvas.getContext('2d', { willReadFrequently:true });
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          var data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          var decoded = window.jsQR ? window.jsQR(data.data, canvas.width, canvas.height) : null;
+          if(decoded && decoded.data){ finishSuccess(String(decoded.data)); return; }
+          setStatus('圖片中找不到 QR code，請選擇更清晰圖片。 / No QR code found. Choose a clearer image.');
+        }catch(err){
+          setStatus('圖片解碼失敗 / Image decode failed');
+        }
+      };
+      image.onerror = function(){ setStatus('圖片格式不支援 / Unsupported image format'); };
+      image.src = reader.result;
+    };
+    reader.onerror = function(){ setStatus('檔案讀取失敗 / Failed to read file'); };
+    reader.readAsDataURL(file);
+  }
+
   btnRetry.addEventListener('click', startScan);
+  btnUpload.addEventListener('click', function(){ qrImageInput.value=''; qrImageInput.click(); });
+  qrImageInput.addEventListener('change', function(ev){
+    var file = ev && ev.target && ev.target.files && ev.target.files[0];
+    decodeUploadedQr(file);
+  });
   btnCancel.addEventListener('click', function(){ finishCancel('user_cancelled'); });
   window.addEventListener('beforeunload', function(){ stopScan(); });
 

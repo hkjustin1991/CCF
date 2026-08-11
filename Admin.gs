@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-11.admin119
- * CHANGELOG: GL/STAFF/ADMIN serving-group membership permissions are aligned.
+ * v2026-08-11.admin120
+ * CHANGELOG: child-serving safeguards, Logistics index dashboard, and member-name/minor metadata.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-11.admin119';
+const ADMIN_VERSION = '2026-08-11.admin120';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -71,6 +71,16 @@ const ADMIN_AUDIT_SHEET_NAME = 'Admin_Activity';
 const ADMIN_MEMBERS_HEADERS_REQUIRED = [
   'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
 ];
+const ADMIN_MINOR_SERVING_HEADERS = [
+  'IsMinor',
+  'MinorServingApprovedGroups',
+  'MinorServingSelfSignup',
+  'MinorServingApprovedBy',
+  'MinorServingApprovedAt'
+];
+const ADMIN_MINOR_SERVING_GROUP = 'LOGISTIC';
+const ADMIN_LOGISTICS_DASHBOARD_DAYS = 56;
+const ADMIN_ACTIVITY_WINDOW_DAYS = 182;
 
 // Range limits
 const ADMIN_MAX_DAYS_STAFF = 181;
@@ -213,7 +223,7 @@ function admin_servingPositionZh_(pos){
 }
 
 // Cache
-const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v2';
+const ADMIN_CACHE_FIRSTSEEN_KEY = 'admin_firstSeen_v3';
 const ADMIN_CACHE_FIRSTSEEN_TTL = 10 * 60;
 
 const ADMIN_CACHE_LOWATT_KEY = 'admin_lowatt_v1';
@@ -223,6 +233,21 @@ const ADMIN_CACHE_CHECKINS_PART_PREFIX = 'admin_checkins_part_v1_';
 const ADMIN_CACHE_CHECKINS_TTL = 60;
 const ADMIN_CACHE_CHECKINS_PART_CHARS = 85000;
 const ADMIN_CACHE_CHECKINS_MAX_PARTS = 12;
+
+function admin_clearCheckinsDerivedCache_(){
+  try{
+    const cache = CacheService.getScriptCache();
+    let partCount = ADMIN_CACHE_CHECKINS_MAX_PARTS;
+    try{
+      const raw = cache.get(ADMIN_CACHE_CHECKINS_MANIFEST_KEY);
+      const manifest = raw ? JSON.parse(raw) : null;
+      if (manifest && Number(manifest.nParts) > 0) partCount = Math.min(ADMIN_CACHE_CHECKINS_MAX_PARTS, Number(manifest.nParts));
+    }catch(e){}
+    cache.remove(ADMIN_CACHE_CHECKINS_MANIFEST_KEY);
+    cache.remove(ADMIN_CACHE_FIRSTSEEN_KEY);
+    for (let i=0;i<partCount;i++) cache.remove(ADMIN_CACHE_CHECKINS_PART_PREFIX + i);
+  }catch(e){}
+}
 const ADMIN_CACHE_CHECKINS_TELEMETRY_THROTTLE = 60;
 
 // ---- Page ----
@@ -1062,6 +1087,12 @@ function api_admin_serving_group_member_summary(token, groupKey, memberId){
       nameEn:member.nameEn||'',
       preferredName:String(member.preferredName||'').trim(),
       status:admin_normStatus_(member.status||''),
+      isMinor:!!member.isMinor,
+      familyId:String(member.familyId||''),
+      minorServingApprovedGroups:member.minorServingApprovedGroups||[],
+      minorServingSelfSignup:!!member.minorServingSelfSignup,
+      minorServingApprovedBy:String(member.minorServingApprovedBy||''),
+      minorServingApprovedAt:String(member.minorServingApprovedAt||''),
       servingGroups:member.servingGroups||[],
       servingGLGroups:member.servingGLGroups||[]
     },
@@ -1120,6 +1151,10 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
 
   if (!admin_canManageServingGroupTarget_(s.actor, target)){
     return admin_err_('E403','只有 ADMIN 可修改 STAFF/ADMIN 的事奉組別','Only ADMIN can modify STAFF/ADMIN serving groups.');
+  }
+  if (up === 'ADD' && target.isMinor){
+    const eligibility = admin_minorServingEligibility_(target, key);
+    if (!eligibility.ok) return eligibility;
   }
 
   const sh = admin_findMembersSheet_();
@@ -1226,7 +1261,7 @@ function api_admin_serving_event_rows(token, eventKey){
   const members = Object.keys(mi.byId).map(function(id){
     const m = mi.byId[id];
     const groups = (m.servingGroups || []).concat(m.servingGLGroups || []).filter(Boolean);
-    return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', preferredName: m.preferredName||'', groups: groups };
+    return { id: m.id, nameZh: m.nameZh||'', nameEn: m.nameEn||'', preferredName: m.preferredName||'', isMinor:!!m.isMinor, familyId:String(m.familyId||''), groups: groups };
   });
   members.sort(function(a,b){ return a.id.localeCompare(b.id); });
   return { ok:true, eventKey: ev, positions: positions, values: values, members: members };
@@ -1363,6 +1398,22 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     }).join(' | ');
     return admin_conflict_('成員不屬於該事奉組別','Member is NOT a member of this serving group.', detail, 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_ASSIGNMENT');
   }
+  const minorValidation = admin_validateMinorServingValues_(mergedValues, membersById, Array.from(changedPositions));
+  if (!minorValidation.ok){
+    const firstMinorError = minorValidation.errors[0] || {};
+    return {
+      ok:false,
+      code:'E409',
+      subCode:String(firstMinorError.code || 'MINOR_SERVING_INVALID'),
+      subGroup:'MINOR_SERVING',
+      zh:String(firstMinorError.zh || '未成年事奉安排不符合規則'),
+      en:String(firstMinorError.en || 'Young-volunteer assignment does not meet the rules.'),
+      detail:(minorValidation.errors || []).map(function(err){
+        return [err.memberId, admin_servingPositionLabel_(err.position), err.zh + ' / ' + err.en].filter(Boolean).join(' · ');
+      }).join(' | '),
+      minorErrors:minorValidation.errors
+    };
+  }
   if (duplicateDetails.length){
     if (!canOverride){
       const detail = duplicateDetails.map(function(d){
@@ -1425,7 +1476,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     rows: cleaned.length,
     warnings:{
       conflicts: [],
-      duplicates: []
+      duplicates: [],
+      minorPairing: minorValidation.warnings || []
     }
   };
 }
@@ -1613,6 +1665,7 @@ function api_admin_stats(token, fromDate, toDate){
 
   const firstSeenRes = admin_getFirstSeenIndexCached_();
   const firstSeen = firstSeenRes.map;
+  const statsMembersById = admin_getMembersIndex_().byId || {};
 
   const check = admin_getCheckinsDataCached_();
   if (!check.ok) return check;
@@ -1658,8 +1711,7 @@ function api_admin_stats(token, fromDate, toDate){
 
     if (set){
       for (const mid of set){
-        const fev = firstSeen[mid];
-        if (fev && fev === ev) newCount++;
+        if (admin_isNewFriendForEvent_(ev, mid, firstSeen, statsMembersById)) newCount++;
         if (admin_isInAwayOnDate_(awayMap[mid], d)) holidayCount++;
       }
     }
@@ -1739,7 +1791,7 @@ function api_admin_event_detail(token, eventKey){
       preferredName: String(m.preferredName||'').trim(),
       status: admin_normStatus_(m.status||'')
     };
-    if (fs[mid] && fs[mid] === ev) newMembers.push(obj);
+    if (admin_isNewFriendForEvent_(ev, mid, fs, mi.byId || {})) newMembers.push(obj);
     else existingMembers.push(obj);
   });
 
@@ -1828,6 +1880,7 @@ function api_admin_period_stats(token, fromDate, toDate){
   }
 
   const fs = admin_getFirstSeenIndexCached_().map;
+  const periodMembersById = admin_getMembersIndex_().byId || {};
   const newByMonth = {};
   for (const mid in fs){
     const fev = fs[mid];
@@ -1836,8 +1889,10 @@ function api_admin_period_stats(token, fromDate, toDate){
     if (!d) continue;
     if (d < range.from || d > range.to) continue;
     const mk = admin_fmtYm_(d);
-    if (!newByMonth[mk]) newByMonth[mk] = new Set();
-    newByMonth[mk].add(mid);
+    if (admin_isNewFriendForEvent_(fev, mid, fs, periodMembersById)){
+      if (!newByMonth[mk]) newByMonth[mk] = new Set();
+      newByMonth[mk].add(mid);
+    }
   }
 
   const monthsOut = Object.keys(month).sort().map(k => {
@@ -1881,7 +1936,7 @@ function api_admin_period_stats(token, fromDate, toDate){
     if (d < range.from || d > range.to) continue;
     const sk = seasonLabel_(d);
     if (!seasonBuckets[sk]) seasonBuckets[sk] = { season: sk, services:0, total:0, uniqueSet:new Set(), newSet:new Set() };
-    seasonBuckets[sk].newSet.add(mid);
+    if (admin_isNewFriendForEvent_(fev, mid, fs, periodMembersById)) seasonBuckets[sk].newSet.add(mid);
   }
 
   const seasonsOut = Object.keys(seasonBuckets).sort().map(k => {
@@ -2136,6 +2191,10 @@ function api_admin_member_search(token, q){
         nameZh: m.nameZh||'',
         nameEn: m.nameEn||'',
         status: st,
+        isMinor: !!m.isMinor,
+        familyId: String(m.familyId||''),
+        minorServingApprovedGroups: m.minorServingApprovedGroups || [],
+        minorServingSelfSignup: !!m.minorServingSelfSignup,
         servingGroups: m.servingGroups || [],
         servingGLGroups: m.servingGLGroups || [],
         lowFlag: !!flags.flagById[m.id],
@@ -2231,6 +2290,12 @@ function api_admin_member_detail(token, memberId, fromDate, toDate){
       nameEn: m.nameEn||'',
       preferredName: pref || '',
       status: admin_normStatus_(m.status||''),
+      isMinor: !!m.isMinor,
+      familyId: String(m.familyId||''),
+      minorServingApprovedGroups: m.minorServingApprovedGroups || [],
+      minorServingSelfSignup: !!m.minorServingSelfSignup,
+      minorServingApprovedBy: String(m.minorServingApprovedBy||''),
+      minorServingApprovedAt: String(m.minorServingApprovedAt||''),
       memberSince: memberSinceYmd || '',
       servingGroups: m.servingGroups || [],
       servingGLGroups: m.servingGLGroups || []
@@ -2401,6 +2466,77 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
   }), 'status');
 
   return { ok:true, memberId:id, fromStatus: oldStatusRaw, toStatus: ns, expiryIso: expiryIso };
+}
+
+/**
+ * Record or revoke the safeguarding approval used by the serving rules.
+ * STAFF/ADMIN may approve; GL can see the state but cannot change it.
+ * markAdult is the separate, reauthenticated transition once the member is 18.
+ */
+function api_admin_member_minor_serving_update(token, memberId, options, reauthQrPayload){
+  const s = admin_requireSession_(token);
+  if (!s.ok) return s;
+  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
+  if (!(role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER')){
+    return admin_err_('E403','只有 STAFF／ADMIN 可更改未成年事奉批准','Only STAFF/ADMIN may change young-volunteer approval.');
+  }
+  const id = String(memberId || '').trim().toUpperCase();
+  if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
+  const auth = admin_verifyReauth_(s.actor, reauthQrPayload);
+  if (!auth.ok) return auth;
+
+  const opts = options || {};
+  const markAdult = !!opts.markAdult;
+  const approved = !markAdult && !!opts.approved;
+  const selfSignup = approved && !!opts.selfSignup;
+  const ms = admin_findMembersSheet_();
+  if (!ms) return admin_err_('E500','找不到 Members 表','Members sheet not found.');
+  const col = admin_getMembersColMap_(ms);
+  admin_ensureMemberColumns_(ms, col, ADMIN_MINOR_SERVING_HEADERS.concat(['ParentEmail']));
+  const rowNumber = admin_findMemberRowById_(ms, col, id);
+  if (!rowNumber) return admin_err_('E412','找不到此會員','Member not found.');
+  const isMinorNow = String(ms.getRange(rowNumber, col.IsMinor + 1).getValue() || '').trim().toUpperCase() === 'YES';
+  if (!isMinorNow && !markAdult){
+    return admin_conflict_('此會員未標示為未滿 18 歲','This member is not marked as under 18.','', 'MEMBER_NOT_MINOR','MINOR_SERVING');
+  }
+
+  const by = String(auth.confirmedBy || s.actor.id || '').trim().toUpperCase();
+  const at = admin_nowIso_();
+  if (markAdult){
+    ms.getRange(rowNumber, col.IsMinor + 1).setValue('NO');
+    ms.getRange(rowNumber, col.MinorServingApprovedGroups + 1).setValue('');
+    ms.getRange(rowNumber, col.MinorServingSelfSignup + 1).setValue('NO');
+    ms.getRange(rowNumber, col.MinorServingApprovedBy + 1).setValue('');
+    ms.getRange(rowNumber, col.MinorServingApprovedAt + 1).setValue('');
+    if (opts.removeParentEmail && col.ParentEmail !== undefined){
+      ms.getRange(rowNumber, col.ParentEmail + 1).setValue('');
+    }
+  }else{
+    ms.getRange(rowNumber, col.MinorServingApprovedGroups + 1).setValue(approved ? ADMIN_MINOR_SERVING_GROUP : '');
+    ms.getRange(rowNumber, col.MinorServingSelfSignup + 1).setValue(selfSignup ? 'YES' : 'NO');
+    ms.getRange(rowNumber, col.MinorServingApprovedBy + 1).setValue(approved ? by : '');
+    ms.getRange(rowNumber, col.MinorServingApprovedAt + 1).setValue(approved ? at : '');
+  }
+  admin_clearMembersCache_();
+  if (typeof clearMembersIndexCache_ === 'function') clearMembersIndexCache_();
+  admin_audit_(s.actor, markAdult ? 'MEMBER_CONFIRMED_ADULT' : 'MINOR_SERVING_APPROVAL_UPDATE', JSON.stringify({
+    memberId:id,
+    approved:approved,
+    selfSignup:selfSignup,
+    markAdult:markAdult,
+    removeParentEmail:!!opts.removeParentEmail,
+    confirmedBy:by
+  }), 'minor_serving');
+  return {
+    ok:true,
+    memberId:id,
+    isMinor:!markAdult,
+    approved:approved,
+    selfSignup:selfSignup,
+    approvedBy:approved ? by : '',
+    approvedAt:approved ? at : '',
+    parentEmailRemoved:!!(markAdult && opts.removeParentEmail)
+  };
 }
 
 /* ===========================
@@ -3059,12 +3195,97 @@ function admin_memberLabelCompact_(m){
   const zh = String((m && m.nameZh) || '').trim();
   const en = String((m && m.nameEn) || '').trim();
   const fallback = [en, zh].filter(Boolean).join(' / ');
-  const display = pref || fallback || zh || en || id;
+  const hasName = !!(pref || fallback || zh || en);
+  const display = pref || fallback || zh || en || '⚠️ 找不到會員姓名 / Member name not found';
+  const isMinor = !!(m && m.isMinor);
+  const prefix = isMinor ? '🧒 ' : '';
   return {
     id: id,
+    nameZh: zh,
+    nameEn: en,
+    preferredName: pref,
+    isMinor: isMinor,
+    familyId: String((m && m.familyId) || '').trim(),
+    nameFound:hasName,
     name: display,
-    label: id ? (id + ' · ' + display) : display
+    label: id ? (prefix + id + ' · ' + display) : (prefix + display)
   };
+}
+function admin_minorApprovedForGroup_(member, groupKey){
+  if (!member || !member.isMinor) return true;
+  const key = admin_normalizeServingGroupToken_(groupKey);
+  const approved = Array.isArray(member.minorServingApprovedGroups)
+    ? member.minorServingApprovedGroups
+    : admin_parseGroupsCsv_(member.minorServingApprovedGroups || '');
+  return approved.indexOf(key) >= 0;
+}
+function admin_minorServingEligibility_(member, groupKey){
+  if (!member) return admin_err_('E412','找不到此會員','Member not found.');
+  if (!member.isMinor) return { ok:true, isMinor:false };
+  const group = admin_normalizeServingGroupToken_(groupKey);
+  if (group !== ADMIN_MINOR_SERVING_GROUP){
+    return admin_conflict_('未成年會員目前只可參與後勤事奉','Young volunteers may currently serve in Logistics only.','', 'MINOR_GROUP_NOT_ALLOWED','MINOR_SERVING');
+  }
+  if (admin_normStatus_(member.status) !== 'ACTIVE'){
+    return admin_conflict_('未成年會員必須先成為 ACTIVE 才可安排事奉','A young volunteer must be ACTIVE before being rostered.','', 'MINOR_NOT_ACTIVE','MINOR_SERVING');
+  }
+  if (!admin_minorApprovedForGroup_(member, group)){
+    return admin_conflict_('未成年會員尚未獲批准參與後勤事奉','This young member is not approved to serve in Logistics.','', 'MINOR_NOT_APPROVED','MINOR_SERVING');
+  }
+  return { ok:true, isMinor:true, selfSignup:!!member.minorServingSelfSignup };
+}
+function admin_validateMinorServingValues_(valuesByPosition, membersById, positionsToCheck){
+  const values = valuesByPosition || {};
+  const byId = membersById || {};
+  const selected = Array.isArray(positionsToCheck) ? positionsToCheck : ADMIN_SERVING_POSITIONS;
+  const errors = [];
+  const warnings = [];
+  selected.forEach(function(position){
+    const group = admin_normalizeServingGroup_(ADMIN_SERVING_POSITION_GROUP[position] || '');
+    const ids = admin_extractMemberIdsFromServingValue_(String(values[position] || ''));
+    const members = ids.map(function(id){ return byId[id] || null; }).filter(Boolean);
+    const minors = members.filter(function(m){ return !!m.isMinor; });
+    if (!minors.length) return;
+    const adults = members.filter(function(m){
+      return !m.isMinor && admin_normStatus_(m.status) !== 'DISABLED';
+    });
+    minors.forEach(function(minor){
+      const eligibility = admin_minorServingEligibility_(minor, group);
+      if (!eligibility.ok){
+        errors.push({
+          memberId:minor.id,
+          position:position,
+          code:eligibility.subCode || eligibility.code || 'MINOR_NOT_ELIGIBLE',
+          zh:eligibility.zh,
+          en:eligibility.en
+        });
+        return;
+      }
+      if (!adults.length){
+        errors.push({
+          memberId:minor.id,
+          position:position,
+          code:'MINOR_ADULT_PAIR_REQUIRED',
+          zh:'未成年事奉者必須在同一崗位與成年同工一同服侍',
+          en:'A young volunteer must be paired with an adult in the same position.'
+        });
+        return;
+      }
+      const familyId = String(minor.familyId || '').trim();
+      const sameFamilyAdults = familyId ? adults.filter(function(adult){ return String(adult.familyId || '').trim() === familyId; }) : [];
+      if (!sameFamilyAdults.length){
+        warnings.push({
+          memberId:minor.id,
+          position:position,
+          adultIds:adults.map(function(adult){ return adult.id; }),
+          code:'MINOR_DIFFERENT_FAMILY_ADULT',
+          zh:'未有同一家庭成人安排；已由其他成年同工配對',
+          en:'No adult from the same family is assigned; paired with another adult volunteer.'
+        });
+      }
+    });
+  });
+  return { ok:errors.length === 0, errors:errors, warnings:warnings };
 }
 function admin_servingGroupLabelText_(groupKey){
   const key = admin_normalizeServingGroup_(groupKey);
@@ -3254,13 +3475,22 @@ function admin_buildServingGroupOverview_(fromYmd){
   const out = { byGroup:{} };
   const groups = ['worship','media','logistic','support','finance'];
   const mi = admin_getMembersIndex_();
+  const byId = (mi && mi.byId) ? mi.byId : {};
   const allMembers = (mi && mi.all) ? mi.all : [];
   groups.forEach(function(groupKey){
     const current = allMembers
       .filter(function(m){ return admin_memberHasServingGroup_(m, groupKey); })
       .map(admin_memberLabelCompact_)
       .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
-    out.byGroup[groupKey] = { group: groupKey, currentMembers: current, gaps: [] };
+    out.byGroup[groupKey] = {
+      group: groupKey,
+      currentMembers: current,
+      gaps: [],
+      activity:{ top:[], bottom:[], windowDays:ADMIN_ACTIVITY_WINDOW_DAYS },
+      upcomingChildren:[],
+      previous:[],
+      upcoming:[]
+    };
   });
 
   const sh = admin_getServingSheet_();
@@ -3273,13 +3503,19 @@ function admin_buildServingGroupOverview_(fromYmd){
   const rows = sh.getRange(2,1,lastRow-1,lastCol).getValues();
   const today = admin_parseYmd_(fromYmd) || admin_parseYmd_(admin_todayUkYmd_()) || new Date();
   const soon12w = new Date(today.getTime() + (84 * 24 * 60 * 60 * 1000));
+  const logisticsEnd = new Date(today.getTime() + (ADMIN_LOGISTICS_DASHBOARD_DAYS * 24 * 60 * 60 * 1000));
+  const activityStart = new Date(today.getTime() - (ADMIN_ACTIVITY_WINDOW_DAYS * 24 * 60 * 60 * 1000));
   const gapMap = {};
+  const logisticActivity = {};
+  (out.byGroup.logistic.currentMembers || []).forEach(function(m){
+    logisticActivity[m.id] = { member:m, count:0, lastDateYmd:'' };
+  });
 
   rows.forEach(function(row){
     const eventKey = String(row[0]||'').trim();
     if (!eventKey) return;
     const evDate = admin_eventDateFromKey_(eventKey);
-    if (!evDate || evDate.getTime() < today.getTime() || evDate.getTime() > soon12w.getTime()) return;
+    if (!evDate) return;
     const dateYmd = admin_fmtYmd_(evDate);
     matrix.positions.forEach(function(pos){
       if (!pos || !pos.colIndex) return;
@@ -3288,16 +3524,82 @@ function admin_buildServingGroupOverview_(fromYmd){
       const raw = String(row[pos.colIndex - 1] || '').trim();
       if (admin_isServingClosedValue_(raw)) return;
       const ids = raw ? admin_extractMemberIdsFromServingValue_(raw) : [];
+      const members = ids.map(function(id){ return byId[id] || null; }).filter(Boolean);
+      const entryBase = {
+        eventKey:eventKey,
+        dateYmd:dateYmd,
+        position:String(pos.position||''),
+        label:admin_servingPositionLabel_(String(pos.position||''))
+      };
+      ids.forEach(function(id){
+        const member = byId[id] || { id:id };
+        const compact = admin_memberLabelCompact_(member);
+        const entry = Object.assign({}, entryBase, {
+          memberId:id,
+          name:compact.name,
+          nameZh:compact.nameZh,
+          nameEn:compact.nameEn,
+          preferredName:compact.preferredName,
+          isMinor:!!member.isMinor,
+          familyId:String(member.familyId||'')
+        });
+        if (evDate.getTime() < today.getTime() && evDate.getTime() >= activityStart.getTime()){
+          out.byGroup[groupKey].previous.push(entry);
+        }else if (evDate.getTime() >= today.getTime() && evDate.getTime() <= (groupKey === 'logistic' ? logisticsEnd.getTime() : soon12w.getTime())){
+          out.byGroup[groupKey].upcoming.push(entry);
+        }
+        if (groupKey === 'logistic' && evDate.getTime() < today.getTime() && evDate.getTime() >= activityStart.getTime() && logisticActivity[id]){
+          logisticActivity[id].count += 1;
+          if (!logisticActivity[id].lastDateYmd || dateYmd > logisticActivity[id].lastDateYmd) logisticActivity[id].lastDateYmd = dateYmd;
+        }
+      });
+
+      if (groupKey === 'logistic' && evDate.getTime() >= today.getTime() && evDate.getTime() <= logisticsEnd.getTime()){
+        const adults = members.filter(function(m){ return !m.isMinor && admin_normStatus_(m.status) !== 'DISABLED'; });
+        members.filter(function(m){ return !!m.isMinor; }).forEach(function(child){
+          const familyId = String(child.familyId || '').trim();
+          const sameFamily = !!familyId && adults.some(function(adult){ return String(adult.familyId || '').trim() === familyId; });
+          const compact = admin_memberLabelCompact_(child);
+          out.byGroup.logistic.upcomingChildren.push({
+            eventKey:eventKey,
+            dateYmd:dateYmd,
+            position:String(pos.position||''),
+            label:admin_servingPositionLabel_(String(pos.position||'')),
+            memberId:child.id,
+            name:compact.name,
+            nameZh:compact.nameZh,
+            nameEn:compact.nameEn,
+            preferredName:compact.preferredName,
+            familyId:familyId,
+            adultIds:adults.map(function(adult){ return adult.id; }),
+            adultLabels:adults.map(function(adult){ return admin_memberLabelCompact_(adult).label; }),
+            pairedAdult:adults.length > 0,
+            sameFamilyAdult:sameFamily
+          });
+        });
+      }
+
+      const gapEnd = (groupKey === 'logistic') ? logisticsEnd : soon12w;
+      if (evDate.getTime() < today.getTime() || evDate.getTime() > gapEnd.getTime()) return;
       const filledSlots = admin_countServingFilledSlots_(raw);
       const minRequired = admin_servingMinRequired_(pos.position);
-      const missing = Math.max(0, minRequired - filledSlots);
+      let missing = Math.max(0, minRequired - filledSlots);
+      let pairingMissing = false;
+      if (groupKey === 'logistic'){
+        const hasMinor = members.some(function(m){ return !!m.isMinor; });
+        const hasAdult = members.some(function(m){ return !m.isMinor && admin_normStatus_(m.status) !== 'DISABLED'; });
+        if (hasMinor && !hasAdult){
+          pairingMissing = true;
+          missing = Math.max(1, missing);
+        }
+      }
       if (missing <= 0) return;
       const key = groupKey + '::' + eventKey;
       if (!gapMap[key]){
         gapMap[key] = { group: groupKey, eventKey:eventKey, dateYmd:dateYmd, totalMissing:0, positions:[] };
       }
       gapMap[key].totalMissing += missing;
-      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionZh_(String(pos.position||'')), missing:missing, assigned:filledSlots, minRequired:minRequired });
+      gapMap[key].positions.push({ position:String(pos.position||''), label:admin_servingPositionLabel_(String(pos.position||'')), missing:missing, assigned:filledSlots, minRequired:minRequired, pairingMissing:pairingMissing });
     });
   });
 
@@ -3308,7 +3610,29 @@ function admin_buildServingGroupOverview_(fromYmd){
   }
   for (const g in out.byGroup){
     out.byGroup[g].gaps.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
+    out.byGroup[g].previous.sort(function(a,b){ return String(b.dateYmd||'').localeCompare(String(a.dateYmd||'')); });
+    out.byGroup[g].upcoming.sort(function(a,b){ return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')); });
   }
+  const activityRows = Object.keys(logisticActivity).map(function(id){
+    const row = logisticActivity[id];
+    return {
+      memberId:id,
+      label:row.member.label,
+      name:row.member.name,
+      isMinor:!!row.member.isMinor,
+      count:row.count,
+      lastDateYmd:row.lastDateYmd
+    };
+  });
+  out.byGroup.logistic.activity.top = activityRows.slice().sort(function(a,b){
+    return (b.count - a.count) || String(b.lastDateYmd||'').localeCompare(String(a.lastDateYmd||'')) || String(a.label||'').localeCompare(String(b.label||''));
+  }).slice(0,3);
+  out.byGroup.logistic.activity.bottom = activityRows.slice().sort(function(a,b){
+    return (a.count - b.count) || String(a.lastDateYmd||'').localeCompare(String(b.lastDateYmd||'')) || String(a.label||'').localeCompare(String(b.label||''));
+  }).slice(0,3);
+  out.byGroup.logistic.upcomingChildren.sort(function(a,b){
+    return String(a.dateYmd||'').localeCompare(String(b.dateYmd||'')) || String(a.position||'').localeCompare(String(b.position||'')) || String(a.memberId||'').localeCompare(String(b.memberId||''));
+  });
   return out;
 }
 function admin_servingHeaderLabel_(key){
@@ -3551,6 +3875,8 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
       entry.nameZh = String(m.nameZh || '');
       entry.nameEn = String(m.nameEn || '');
       entry.preferredName = String(m.preferredName || '');
+      entry.isMinor = !!m.isMinor;
+      entry.familyId = String(m.familyId || '');
       out.push(entry);
     });
 
@@ -3567,7 +3893,9 @@ function admin_getServingForEvent_(eventKey, membersById, checkedInSet, includeN
         checkedIn: false,
         nameZh: '',
         nameEn: '',
-        preferredName: ''
+        preferredName: '',
+        isMinor: false,
+        familyId: ''
       });
     }
   });
@@ -3730,6 +4058,8 @@ function admin_getServingPlanMatrix_(events){
           nameZh: String(member.nameZh || ''),
           nameEn: String(member.nameEn || ''),
           preferredName: String(member.preferredName || ''),
+          isMinor: !!member.isMinor,
+          familyId: String(member.familyId || ''),
           slot: ''
         };
         if (!cells[ev][pos.key]) cells[ev][pos.key] = [];
@@ -3967,14 +4297,27 @@ function admin_ensureAwayColumns_(sh, col){
   });
   return col;
 }
+function admin_ensureMemberColumns_(sh, col, fields){
+  const list = Array.isArray(fields) ? fields : [];
+  list.forEach(function(field){
+    if (!field || col[field] !== undefined) return;
+    const lastCol = sh.getLastColumn();
+    sh.insertColumnAfter(lastCol);
+    const newCol = lastCol + 1;
+    sh.getRange(1, newCol).setValue(field).setFontWeight('bold');
+    col[field] = newCol - 1;
+  });
+  return col;
+}
 
 // Members index cache (includes preferredName + memberSince)
 function admin_clearMembersCache_(){
   try{ CacheService.getScriptCache().remove('admin_membersIndex_v2'); }catch(e){}
+  try{ CacheService.getScriptCache().remove('admin_membersIndex_v3'); }catch(e){}
 }
 function admin_getMembersIndex_(){
   const cache = CacheService.getScriptCache();
-  const key = 'admin_membersIndex_v2';
+  const key = 'admin_membersIndex_v3';
   const cached = cache.get(key);
   if (cached) return JSON.parse(cached);
 
@@ -3998,6 +4341,8 @@ function admin_getMembersIndex_(){
       const memberRow = {
         rowNumber: r+2,
         id: id,
+        familyId: (col.FamilyID!==undefined) ? String(row[col.FamilyID]||'').trim() : '',
+        memberLetter: (col.MemberLetter!==undefined) ? String(row[col.MemberLetter]||'').trim() : '',
         key: String(row[col.Key]||'').trim(),
         nameZh: String(row[col.NameZh]||'').trim(),
         nameEn: String(row[col.NameEn]||'').trim(),
@@ -4008,6 +4353,11 @@ function admin_getMembersIndex_(){
         vrm: (col.VRM!==undefined) ? String(row[col.VRM]||'').trim() : '',
         vrm2:(col.VRM2!==undefined)? String(row[col.VRM2]||'').trim() : '',
         preferredName: (col.PreferredName!==undefined) ? String(row[col.PreferredName]||'').trim() : '',
+        isMinor: (col.IsMinor!==undefined) ? String(row[col.IsMinor]||'').trim().toUpperCase() === 'YES' : false,
+        minorServingApprovedGroups: (col.MinorServingApprovedGroups!==undefined) ? admin_parseGroupsCsv_(row[col.MinorServingApprovedGroups]) : [],
+        minorServingSelfSignup: (col.MinorServingSelfSignup!==undefined) ? String(row[col.MinorServingSelfSignup]||'').trim().toUpperCase() === 'YES' : false,
+        minorServingApprovedBy: (col.MinorServingApprovedBy!==undefined) ? String(row[col.MinorServingApprovedBy]||'').trim() : '',
+        minorServingApprovedAt: (col.MinorServingApprovedAt!==undefined) ? String(row[col.MinorServingApprovedAt]||'').trim() : '',
         memberSinceRaw: (col.Member_Since!==undefined) ? row[col.Member_Since] : '',
         servingGroups: (col.ServingGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGroups]) : [],
         servingGLGroups: (col.ServingGLGroups!==undefined) ? admin_parseGroupsCsv_(row[col.ServingGLGroups]) : [],
@@ -4185,21 +4535,32 @@ function admin_getFirstSeenIndexCached_(){
 function admin_buildFirstSeenIndex_(){
   const check = admin_getCheckinsDataCached_();
   const map = {};
-  const tsById = {};
   if (check.ok){
     for (const r of check.rows){
       if (!admin_isSundayServiceKey_(r.eventKey)) continue;
       const mid = r.memberId;
-      const t = r.ts || 0;
-      if (!mid || !t) continue;
-      const prev = tsById[mid];
-      if (prev === undefined || t < prev){
-        tsById[mid] = t;
-        map[mid] = r.eventKey;
-      }
+      if (!mid) continue;
+      const prev = map[mid] || '';
+      if (!prev || String(r.eventKey) < String(prev)) map[mid] = r.eventKey;
     }
   }
   return { map: map, rows: Object.keys(map).length, updatedAt: admin_nowIso_() };
+}
+function admin_isNewFriendForEvent_(eventKey, memberId, firstSeenMap, membersById){
+  const ev = String(eventKey || '').trim();
+  const id = String(memberId || '').trim().toUpperCase();
+  const member = (membersById || {})[id] || {};
+  const status = admin_normStatus_(member.status || '');
+  const firstEvent = String((firstSeenMap || {})[id] || '');
+  if (typeof classifyNewFriendFromFirstEvent_ === 'function'){
+    return !!classifyNewFriendFromFirstEvent_(ev, id, status, firstEvent || ev).isNewFriend;
+  }
+  if (status === 'STAFF' || status === 'ADMIN') return false;
+  if (!firstEvent || firstEvent !== ev) return false;
+  try{
+    if (typeof isNewFriendSuppressed_ === 'function' && isNewFriendSuppressed_(ev, id)) return false;
+  }catch(e){}
+  return true;
 }
 
 // Member_Since formatting helper

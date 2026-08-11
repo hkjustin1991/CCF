@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-06.reg120
- * CHANGELOG: operational hotfixes for self-service login resilience and serving sign-up availability.
+ * v2026-08-11.reg121
+ * CHANGELOG: family registration, independent email changes, and safeguarded minor serving.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-06.reg120';
+const REG_VERSION = '2026-08-11.reg121';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -46,6 +46,7 @@ const REG_QR_BASE = 'https://quickchart.io/qr';
 
 const REG_EXTRA_HEADERS = [
   'Member_Since','PreferredName','Gender','HasCar','VRM','VRM2','IsMinor','ParentEmail',
+  'MinorServingApprovedGroups','MinorServingSelfSignup','MinorServingApprovedBy','MinorServingApprovedAt',
   /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_BEGIN */
   'ReferredBy'
   /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_END */
@@ -574,6 +575,9 @@ function api_reg_create_member_public(input){
   const ua = String(inObj.ua||'');
 
   try{
+    if (Array.isArray(inObj.familyMembers) && inObj.familyMembers.length){
+      return api_reg_create_family_public(inObj);
+    }
     // overwrite safety: if existingId provided, route to update
     const existingId = String(inObj.existingId||'').trim().toUpperCase();
     if (/^CCF\d{4}$/.test(existingId)) {
@@ -672,6 +676,190 @@ function api_reg_create_member_public(input){
   } catch(e){
     const err = regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
     regLogBlock_(err, null, deviceId, ua, 'CREATE_EXCEPTION');
+    return err;
+  }
+}
+
+function regGenerateFamilyId_(ms){
+  const used = new Set((ms.dataRows || []).map(function(row){ return String(row.FamilyID||'').trim().toUpperCase(); }).filter(Boolean));
+  for (let i=0;i<40;i++){
+    const candidate = 'FAM-' + Utilities.getUuid().replace(/-/g,'').slice(0,12).toUpperCase();
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new Error('Failed to generate FamilyID');
+}
+function regAllocateFamilyIdsAndKeys_(ms, count){
+  const usedNums = new Set();
+  const usedKeys = new Set();
+  (ms.dataRows || []).forEach(function(row){
+    const hit = String(row.ID||'').match(/^CCF(\d{4})$/);
+    if (hit) usedNums.add(parseInt(hit[1],10));
+    if (row.Key) usedKeys.add(String(row.Key));
+  });
+  const out = [];
+  let next = REG_MIN_ID_NUM;
+  while (out.length < count){
+    while (next <= REG_MAX_ID_NUM && usedNums.has(next)) next++;
+    if (next > REG_MAX_ID_NUM) return { ok:false, code:'E433', zh:'ID 已用盡（CCF0101–CCF9999）', en:'IDs exhausted (CCF0101–CCF9999).' };
+    let key = '';
+    for (let tries=0;tries<60;tries++){
+      const candidate = regNewKey_();
+      if (!usedKeys.has(candidate)){ key = candidate; usedKeys.add(candidate); break; }
+    }
+    if (!key) return { ok:false, code:'E500', zh:'無法產生 Key', en:'Failed to generate Key.' };
+    usedNums.add(next);
+    out.push({ id:'CCF' + String(next).padStart(4,'0'), key:key });
+    next++;
+  }
+  return { ok:true, allocations:out };
+}
+function regEnforceFamilyBatchHardStops_(ms, members){
+  const activeRows = (ms.dataRows || []).filter(function(row){ return regStatus_(row.Status) !== 'DISABLED'; });
+  const emailBatch = {};
+  const nameBatch = {};
+  (members || []).forEach(function(data){
+    const email = regNormEmail_(data.email);
+    if (email) emailBatch[email] = (emailBatch[email] || 0) + 1;
+    if (data.nameZh && data.nameEn){
+      const key = regNormName_(data.nameZh) + '|' + regNormName_(data.nameEn);
+      nameBatch[key] = (nameBatch[key] || 0) + 1;
+    }
+  });
+  for (const email in emailBatch){
+    const existing = activeRows.filter(function(row){ return regNormEmail_(row.Email) === email; }).length;
+    if (existing + emailBatch[email] > 4){
+      return { ok:false, code:'E452', zh:'此電郵已由 4 個未停用的會員記錄使用；請改用另一個電郵或聯絡影音同工。', en:'This email is already used by four non-disabled member records. Use another email or contact Media team.' };
+    }
+  }
+  for (const nameKey in nameBatch){
+    const parts = nameKey.split('|');
+    const existing = activeRows.filter(function(row){ return regNormName_(row.NameZh) === parts[0] && regNormName_(row.NameEn) === parts[1]; }).length;
+    if (existing + nameBatch[nameKey] > 2){
+      return { ok:false, code:'E451', zh:'同一中文名 + 英文名 已有 2 個未停用記錄，請聯絡影音同工核實。', en:'This exact Chinese and English name already has two non-disabled records. Contact Media team to verify.' };
+    }
+  }
+  return { ok:true };
+}
+
+/**
+ * One primary registration plus up to three additional family members.
+ * All records validate before a single setValues write under one lock.
+ */
+function api_reg_create_family_public(input){
+  const inObj = input || {};
+  const deviceId = String(inObj.deviceId||'');
+  const ua = String(inObj.ua||'');
+  try{
+    const additionalRaw = Array.isArray(inObj.familyMembers) ? inObj.familyMembers : [];
+    if (additionalRaw.length < 1 || additionalRaw.length > 3){
+      return { ok:false, code:'E465', zh:'家庭成員必須為 1 至 3 位', en:'Add between one and three family members.' };
+    }
+    const rawMembers = [Object.assign({}, inObj, { familyMembers:undefined })].concat(additionalRaw.map(function(row){
+      const item = Object.assign({}, row || {});
+      if (!Object.prototype.hasOwnProperty.call(item, 'referredBy')) item.referredBy = inObj.referredBy || '';
+      item.deviceId = deviceId;
+      item.ua = ua;
+      return item;
+    }));
+    const validated = [];
+    for (let i=0;i<rawMembers.length;i++){
+      const v = regValidateInput_(rawMembers[i]);
+      if (!v.ok){
+        v.familyMemberIndex = i;
+        v.detail = (i === 0 ? 'Primary member' : ('Family member ' + i));
+        regLogBlock_(v, null, deviceId, ua, 'FAMILY_VALIDATE');
+        return v;
+      }
+      validated.push(v.data);
+    }
+
+    const familyFingerprint = validated.map(function(member){
+      return [regNormName_(member.nameZh), regNormName_(member.nameEn), regNormEmail_(member.email), regNormMobile_(member.mobile)].join('|');
+    }).join('::');
+    const dedupKey = regCreateDedupKey_(inObj) + '_family_' + validated.length + '_' + Utilities.base64EncodeWebSafe(familyFingerprint).slice(0, 120);
+    const prior = regCreateDedupGet_(dedupKey);
+    if (prior && prior.ok && prior.mode === 'FAMILY_CREATE') return prior;
+
+    const lock = LockService.getScriptLock();
+    lock.waitLock(15000);
+    let created = [];
+    let familyId = '';
+    try{
+      const ms = regGetMembersScan_({ ensureExtras:true });
+      const hardStop = regEnforceFamilyBatchHardStops_(ms, validated);
+      if (!hardStop.ok){ regLogBlock_(hardStop, null, deviceId, ua, 'FAMILY_HARDSTOP'); return hardStop; }
+      const allocation = regAllocateFamilyIdsAndKeys_(ms, validated.length);
+      if (!allocation.ok) return allocation;
+      familyId = regGenerateFamilyId_(ms);
+      const ts = regNow_();
+      const rows = validated.map(function(data, index){
+        const alloc = allocation.allocations[index];
+        const entry = Object.assign({}, data, {
+          id:alloc.id,
+          key:alloc.key,
+          status:'PENDING',
+          memberSince:ts,
+          familyId:familyId,
+          memberLetter:String.fromCharCode(65 + index)
+        });
+        const greet = regPickGreetings_(data.nameZh, data.nameEn, data.preferredName);
+        created.push({
+          memberId:alloc.id,
+          qrPayload:alloc.id + '|' + alloc.key,
+          nameZh:data.nameZh,
+          nameEn:data.nameEn,
+          preferredName:data.preferredName,
+          email:data.email,
+          optInEmail:!!data.optInEmail,
+          isMinor:!!data.isMinor,
+          greet:greet,
+          memberLetter:String.fromCharCode(65 + index)
+        });
+        return regBuildAppendRow_(ms, entry);
+      });
+      const startRow = Math.max(2, ms.sh.getLastRow() + 1);
+      const requiredLast = startRow + rows.length - 1;
+      if (requiredLast > ms.sh.getMaxRows()) ms.sh.insertRowsAfter(ms.sh.getMaxRows(), requiredLast - ms.sh.getMaxRows());
+      ms.sh.getRange(startRow, 1, rows.length, ms.lastCol).setValues(rows);
+      regClearMembersIndexCache_();
+      if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
+    } finally {
+      lock.releaseLock();
+    }
+
+    const familyEmail = (validated[0].optInEmail && validated[0].email)
+      ? validated[0].email
+      : ((created.find(function(row){ return row.optInEmail && row.email; }) || {}).email || '');
+    const emailRes = regSendFamilyRegistrationEmail_({
+      toEmail:familyEmail,
+      familyId:familyId,
+      members:created,
+      deviceHint:regDeviceHint_(inObj)
+    });
+    regLogActivity_('REG_FAMILY_CREATE', created[0].memberId, 'OK', {
+      familyId:familyId,
+      memberIds:created.map(function(row){ return row.memberId; }),
+      count:created.length,
+      emailSent:emailRes.sentToNew ? 'YES' : 'NO',
+      deviceId:deviceId,
+      ua:ua
+    });
+    const out = {
+      ok:true,
+      mode:'FAMILY_CREATE',
+      familyId:familyId,
+      memberId:created[0].memberId,
+      qrPayload:created[0].qrPayload,
+      members:created,
+      email:emailRes,
+      emailMeta:{ optInEmail:!!familyEmail, emailProvided:!!familyEmail },
+      greet:created[0].greet
+    };
+    regCreateDedupPut_(dedupKey, out);
+    return out;
+  }catch(e){
+    const err = regErr_('E500','家庭登記失敗（E500）。','Family registration failed (E500).', e);
+    regLogBlock_(err, null, deviceId, ua, 'FAMILY_EXCEPTION');
     return err;
   }
 }
@@ -840,6 +1028,9 @@ function api_reg_self_lookup_public(qrPayload){
         vrm2: regNormalizeVrm_(r.VRM2||''),
         isMinor: String(r.IsMinor||'').trim().toUpperCase() === 'YES',
         parentEmail: String(r.ParentEmail||'').trim(),
+        familyId: String(r.FamilyID||'').trim(),
+        minorServingApprovedGroups: reg_parseServingGroupsCsvSafe_(r.MinorServingApprovedGroups||''),
+        minorServingSelfSignup: String(r.MinorServingSelfSignup||'').trim().toUpperCase() === 'YES',
         gender: String(r.Gender||'').trim().toUpperCase(),
         /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_BEGIN */
         referredBy: String(r.ReferredBy||'').trim(),
@@ -1366,6 +1557,35 @@ function api_reg_self_delete_membership_public(qrPayload, confirmQrPayload){
   }
 }
 
+function reg_minorSelfServingPolicy_(member, position){
+  if (!member || !member.isMinor) return { ok:true, isMinor:false };
+  const group = ADMIN_SERVING_POSITION_GROUP[position] || '';
+  const eligible = admin_minorServingEligibility_(member, group);
+  if (!eligible.ok) return eligible;
+  if (!member.minorServingSelfSignup){
+    return regConflict_(
+      '此未成年會員未獲允許自行報名或取消，請聯絡組長／同工。',
+      'This young member is not permitted to self-sign up or cancel. Contact a GL or staff member.',
+      '',
+      'MINOR_SELF_SIGNUP_NOT_ALLOWED',
+      'MINOR_SERVING'
+    );
+  }
+  return { ok:true, isMinor:true, selfSignup:true };
+}
+
+function reg_minorPairingWarningFromValidation_(validation){
+  const warnings = validation && Array.isArray(validation.warnings) ? validation.warnings : [];
+  if (!warnings.length) return null;
+  const first = warnings[0] || {};
+  return {
+    code:String(first.code || 'MINOR_DIFFERENT_FAMILY_ADULT'),
+    zh:String(first.zh || '未有同一家庭成人安排；已由其他成年同工配對'),
+    en:String(first.en || 'No adult from the same family is assigned; paired with another adult volunteer.'),
+    minorPairing:warnings
+  };
+}
+
 function api_reg_self_serving_data_public(qrPayload){
   try{
     const auth = regGetSelfMemberByQr_(qrPayload);
@@ -1380,6 +1600,9 @@ function api_reg_self_serving_data_public(qrPayload){
       : (member ? reg_mergeServingGroups_(member.servingGroups, member.servingGLGroups) : []);
     if (!member && !groups.length) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
     const groupNorm = groups.map(function(g){ return admin_normalizeServingGroup_(g); }).filter(Boolean);
+    const isMinor = !!(member && member.isMinor);
+    const minorApproved = isMinor ? admin_minorApprovedForGroup_(member, ADMIN_MINOR_SERVING_GROUP) : false;
+    const minorSelfSignup = isMinor && !!member.minorServingSelfSignup;
     const insights = admin_getServingInsightsForMember_(id) || { byGroup:{} };
 
     const summary = [];
@@ -1427,11 +1650,59 @@ function api_reg_self_serving_data_public(qrPayload){
         while (slots.length < max) slots.push('');
 
         const canChange = regSelfServingEditable_(admin_eventDateFromKey_(ev.eventKey));
-        cells[ev.eventKey][p.position] = { slots: isClosed ? [] : slots, canSignup: !isClosed, canChange: canChange };
+        let canSignup = !isClosed;
+        let canSelfRemove = canChange;
+        let minorBlockedReason = '';
+        let pairing = null;
+        if (isMinor){
+          const policy = reg_minorSelfServingPolicy_(member, p.position);
+          const adultIds = slots.filter(function(mid){
+            const assigned = ((mIndex && mIndex.byId) ? mIndex.byId : {})[String(mid||'').trim().toUpperCase()] || null;
+            return assigned && !assigned.isMinor && admin_normStatus_(assigned.status) !== 'DISABLED';
+          });
+          const familyId = String(member.familyId || '').trim();
+          const sameFamilyAdultIds = familyId ? adultIds.filter(function(mid){
+            const adult = mIndex.byId[String(mid||'').trim().toUpperCase()] || {};
+            return String(adult.familyId || '').trim() === familyId;
+          }) : [];
+          pairing = { adultIds:adultIds, sameFamilyAdultIds:sameFamilyAdultIds, sameFamily:!!sameFamilyAdultIds.length };
+          if (!policy.ok){
+            canSignup = false;
+            canSelfRemove = false;
+            minorBlockedReason = String(policy.subCode || policy.code || 'MINOR_SELF_SIGNUP_NOT_ALLOWED');
+          }else if (!adultIds.length){
+            canSignup = false;
+            minorBlockedReason = 'MINOR_ADULT_PAIR_REQUIRED';
+          }
+        }
+        cells[ev.eventKey][p.position] = {
+          slots:isClosed ? [] : slots,
+          canSignup:canSignup,
+          canChange:canChange,
+          canSelfRemove:canSelfRemove,
+          minorBlockedReason:minorBlockedReason,
+          pairing:pairing
+        };
       });
     });
 
-    return { ok:true, member:{ id:id, servingGroups:groups }, summary:summary, events:matrix.events||[], positions:filteredPositions, cells:cells, memberLabelsById:memberLabelsById, maxMonths:ADMIN_SERVING_MONTHS_AHEAD };
+    return {
+      ok:true,
+      member:{
+        id:id,
+        servingGroups:groups,
+        isMinor:isMinor,
+        minorServingApproved:minorApproved,
+        minorServingSelfSignup:minorSelfSignup,
+        canSelfManageMinorServing:!isMinor || (minorApproved && minorSelfSignup)
+      },
+      summary:summary,
+      events:matrix.events||[],
+      positions:filteredPositions,
+      cells:cells,
+      memberLabelsById:memberLabelsById,
+      maxMonths:ADMIN_SERVING_MONTHS_AHEAD
+    };
   }catch(e){
     return regErr_('E500','系統錯誤（E500）。','System error (E500).', e);
   }
@@ -1502,7 +1773,10 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
 
     const mi = admin_getMembersIndex_();
     const member = mi.byId[id];
+    if (!member) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
     if (!admin_memberHasServingGroup_(member, ADMIN_SERVING_POSITION_GROUP[pos] || '')) return regConflict_('你不屬於此事奉組別', 'You are not in this serving group.', '', 'MEMBER_NOT_IN_SERVING_GROUP', 'SERVING_SIGNUP');
+    const minorPolicy = reg_minorSelfServingPolicy_(member, pos);
+    if (!minorPolicy.ok) return minorPolicy;
 
     var awayPeriodsMap = admin_getAwayPeriodsMap_([id]) || {};
     var periods = (awayPeriodsMap[id] && awayPeriodsMap[id].periods) ? awayPeriodsMap[id].periods : [];
@@ -1591,19 +1865,33 @@ function api_reg_self_serving_signup_public(qrPayload, eventKey, position, slotI
       }
 
       tokens[targetIdx] = id;
-      sh.getRange(rowIndex, colIndex).setValue(tokens.join(', '));
+      const candidateRaw = tokens.join(', ');
+      const minorValidation = admin_validateMinorServingValues_((function(){ const out={}; out[pos]=candidateRaw; return out; })(), mi.byId, [pos]);
+      if (!minorValidation.ok){
+        const first = minorValidation.errors[0] || {};
+        return regConflict_(
+          String(first.zh || '未成年事奉者必須在同一崗位與成年同工一同服侍'),
+          String(first.en || 'A young volunteer must be paired with an adult in the same position.'),
+          [first.memberId, first.position].filter(Boolean).join(' · '),
+          String(first.code || 'MINOR_ADULT_PAIR_REQUIRED'),
+          'MINOR_SERVING'
+        );
+      }
+      sh.getRange(rowIndex, colIndex).setValue(candidateRaw);
       regLogActivity_('REG_SELF_SERVING_SIGNUP', id, 'OK', { eventKey:ev, position:pos, afterCutoff: afterChangeCutoff });
+      const pairingWarning = reg_minorPairingWarningFromValidation_(minorValidation);
       return {
         ok:true,
         eventKey:ev,
         position:pos,
-        warning: afterChangeCutoff
+        pairing:minorValidation.warnings || [],
+        warning: pairingWarning || (afterChangeCutoff
           ? {
               code:'W_CUTOFF',
               zh:'已超過六週更改期限。如需更改或取消，請聯絡組長。',
               en:'The 6-week change/cancel cutoff has passed. Please contact your GL for changes or cancellations.'
             }
-          : null
+          : null)
       };
     } finally {
       lock.releaseLock();
@@ -1624,6 +1912,12 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
     if (ADMIN_SERVING_POSITIONS.indexOf(pos) < 0) return { ok:false, code:'E416', zh:'崗位格式錯誤', en:'Invalid position.' };
     if (!regSelfServingEditable_(admin_eventDateFromKey_(ev))) return regConflict_('六週內不可更改，請聯絡組長', 'Changes within 6 weeks are blocked. Please contact GL.', '', 'CHANGE_CUTOFF_WINDOW', 'SERVING_SIGNUP');
 
+    const mi = admin_getMembersIndex_();
+    const member = (mi && mi.byId) ? mi.byId[id] : null;
+    if (!member) return { ok:false, code:'E412', zh:'找不到此會員', en:'Member not found.' };
+    const minorPolicy = reg_minorSelfServingPolicy_(member, pos);
+    if (!minorPolicy.ok) return minorPolicy;
+
     const lock = LockService.getScriptLock();
     lock.waitLock(15000);
     try{
@@ -1637,9 +1931,21 @@ function api_reg_self_serving_remove_public(qrPayload, eventKey, position){
       const max = ADMIN_SERVING_POSITION_MAX[pos] || 1;
       const tokens = reg_buildServingTokensForWrite_(raw, max);
       const next = tokens.map(function(t){ return String(t||'').trim().toUpperCase() === id ? 'N/A' : t; });
-      sh.getRange(rowIndex, colIndex).setValue(next.join(', '));
+      const candidateRaw = next.join(', ');
+      const minorValidation = admin_validateMinorServingValues_((function(){ const out={}; out[pos]=candidateRaw; return out; })(), mi.byId, [pos]);
+      if (!minorValidation.ok){
+        const first = minorValidation.errors[0] || {};
+        return regConflict_(
+          String(first.zh || '取消後會令未成年事奉者失去同崗位成年同工配對'),
+          String(first.en || 'This cancellation would leave a young volunteer without an adult in the same position.'),
+          [first.memberId, first.position].filter(Boolean).join(' · '),
+          String(first.code || 'MINOR_ADULT_PAIR_REQUIRED'),
+          'MINOR_SERVING'
+        );
+      }
+      sh.getRange(rowIndex, colIndex).setValue(candidateRaw);
       regLogActivity_('REG_SELF_SERVING_REMOVE', id, 'OK', { eventKey:ev, position:pos });
-      return { ok:true, eventKey:ev, position:pos };
+      return { ok:true, eventKey:ev, position:pos, warning:reg_minorPairingWarningFromValidation_(minorValidation), pairing:minorValidation.warnings || [] };
     } finally {
       lock.releaseLock();
     }
@@ -2025,38 +2331,39 @@ function api_reg_self_live_service_public(qrPayload){
     const byId = mi.byId || {};
     const countByEvent = {};
     const breakdownByEvent = {};
-    const liveCountCacheKey = 'reg_live_counts_' + String(next || '') + '_' + String(last || '');
-    const cachedCounts = reg_liveCacheGet_(liveCountCacheKey);
-    if (cachedCounts && typeof cachedCounts.nextCount === 'number' && typeof cachedCounts.lastCount === 'number'){
-      countByEvent[next] = { size: cachedCounts.nextCount };
-      countByEvent[last] = { size: cachedCounts.lastCount };
-    }else{
-      const check = admin_getCheckinsData_();
-      if (check && check.ok){
-        const firstSundayByMember = {};
-        check.rows.forEach(function(r){
-          if (!admin_isSundayServiceKey_(r.eventKey) || !r.memberId) return;
-          const prev = firstSundayByMember[r.memberId];
-          if (!prev || String(r.eventKey) < prev) firstSundayByMember[r.memberId] = String(r.eventKey);
+    // New Friend handling must be reflected immediately, so the classification
+    // is rebuilt from the cached Checkins source instead of caching the derived flag.
+    const check = (typeof admin_getCheckinsDataCached_ === 'function') ? admin_getCheckinsDataCached_() : admin_getCheckinsData_();
+    if (check && check.ok){
+      const firstSundayByMember = {};
+      check.rows.forEach(function(r){
+        if (!admin_isSundayServiceKey_(r.eventKey) || !r.memberId) return;
+        const prev = firstSundayByMember[r.memberId];
+        if (!prev || String(r.eventKey) < prev) firstSundayByMember[r.memberId] = String(r.eventKey);
+      });
+      check.rows.forEach(function(r){
+        if (!admin_isSundayServiceKey_(r.eventKey)) return;
+        if (r.eventKey !== next && r.eventKey !== last) return;
+        if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
+        countByEvent[r.eventKey].add(r.memberId);
+      });
+      [next,last].forEach(function(ev){
+        const set = countByEvent[ev] || new Set();
+        var total = 0, newFriend = 0;
+        set.forEach(function(mid){
+          total++;
+          const st = regStatus_((((mi||{}).byId||{})[mid] || {}).status || '');
+          let classification = null;
+          if (typeof classifyNewFriendFromFirstEvent_ === 'function'){
+            classification = classifyNewFriendFromFirstEvent_(ev, mid, st, firstSundayByMember[mid] || ev);
+          }else{
+            const suppressed = (typeof isNewFriendSuppressed_ === 'function') ? isNewFriendSuppressed_(ev, mid) : false;
+            classification = { isNewFriend:firstSundayByMember[mid] === ev && st !== 'STAFF' && st !== 'ADMIN' && !suppressed };
+          }
+          if (classification && classification.isNewFriend) newFriend++;
         });
-        check.rows.forEach(function(r){
-          if (!admin_isSundayServiceKey_(r.eventKey)) return;
-          if (r.eventKey !== next && r.eventKey !== last) return;
-          if (!countByEvent[r.eventKey]) countByEvent[r.eventKey] = new Set();
-          countByEvent[r.eventKey].add(r.memberId);
-        });
-        [next,last].forEach(function(ev){
-          const set = countByEvent[ev] || new Set();
-          var total = 0, newFriend = 0;
-          set.forEach(function(mid){
-            total++;
-            const st = regStatus_((((mi||{}).byId||{})[mid] || {}).status || '');
-            if (firstSundayByMember[mid] === ev && st !== 'STAFF' && st !== 'ADMIN') newFriend++;
-          });
-          breakdownByEvent[ev] = { totalAttendance: total, newFriendCount: newFriend, existingChurchgoerCount: Math.max(0, total - newFriend) };
-        });
-      }
-      reg_liveCachePut_(liveCountCacheKey, { nextCount: (countByEvent[next] ? countByEvent[next].size : 0), lastCount: (countByEvent[last] ? countByEvent[last].size : 0) }, 30);
+        breakdownByEvent[ev] = { totalAttendance:total, newFriendCount:newFriend, existingChurchgoerCount:Math.max(0, total-newFriend) };
+      });
     }
 
     const eventKeys = events.map(function(ev){ return String((ev && ev.eventKey) || '').trim(); }).filter(Boolean);
@@ -2088,7 +2395,7 @@ function api_reg_self_live_service_public(qrPayload){
       serviceOptions: serviceOptions,
       servicesByEvent: servicesByEvent,
       currentAttendance:Object.assign({ eventKey:next, count: next && countByEvent[next] ? countByEvent[next].size : 0 }, breakdownByEvent[next] || {}),
-      lastAttendance:{ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 },
+      lastAttendance:Object.assign({ eventKey:last, count: last && countByEvent[last] ? countByEvent[last].size : 0 }, breakdownByEvent[last] || {}),
       lastOffering:{
         eventKey:last,
         amount: (last && typeof offeringMap[last] === 'number') ? offeringMap[last] : null
@@ -3827,6 +4134,11 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   const ua = String(inObj.ua||'');
 
   const oldRow = regReadRow_(ms, rowNumber);
+  // A member already marked under 18 cannot remove that flag through public
+  // self-service. STAFF/ADMIN performs the separate reauthenticated 18+ step.
+  if (String(oldRow.IsMinor||'').trim().toUpperCase() === 'YES' && !data.isMinor){
+    data.isMinor = true;
+  }
 
   /* PATCH_BOUNDARY: REG2_KEEP_EXISTING_QR_BEGIN */
   const keepExistingQr = !!(inObj && inObj.keepExistingQr);
@@ -3841,7 +4153,7 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
 
   const oldEmail = String(oldRow.Email||'').trim();
   const newEmail = String(data.email||'').trim();
-  const emailChanged = !!(regNormEmail_(oldEmail) && regNormEmail_(newEmail) && regNormEmail_(oldEmail) !== regNormEmail_(newEmail));
+  const emailChanged = !!(regNormEmail_(oldEmail) && regNormEmail_(oldEmail) !== regNormEmail_(newEmail));
 
   /* PATCH_BOUNDARY: REG1_CHANGEDFIELDS_BEGIN */
   const changedFields = regComputeChangedFields_(oldRow, data);
@@ -3872,7 +4184,15 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
 
   /* PATCH_BOUNDARY: REG2_PRESERVE_ADMIN_STATUS_BEGIN */
   const stOldNorm = String(stOld||'').toUpperCase();
-  const newStatusToWrite = (stOldNorm === 'ADMIN') ? 'ADMIN' : (isStaff ? 'STAFF' : 'ACTIVE');
+  // A later profile/email change for one family member must not change that
+  // member's workflow state. Legacy non-family updates retain their existing
+  // promotion behaviour.
+  const preserveFamilyStatus = !!String(oldRow.FamilyID || '').trim();
+  const newStatusToWrite = (stOldNorm === 'ADMIN')
+    ? 'ADMIN'
+    : ((stOldNorm === 'STAFF')
+      ? 'STAFF'
+      : (preserveFamilyStatus ? (stOldNorm || 'ACTIVE') : 'ACTIVE'));
   regWriteCell_(ms, rowNumber, 'Status', newStatusToWrite);
   /* PATCH_BOUNDARY: REG2_PRESERVE_ADMIN_STATUS_END */
 
@@ -3883,7 +4203,11 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   const includeWhatsApp = (!isStaff && String(stOld||'').toUpperCase() === 'PROVISIONAL');
 
   const toEmail = isStaff ? (newEmail || oldEmail || '') : (data.optInEmail ? newEmail : '');
-  const oldAlertEmail = emailChanged ? oldEmail : '';
+  const alertEmails = [];
+  if (emailChanged && oldEmail) alertEmails.push(oldEmail);
+  if (emailChanged && String(oldRow.IsMinor||'').trim().toUpperCase() === 'YES' && oldRow.ParentEmail){
+    alertEmails.push(String(oldRow.ParentEmail||'').trim());
+  }
 
   const g = regPickGreetings_(data.nameZh, data.nameEn, data.preferredName);
   const emailMeta = { optInEmail: !!data.optInEmail, emailProvided: !!data.email };
@@ -3891,7 +4215,8 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   const emailRes = regSendEmails_({
     kind: 'UPDATE',
     toEmail,
-    oldEmail: oldAlertEmail,
+    oldEmail: alertEmails[0] || '',
+    alertEmails: alertEmails,
     memberId,
     payload,
     greetZh: g.greetZh,
@@ -4190,7 +4515,7 @@ function regEnforceHardStops_(data, excludeId){
   const email = regNormEmail_(data.email);
   if (email){
     const cntE = regCountRows_(r => regNormEmail_(r.Email)===email, excludeId);
-    if (cntE >= 4) return { ok:false, code:'E452', zh:'此電郵已登記多於 4 次，請改用另一個電郵或聯絡影音同工處理。', en:'This email address is already registered more than 4 times.' };
+    if (cntE >= 4) return { ok:false, code:'E452', zh:'此電郵已由 4 個未停用的會員記錄使用；請改用另一個電郵或聯絡影音同工。', en:'This email is already used by four non-disabled member records. Use another email or contact Media team.' };
   }
   return { ok:true };
 }
@@ -4229,6 +4554,8 @@ function regRowObj_(col, row, rowNumber){
   function g(h){ return (col[h] === undefined) ? '' : row[col[h]]; }
   return {
     rowNumber,
+    FamilyID: String(g('FamilyID')||'').trim(),
+    MemberLetter: String(g('MemberLetter')||'').trim(),
     ID: String(g('ID')||'').trim().toUpperCase(),
     Key: String(g('Key')||'').trim(),
     NameZh: String(g('NameZh')||'').trim(),
@@ -4244,6 +4571,10 @@ function regRowObj_(col, row, rowNumber){
     VRM2: String(g('VRM2')||'').trim(),
     IsMinor: String(g('IsMinor')||'').trim(),
     ParentEmail: String(g('ParentEmail')||'').trim(),
+    MinorServingApprovedGroups: String(g('MinorServingApprovedGroups')||'').trim(),
+    MinorServingSelfSignup: String(g('MinorServingSelfSignup')||'').trim(),
+    MinorServingApprovedBy: String(g('MinorServingApprovedBy')||'').trim(),
+    MinorServingApprovedAt: String(g('MinorServingApprovedAt')||'').trim(),
     Gender: String(g('Gender')||'').trim().toUpperCase(),
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_BEGIN */
     ReferredBy: String(g('ReferredBy')||'').trim(),
@@ -4345,8 +4676,8 @@ function regBuildAppendRow_(ms, obj){
     row[c] = v;
   }
 
-  set('FamilyID','');
-  set('MemberLetter','');
+  set('FamilyID', obj.familyId || '');
+  set('MemberLetter', obj.memberLetter || '');
   set('ID', obj.id);
   set('Key', obj.key);
 
@@ -4366,6 +4697,10 @@ function regBuildAppendRow_(ms, obj){
 
   set('IsMinor', obj.isMinor ? 'YES' : 'NO');
   set('ParentEmail', obj.parentEmail || '');
+  set('MinorServingApprovedGroups', '');
+  set('MinorServingSelfSignup', 'NO');
+  set('MinorServingApprovedBy', '');
+  set('MinorServingApprovedAt', '');
   set('Gender', obj.gender || '');
 
   /* PATCH_BOUNDARY: REG2_REFERREDBY_APPEND_BEGIN */
@@ -4396,6 +4731,81 @@ function regFetchQrPngBlob_(text, sizePx, filename){
 }
 
 /******** Email send ********/
+function regSendFamilyRegistrationEmail_(p){
+  const out = { sentToNew:false, sentToOld:false, toNewMasked:'', toOldMasked:'', reason:'' };
+  const toEmail = String((p && p.toEmail) || '').trim();
+  const members = Array.isArray(p && p.members) ? p.members.slice(0, 4) : [];
+  out.toNewMasked = toEmail ? regMaskEmail_(toEmail) : '';
+  if (!toEmail){ out.reason = 'NO_EMAIL'; return out; }
+  if (!members.length){ out.reason = 'NO_MEMBERS'; return out; }
+  if (MailApp.getRemainingDailyQuota() <= 0){ out.reason = 'QUOTA'; return out; }
+
+  const attachments = [];
+  members.forEach(function(member, index){
+    const letter = String(member.memberLetter || String.fromCharCode(65 + index)).trim().toUpperCase();
+    const id = String(member.memberId || '').trim().toUpperCase();
+    try{
+      attachments.push(regFetchQrPngBlob_(member.qrPayload, 420, 'ccf-' + letter + '-' + id + '-qr.png'));
+    }catch(e){
+      if (!out.reason) out.reason = 'QR_ATTACH_FAIL: ' + String(e && e.message || e);
+    }
+  });
+  try{
+    attachments.push(regFetchQrPngBlob_(REG_WA_LINK, 420, 'ccf-whatsapp.png'));
+  }catch(e){
+    if (!out.reason) out.reason = 'WHATSAPP_QR_ATTACH_FAIL: ' + String(e && e.message || e);
+  }
+
+  const familyId = String((p && p.familyId) || '').trim();
+  const cards = members.map(function(member, index){
+    const letter = String(member.memberLetter || String.fromCharCode(65 + index)).trim().toUpperCase();
+    const id = String(member.memberId || '').trim().toUpperCase();
+    const name = [member.nameZh, member.nameEn].map(function(v){ return String(v || '').trim(); }).filter(Boolean).join(' / ') || id;
+    return '<div style="border:1px solid #d9deea;border-radius:12px;padding:12px;margin:12px 0;">' +
+      '<p style="margin:0 0 6px;"><b>' + regHtmlEscape_(letter + ' · ' + name) + '</b></p>' +
+      '<p style="margin:0 0 8px;"><b>CCF ID:</b> ' + regHtmlEscape_(id) + '</p>' +
+      '<p style="margin:0;"><img alt="CCF QR ' + regHtmlEscape_(id) + '" src="' + regQrUrl_(member.qrPayload, 360) + '" style="max-width:320px;height:auto;" /></p>' +
+      '<p style="color:#666;font-size:12px;margin:6px 0 0;">附件 / Attachment: ccf-' + regHtmlEscape_(letter) + '-' + regHtmlEscape_(id) + '-qr.png</p>' +
+    '</div>';
+  }).join('');
+  const textMembers = members.map(function(member, index){
+    const letter = String(member.memberLetter || String.fromCharCode(65 + index)).trim().toUpperCase();
+    const id = String(member.memberId || '').trim().toUpperCase();
+    const name = [member.nameZh, member.nameEn].map(function(v){ return String(v || '').trim(); }).filter(Boolean).join(' / ') || id;
+    return letter + ' · ' + name + '\nCCF ID: ' + id + '\nAttachment: ccf-' + letter + '-' + id + '-qr.png';
+  }).join('\n\n');
+
+  const html = '<div style="font-family:Arial,sans-serif;line-height:1.55;">' +
+    '<p><b>家庭登記已完成 / Family registration complete</b></p>' +
+    '<p>以下每位家庭成員都有獨立的 CCF ID 及 QR。請分別保存並在簽到時出示正確的 QR。<br/>' +
+      'Each family member has an independent CCF ID and QR. Save them separately and present the correct QR at check-in.</p>' +
+    (familyId ? ('<p><b>Family ID:</b> ' + regHtmlEscape_(familyId) + '</p>') : '') +
+    cards +
+    '<hr/><p><b>加入 CCF WhatsApp 社群 / Join the CCF WhatsApp community</b><br/><a href="' + REG_WA_LINK + '">' + REG_WA_LINK + '</a></p>' +
+    '<p><img alt="CCF WhatsApp QR" src="' + regQrUrl_(REG_WA_LINK, 320) + '" style="max-width:320px;height:auto;" /></p>' +
+    '<p style="color:#666;font-size:12px;">如 QR 未能顯示，請開啟相應附件。日後每位成員可用自己的 QR 登入並獨立更改電郵；CCF ID、QR、Family ID、出席及事奉記錄不會因此改變。<br/>' +
+      'If a QR is not visible, open its labelled attachment. Later, each member can sign in with their own QR and change email independently; their CCF ID, QR, Family ID, attendance and serving history stay unchanged. ' + regHtmlEscape_((p && p.deviceHint) || '') + '</p>' +
+  '</div>';
+  const textBody = '家庭登記已完成 / Family registration complete\n' +
+    (familyId ? ('Family ID: ' + familyId + '\n\n') : '\n') + textMembers +
+    '\n\nJoin WhatsApp: ' + REG_WA_LINK +
+    '\n\nEach member may later change email independently without changing their CCF ID, QR, Family ID, attendance or serving history.';
+  try{
+    MailApp.sendEmail({
+      to:toEmail,
+      subject:'CCF 家庭登記 QR / Family registration QRs',
+      body:textBody,
+      htmlBody:html,
+      attachments:attachments
+    });
+    out.sentToNew = true;
+    if (!out.reason) out.reason = 'SENT';
+  }catch(e){
+    out.reason = 'SEND_NEW_FAIL: ' + String(e && e.message || e);
+  }
+  return out;
+}
+
 function regSendEmails_(p){
   const out = { sentToNew:false, sentToOld:false, toNewMasked:'', toOldMasked:'', reason:'' };
 
@@ -4404,8 +4814,15 @@ function regSendEmails_(p){
 
   const toEmail = String(p.toEmail||'').trim();
   const oldEmail = String(p.oldEmail||'').trim();
+  const alertEmails = [];
+  (Array.isArray(p.alertEmails) ? p.alertEmails : []).concat(oldEmail ? [oldEmail] : []).forEach(function(value){
+    const email = String(value||'').trim();
+    const norm = regNormEmail_(email);
+    if (!norm || alertEmails.some(function(existing){ return regNormEmail_(existing) === norm; })) return;
+    alertEmails.push(email);
+  });
   out.toNewMasked = toEmail ? regMaskEmail_(toEmail) : '';
-  out.toOldMasked = oldEmail ? regMaskEmail_(oldEmail) : '';
+  out.toOldMasked = alertEmails.length ? alertEmails.map(regMaskEmail_).join(', ') : '';
 
   // reasons if not sending
   if (!toEmail){
@@ -4496,7 +4913,7 @@ ${p.includeWhatsApp ? ('Join WhatsApp (if not already): ' + REG_WA_LINK) : ''}`;
     }
   }
 
-  if (oldEmail){
+  if (alertEmails.length){
     const staffExtraHtml = p.isStaff
       ? '<p style="color:#b00;"><b>STAFF notice:</b> If you are CCF staff and did not request this, contact Media Team immediately.</p>'
       : '';
@@ -4517,12 +4934,14 @@ If you did not request this change, please contact Media Team ASAP.
 
 (For security, no personal details or QR are included.)`;
 
-    try{
-      MailApp.sendEmail({ to: oldEmail, subject: subjectOld, body: txtOld, htmlBody: htmlOld });
-      out.sentToOld = true;
-    }catch(e){
-      out.reason = out.reason || ('SEND_OLD_FAIL: ' + String(e && e.message || e));
-    }
+    alertEmails.forEach(function(alertEmail){
+      try{
+        MailApp.sendEmail({ to: alertEmail, subject: subjectOld, body: txtOld, htmlBody: htmlOld });
+        out.sentToOld = true;
+      }catch(e){
+        out.reason = out.reason || ('SEND_OLD_FAIL: ' + String(e && e.message || e));
+      }
+    });
   }
 
   return out;

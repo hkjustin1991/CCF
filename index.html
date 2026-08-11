@@ -11,9 +11,9 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff-ui-2026-08-06.103
-   * For Code.gs: v2026-08-06.staff103
-   * CHANGELOG: operational hotfixes for visible login feedback and check-in deletion reauthentication.
+   * UI VERSION: staff-ui-2026-08-11.104
+   * For Code.gs: v2026-08-11.staff104
+   * CHANGELOG: authoritative New Friend labels and QR-image upload for every non-check-in QR flow.
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -176,7 +176,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-06.103</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-11.104</span></div>
     </header>
 
     <main id="app"></main>
@@ -1483,8 +1483,10 @@
           '<div class="small">請掃描授權者 QR。<br/>Scan approver QR.</div>'+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
               '<button id="btnSwitchCamAuth1" class="primary">📷 掃描 QR / Scan QR</button>'+
+              '<button id="btnUploadAuth1" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
               '<button id="btnAuthCancel" class="danger">⬅️ 返回 / Back</button>'+
             '</div>'+
+          '<input id="authQrImage1" type="file" accept="image/*" class="hide" />'+
           '<div class="hide"><video id="videoAuth1" playsinline></video></div>'+
           '<div id="authMsg"></div>'+
           '<div id="authActions" class="miniBtnRow '+(App.authFlash ? '' : 'hide')+'" style="margin-top:12px;">'+
@@ -1498,8 +1500,10 @@
           '<div class="small" style="margin-top:10px;">請掃描目標會員 QR。<br/>Scan target member QR.</div>'+
           '<div class="miniBtnRow" style="margin-top:10px;">'+
               '<button id="btnSwitchCamAuth2" class="primary">📷 掃描 QR / Scan QR</button>'+
+              '<button id="btnUploadAuth2" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
               '<button id="btnAuthBack1" class="alt">⬅️ 上一步 / Back</button>'+
             '</div>'+
+          '<input id="authQrImage2" type="file" accept="image/*" class="hide" />'+
           '<div class="hide"><video id="videoAuth2" playsinline></video></div>'+
           '<div id="authMsg"></div>'+
           '<div id="authActions" class="miniBtnRow hide" style="margin-top:12px;">'+
@@ -2559,6 +2563,21 @@ if (btnC) {
     function bindAuth(){
       clear('authMsg');
 
+      function bindAuthUpload_(buttonId, inputId, onPayload){
+        var button = $(buttonId);
+        var input = $(inputId);
+        if (!button || !input) return;
+        button.onclick = function(){ input.value=''; input.click(); };
+        input.onchange = function(ev){
+          var file = ev && ev.target && ev.target.files && ev.target.files[0];
+          if (!file) return;
+          showBox('authMsg','warn','讀取圖片中…','Reading image…');
+          decodeQrFromImageFile_(file).then(function(payload){ onPayload(payload, 'UPLOAD_QR'); }).catch(function(err){
+            showErr('authMsg', err || {code:'E500', zh:'圖片解碼失敗', en:'Image decode failed.'});
+          });
+        };
+      }
+
       function setFlash(kind, zh, en, detailHtml){
         App.authFlash = { kind:kind, zh:zh, en:en, detailHtml:detailHtml||'' };
       }
@@ -2571,9 +2590,8 @@ if (btnC) {
       var step = !App.authApprover ? 1 : (!App.authTarget ? 2 : (!App.authRole ? 3 : 4));
 
       if(step===1){
-        camBindSwitchButton_('btnSwitchCamAuth1', function(){
-          startScan('videoAuth1', onApprover, 'authMsg');
-        });
+        $('btnSwitchCamAuth1').onclick = function(){ startScan('videoAuth1', onApprover, 'authMsg', { externalFlow:'authorise_approver' }); };
+        bindAuthUpload_('btnUploadAuth1', 'authQrImage1', onApprover);
 
         $('btnAuthCancel').onclick = function(){ goBack(); };
         $('btnAuthBackMenu') && ($('btnAuthBackMenu').onclick = function(){ goMenu(); });
@@ -2606,9 +2624,8 @@ if (btnC) {
       }
 
       if(step===2){
-        camBindSwitchButton_('btnSwitchCamAuth2', function(){
-          startScan('videoAuth2', onTarget, 'authMsg');
-        });
+        $('btnSwitchCamAuth2').onclick = function(){ startScan('videoAuth2', onTarget, 'authMsg', { externalFlow:'authorise_target' }); };
+        bindAuthUpload_('btnUploadAuth2', 'authQrImage2', onTarget);
 
         $('btnAuthBack1').onclick = function(){
           App.authApprover=null; App.authTarget=null; App.authRole=null; clearFlash();
@@ -2837,8 +2854,10 @@ if (btnC) {
           ? '<div class="small" style="margin-top:8px;">SUPERUSER 可直接確認 / SUPERUSER can proceed.</div>'
           : '<div class="miniBtnRow" id="undoCam" style="margin-top:10px;">'+
                 '<button id="btnScanUndo" class="primary">📷 掃描 QR / Scan QR</button>'+
+                '<button id="btnUploadUndo" class="alt">🖼️ 上傳 QR 圖片 / Upload QR image</button>'+
                 '<button id="btnStopUndo" class="danger">取消 / Cancel</button>'+
               '</div>'+
+              '<input id="undoQrImageInput" type="file" accept="image/*" class="hide" />'+
               '<div class="hide"><video id="videoUndo" playsinline></video></div>'
         )+
         '<div class="miniBtnRow" style="margin-top:10px;">'+
@@ -2879,6 +2898,17 @@ if (btnC) {
       if (btnScanUndo){
         btnScanUndo.onclick = function(){
           startScan('videoUndo', handleScan, 'undoMsg', { externalFlow:'undo_checkin' });
+        };
+      }
+      var btnUploadUndo = modal.querySelector('#btnUploadUndo');
+      var undoQrImageInput = modal.querySelector('#undoQrImageInput');
+      if (btnUploadUndo && undoQrImageInput){
+        btnUploadUndo.onclick = function(){ undoQrImageInput.value=''; undoQrImageInput.click(); };
+        undoQrImageInput.onchange = function(ev){
+          var file = ev && ev.target && ev.target.files && ev.target.files[0];
+          if (!file) return;
+          showBox('undoMsg','warn','讀取圖片中…','Reading image…');
+          decodeQrFromImageFile_(file).then(handleScan).catch(function(err){ showErr('undoMsg', err || {code:'E500', zh:'圖片解碼失敗', en:'Image decode failed.'}); });
         };
       }
       modal.querySelector('#btnStopUndo').onclick = function(){ stopScan(); };
