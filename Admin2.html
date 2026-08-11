@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-08-07.120
-  For Admin.gs: v2026-08-07.admin118
-  CHANGELOG: date-independent group-member data, role-safe ranges and single-code error display.
+  UI VERSION TAG: admin2-ui-2026-08-11.121
+  For Admin.gs: v2026-08-11.admin119
+  CHANGELOG: bilingual, role-aligned serving-group membership management.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-07.120</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-11.121</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -1378,13 +1378,32 @@
             var role = String((App.actor && App.actor.role) || '').toUpperCase();
             var isStaffAdmin = (role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER');
 
-            function addById_(id, qrPayload){
+            function finishAdd_(r, activeModal){
+              var id = String((r && r.memberId) || '').trim().toUpperCase();
+              if (activeModal) closeModal(activeModal);
+              opts.notice = r && r.changed
+                ? {
+                    kind:'ok', code:'S106',
+                    zh:'已加入事奉組別', en:'Member added to serving group.',
+                    detailZh:(id ? ('會員：' + id) : ''), detailEn:(id ? ('Member: ' + id) : '')
+                  }
+                : {
+                    kind:'warn', code:'S107',
+                    zh:'此會員已在組別內', en:'This member is already in the group.',
+                    detailZh:(id ? ('會員：' + id) : ''), detailEn:(id ? ('Member: ' + id) : '')
+                  };
+              loadServingGroupMembers_(host, groupKey, opts);
+            }
+
+            function addById_(id, qrPayload, msgTarget, activeModal){
               callApi('api_admin_serving_group_member_update', App.token, groupKey, String(id||'').trim().toUpperCase(), 'ADD', qrPayload || '').then(function(r){
                 if (!r || !r.ok){
-                  showErr('app', r || {code:'E500', zh:'系統錯誤', en:'System error'});
+                  showErr(msgTarget, r || {code:'E500', zh:'系統錯誤', en:'System error'});
                   return;
                 }
-                loadServingGroupMembers_(host, groupKey, opts);
+                finishAdd_(r, activeModal);
+              }).catch(function(err){
+                showErr(msgTarget, err || {code:'E500', zh:'系統錯誤', en:'System error'});
               });
             }
 
@@ -1392,40 +1411,55 @@
               var modal = openModal(''+
                 '<div class="big">➕ 新增組員 / Add member</div>'+
                 '<div class="small">可搜尋 CCF ID / 姓名 / Email。<br/>Search by CCF ID / name / email.</div>'+
-                '<input id="addMemberQuery" class="input" placeholder="例如 CCF0001 / Alex / abc@x.com" />'+
+                (role === 'STAFF'
+                  ? '<div class="small">STAFF 可管理所有組別的一般會員；STAFF／ADMIN 帳戶只可由 ADMIN 修改。<br/>STAFF may manage ordinary members in all groups; only ADMIN may change STAFF/ADMIN accounts.</div>'
+                  : '<div class="small">ADMIN 可管理所有事奉組別及會員帳戶。<br/>ADMIN may manage all serving groups and member accounts.</div>')+
+                '<input id="addMemberQuery" class="input" placeholder="例如 / e.g.: CCF0001 / Alex / abc@x.com" />'+
                 '<div class="miniBtnRow">'+
                   '<button id="btnFindAddMember" class="btnMain">🔎 搜尋 / Search</button>'+
                   '<button id="btnCloseAddMember" class="btnBack">取消 / Cancel</button>'+
                 '</div>'+
+                '<div id="addMemberMsg"></div>'+
                 '<div id="addMemberResults" class="memberBubbleWrap" style="margin-top:8px;max-height:42vh;"></div>'
               );
               modal.querySelector('#btnCloseAddMember').onclick = function(){ closeModal(modal); };
-              modal.querySelector('#btnFindAddMember').onclick = function(){
+              function findAddMember_(){
                 var q = String(modal.querySelector('#addMemberQuery').value||'').trim();
-                if (!q) return;
+                if (!q){
+                  showBox('addMemberMsg','warn','請輸入 CCF ID、姓名或 Email','Enter a CCF ID, name or email.');
+                  return;
+                }
+                showBox('addMemberMsg','warn','正在搜尋…','Searching…');
                 callApi('api_admin_member_search', App.token, q).then(function(res2){
                   if (!res2 || !res2.ok){
-                    var hostR = modal.querySelector('#addMemberResults');
-                    if (hostR) hostR.innerHTML = buildMsgHtml_('err', { code:'E500', zh:'搜尋失敗', en:'Search failed' });
+                    showErr('addMemberMsg', res2 || { code:'E500', zh:'搜尋失敗', en:'Search failed' });
                     return;
                   }
+                  clear('addMemberMsg');
                   var rows = Array.isArray(res2.results) ? res2.results : [];
                   var hostR = modal.querySelector('#addMemberResults');
                   if (!hostR) return;
                   if (!rows.length){ hostR.innerHTML = buildMsgHtml_('warn', { code:'S102', zh:'找不到結果', en:'No results' }); return; }
                   hostR.innerHTML = '<div class="memberBubbleList">'+rows.map(function(r){
                     var name = [r.nameZh, r.nameEn, r.email].filter(Boolean).join(' / ');
-                    return '<button type="button" class="memberBubble btnBack" data-add-id="'+escapeHtml(r.id||'')+'">'+escapeHtml((r.id||'') + ' · ' + name)+'</button>';
+                    var status = displayMemberStatusLabel(r.status||'') || '—';
+                    return '<button type="button" class="memberBubble btnBack" data-add-id="'+escapeHtml(r.id||'')+'">'+escapeHtml((r.id||'') + ' · ' + name + ' · ' + status)+'</button>';
                   }).join('')+'</div>';
                   Array.prototype.forEach.call(hostR.querySelectorAll('[data-add-id]'), function(btn){
                     btn.onclick = function(){
                       var id = String(btn.getAttribute('data-add-id')||'').trim();
                       if (!id) return;
-                      addById_(id, '');
-                      closeModal(modal);
+                      showBox('addMemberMsg','warn','正在加入事奉組別…','Adding member to serving group…');
+                      addById_(id, '', 'addMemberMsg', modal);
                     };
                   });
+                }).catch(function(err){
+                  showErr('addMemberMsg', err || {code:'E500', zh:'搜尋失敗', en:'Search failed'});
                 });
+              }
+              modal.querySelector('#btnFindAddMember').onclick = findAddMember_;
+              modal.querySelector('#addMemberQuery').onkeydown = function(ev){
+                if (ev && ev.key === 'Enter') findAddMember_();
               };
               return;
             }
@@ -1446,11 +1480,13 @@
             scanModal.querySelector('#btnCloseTargetQr').onclick = function(){ stopScan(); closeModal(scanModal); };
             var vEl = scanModal.querySelector('#vTargetQr');
             function handleTargetQr_(payload){
+              showBox('targetQrMsg','warn','正在加入事奉組別…','Adding member to serving group…');
               callApi('api_admin_serving_group_member_update', App.token, groupKey, '', 'ADD', payload).then(function(r){
                 if (!r || !r.ok){ showErr('targetQrMsg', r || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
                 stopScan();
-                closeModal(scanModal);
-                loadServingGroupMembers_(host, groupKey, opts);
+                finishAdd_(r, scanModal);
+              }).catch(function(err){
+                showErr('targetQrMsg', err || {code:'E500', zh:'系統錯誤', en:'System error'});
               });
             }
             var btnStartTargetCam = scanModal.querySelector('#btnStartTargetCam');
@@ -1495,14 +1531,29 @@
             ? members.slice()
             : members.filter(function(m){ return memberText_(m).indexOf(normalizedQuery) >= 0; });
 
-          var html = '<div class="miniBtnRow" style="margin-top:0;">';
+          var html = '';
+          if (opts.notice){
+            html += buildMsgHtml_(opts.notice.kind || 'ok', opts.notice);
+            opts.notice = null;
+          }
+          html += '<div class="miniBtnRow" style="margin-top:0;">';
           if (res.canManage){
             html += '<button type="button" class="btnPeriod btnMini" id="btnGroupAddMember">➕ 新增組員 / Add member</button>';
           }
           html += '</div>';
+          if (res.canManage){
+            var roleNow = String((App.actor && App.actor.role) || '').toUpperCase();
+            if (roleNow === 'GL'){
+              html += '<div class="small">你可管理自己帶領的組別；新增組員須掃描對方 QR。<br/>You may manage groups you lead; adding a member requires scanning their QR.</div>';
+            } else if (roleNow === 'STAFF'){
+              html += '<div class="small">你可管理所有組別的一般會員；STAFF／ADMIN 帳戶只可由 ADMIN 修改。<br/>You may manage ordinary members in all groups; only ADMIN may change STAFF/ADMIN accounts.</div>';
+            } else {
+              html += '<div class="small">你可管理所有事奉組別及會員帳戶。<br/>You may manage all serving groups and member accounts.</div>';
+            }
+          }
           html += '<div class="label">組員總數 / Total members: '+escapeHtml(String(res.count||0))+'</div>';
           html += '<div class="small" style="margin:6px 0;">搜尋組員（姓名 / CCF ID）/ Search members (name / CCF ID)</div>';
-          html += '<input id="groupMemberSearch" class="input" type="text" placeholder="例如：CCF0001 / Alex" value="'+escapeHtml(query)+'" style="margin-bottom:8px;"/>';
+          html += '<input id="groupMemberSearch" class="input" type="text" placeholder="例如 / e.g.: CCF0001 / Alex" value="'+escapeHtml(query)+'" style="margin-bottom:8px;"/>';
 
           if (!members.length){
             html += '<div class="small">暫無組員 / No members found</div>';
@@ -1635,7 +1686,7 @@
         m.querySelector('.modal').innerHTML = ''+
           '<div class="groupDialogHeader">'+
             '<div class="big">👤 '+escapeHtml(member.id||memberId||'')+'</div>'+
-            '<button id="btnRemoveThisGroup" class="btnDanger btnMini">🗑️ 從本組移除 / Remove from this group</button>'+
+            (res.canManage ? '<button id="btnRemoveThisGroup" class="btnDanger btnMini">🗑️ 從本組移除 / Remove from this group</button>' : '')+
           '</div>'+
           '<div class="small">'+escapeHtml(namesLine || '—')+'</div>'+
           '<div style="margin-top:8px;">'+renderServingGroupBubble_(groupKey)+'</div>'+

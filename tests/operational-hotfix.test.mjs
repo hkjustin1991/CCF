@@ -222,6 +222,7 @@ test('group-member serving summary is independent of attendance date limits', ()
   const result = context.api_admin_serving_group_member_summary('token', 'media', 'CCF0123');
   assert.equal(result.ok, true);
   assert.equal(result.member.id, 'CCF0123');
+  assert.equal(result.canManage, true);
   assert.equal(result.servingInsights.byGroup.media.memberId, 'CCF0123');
   assert.equal(audited, true);
 
@@ -264,6 +265,81 @@ test('group-member serving summary is independent of attendance date limits', ()
   assert.equal(clampContext.App.from, '2026-02-08');
 });
 
+test('GL STAFF and ADMIN group-membership controls follow one permission policy', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), context, { filename:'Admin.gs' });
+
+  assert.equal(context.admin_canManageServingGroupMembership_({ role:'STAFF' }, 'media'), true);
+  assert.equal(context.admin_canManageServingGroupMembership_({ role:'ADMIN' }, 'finance'), true);
+  assert.equal(context.admin_canManageServingGroupMembership_({ role:'GL', glGroups:['MEDIA'] }, 'media'), true);
+  assert.equal(context.admin_canManageServingGroupMembership_({ role:'GL', glGroups:['MEDIA'] }, 'logistic'), false);
+  assert.equal(context.admin_canManageServingGroupTarget_({ role:'STAFF' }, { status:'ACTIVE' }), true);
+  assert.equal(context.admin_canManageServingGroupTarget_({ role:'STAFF' }, { status:'STAFF' }), false);
+  assert.equal(context.admin_canManageServingGroupTarget_({ role:'ADMIN' }, { status:'STAFF' }), true);
+
+  let actor = { id:'CCF0001', role:'STAFF', glGroups:[] };
+  let target = { id:'CCF0123', status:'ACTIVE', rowNumber:2 };
+  let cellValue = '';
+  let writeCount = 0;
+  const sheet = {
+    getRange(){
+      return {
+        getValue(){ return cellValue; },
+        setValue(value){ cellValue = value; writeCount += 1; }
+      };
+    }
+  };
+  context.admin_requireSession_ = () => ({ ok:true, actor });
+  context.admin_getMembersIndex_ = () => ({ byId:{ CCF0123:target } });
+  context.admin_findMembersSheet_ = () => sheet;
+  context.admin_getMembersColMap_ = () => ({ ServingGroups:5 });
+  context.admin_parseGroupsCsv_ = value => String(value || '').split(',').map(v => v.trim().toUpperCase()).filter(Boolean);
+  context.admin_clearMembersCache_ = () => {};
+  context.admin_audit_ = () => {};
+  context.admin_parseQrStrict_ = () => ({ ok:true, id:'CCF0123' });
+
+  const staffAdd = context.api_admin_serving_group_member_update('token', 'media', 'CCF0123', 'ADD', '');
+  assert.equal(staffAdd.ok, true);
+  assert.equal(staffAdd.changed, true);
+  assert.equal(cellValue, 'MEDIA');
+
+  const duplicateAdd = context.api_admin_serving_group_member_update('token', 'media', 'CCF0123', 'ADD', '');
+  assert.equal(duplicateAdd.ok, true);
+  assert.equal(duplicateAdd.changed, false);
+  assert.equal(writeCount, 1);
+
+  target.status = 'STAFF';
+  cellValue = '';
+  const staffBlocked = context.api_admin_serving_group_member_update('token', 'media', 'CCF0123', 'ADD', '');
+  assert.equal(staffBlocked.ok, false);
+  assert.equal(staffBlocked.code, 'E403');
+
+  actor = { id:'CCF0002', role:'ADMIN', glGroups:[] };
+  const adminAdd = context.api_admin_serving_group_member_update('token', 'media', 'CCF0123', 'ADD', '');
+  assert.equal(adminAdd.ok, true);
+
+  actor = { id:'CCF0003', role:'GL', glGroups:['MEDIA'] };
+  target.status = 'ACTIVE';
+  cellValue = '';
+  const glOwnGroup = context.api_admin_serving_group_member_update('token', 'media', '', 'ADD', 'CCF0123|key');
+  assert.equal(glOwnGroup.ok, true);
+  const glOtherGroup = context.api_admin_serving_group_member_update('token', 'logistic', '', 'ADD', 'CCF0123|key');
+  assert.equal(glOtherGroup.ok, false);
+  assert.equal(glOtherGroup.code, 'E403');
+
+  const ui = read('Admin2.html');
+  const addFlow = ui.slice(
+    ui.indexOf('function renderGroupMemberManage_'),
+    ui.indexOf('function openServingGroupMemberSummary_')
+  );
+  assert.ok(addFlow.includes("role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER'"));
+  assert.ok(addFlow.includes('id="addMemberMsg"'));
+  assert.ok(addFlow.includes('STAFF 可管理所有組別的一般會員；STAFF／ADMIN 帳戶只可由 ADMIN 修改。<br/>STAFF may manage ordinary members in all groups; only ADMIN may change STAFF/ADMIN accounts.'));
+  assert.ok(addFlow.includes('GL must scan target member QR to authorise adding member.'));
+  assert.ok(!addFlow.includes("showErr('app', r"));
+  assert.ok(ui.includes("(res.canManage ? '<button id=\"btnRemoveThisGroup\""));
+});
+
 test('source and visible UI version tags identify this hotfix', () => {
   const liveBackend = read('Code.gs');
   const liveUi = read('index.html');
@@ -277,10 +353,10 @@ test('source and visible UI version tags identify this hotfix', () => {
   assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-06.103'));
   assert.ok(liveUi.includes('ui staff-ui-2026-08-06.103'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-07.admin118';"));
-  assert.ok(adminBackend.includes('* v2026-08-07.admin118'));
-  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-07.120'));
-  assert.ok(adminUi.includes('ui admin2-ui-2026-08-07.120'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-11.admin119';"));
+  assert.ok(adminBackend.includes('* v2026-08-11.admin119'));
+  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-11.121'));
+  assert.ok(adminUi.includes('ui admin2-ui-2026-08-11.121'));
 
   assert.ok(regBackend.includes("const REG_VERSION = '2026-08-06.reg120';"));
   assert.ok(regBackend.includes('* v2026-08-06.reg120'));

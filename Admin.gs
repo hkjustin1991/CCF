@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-07.admin118
- * CHANGELOG: group-member serving summaries no longer depend on attendance date ranges.
+ * v2026-08-11.admin119
+ * CHANGELOG: GL/STAFF/ADMIN serving-group membership permissions are aligned.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-07.admin118';
+const ADMIN_VERSION = '2026-08-11.admin119';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -958,6 +958,30 @@ function admin_canEditServingGroup_(actor, groupKey){
   return glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
 }
 
+/**
+ * Group-membership management policy:
+ * - ADMIN/SUPERUSER: every serving group.
+ * - STAFF: every serving group, but privileged targets are blocked separately.
+ * - GL: only groups they lead.
+ */
+function admin_canManageServingGroupMembership_(actor, groupKey){
+  const key = admin_normalizeServingGroup_(groupKey);
+  if (!key) return false;
+  const role = String((actor && actor.role) || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
+  if (role !== 'GL') return false;
+  const glGroups = Array.isArray(actor && actor.glGroups) ? actor.glGroups : [];
+  return glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
+}
+
+function admin_canManageServingGroupTarget_(actor, target){
+  const role = String((actor && actor.role) || '').trim().toUpperCase();
+  if (role === 'ADMIN' || role === 'SUPERUSER') return true;
+  if (!(role === 'STAFF' || role === 'GL')) return false;
+  const targetStatus = admin_normStatus_((target && target.status) || '');
+  return !(targetStatus === 'STAFF' || targetStatus === 'ADMIN');
+}
+
 function admin_getServingPlanEditMap_(actor, positions){
   const out = {};
   const list = Array.isArray(positions) ? positions : [];
@@ -996,8 +1020,7 @@ function api_admin_serving_group_members(token, groupKey){
     .map(admin_memberLabelCompact_)
     .sort(function(a,b){ return String(a.label||'').localeCompare(String(b.label||'')); });
 
-  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
-  const canManage = (role === 'ADMIN' || role === 'SUPERUSER' || (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; })));
+  const canManage = admin_canManageServingGroupMembership_(s.actor, key);
 
   return { ok:true, group:key, count:members.length, members:members, canManage:canManage };
 }
@@ -1042,7 +1065,8 @@ function api_admin_serving_group_member_summary(token, groupKey, memberId){
       servingGroups:member.servingGroups||[],
       servingGLGroups:member.servingGLGroups||[]
     },
-    servingInsights:admin_getServingInsightsForMember_(id)
+    servingInsights:admin_getServingInsightsForMember_(id),
+    canManage:admin_canManageServingGroupMembership_(s.actor, key) && admin_canManageServingGroupTarget_(s.actor, member)
   };
   admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_SUMMARY', JSON.stringify({ group:key, memberId:id }), 'serving_group');
   return result;
@@ -1086,10 +1110,7 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
   }
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
 
-  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
-  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
-  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
-  if (!isAdminLike && !isGlAllowed){
+  if (!admin_canManageServingGroupMembership_(s.actor, key)){
     return admin_err_('E403','沒有權限修改此組別','No permission to modify this group.');
   }
 
@@ -1097,9 +1118,8 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
   const target = (mi && mi.byId) ? mi.byId[id] : null;
   if (!target) return admin_err_('E412','找不到此會員','Member not found.');
 
-  const targetStatus = admin_normStatus_(target.status || '');
-  if (!isAdminLike && (targetStatus === 'STAFF' || targetStatus === 'ADMIN')){
-    return admin_err_('E403','GL 不可修改 STAFF/ADMIN 的組別','GL cannot modify STAFF/ADMIN serving groups.');
+  if (!admin_canManageServingGroupTarget_(s.actor, target)){
+    return admin_err_('E403','只有 ADMIN 可修改 STAFF/ADMIN 的事奉組別','Only ADMIN can modify STAFF/ADMIN serving groups.');
   }
 
   const sh = admin_findMembersSheet_();
@@ -1112,16 +1132,23 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
   const nowGroups = admin_parseGroupsCsv_(sh.getRange(rowNumber, col.ServingGroups+1).getValue());
   let next = nowGroups.slice();
   const keyUpper = key.toUpperCase();
+  let changed = false;
   if (up === 'ADD'){
-    if (next.indexOf(keyUpper) < 0) next.push(keyUpper);
+    if (next.indexOf(keyUpper) < 0){
+      next.push(keyUpper);
+      changed = true;
+    }
   } else if (up === 'REMOVE'){
     next = next.filter(function(g){ return g !== keyUpper; });
+    changed = (next.length !== nowGroups.length);
   }
 
-  sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
-  admin_clearMembersCache_();
-  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_UPDATE', JSON.stringify({ group:key, action:up, memberId:id, viaTargetQr:(up==='ADD' && role==='GL') }), 'serving_group');
-  return { ok:true, group:key, action:up, memberId:id, servingGroups:next };
+  if (changed){
+    sh.getRange(rowNumber, col.ServingGroups+1).setValue(next.join(', '));
+    admin_clearMembersCache_();
+  }
+  admin_audit_(s.actor, 'SERVING_GROUP_MEMBER_UPDATE', JSON.stringify({ group:key, action:up, memberId:id, changed:changed, viaTargetQr:(up==='ADD' && role==='GL') }), 'serving_group');
+  return { ok:true, group:key, action:up, memberId:id, changed:changed, servingGroups:next };
 }
 
 /**
@@ -1140,11 +1167,7 @@ function api_admin_member_remove_from_group(token, memberId, groupKey, reauthQrP
   const auth = admin_verifyReauth_(s.actor, reauthQrPayload);
   if (!auth.ok) return auth;
 
-  const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  const glGroups = Array.isArray(s.actor.glGroups) ? s.actor.glGroups : [];
-  const isAdminLike = (role === 'ADMIN' || role === 'SUPERUSER');
-  const isGlAllowed = (role === 'GL' && glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; }));
-  if (!isAdminLike && !isGlAllowed){
+  if (!admin_canManageServingGroupMembership_(s.actor, key)){
     return admin_err_('E403','沒有權限修改此組別','No permission to modify this group.');
   }
 
@@ -1152,9 +1175,8 @@ function api_admin_member_remove_from_group(token, memberId, groupKey, reauthQrP
   const target = (mi && mi.byId) ? mi.byId[id] : null;
   if (!target) return admin_err_('E412','找不到此會員','Member not found.');
 
-  const targetStatus = admin_normStatus_(target.status || '');
-  if (!isAdminLike && (targetStatus === 'STAFF' || targetStatus === 'ADMIN')){
-    return admin_err_('E403','GL 不可修改 STAFF/ADMIN 的組別','GL cannot modify STAFF/ADMIN serving groups.');
+  if (!admin_canManageServingGroupTarget_(s.actor, target)){
+    return admin_err_('E403','只有 ADMIN 可修改 STAFF/ADMIN 的事奉組別','Only ADMIN can modify STAFF/ADMIN serving groups.');
   }
 
   const sh = admin_findMembersSheet_();
