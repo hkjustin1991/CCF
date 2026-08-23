@@ -90,22 +90,33 @@ test('portal is generic and follows the simple reusable poll design', () => {
   assert.ok(html.includes('id="pollQuestion"'));
   assert.ok(html.includes('id="pollMultiple"'));
   assert.ok(html.includes('id="pollRanked"'));
+  assert.ok(html.includes('id="pollChildren"'));
   assert.ok(html.includes('棄權 / Abstain'));
   assert.ok(html.includes("answerType:ranked?'RANKED':(multi?'MULTIPLE':'SINGLE')"));
+  assert.equal(html.includes('Existing poll data will be consolidated'),false);
+  assert.equal(html.includes('eligibilityHtml_'),false);
+  assert.equal(html.includes('childTick'),false);
+  assert.equal(html.includes('id="btnEligibility"'),false);
 });
 
-test('one Vote tab carries all record types and legacy tabs map into it', () => {
+test('Vote holds poll setup while Vote Audit holds running records', () => {
   const context = voteContext();
   assert.equal(vm.runInContext('VOTE_SHEET',context),'Vote');
+  assert.equal(vm.runInContext('VOTE_AUDIT_SHEET',context),'Vote Audit');
   assert.deepEqual(plain(vm.runInContext('VOTE_LEGACY_SHEETS',context)),[
     'Vote_Elections','Vote_Options','Vote_Eligibility','Vote_Ballots','Vote_Scrutineers','Vote_Audit'
   ]);
   const headers = plain(vm.runInContext('VOTE_HEADERS',context));
-  ['RecordType','PollId','Question','AnswerType','MaxSelections','Choices','Abstained','Action'].forEach(header => assert.ok(headers.includes(header)));
+  ['RecordType','PollId','Question','AnswerType','MaxSelections','IncludeChildren','FinalResult','ResultNotes'].forEach(header => assert.ok(headers.includes(header)));
+  ['MemberId','Choices','Abstained','Action'].forEach(header => assert.equal(headers.includes(header),false));
+  const auditHeaders = plain(vm.runInContext('VOTE_AUDIT_HEADERS',context));
+  ['RecordType','PollId','MemberId','Choices','Abstained','Action'].forEach(header => assert.ok(auditHeaders.includes(header)));
+  ['Question','OptionText','FinalResult'].forEach(header => assert.equal(auditHeaders.includes(header),false));
   const mapped = context.vote_legacy_record_fields_('Vote_Elections',{ _rowNumber:2, ElectionId:'POLL_OLD', TitleZh:'問題', TitleEn:'Question', State:'OPEN' });
   assert.equal(mapped.RecordType,'POLL');
   assert.equal(mapped.PollId,'POLL_OLD');
   assert.equal(mapped.AnswerType,'SINGLE');
+  assert.equal(mapped.IncludeChildren,'NO');
   assert.equal(mapped.LegacySource,'Vote_Elections#2');
 });
 
@@ -127,6 +138,8 @@ class FakeSheet{
   getLastColumn(){ return this.values.reduce((max,row) => Math.max(max,row.length),0); }
   getRange(row,col,numRows,numCols){ return new FakeRange(this,row,col,numRows,numCols); }
   appendRow(row){ this.values.push([...row]); }
+  deleteRow(row){ this.values.splice(row - 1,1); }
+  deleteColumn(col){ this.values.forEach(row => row.splice(col - 1,1)); }
   setFrozenRows(){}
 }
 
@@ -137,7 +150,7 @@ class FakeSpreadsheet{
   deleteSheet(sheet){ this.deleted.push(sheet.name); this.sheets.delete(sheet.name); }
 }
 
-test('legacy migration creates only Vote, verifies rows, then removes the six legacy tabs', () => {
+test('legacy migration creates Vote and Vote Audit, verifies rows, then removes the six legacy tabs', () => {
   const legacy = [
     new FakeSheet('Vote_Elections',[[ 'ElectionId','TitleZh','TitleEn','State' ],[ 'POLL_OLD','舊問題','Old question','CLOSED' ]]),
     new FakeSheet('Vote_Options',[[ 'ElectionId','OptionNo','LabelZh','LabelEn','SortOrder','Active' ],[ 'POLL_OLD','1','甲','A',1,'YES' ]]),
@@ -152,20 +165,51 @@ test('legacy migration creates only Vote, verifies rows, then removes the six le
   assert.equal(result.migrated,6);
   assert.equal(result.removedSheets,6);
   assert.deepEqual(new Set(ss.deleted),new Set(legacy.map(sheet => sheet.name)));
-  assert.deepEqual([...ss.sheets.keys()],['Vote']);
-  assert.equal(context.vote_data_records_('').length,6);
+  assert.deepEqual([...ss.sheets.keys()],['Vote','Vote Audit']);
+  assert.equal(context.vote_data_records_('').length,2);
+  assert.equal(context.vote_audit_data_records_('').length,4);
 });
 
-test('eligibility blocks excluded statuses, explicit exclusions, and unticked children', () => {
+test('the previous unified Vote layout is safely split without losing ballots', () => {
+  const oldHeaders = [
+    'RecordType','PollId','RecordId','MemberId','Question','QuestionAlt','OptionNo','OptionText','OptionTextAlt','SortOrder',
+    'AnswerType','MaxSelections','State','OpensAt','ClosesAt','Active','OptionDigest','ChildEligible','ExplicitIneligible','Reason',
+    'ReceiptId','VoterCode','Choices','Abstained','CastAt','DecisionCode','IntegrityMac','ActorId','ActorRole','Action','Target','Details',
+    'CreatedAt','CreatedBy','UpdatedAt','UpdatedBy','LegacySource'
+  ];
+  const row = fields => oldHeaders.map(header => fields[header] ?? '');
+  const vote = new FakeSheet('Vote',[
+    oldHeaders,
+    row({ RecordType:'POLL', PollId:'POLL_OLD', RecordId:'POLL_OLD', Question:'Question', AnswerType:'SINGLE', MaxSelections:1, State:'CLOSED' }),
+    row({ RecordType:'OPTION', PollId:'POLL_OLD', RecordId:'OPT_1', OptionNo:'1', OptionText:'A', SortOrder:1, Active:'YES' }),
+    row({ RecordType:'BALLOT', PollId:'POLL_OLD', RecordId:'BALLOT_1', ReceiptId:'R-1', VoterCode:'V1.X', Choices:'["1"]', CastAt:'2030-01-01', DecisionCode:'D1.X', IntegrityMac:'I1.X' }),
+    row({ RecordType:'AUDIT', PollId:'POLL_OLD', RecordId:'AUDIT_1', ActorId:'V1.X', ActorRole:'VOTER_CODE', Action:'BALLOT_CAST', Target:'R-1' })
+  ]);
+  const ss = new FakeSpreadsheet([vote]), context = voteContext();
+  context.vote_open_ss_ = () => ss;
+  const result = context.vote_migrate_legacy_sheets_();
+  assert.equal(result.migrated,2);
+  assert.equal(result.splitRows,2);
+  assert.equal(result.removedSheets,0);
+  assert.deepEqual([...ss.sheets.keys()],['Vote','Vote Audit']);
+  assert.deepEqual(context.vote_data_records_('').map(record => record.RecordType),['POLL','OPTION']);
+  assert.deepEqual(context.vote_audit_data_records_('').map(record => record.RecordType),['BALLOT','AUDIT']);
+  assert.equal(context.vote_ballots_('POLL_OLD')[0].receiptId,'R-1');
+  const voteHeaders = vote.values[0].filter(Boolean);
+  ['IncludeChildren','FinalResult','ResultNotes'].forEach(header => assert.ok(voteHeaders.includes(header)));
+  ['MemberId','VoterCode','Choices','Action'].forEach(header => assert.equal(voteHeaders.includes(header),false));
+});
+
+test('eligibility blocks excluded statuses, explicit exclusions, and children when the poll-wide box is off', () => {
   const context = voteContext();
-  const check = (status,isMinor = false,flag = {}) => context.vote_evaluate_eligibility_({ status,isMinor },flag);
+  const check = (status,isMinor = false,flag = {},includeChildren = false) => context.vote_evaluate_eligibility_({ status,isMinor },flag,includeChildren);
   assert.equal(check('DISABLED').code,'STATUS_DISABLED');
   assert.equal(check('PROVISIONAL').code,'STATUS_PROVISIONAL');
   assert.equal(check('PENDING').code,'STATUS_PENDING');
   assert.equal(check('').code,'STATUS_MISSING');
   assert.equal(check('ACTIVE',false,{ explicitIneligible:true }).code,'EXPLICITLY_INELIGIBLE');
-  assert.equal(check('ACTIVE',true,{ childEligible:false }).code,'CHILD_APPROVAL_REQUIRED');
-  assert.equal(check('ACTIVE',true,{ childEligible:true }).eligible,true);
+  assert.equal(check('ACTIVE',true,{},false).code,'CHILDREN_NOT_INCLUDED');
+  assert.equal(check('ACTIVE',true,{},true).eligible,true);
   assert.equal(check('STAFF').eligible,true);
   assert.equal(check('DEACON').eligible,true);
   assert.equal(check('ADMIN').eligible,true);
@@ -186,13 +230,15 @@ test('poll validation supports single, multiple, and stored-order response modes
   assert.equal(context.vote_validate_poll_content_({ question:'Question', answerType:'SINGLE', options:[{ label:'A' }] }).code,'E422');
   assert.equal(context.vote_validate_poll_content_({ question:'', answerType:'SINGLE', options }).code,'E422');
   assert.equal(context.vote_validate_poll_content_({ question:'Question', answerType:'MULTIPLE', maxSelections:1, options }).code,'E422');
-  const single = context.vote_validate_poll_content_({ question:'Question', answerType:'SINGLE', options });
-  const multiple = context.vote_validate_poll_content_({ question:'Question', answerType:'MULTIPLE', maxSelections:2, options });
+  const single = context.vote_validate_poll_content_({ question:'Question', answerType:'SINGLE', includeChildren:false, options });
+  const multiple = context.vote_validate_poll_content_({ question:'Question', answerType:'MULTIPLE', maxSelections:2, includeChildren:true, options });
   const ranked = context.vote_validate_poll_content_({ question:'Question', answerType:'RANKED', options });
   assert.equal(single.ok,true);
   assert.equal(single.maxSelections,1);
   assert.equal(multiple.ok,true);
   assert.equal(multiple.maxSelections,2);
+  assert.equal(single.includeChildren,false);
+  assert.equal(multiple.includeChildren,true);
   assert.equal(ranked.ok,true);
   assert.equal(ranked.maxSelections,3);
   assert.deepEqual(plain(ranked.options.map(option => option.optionNo)),['1','2','3']);
@@ -226,7 +272,7 @@ test('ADMIN creates reusable polls without displacing an active current poll', (
   context.vote_append_record_ = fields => {
     if(fields.RecordType === 'POLL')polls.set(fields.PollId,{
       rowNumber:polls.size + 2, electionId:fields.PollId, pollId:fields.PollId, question:fields.Question, questionAlt:fields.QuestionAlt,
-      answerType:fields.AnswerType, maxSelections:fields.MaxSelections, state:fields.State, optionDigest:fields.OptionDigest,
+      answerType:fields.AnswerType, maxSelections:fields.MaxSelections, includeChildren:fields.IncludeChildren === 'YES', state:fields.State, optionDigest:fields.OptionDigest,
       opensAt:'', closesAt:'', createdAt:fields.CreatedAt.toISOString(), createdBy:fields.CreatedBy
     });
     if(fields.RecordType === 'OPTION')optionRows.push({ optionNo:fields.OptionNo, label:fields.OptionText, labelAlt:fields.OptionTextAlt, labelZh:fields.OptionText, labelEn:fields.OptionTextAlt, sortOrder:fields.SortOrder, pollId:fields.PollId });
@@ -236,10 +282,11 @@ test('ADMIN creates reusable polls without displacing an active current poll', (
   context.vote_set_current_poll_id_ = pollId => { currentId = pollId; };
   context.vote_audit_ = (actor,pollId,action,target,reason,details) => { audit.push({ actor,pollId,action,target,reason,details }); return true; };
 
-  const first = context.api_vote_admin_create_poll('admin',{ question:'First poll', answerType:'MULTIPLE', maxSelections:2, options:[{ label:'A' },{ label:'B' },{ label:'C' }] });
+  const first = context.api_vote_admin_create_poll('admin',{ question:'First poll', answerType:'MULTIPLE', maxSelections:2, includeChildren:true, options:[{ label:'A' },{ label:'B' },{ label:'C' }] });
   assert.equal(first.ok,true);
   assert.equal(first.madeCurrent,true);
   assert.equal(first.poll.answerType,'MULTIPLE');
+  assert.equal(first.poll.includeChildren,true);
   assert.equal(first.options.length,3);
   assert.equal(currentId,first.poll.electionId);
   assert.ok(first.poll.optionDigest.startsWith('O1.'));
@@ -276,22 +323,23 @@ test('an open or scheduled current poll cannot be replaced from the manager', ()
 
 function castFixture(member = { id:'CCF0123', status:'ACTIVE', isMinor:false }){
   const context = voteContext(), ballots = [], audit = [];
-  let currentPollId = 'POLL_TEST_A', electionState = 'OPEN', answerType = 'SINGLE', maxSelections = 1;
+  let currentPollId = 'POLL_TEST_A', electionState = 'OPEN', answerType = 'SINGLE', maxSelections = 1, includeChildren = true;
   const options = [{ optionNo:'1', label:'A', labelAlt:'甲', labelZh:'A', labelEn:'甲', sortOrder:1 },{ optionNo:'3', label:'B', labelAlt:'乙', labelZh:'B', labelEn:'乙', sortOrder:2 },{ optionNo:'5', label:'C', labelAlt:'丙', labelZh:'C', labelEn:'丙', sortOrder:3 }];
   context.vote_require_session_ = () => ({ ok:true, member });
   context.vote_current_poll_id_ = () => currentPollId;
   context.vote_get_election_ = pollId => ({
     electionId:String(pollId || currentPollId), question:'Test poll', state:electionState, answerType, maxSelections,
+    includeChildren,
     opensAt:'', closesAt:electionState === 'OPEN' ? '2099-01-01T00:00:00.000Z' : '2020-01-01T00:00:00.000Z'
   });
-  context.vote_get_eligibility_flag_ = () => ({ childEligible:true, explicitIneligible:false });
+  context.vote_get_eligibility_flag_ = () => ({ explicitIneligible:false });
   context.vote_get_options_ = () => options;
   context.vote_options_integrity_ok_ = () => true;
   context.vote_get_secret_ = () => 'test-only-secret';
   context.vote_ballots_ = pollId => ballots.filter(ballot => !pollId || ballot.electionId === pollId);
   context.vote_prior_cast_audit_ = () => null;
   context.vote_audit_ = (actor,pollId,action,target,reason,details) => { audit.push({ actor,pollId,action,target,reason,details }); return true; };
-  context.vote_append_record_ = fields => {
+  context.vote_append_audit_record_ = fields => {
     if(fields.RecordType !== 'BALLOT')return;
     ballots.push({
       electionId:fields.PollId, receiptId:fields.ReceiptId, voterCode:fields.VoterCode,
@@ -303,9 +351,22 @@ function castFixture(member = { id:'CCF0123', status:'ACTIVE', isMinor:false }){
     context,ballots,audit,options,
     setCurrentPoll(pollId){ currentPollId = pollId; },
     setElectionState(state){ electionState = state; },
-    setAnswerType(type,max){ answerType = type; maxSelections = max; }
+    setAnswerType(type,max){ answerType = type; maxSelections = max; },
+    setIncludeChildren(value){ includeChildren = value; }
   };
 }
+
+test('the one poll-wide child setting controls every child ballot', () => {
+  const fixture = castFixture({ id:'CCF0200', status:'ACTIVE', isMinor:true });
+  fixture.setIncludeChildren(false);
+  let result = fixture.context.api_vote_cast('session','POLL_TEST_A',['1'],false);
+  assert.equal(result.code,'E_VOTE_NOT_AVAILABLE');
+  assert.equal(fixture.ballots.length,0);
+  fixture.setIncludeChildren(true);
+  result = fixture.context.api_vote_cast('session','POLL_TEST_A',['1'],false);
+  assert.equal(result.ok,true);
+  assert.equal(fixture.ballots.length,1);
+});
 
 test('one member submits once per poll and may participate in the next poll', () => {
   const fixture = castFixture(), { context,ballots,audit } = fixture;
@@ -474,22 +535,25 @@ test('pre-login payload contains the current question but no poll choices, resul
 
 test('authenticated dashboard has ballot data but omits restricted permission and ballot internals', () => {
   const context = voteContext();
-  context.vote_get_election_ = () => ({ electionId:'POLL_A', question:'Question', questionAlt:'', answerType:'SINGLE', maxSelections:1, state:'OPEN', opensAt:'', closesAt:'2099-01-01', optionDigest:'digest' });
+  context.vote_get_election_ = () => ({ electionId:'POLL_A', question:'Question', questionAlt:'', answerType:'SINGLE', maxSelections:1, includeChildren:false, state:'OPEN', opensAt:'', closesAt:'2099-01-01', optionDigest:'digest' });
   context.vote_get_options_ = () => [{ optionNo:'1', label:'A', labelAlt:'', sortOrder:1 },{ optionNo:'2', label:'B', labelAlt:'', sortOrder:2 }];
   context.vote_options_integrity_ok_ = () => true;
-  context.vote_get_eligibility_flag_ = () => ({ childEligible:false, explicitIneligible:false });
+  context.vote_get_eligibility_flag_ = () => ({ explicitIneligible:false });
   context.vote_existing_ballot_for_member_ = () => ({ hasVoted:false });
   context.vote_is_system_initialized_ = () => true;
   context.vote_is_scrutineer_ = () => false;
   const dashboard = context.vote_dashboard_for_member_({ id:'CCF0123', nameZh:'會員', status:'ACTIVE', isMinor:false });
   assert.equal(dashboard.election.question,'Question');
   assert.equal(dashboard.options.length,2);
+  assert.equal(dashboard.canVote,true);
+  assert.equal(Object.hasOwn(dashboard,'eligibility'),false);
+  assert.equal(Object.hasOwn(dashboard,'eligibilityFlags'),false);
   assert.equal(Object.hasOwn(dashboard.privileges,'canTrace'),false);
   assert.equal(Object.hasOwn(dashboard,'decisionCode'),false);
   assert.equal(Object.hasOwn(dashboard,'ballotRegister'),false);
 });
 
-test('STAFF manages eligibility while DEACON and ADMIN manage polls', () => {
+test('STAFF manages the not-eligible list while DEACON and ADMIN manage polls', () => {
   const context = voteContext();
   context.vote_is_scrutineer_ = () => false;
   const staff = context.vote_privileges_({ id:'CCF1', status:'STAFF' },'POLL_A');

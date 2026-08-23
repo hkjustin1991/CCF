@@ -1,6 +1,6 @@
 # Reusable CCF QR Polling Portal — Operating Guide
 
-The member portal is available at `?mode=vote`. It reuses the existing CCF member QR and member register. Routine poll creation, eligibility work, voting and aggregate results are handled in the portal.
+The member portal is available at `?mode=vote`. It reuses the existing CCF member QR and member register. Routine poll creation, the not-eligible list, voting and aggregate results are handled in the portal.
 
 The rota Google Sheet may be shared separately for member editing and Google version history. Do not give general members access to the CCF system spreadsheet or its `Vote` tab.
 
@@ -32,9 +32,9 @@ Selecting a QR image starts decoding immediately. A member does not need an ADMI
 | Action | Eligible member | STAFF | DEACON / ADMIN | Appointed scrutineer |
 |---|---:|---:|---:|---:|
 | Submit once per poll | Yes | Yes | Yes | Yes |
-| Tick child eligibility for the current poll | No | Yes | Yes | Only if also STAFF/DEACON/ADMIN |
 | Add/remove a poll-specific exclusion | No | Yes | Yes | Only if also STAFF/DEACON/ADMIN |
-| Create, edit, open and close polls | No | No | Yes | No |
+| Create/edit polls, including whether all children are included | No | No | Yes | No |
+| Open and close polls | No | No | Yes | No |
 | Appoint/remove scrutineers | No | No | Yes | No |
 | View results before closing | No | Only if appointed | Yes | Yes |
 | Use the separately routed review workflow | No | Only if appointed | Yes | Yes |
@@ -43,27 +43,30 @@ DEACON has the same poll-management authority as ADMIN. There is no software lim
 
 ## Eligibility
 
-A member is eligible unless any of these applies:
+A member may cast a ballot unless any of these applies:
 
 - `Status` is blank, `DISABLED`, `PROVISIONAL` or `PENDING`;
-- `IsMinor=YES` and STAFF/DEACON/ADMIN has not ticked child eligibility for that poll; or
+- `IsMinor=YES` and the poll-wide **Include all child members** box is off; or
 - STAFF/DEACON/ADMIN has placed the member on that poll's not-eligible list and entered a reason.
 
-An explicit exclusion overrides a child-eligibility tick. An expired privileged role is treated as `ACTIVE`, so an expired STAFF/DEACON/ADMIN role does not retain management access.
+There are no per-child approval boxes. One setting includes or excludes all children for that poll. A named exclusion still overrides the poll-wide setting. An expired privileged role is treated as `ACTIVE`, so an expired STAFF/DEACON/ADMIN role does not retain management access.
 
-## One-time setup and tab consolidation
+## One-time setup and the two voting tabs
 
 1. Copy `Vote.gs` into an Apps Script script file named `VoteBackend.gs`.
 2. Copy `Vote.html` and `VoteReview.html` into HTML files with those exact names.
 3. Deploy the version containing the `mode=vote` route.
 4. Open the deployed web-app URL with `?mode=vote`.
-5. A DEACON or ADMIN signs in with their own CCF QR and selects **開始 / Continue**.
+5. A DEACON or ADMIN signs in with their own CCF QR and selects **開始 / Start**.
 
-Setup creates at most one new tab named `Vote`. If the older six `Vote_*` tabs exist, the system:
+The finished spreadsheet has only these two voting tabs:
 
-1. copies every row into typed records in `Vote`;
-2. verifies that every legacy source row is present; and
-3. removes the six legacy tabs only after verification succeeds.
+- `Vote`: poll questions, options, response settings, dates, and blank `FinalResult` / `ResultNotes` fields for entering the agreed result after the poll is finished.
+- `Vote Audit`: the not-eligible list, ballots, appointed scrutineers, and the running system log.
+
+If `Vote` already exists from the previous release, setup adds only one new tab, `Vote Audit`. It copies and verifies the running records there before removing those rows and unused columns from `Vote`.
+
+If the older six `Vote_*` tabs exist, setup routes every row into `Vote` or `Vote Audit`, verifies every copied source row, and only then removes those six legacy tabs. A fresh installation creates both voting tabs.
 
 All unrelated spreadsheet tabs are left untouched. Setup also preserves the existing private Script Property. If that property is missing while ballots exist, the system refuses to generate a replacement.
 
@@ -77,10 +80,11 @@ After DEACON/ADMIN sign-in, choose **管理投票 / Manage polls**. The small `+
 4. Leave **Allow multiple choices** off for a one-choice poll.
 5. Turn it on for a multiple-choice poll and set the maximum selections.
 6. Turn on **Record choice order** when order matters.
-7. Create the poll. It is saved as `DRAFT`.
-8. Set child eligibility and any poll-specific exclusions.
-9. Appoint scrutineers by exact CCF ID.
-10. Set opening and closing times, then change the state to `OPEN`.
+7. Tick **Include all child members** if every child member should be able to take part.
+8. Create the poll. It is saved as `DRAFT`.
+9. Add any named exceptions to **Not eligible list**.
+10. Appoint scrutineers by exact CCF ID.
+11. Set opening and closing times, then change the state to `OPEN`.
 
 Every open ballot form also has a separate **棄權 / Abstain** button. Abstention is recorded as a valid ballot and reported separately.
 
@@ -90,6 +94,8 @@ For ordered polls, the portal stores the submitted option order. It deliberately
 
 - Ordinary members see the current poll immediately after QR sign-in.
 - DEACON/ADMIN first see two choices: **Cast vote** or **Manage polls**.
+- STAFF first see **Cast vote** or **Not eligible list**.
+- The casting page contains the current question and ballot only; it has no eligibility panel or management button.
 - A member may submit only once per poll.
 - The final confirmation cannot be changed after submission.
 - The receipt page contains a receipt ID and submission time.
@@ -132,14 +138,16 @@ An ADMIN or a scrutineer appointed to the relevant poll must sign in, enter a re
 - Confirm QR-image selection starts automatically and no `E415` image error remains.
 - Confirm an `ACTIVE` adult reaches the open poll, including a non-admin test member.
 - Confirm `DISABLED`, `PROVISIONAL`, `PENDING` and blank-status accounts are blocked.
-- Confirm an unticked child is blocked and becomes eligible after the child box is ticked.
-- Confirm a poll-specific exclusion overrides eligibility.
+- Confirm all children are blocked when **Include all child members** is off and allowed when it is on.
+- Confirm a poll-specific named exclusion still blocks that member.
 - Confirm single, multiple, ordered and Abstain submissions behave as configured.
 - Confirm a second submission returns the original receipt and adds no ballot row.
 - Confirm ordinary members cannot view live totals.
 - Confirm DEACON, ADMIN and appointed scrutineers can view live totals.
 - Confirm an ordered poll shows no calculated ranking.
-- Confirm the spreadsheet contains one `Vote` tab and no legacy `Vote_*` tabs after successful setup.
+- Confirm the spreadsheet contains `Vote` and `Vote Audit`, with no legacy `Vote_*` tabs after successful setup.
+- Confirm `Vote` contains only poll/configuration rows and has `FinalResult` and `ResultNotes` columns.
+- Confirm `Vote Audit` contains ballots and running records.
 - Confirm previous polls remain available in the manager.
 - Confirm QR sign-in and QR-image upload on both iPhone and Android.
 
