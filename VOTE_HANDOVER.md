@@ -1,149 +1,146 @@
 # Reusable CCF QR Polling Portal — Operating Guide
 
-The polling portal is available at `?mode=vote`. It reuses the existing CCF member QR and member register. Routine operation is completed through the portal; the next operator should not need to edit Apps Script or the `Vote_*` tabs.
+The member portal is available at `?mode=vote`. It reuses the existing CCF member QR and member register. Routine poll creation, eligibility work, voting and aggregate results are handled in the portal.
 
-The rota Google Sheet may be shared separately for member editing and Google edit history. Do not give general members access to the CCF system spreadsheet or its `Vote_*` tabs.
+The rota Google Sheet may be shared separately for member editing and Google version history. Do not give general members access to the CCF system spreadsheet or its `Vote` tab.
 
-## What members see
+## Apps Script file names
 
-The ordinary member flow contains only:
+Apps Script does not allow two project files with the same base name. Use these project file names:
 
-- the current poll title and dates;
-- the member's eligibility;
-- one-choice ballot options when the poll is open;
-- final submission confirmation; and
-- a receipt ID after submission.
+| Repository file | Apps Script project file |
+|---|---|
+| `Vote.gs` | `VoteBackend.gs` |
+| `Vote.html` | `Vote.html` |
+| `VoteReview.html` | `VoteReview.html` |
 
-Do not add descriptions of internal exception-review mechanics anywhere in the normal polling portal. The exceptional workflow belongs only on its separate, unlinked, restricted route.
+Renaming `Vote.gs` to `VoteBackend.gs` in Apps Script requires no code changes. Apps Script loads all `.gs` files into the same server-side namespace.
+
+## What is shown before sign-in
+
+The public page displays only the current poll question and the two QR sign-in methods. It does not return or display:
+
+- poll options;
+- the poll ID, state, dates or response mode;
+- ballot totals; or
+- aggregate results.
+
+Selecting a QR image starts decoding immediately. A member does not need an ADMIN role to sign in or vote.
 
 ## Roles
 
-| Action | Member | STAFF | DEACON / ADMIN | Appointed scrutineer |
+| Action | Eligible member | STAFF | DEACON / ADMIN | Appointed scrutineer |
 |---|---:|---:|---:|---:|
-| Submit one response per poll | Yes, if eligible | Yes, if eligible | Yes, if eligible | Yes, if eligible |
+| Submit once per poll | Yes | Yes | Yes | Yes |
 | Tick child eligibility for the current poll | No | Yes | Yes | Only if also STAFF/DEACON/ADMIN |
 | Add/remove a poll-specific exclusion | No | Yes | Yes | Only if also STAFF/DEACON/ADMIN |
-| Create and edit a draft poll | No | No | Yes | No |
-| Set the current poll and open/close it | No | No | Yes | No |
+| Create, edit, open and close polls | No | No | Yes | No |
 | Appoint/remove scrutineers | No | No | Yes | No |
 | View results before closing | No | Only if appointed | Yes | Yes |
-| Use exceptional ballot review | No | Only if appointed | Yes | Yes |
+| Use the separately routed review workflow | No | Only if appointed | Yes | Yes |
 
-There is no software limit on appointed scrutineers. Add each person by exact CCF ID for the relevant poll. At least two scrutineers are recommended for a formal vote.
+DEACON has the same poll-management authority as ADMIN. There is no software limit on appointed scrutineers; appoint each person by exact CCF ID for the relevant poll.
 
 ## Eligibility
 
 A member is eligible unless any of these applies:
 
-- `Status` is blank, `DISABLED`, `PROVISIONAL`, or `PENDING`;
+- `Status` is blank, `DISABLED`, `PROVISIONAL` or `PENDING`;
 - `IsMinor=YES` and STAFF/DEACON/ADMIN has not ticked child eligibility for that poll; or
 - STAFF/DEACON/ADMIN has placed the member on that poll's not-eligible list and entered a reason.
 
 An explicit exclusion overrides a child-eligibility tick. An expired privileged role is treated as `ACTIVE`, so an expired STAFF/DEACON/ADMIN role does not retain management access.
 
-## One-time system setup
+## One-time setup and tab consolidation
 
-1. Deploy the Apps Script version containing `Vote.gs`, `Vote.html`, and the `mode=vote` route.
-2. Open the deployed web-app URL with `?mode=vote`.
-3. A DEACON or ADMIN signs in with their own CCF QR.
-4. Select **初始化投票系統 / Initialise polling system** once.
-5. The portal opens the ADMIN poll-creation form.
+1. Copy `Vote.gs` into an Apps Script script file named `VoteBackend.gs`.
+2. Copy `Vote.html` and `VoteReview.html` into HTML files with those exact names.
+3. Deploy the version containing the `mode=vote` route.
+4. Open the deployed web-app URL with `?mode=vote`.
+5. A DEACON or ADMIN signs in with their own CCF QR and selects **開始 / Continue**.
 
-Initialisation creates the six `Vote_*` tabs and one private Script Property used by ballot integrity and the exceptional review process. If the system has already been initialised, the ADMIN goes directly to the normal dashboard.
+Setup creates at most one new tab named `Vote`. If the older six `Vote_*` tabs exist, the system:
 
-## Create a poll in the ADMIN page
+1. copies every row into typed records in `Vote`;
+2. verifies that every legacy source row is present; and
+3. removes the six legacy tabs only after verification succeeds.
 
-1. Sign in with a DEACON or ADMIN QR.
-2. Select **建立新投票 / Create poll**.
-3. Enter a Chinese title, an English title, or both.
-4. Enter between 2 and 50 options. Each option needs a unique short number/code and at least one Chinese or English label.
-5. For the present church-name vote, select **載入教會名稱選項 / Load church-name choices** to load the approved 13-name list, then check it before saving.
-6. Select **建立投票 / Create poll**. It is saved as `DRAFT`.
-7. In **投票資格 / Eligibility**, tick each eligible child and add any poll-specific exclusions with reasons.
-8. In **監票員 / Scrutineers**, add every appointed scrutineer by exact CCF ID.
-9. Check the member register for duplicate valid CCF IDs belonging to one person. The technical limit is one submission per CCF ID.
-10. Agree any tie procedure before opening.
-11. Enter the opening and closing times. Change the state to `OPEN` to open immediately or schedule it for the opening time.
+All unrelated spreadsheet tabs are left untouched. Setup also preserves the existing private Script Property. If that property is missing while ballots exist, the system refuses to generate a replacement.
 
-The public member page displays one current poll. Creating a new draft makes it current when no existing poll is open or scheduled. If a current poll is active, the new poll remains saved in the manager without displacing it.
+## Create a poll
 
-## Poll manager and repeat use
+After DEACON/ADMIN sign-in, choose **管理投票 / Manage polls**. The small `+` button at the top right opens the create page.
 
-Use **投票管理 / Poll manager** to:
+1. Enter the question in the single question box.
+2. Enter the first two options.
+3. Use the small `+` beside **Options** to add more.
+4. Leave **Allow multiple choices** off for a one-choice poll.
+5. Turn it on for a multiple-choice poll and set the maximum selections.
+6. Turn on **Record choice order** when order matters.
+7. Create the poll. It is saved as `DRAFT`.
+8. Set child eligibility and any poll-specific exclusions.
+9. Appoint scrutineers by exact CCF ID.
+10. Set opening and closing times, then change the state to `OPEN`.
 
-- create another poll;
-- view current and previous polls;
-- edit a draft's title and options;
-- set a non-active poll as current;
-- manage poll-specific eligibility and scrutineers; and
-- view results for a previous poll without making it current.
+Every open ballot form also has a separate **棄權 / Abstain** button. Abstention is recorded as a valid ballot and reported separately.
 
-Lifecycle rules:
+For ordered polls, the portal stores the submitted option order. It deliberately does not apply a winner or points method. Scrutineers decide the method outside the system before processing the stored orders.
 
-- `DRAFT`: title and options may be edited while there are no ballots.
-- `OPEN`: options are locked. A future opening time appears as `SCHEDULED`.
+## Member experience
+
+- Ordinary members see the current poll immediately after QR sign-in.
+- DEACON/ADMIN first see two choices: **Cast vote** or **Manage polls**.
+- A member may submit only once per poll.
+- The final confirmation cannot be changed after submission.
+- The receipt page contains a receipt ID and submission time.
+- Signing in again returns the original receipt instead of adding another ballot.
+
+The technical limit is one submission per CCF ID. Check the member register for duplicate valid IDs belonging to one person before opening a formal poll.
+
+## Response modes and results
+
+| Mode | Ballot behavior | Aggregate result behavior |
+|---|---|---|
+| `SINGLE` | Exactly one option, or Abstain | One count for the selected option |
+| `MULTIPLE` | One or more options up to the configured maximum, or Abstain | Each selected option receives one count; total ballots remains the number of submissions |
+| `RANKED` | One or more unique options stored in submitted order, or Abstain | Ballot and abstention totals only; no automatic ranking |
+
+Ordinary members cannot view totals before the poll closes. DEACON, ADMIN and appointed scrutineers may view them earlier. Once the current poll is closed, signed-in members may view its final aggregate result.
+
+## Poll lifecycle
+
+- `DRAFT`: the question, mode and options may be edited while there are no ballots.
+- `OPEN`: ballot content is locked. A future opening time appears as `SCHEDULED`.
 - `CLOSED`: final and cannot be reopened.
 - An open or scheduled current poll must be closed before another poll can replace it.
-- Previous polls and their records remain available in the poll manager.
+- Creating a draft does not displace an active current poll.
+- Previous polls remain in the manager.
 
-The option set is protected by an integrity digest. Manual changes to `Vote_Options` will make the poll unavailable rather than silently changing an active ballot.
+The option set is protected by a digest. Manual changes to option records make the poll unavailable instead of silently changing an active ballot.
 
-## Member submission flow
+## Separately routed review workflow
 
-1. Open `?mode=vote` and choose **External scanner** or **Upload QR image**.
-2. Sign in using the member's own CCF QR.
-3. If eligible and the poll is open, select exactly one option.
-4. Review the selected option and tick the final-choice acknowledgement.
-5. Submit. The response cannot be changed and a second response for that poll is refused.
-6. Save the receipt ID if desired. Signing in again shows the same receipt instead of another ballot.
-
-The raw QR payload and QR key are not written to any `Vote_*` tab or audit entry.
-
-## Results
-
-- Totals are not returned to ordinary members while voting is open or scheduled.
-- ADMIN and the poll's appointed scrutineers may view totals before closing.
-- Once the current poll closes, signed-in members may view its final totals.
-- Authorised operators can view previous results through the poll manager.
-- Invalid or manually altered ballot rows are excluded from valid totals. Authorised reviewers see the number of integrity exceptions.
-
-## Exceptional ballot review
-
-There is no link, wording, or control for this process in the normal `?mode=vote` portal. Keep the separate route within this restricted handover material and supply it to an authorised operator only when a real exception occurs:
+There is no link or description for this workflow in the ordinary portal. Keep the route within restricted operator material:
 
 `?mode=vote-review`
 
-1. An ADMIN or a scrutineer appointed to the relevant poll opens the restricted route.
-2. Sign in with that operator's own CCF QR.
-3. Select the relevant poll.
-4. Enter the receipt ID and a specific reason of at least 10 characters.
-5. Confirm the warning.
-6. The system first writes an audit entry. Only after that succeeds does it display the matched member and choice.
-
-Do not use this control for curiosity checks. If the audit write fails, the system reveals nothing.
-
-## Data and recovery rules
-
-- Do not manually edit `Vote_Ballots`, `Vote_Audit`, `Vote_Options`, or `Vote_Elections`.
-- Do not delete or rotate the private polling Script Property. If it is missing after ballots exist, the portal refuses to generate a replacement.
-- If a ballot row is missing but its cast audit remains, that member is blocked from submitting again and an integrity error is raised.
-- Use Google Sheet version history for accidental Sheet changes.
-- Keep the portal deployment and CCF system spreadsheet limited to existing trusted operators.
+An ADMIN or a scrutineer appointed to the relevant poll must sign in, enter a receipt ID and give a specific reason of at least 10 characters. The system writes the operator, poll, receipt and reason before displaying the matched member and recorded response. If that write fails, member details are not displayed.
 
 ## Acceptance check before sharing the link
 
-- Confirm an `ACTIVE` adult reaches the current open poll.
-- Confirm `DISABLED`, `PROVISIONAL`, `PENDING`, and blank-status accounts are blocked.
-- Confirm an unticked child is blocked and becomes eligible after STAFF/DEACON/ADMIN ticks the child for that poll.
+- Confirm the signed-out page shows only the current question and QR sign-in controls.
+- Confirm QR-image selection starts automatically and no `E415` image error remains.
+- Confirm an `ACTIVE` adult reaches the open poll, including a non-admin test member.
+- Confirm `DISABLED`, `PROVISIONAL`, `PENDING` and blank-status accounts are blocked.
+- Confirm an unticked child is blocked and becomes eligible after the child box is ticked.
 - Confirm a poll-specific exclusion overrides eligibility.
-- Confirm the ballot uses radio buttons and permits exactly one option.
+- Confirm single, multiple, ordered and Abstain submissions behave as configured.
 - Confirm a second submission returns the original receipt and adds no ballot row.
-- Confirm the member register has no duplicate valid ID for one person and record the tie procedure.
-- Confirm an ordinary member cannot view live totals.
-- Confirm DEACON, ADMIN and every appointed scrutineer can view live totals, and a non-appointed STAFF member cannot.
-- Confirm a draft can be created for the next poll without replacing an active current poll.
+- Confirm ordinary members cannot view live totals.
+- Confirm DEACON, ADMIN and appointed scrutineers can view live totals.
+- Confirm an ordered poll shows no calculated ranking.
+- Confirm the spreadsheet contains one `Vote` tab and no legacy `Vote_*` tabs after successful setup.
 - Confirm previous polls remain available in the manager.
-- Confirm exceptional review rejects a missing/short reason and reveals nothing if its audit write fails.
-- Confirm external scanner and QR-image upload on both iPhone and Android.
+- Confirm QR sign-in and QR-image upload on both iPhone and Android.
 
 <!-- ===== END OF VOTE_HANDOVER.md (COMPLETE) ===== -->

@@ -1,32 +1,39 @@
 /***************************************
  * CCF reusable member polling portal
- * File: Vote.gs
- * v2026-08-23.vote2
+ * File: Vote.gs (use VoteBackend.gs in Apps Script if Vote.html already exists)
+ * v2026-08-23.vote3
  *
- * Ordinary voting exposes only poll content, eligibility, final submission state,
- * receipt, and permitted results. Exceptional ballot investigation remains inside
- * the authorised DEACON/ADMIN/scrutineer workflow and is audit-gated.
+ * The normal portal exposes routine voting and permitted aggregate results only.
+ * The separately routed review workflow remains permission- and audit-gated.
  ***************************************/
 
-const VOTE_VERSION = '2026-08-23.vote2';
+const VOTE_VERSION = '2026-08-23.vote3';
 const VOTE_SESSION_PREFIX = 'vote_sess_';
 const VOTE_SESSION_TTL_SECONDS = 30 * 60;
 const VOTE_SECRET_PROPERTY = 'CCF_VOTE_TRACE_SECRET';
 const VOTE_CURRENT_POLL_PROPERTY = 'CCF_VOTE_CURRENT_POLL_ID';
 
-const VOTE_ELECTIONS_SHEET = 'Vote_Elections';
-const VOTE_OPTIONS_SHEET = 'Vote_Options';
-const VOTE_ELIGIBILITY_SHEET = 'Vote_Eligibility';
-const VOTE_BALLOTS_SHEET = 'Vote_Ballots';
-const VOTE_SCRUTINEERS_SHEET = 'Vote_Scrutineers';
-const VOTE_AUDIT_SHEET = 'Vote_Audit';
-
-const VOTE_ELECTION_HEADERS = ['ElectionId','TitleZh','TitleEn','OpensAt','ClosesAt','State','OptionDigest','CreatedAt','CreatedBy','UpdatedAt','UpdatedBy'];
-const VOTE_OPTION_HEADERS = ['ElectionId','OptionNo','LabelZh','LabelEn','SortOrder','Active'];
-const VOTE_ELIGIBILITY_HEADERS = ['ElectionId','MemberId','ChildEligible','ExplicitIneligible','Reason','UpdatedAt','UpdatedBy'];
-const VOTE_BALLOT_HEADERS = ['ElectionId','ReceiptId','VoterCode','OptionNo','CastAt','DecisionCode','IntegrityMac'];
-const VOTE_SCRUTINEER_HEADERS = ['ElectionId','MemberId','Active','AddedAt','AddedBy','UpdatedAt','UpdatedBy'];
-const VOTE_AUDIT_HEADERS = ['Timestamp','ElectionId','ActorId','ActorRole','Action','Target','Reason','Details'];
+/* One tab contains every poll record. Legacy Vote_* tabs are migrated once. */
+const VOTE_SHEET = 'Vote';
+const VOTE_LEGACY_SHEETS = [
+  'Vote_Elections','Vote_Options','Vote_Eligibility','Vote_Ballots','Vote_Scrutineers','Vote_Audit'
+];
+const VOTE_HEADERS = [
+  'RecordType','PollId','RecordId','MemberId','Question','QuestionAlt','OptionNo','OptionText','OptionTextAlt','SortOrder',
+  'AnswerType','MaxSelections','State','OpensAt','ClosesAt','Active','OptionDigest','ChildEligible','ExplicitIneligible','Reason',
+  'ReceiptId','VoterCode','Choices','Abstained','CastAt','DecisionCode','IntegrityMac','ActorId','ActorRole','Action','Target','Details',
+  'CreatedAt','CreatedBy','UpdatedAt','UpdatedBy','LegacySource'
+];
+const VOTE_RECORD_POLL = 'POLL';
+const VOTE_RECORD_OPTION = 'OPTION';
+const VOTE_RECORD_ELIGIBILITY = 'ELIGIBILITY';
+const VOTE_RECORD_BALLOT = 'BALLOT';
+const VOTE_RECORD_SCRUTINEER = 'SCRUTINEER';
+const VOTE_RECORD_AUDIT = 'AUDIT';
+const VOTE_ANSWER_SINGLE = 'SINGLE';
+const VOTE_ANSWER_MULTIPLE = 'MULTIPLE';
+const VOTE_ANSWER_RANKED = 'RANKED';
+const VOTE_ABSTAIN_VALUE = '__ABSTAIN__';
 
 function doGetVote_(e){
   const t = HtmlService.createTemplateFromFile('Vote');
@@ -50,7 +57,7 @@ function doGetVoteReview_(e){
   return t.evaluate().setTitle('CCF Formal Review').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function vote_err_(code, zh, en, detail){
+function vote_err_(code,zh,en,detail){
   const out = { ok:false, code:String(code || 'E500'), zh:String(zh || '系統錯誤'), en:String(en || 'System error') };
   if (detail !== undefined && detail !== null && String(detail) !== '') out.detail = String(detail);
   return out;
@@ -62,7 +69,7 @@ function vote_open_ss_(){
   return SpreadsheetApp.openById(id);
 }
 
-function vote_ensure_sheet_(name, headers){
+function vote_ensure_sheet_(name,headers){
   const ss = vote_open_ss_();
   let sh = ss.getSheetByName(name);
   if (!sh){
@@ -72,7 +79,7 @@ function vote_ensure_sheet_(name, headers){
     sh.setFrozenRows(1);
     return sh;
   }
-  const lastCol = Math.max(1, sh.getLastColumn());
+  const lastCol = Math.max(1,sh.getLastColumn());
   const existing = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v || '').trim(); });
   headers.forEach(function(header){
     if (existing.indexOf(header) >= 0) return;
@@ -85,25 +92,59 @@ function vote_ensure_sheet_(name, headers){
 }
 
 function vote_get_sheet_(name){ return vote_open_ss_().getSheetByName(name); }
+function vote_get_data_sheet_(){ return vote_get_sheet_(VOTE_SHEET); }
+function vote_ensure_data_sheet_(){ return vote_ensure_sheet_(VOTE_SHEET,VOTE_HEADERS); }
 
 function vote_sheet_records_(name){
   const sh = vote_get_sheet_(name);
   if (!sh || sh.getLastRow() < 2 || sh.getLastColumn() < 1) return [];
   const values = sh.getRange(1,1,sh.getLastRow(),sh.getLastColumn()).getValues();
   const headers = values[0].map(function(v){ return String(v || '').trim(); });
-  return values.slice(1).map(function(row, idx){
+  return values.slice(1).map(function(row,idx){
     const rec = { _rowNumber:idx + 2 };
-    headers.forEach(function(h, col){ if (h) rec[h] = row[col]; });
+    headers.forEach(function(h,col){ if (h) rec[h] = row[col]; });
     return rec;
   });
 }
 
 function vote_header_map_(sh){
   if (!sh || sh.getLastColumn() < 1) return {};
-  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
-  const map = {};
-  headers.forEach(function(h, idx){ const key = String(h || '').trim(); if (key) map[key] = idx; });
+  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0], map = {};
+  headers.forEach(function(h,idx){ const key = String(h || '').trim(); if (key) map[key] = idx; });
   return map;
+}
+
+function vote_row_from_fields_(fields){
+  const f = fields || {};
+  return VOTE_HEADERS.map(function(h){ return Object.prototype.hasOwnProperty.call(f,h) ? f[h] : ''; });
+}
+
+function vote_append_record_(fields){
+  const sh = vote_ensure_data_sheet_();
+  sh.appendRow(vote_row_from_fields_(fields));
+  return sh.getLastRow();
+}
+
+function vote_update_record_(rowNumber,fields){
+  const sh = vote_get_data_sheet_();
+  if (!sh || !rowNumber) throw new Error('Vote data row not found.');
+  const col = vote_header_map_(sh), f = fields || {};
+  Object.keys(f).forEach(function(key){
+    if (col[key] === undefined) throw new Error('Missing Vote column: ' + key);
+    sh.getRange(rowNumber,col[key] + 1).setValue(f[key]);
+  });
+}
+
+function vote_data_records_(recordType){
+  const rows = vote_sheet_records_(VOTE_SHEET), type = String(recordType || '').trim().toUpperCase();
+  return type ? rows.filter(function(r){ return String(r.RecordType || '').trim().toUpperCase() === type; }) : rows;
+}
+
+function vote_join_text_(primary,alternate){
+  const one = String(primary || '').trim(), two = String(alternate || '').trim();
+  if (!one) return two;
+  if (!two || one === two) return one;
+  return one + ' / ' + two;
 }
 
 function vote_iso_(value){
@@ -119,9 +160,75 @@ function vote_bool_(value){
   return s === 'YES' || s === 'TRUE' || s === '1' || s === 'Y';
 }
 
+function vote_poll_id_(value){ return String(value || '').trim().toUpperCase(); }
+function vote_valid_poll_id_(value){ return /^[A-Z0-9][A-Z0-9_-]{2,79}$/.test(vote_poll_id_(value)); }
+function vote_record_poll_id_(r){ return vote_poll_id_((r && (r.PollId || r.ElectionId)) || ''); }
+function vote_new_record_id_(prefix){ return String(prefix || 'REC') + '_' + Utilities.getUuid().replace(/-/g,'').toUpperCase(); }
+
+function vote_legacy_source_(sheetName,rowNumber){ return String(sheetName) + '#' + String(rowNumber); }
+
+function vote_legacy_record_fields_(sheetName,r){
+  const source = vote_legacy_source_(sheetName,r._rowNumber);
+  if (sheetName === 'Vote_Elections') return {
+    RecordType:VOTE_RECORD_POLL, PollId:vote_poll_id_(r.ElectionId), RecordId:vote_poll_id_(r.ElectionId),
+    Question:String(r.TitleZh || '').trim(), QuestionAlt:String(r.TitleEn || '').trim(), AnswerType:VOTE_ANSWER_SINGLE, MaxSelections:1,
+    State:String(r.State || 'DRAFT').trim().toUpperCase(), OpensAt:r.OpensAt || '', ClosesAt:r.ClosesAt || '', OptionDigest:r.OptionDigest || '',
+    CreatedAt:r.CreatedAt || '', CreatedBy:r.CreatedBy || '', UpdatedAt:r.UpdatedAt || '', UpdatedBy:r.UpdatedBy || '', LegacySource:source
+  };
+  if (sheetName === 'Vote_Options') return {
+    RecordType:VOTE_RECORD_OPTION, PollId:vote_poll_id_(r.ElectionId), RecordId:source, OptionNo:String(r.OptionNo || '').trim(),
+    OptionText:String(r.LabelZh || '').trim(), OptionTextAlt:String(r.LabelEn || '').trim(), SortOrder:Number(r.SortOrder || 0),
+    Active:vote_bool_(r.Active) ? 'YES' : 'NO', LegacySource:source
+  };
+  if (sheetName === 'Vote_Eligibility') return {
+    RecordType:VOTE_RECORD_ELIGIBILITY, PollId:vote_poll_id_(r.ElectionId), RecordId:source, MemberId:String(r.MemberId || '').trim().toUpperCase(),
+    ChildEligible:vote_bool_(r.ChildEligible) ? 'YES' : 'NO', ExplicitIneligible:vote_bool_(r.ExplicitIneligible) ? 'YES' : 'NO', Reason:r.Reason || '',
+    UpdatedAt:r.UpdatedAt || '', UpdatedBy:r.UpdatedBy || '', LegacySource:source
+  };
+  if (sheetName === 'Vote_Ballots') return {
+    RecordType:VOTE_RECORD_BALLOT, PollId:vote_poll_id_(r.ElectionId), RecordId:source, ReceiptId:r.ReceiptId || '', VoterCode:r.VoterCode || '',
+    Choices:String(r.OptionNo || '').trim(), Abstained:'NO', CastAt:r.CastAt || '', DecisionCode:r.DecisionCode || '', IntegrityMac:r.IntegrityMac || '', LegacySource:source
+  };
+  if (sheetName === 'Vote_Scrutineers') return {
+    RecordType:VOTE_RECORD_SCRUTINEER, PollId:vote_poll_id_(r.ElectionId), RecordId:source, MemberId:String(r.MemberId || '').trim().toUpperCase(),
+    Active:vote_bool_(r.Active) ? 'YES' : 'NO', CreatedAt:r.AddedAt || '', CreatedBy:r.AddedBy || '', UpdatedAt:r.UpdatedAt || '', UpdatedBy:r.UpdatedBy || '', LegacySource:source
+  };
+  if (sheetName === 'Vote_Audit') return {
+    RecordType:VOTE_RECORD_AUDIT, PollId:vote_poll_id_(r.ElectionId), RecordId:source, ActorId:r.ActorId || '', ActorRole:r.ActorRole || '',
+    Action:r.Action || '', Target:r.Target || '', Reason:r.Reason || '', Details:r.Details || '', CreatedAt:r.Timestamp || '', LegacySource:source
+  };
+  return null;
+}
+
+function vote_migrate_legacy_sheets_(){
+  const ss = vote_open_ss_(), dataSheet = vote_ensure_data_sheet_(), existingSources = {};
+  vote_data_records_('').forEach(function(r){ if (r.LegacySource) existingSources[String(r.LegacySource)] = true; });
+  const expectedSources = [], legacySheets = [];
+  VOTE_LEGACY_SHEETS.forEach(function(name){
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    legacySheets.push(sh);
+    vote_sheet_records_(name).forEach(function(r){
+      const fields = vote_legacy_record_fields_(name,r);
+      if (!fields) return;
+      expectedSources.push(fields.LegacySource);
+      if (!existingSources[fields.LegacySource]){
+        dataSheet.appendRow(vote_row_from_fields_(fields));
+        existingSources[fields.LegacySource] = true;
+      }
+    });
+  });
+  const verified = {};
+  vote_data_records_('').forEach(function(r){ if (r.LegacySource) verified[String(r.LegacySource)] = true; });
+  const missing = expectedSources.filter(function(source){ return !verified[source]; });
+  if (missing.length) throw new Error('Vote migration verification failed: ' + missing.join(', '));
+  legacySheets.forEach(function(sh){ ss.deleteSheet(sh); });
+  return { migrated:expectedSources.length, removedSheets:legacySheets.length };
+}
+
 function vote_norm_status_(value){ return String(value || '').trim().toUpperCase(); }
 
-function vote_effective_member_status_(value, roleExpires){
+function vote_effective_member_status_(value,roleExpires){
   const status = vote_norm_status_(value);
   if (['STAFF','DEACON','ADMIN','HELPER','TEMP'].indexOf(status) < 0 || !roleExpires) return status;
   const expiry = new Date(roleExpires);
@@ -133,10 +240,8 @@ function vote_member_from_reg_auth_(auth){
   const row = (auth && auth.row) || {};
   return {
     id:String((auth && auth.parsed && auth.parsed.id) || row.ID || '').trim().toUpperCase(),
-    nameZh:String(row.NameZh || '').trim(),
-    nameEn:String(row.NameEn || '').trim(),
-    status:vote_effective_member_status_(row.Status, row.RoleExpires),
-    isMinor:vote_bool_(row.IsMinor)
+    nameZh:String(row.NameZh || '').trim(), nameEn:String(row.NameEn || '').trim(), preferredName:String(row.PreferredName || '').trim(),
+    status:vote_effective_member_status_(row.Status,row.RoleExpires), isMinor:vote_bool_(row.IsMinor)
   };
 }
 
@@ -144,12 +249,11 @@ function vote_get_member_(memberId){
   const id = String(memberId || '').trim().toUpperCase();
   if (!id) return null;
   try{
-    const idx = admin_getMembersIndex_();
-    const m = idx && idx.byId ? idx.byId[id] : null;
+    const idx = admin_getMembersIndex_(), m = idx && idx.byId ? idx.byId[id] : null;
     if (!m) return null;
     return {
-      id:id, nameZh:String(m.nameZh || '').trim(), nameEn:String(m.nameEn || '').trim(),
-      preferredName:String(m.preferredName || '').trim(), status:vote_effective_member_status_(m.status, m.roleExpires), isMinor:!!m.isMinor
+      id:id, nameZh:String(m.nameZh || '').trim(), nameEn:String(m.nameEn || '').trim(), preferredName:String(m.preferredName || '').trim(),
+      status:vote_effective_member_status_(m.status,m.roleExpires), isMinor:!!m.isMinor
     };
   }catch(e){ return null; }
 }
@@ -159,30 +263,29 @@ function vote_all_members_(){
   return ((idx && idx.all) || []).map(function(m){
     return {
       id:String(m.id || '').trim().toUpperCase(), nameZh:String(m.nameZh || '').trim(), nameEn:String(m.nameEn || '').trim(),
-      preferredName:String(m.preferredName || '').trim(), status:vote_effective_member_status_(m.status, m.roleExpires), isMinor:!!m.isMinor
+      preferredName:String(m.preferredName || '').trim(), status:vote_effective_member_status_(m.status,m.roleExpires), isMinor:!!m.isMinor
     };
   }).filter(function(m){ return !!m.id; });
 }
 
 function vote_new_session_(member){
   const token = Utilities.getUuid();
-  CacheService.getScriptCache().put(VOTE_SESSION_PREFIX + token, JSON.stringify({ memberId:member.id, createdAt:Date.now() }), VOTE_SESSION_TTL_SECONDS);
+  CacheService.getScriptCache().put(VOTE_SESSION_PREFIX + token,JSON.stringify({ memberId:member.id, createdAt:Date.now() }),VOTE_SESSION_TTL_SECONDS);
   return token;
 }
 
 function vote_require_session_(token){
-  const key = VOTE_SESSION_PREFIX + String(token || '').trim();
-  const raw = CacheService.getScriptCache().get(key);
+  const key = VOTE_SESSION_PREFIX + String(token || '').trim(), raw = CacheService.getScriptCache().get(key);
   if (!raw) return vote_err_('E401','登入已過期，請重新掃描會員 QR。','Session expired. Please scan your member QR again.');
   let parsed;
   try{ parsed = JSON.parse(raw); }catch(e){ return vote_err_('E401','登入已過期，請重新掃描會員 QR。','Session expired. Please scan your member QR again.'); }
   const member = vote_get_member_(parsed.memberId);
   if (!member) return vote_err_('E412','找不到會員資料。','Member record not found.');
-  CacheService.getScriptCache().put(key, raw, VOTE_SESSION_TTL_SECONDS);
+  CacheService.getScriptCache().put(key,raw,VOTE_SESSION_TTL_SECONDS);
   return { ok:true, member:member };
 }
 
-function vote_require_role_(token, allowed){
+function vote_require_role_(token,allowed){
   const s = vote_require_session_(token);
   if (!s.ok) return s;
   const role = vote_norm_status_(s.member.status);
@@ -199,7 +302,7 @@ function vote_get_secret_(){
 }
 
 function vote_is_system_initialized_(){
-  try{ return !!String(PropertiesService.getScriptProperties().getProperty(VOTE_SECRET_PROPERTY) || '').trim(); }
+  try{ return !!vote_get_data_sheet_() && !!String(PropertiesService.getScriptProperties().getProperty(VOTE_SECRET_PROPERTY) || '').trim(); }
   catch(e){ return false; }
 }
 
@@ -208,9 +311,7 @@ function vote_current_poll_id_(){
   catch(e){ return ''; }
 }
 
-function vote_set_current_poll_id_(pollId){ PropertiesService.getScriptProperties().setProperty(VOTE_CURRENT_POLL_PROPERTY, String(pollId || '').trim()); }
-function vote_poll_id_(value){ return String(value || '').trim().toUpperCase(); }
-function vote_valid_poll_id_(value){ return /^[A-Z0-9][A-Z0-9_-]{2,79}$/.test(vote_poll_id_(value)); }
+function vote_set_current_poll_id_(pollId){ PropertiesService.getScriptProperties().setProperty(VOTE_CURRENT_POLL_PROPERTY,String(pollId || '').trim()); }
 
 function vote_new_poll_id_(){
   const stamp = new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d{3}Z$/,'Z');
@@ -218,9 +319,20 @@ function vote_new_poll_id_(){
   return 'POLL_' + stamp + '_' + suffix;
 }
 
+function vote_normalize_answer_type_(value){
+  const type = String(value || VOTE_ANSWER_SINGLE).trim().toUpperCase();
+  return [VOTE_ANSWER_SINGLE,VOTE_ANSWER_MULTIPLE,VOTE_ANSWER_RANKED].indexOf(type) >= 0 ? type : '';
+}
+
 function vote_election_from_record_(r){
+  const pollId = vote_record_poll_id_(r), question = String(r.Question !== undefined ? r.Question : r.TitleZh || '').trim();
+  const questionAlt = String(r.QuestionAlt !== undefined ? r.QuestionAlt : r.TitleEn || '').trim();
+  const answerType = vote_normalize_answer_type_(r.AnswerType) || VOTE_ANSWER_SINGLE;
+  let maxSelections = Number(r.MaxSelections || 0);
+  if (answerType === VOTE_ANSWER_SINGLE) maxSelections = 1;
   return {
-    rowNumber:r._rowNumber, electionId:vote_poll_id_(r.ElectionId), titleZh:String(r.TitleZh || '').trim(), titleEn:String(r.TitleEn || '').trim(),
+    rowNumber:r._rowNumber, electionId:pollId, pollId:pollId, question:question, questionAlt:questionAlt,
+    titleZh:question, titleEn:questionAlt, answerType:answerType, maxSelections:maxSelections,
     opensAt:vote_iso_(r.OpensAt), closesAt:vote_iso_(r.ClosesAt), state:String(r.State || 'DRAFT').trim().toUpperCase(),
     optionDigest:String(r.OptionDigest || '').trim(), createdAt:vote_iso_(r.CreatedAt), createdBy:String(r.CreatedBy || '').trim(),
     updatedAt:vote_iso_(r.UpdatedAt), updatedBy:String(r.UpdatedBy || '').trim()
@@ -228,25 +340,25 @@ function vote_election_from_record_(r){
 }
 
 function vote_all_elections_(){
-  return vote_sheet_records_(VOTE_ELECTIONS_SHEET).filter(function(r){ return vote_valid_poll_id_(r.ElectionId); }).map(vote_election_from_record_);
+  const rows = vote_get_data_sheet_() ? vote_data_records_(VOTE_RECORD_POLL) : vote_sheet_records_('Vote_Elections');
+  return rows.filter(function(r){ return vote_valid_poll_id_(vote_record_poll_id_(r)); }).map(vote_election_from_record_);
 }
 
 function vote_get_election_(pollId){
   const id = vote_poll_id_(pollId || vote_current_poll_id_());
   if (!id) return null;
   const rows = vote_all_elections_();
-  for (let i=rows.length-1;i>=0;i--){ if (rows[i].electionId === id) return rows[i]; }
+  for (let i=rows.length - 1;i>=0;i--){ if (rows[i].electionId === id) return rows[i]; }
   return null;
 }
 
-function vote_effective_state_(election, now){
+function vote_effective_state_(election,now){
   if (!election) return 'NO_CURRENT_POLL';
   const state = String(election.state || 'DRAFT').trim().toUpperCase();
   if (state === 'CLOSED') return 'CLOSED';
   if (state !== 'OPEN') return 'DRAFT';
   const current = now instanceof Date ? now : new Date();
-  const opens = election.opensAt ? new Date(election.opensAt) : null;
-  const closes = election.closesAt ? new Date(election.closesAt) : null;
+  const opens = election.opensAt ? new Date(election.opensAt) : null, closes = election.closesAt ? new Date(election.closesAt) : null;
   if (opens && !isNaN(opens.getTime()) && current.getTime() < opens.getTime()) return 'SCHEDULED';
   if (closes && !isNaN(closes.getTime()) && current.getTime() >= closes.getTime()) return 'CLOSED';
   return 'OPEN';
@@ -255,8 +367,12 @@ function vote_effective_state_(election, now){
 function vote_get_options_(pollId){
   const id = vote_poll_id_(pollId);
   if (!id) return [];
-  return vote_sheet_records_(VOTE_OPTIONS_SHEET).filter(function(r){ return vote_poll_id_(r.ElectionId) === id && vote_bool_(r.Active); }).map(function(r){
-    return { optionNo:String(r.OptionNo || '').trim(), labelZh:String(r.LabelZh || '').trim(), labelEn:String(r.LabelEn || '').trim(), sortOrder:Number(r.SortOrder || 0) };
+  const unified = !!vote_get_data_sheet_();
+  const rows = unified ? vote_data_records_(VOTE_RECORD_OPTION) : vote_sheet_records_('Vote_Options');
+  return rows.filter(function(r){ return vote_record_poll_id_(r) === id && vote_bool_(r.Active); }).map(function(r){
+    const label = String(unified ? r.OptionText || '' : r.LabelZh || '').trim();
+    const labelAlt = String(unified ? r.OptionTextAlt || '' : r.LabelEn || '').trim();
+    return { optionNo:String(r.OptionNo || '').trim(), label:label, labelAlt:labelAlt, labelZh:label, labelEn:labelAlt, sortOrder:Number(r.SortOrder || 0) };
   }).sort(function(a,b){ return a.sortOrder - b.sortOrder; });
 }
 
@@ -265,43 +381,63 @@ function vote_normalize_options_payload_(rawOptions){
   if (input.length < 2 || input.length > 50) return vote_err_('E422','每個投票需要 2 至 50 個選項。','Each poll requires between 2 and 50 options.');
   const seen = {}, options = [];
   for (let i=0;i<input.length;i++){
-    const raw = input[i] || {};
-    const optionNo = String(raw.optionNo || (i + 1)).trim();
-    const labelZh = String(raw.labelZh || '').trim();
-    const labelEn = String(raw.labelEn || '').trim();
-    if (!/^[A-Za-z0-9_-]{1,12}$/.test(optionNo)) return vote_err_('E416','選項編號只可使用 1–12 個英文字母、數字、_ 或 -。','Option numbers may use 1–12 letters, numbers, underscores, or hyphens.');
+    const raw = input[i] || {}, optionNo = String(raw.optionNo || (i + 1)).trim();
+    const label = String(raw.label !== undefined ? raw.label : raw.labelZh || raw.labelEn || '').trim();
+    const labelAlt = String(raw.labelAlt !== undefined ? raw.labelAlt : (raw.labelZh && raw.labelEn ? raw.labelEn : '') || '').trim();
+    if (!/^[A-Za-z0-9_-]{1,12}$/.test(optionNo)) return vote_err_('E416','選項編號格式無效。','An option number is invalid.');
     const key = optionNo.toUpperCase();
-    if (seen[key]) return vote_err_('E416','選項編號不可重複：' + optionNo,'Option numbers must be unique: ' + optionNo);
-    if (!labelZh && !labelEn) return vote_err_('E422','每個選項至少需要中文或英文名稱。','Each option needs at least a Chinese or English label.');
-    if (labelZh.length > 240 || labelEn.length > 240) return vote_err_('E422','選項文字過長。','An option label is too long.');
+    if (seen[key]) return vote_err_('E416','選項不可重複。','Options must be unique.');
+    if (!label) return vote_err_('E422','每個選項都需要文字。','Each option needs text.');
+    if (label.length > 240 || labelAlt.length > 240) return vote_err_('E422','選項文字過長。','An option label is too long.');
     seen[key] = true;
-    options.push({ optionNo:optionNo, labelZh:labelZh, labelEn:labelEn, sortOrder:i + 1 });
+    options.push({ optionNo:optionNo, label:label, labelAlt:labelAlt, labelZh:label, labelEn:labelAlt, sortOrder:i + 1 });
   }
   return { ok:true, options:options };
 }
 
-function vote_hmac_(message, secret){
+function vote_validate_poll_content_(payload){
+  const p = payload || {};
+  const question = String(p.question !== undefined ? p.question : p.titleZh || p.titleEn || '').trim();
+  const questionAlt = String(p.questionAlt !== undefined ? p.questionAlt : (p.titleZh && p.titleEn ? p.titleEn : '') || '').trim();
+  if (!question) return vote_err_('E422','請填寫投票問題。','Please enter the poll question.');
+  if (question.length > 300 || questionAlt.length > 300) return vote_err_('E422','投票問題過長。','The poll question is too long.');
+  const checked = vote_normalize_options_payload_(p.options);
+  if (!checked.ok) return checked;
+  const answerType = vote_normalize_answer_type_(p.answerType);
+  if (!answerType) return vote_err_('E416','回答方式無效。','The answer type is invalid.');
+  let maxSelections = Number(p.maxSelections || 0);
+  if (answerType === VOTE_ANSWER_SINGLE) maxSelections = 1;
+  else if (answerType === VOTE_ANSWER_RANKED) maxSelections = checked.options.length;
+  else{
+    maxSelections = Math.floor(maxSelections || checked.options.length);
+    if (maxSelections < 2 || maxSelections > checked.options.length) return vote_err_('E422','多選上限必須為 2 至選項總數。','The multiple-choice limit must be between 2 and the number of options.');
+  }
+  return { ok:true, question:question, questionAlt:questionAlt, answerType:answerType, maxSelections:maxSelections, options:checked.options };
+}
+
+function vote_hmac_(message,secret){
   const key = String(secret || vote_get_secret_());
-  const bytes = Utilities.computeHmacSha256Signature(String(message || ''), key, Utilities.Charset.UTF_8);
-  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/g, '');
+  const bytes = Utilities.computeHmacSha256Signature(String(message || ''),key,Utilities.Charset.UTF_8);
+  return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/g,'');
 }
 
-function vote_options_digest_(pollId, options, secret){
-  const canonical = (options || []).map(function(o){ return [String(o.optionNo),String(o.labelZh || ''),String(o.labelEn || ''),Number(o.sortOrder || 0)]; });
-  return 'O1.' + vote_hmac_('options|' + vote_poll_id_(pollId) + '|' + JSON.stringify(canonical), secret);
+function vote_options_digest_(pollId,options,secret){
+  const canonical = (options || []).map(function(o){ return [String(o.optionNo),String(o.label !== undefined ? o.label : o.labelZh || ''),String(o.labelAlt !== undefined ? o.labelAlt : o.labelEn || ''),Number(o.sortOrder || 0)]; });
+  return 'O1.' + vote_hmac_('options|' + vote_poll_id_(pollId) + '|' + JSON.stringify(canonical),secret);
 }
 
-function vote_options_integrity_ok_(election, options){
+function vote_options_integrity_ok_(election,options){
   if (!election || !election.optionDigest || !Array.isArray(options) || options.length < 2) return false;
   try{ return election.optionDigest === vote_options_digest_(election.electionId,options,vote_get_secret_()); }
   catch(e){ return false; }
 }
 
-function vote_get_eligibility_flag_(pollId, memberId){
-  const poll = vote_poll_id_(pollId), id = String(memberId || '').trim().toUpperCase();
-  const rows = vote_sheet_records_(VOTE_ELIGIBILITY_SHEET);
-  for (let i=rows.length-1;i>=0;i--){
-    if (vote_poll_id_(rows[i].ElectionId) !== poll || String(rows[i].MemberId || '').trim().toUpperCase() !== id) continue;
+function vote_get_eligibility_records_(){ return vote_get_data_sheet_() ? vote_data_records_(VOTE_RECORD_ELIGIBILITY) : vote_sheet_records_('Vote_Eligibility'); }
+
+function vote_get_eligibility_flag_(pollId,memberId){
+  const poll = vote_poll_id_(pollId), id = String(memberId || '').trim().toUpperCase(), rows = vote_get_eligibility_records_();
+  for (let i=rows.length - 1;i>=0;i--){
+    if (vote_record_poll_id_(rows[i]) !== poll || String(rows[i].MemberId || '').trim().toUpperCase() !== id) continue;
     return {
       rowNumber:rows[i]._rowNumber, childEligible:vote_bool_(rows[i].ChildEligible), explicitIneligible:vote_bool_(rows[i].ExplicitIneligible),
       reason:String(rows[i].Reason || '').trim(), updatedAt:vote_iso_(rows[i].UpdatedAt), updatedBy:String(rows[i].UpdatedBy || '').trim()
@@ -310,7 +446,7 @@ function vote_get_eligibility_flag_(pollId, memberId){
   return { rowNumber:0, childEligible:false, explicitIneligible:false, reason:'', updatedAt:'', updatedBy:'' };
 }
 
-function vote_evaluate_eligibility_(member, flag){
+function vote_evaluate_eligibility_(member,flag){
   const m = member || {}, f = flag || {}, status = vote_norm_status_(m.status);
   if (!status) return { eligible:false, code:'STATUS_MISSING', zh:'會員狀態未設定', en:'Member status is not set.' };
   if (status === 'DISABLED') return { eligible:false, code:'STATUS_DISABLED', zh:'會員帳戶已停用', en:'Member account is disabled.' };
@@ -321,13 +457,15 @@ function vote_evaluate_eligibility_(member, flag){
   return { eligible:true, code:'ELIGIBLE', zh:'合資格投票', en:'Eligible to vote.' };
 }
 
-function vote_is_scrutineer_(pollId, memberId){
+function vote_scrutineer_records_(){ return vote_get_data_sheet_() ? vote_data_records_(VOTE_RECORD_SCRUTINEER) : vote_sheet_records_('Vote_Scrutineers'); }
+
+function vote_is_scrutineer_(pollId,memberId){
   const poll = vote_poll_id_(pollId), id = String(memberId || '').trim().toUpperCase();
   if (!poll || !id) return false;
-  return vote_sheet_records_(VOTE_SCRUTINEERS_SHEET).some(function(r){ return vote_poll_id_(r.ElectionId) === poll && String(r.MemberId || '').trim().toUpperCase() === id && vote_bool_(r.Active); });
+  return vote_scrutineer_records_().some(function(r){ return vote_record_poll_id_(r) === poll && String(r.MemberId || '').trim().toUpperCase() === id && vote_bool_(r.Active); });
 }
 
-function vote_privileges_(member, pollId){
+function vote_privileges_(member,pollId){
   const role = vote_norm_status_(member && member.status), isAdmin = role === 'DEACON' || role === 'ADMIN', isStaff = role === 'STAFF' || isAdmin;
   const isScrutineer = vote_is_scrutineer_(pollId,member && member.id);
   return {
@@ -347,20 +485,16 @@ function vote_client_privileges_(p){
 function vote_client_election_(election){
   if (!election) return null;
   return {
-    electionId:election.electionId, titleZh:election.titleZh, titleEn:election.titleEn,
+    electionId:election.electionId, pollId:election.electionId, question:vote_join_text_(election.question,election.questionAlt),
+    answerType:election.answerType, maxSelections:election.maxSelections,
     opensAt:election.opensAt, closesAt:election.closesAt, state:election.state
   };
 }
 
+/* Public, before QR sign-in: current question only. */
 function vote_public_config_payload_(){
   const election = vote_get_election_();
-  const options = election ? vote_get_options_(election.electionId) : [];
-  const integrityOk = election ? vote_options_integrity_ok_(election,options) : true;
-  return {
-    systemInitialized:vote_is_system_initialized_(), election:vote_client_election_(election),
-    effectiveState:election ? (integrityOk ? vote_effective_state_(election,new Date()) : 'UNAVAILABLE') : 'NO_CURRENT_POLL',
-    options:integrityOk ? options : [], optionsIntegrityOk:integrityOk, voteVersion:VOTE_VERSION
-  };
+  return { question:election ? vote_join_text_(election.question,election.questionAlt) : '', hasCurrentPoll:!!election, voteVersion:VOTE_VERSION };
 }
 
 function api_vote_public_config(){
@@ -378,15 +512,20 @@ function api_vote_login(qrPayload){
 }
 
 function vote_dashboard_for_member_(member){
-  const cfg = vote_public_config_payload_(), pollId = cfg.election ? cfg.election.electionId : '';
+  const election = vote_get_election_(), pollId = election ? election.electionId : '';
+  const options = election ? vote_get_options_(pollId) : [];
+  const integrityOk = election ? vote_options_integrity_ok_(election,options) : true;
   const flag = pollId ? vote_get_eligibility_flag_(pollId,member.id) : { childEligible:false, explicitIneligible:false, reason:'' };
-  const privileges = vote_privileges_(member,pollId);
-  return Object.assign(cfg,{
+  const privileges = vote_privileges_(member,pollId), initialized = vote_is_system_initialized_();
+  return {
+    systemInitialized:initialized, setupRequired:!initialized, hasCurrentPoll:!!election,
+    election:vote_client_election_(election), effectiveState:election ? (integrityOk ? vote_effective_state_(election,new Date()) : 'UNAVAILABLE') : 'NO_CURRENT_POLL',
+    options:integrityOk ? options : [], optionsIntegrityOk:integrityOk, voteVersion:VOTE_VERSION,
     member:{ id:member.id, nameZh:member.nameZh, nameEn:member.nameEn, preferredName:member.preferredName || '', status:member.status, isMinor:!!member.isMinor },
     eligibility:vote_evaluate_eligibility_(member,flag), eligibilityFlags:flag,
     ballotStatus:pollId ? vote_existing_ballot_for_member_(pollId,member.id) : { hasVoted:false },
-    privileges:vote_client_privileges_(privileges), setupRequired:!cfg.systemInitialized, hasCurrentPoll:!!cfg.election
-  });
+    privileges:vote_client_privileges_(privileges)
+  };
 }
 
 function api_vote_dashboard(token){
@@ -397,27 +536,40 @@ function api_vote_dashboard(token){
   }catch(e){ return vote_err_('E500','未能更新投票頁面。','Could not refresh the polling page.',e && e.message); }
 }
 
-function vote_voter_code_(pollId, memberId, secret){ return 'V1.' + vote_hmac_('voter|' + vote_poll_id_(pollId) + '|' + String(memberId).toUpperCase(),secret); }
-function vote_decision_code_(pollId, memberId, optionNo, receiptId, secret){ return 'D1.' + vote_hmac_('decision|' + vote_poll_id_(pollId) + '|' + String(memberId).toUpperCase() + '|' + String(optionNo) + '|' + String(receiptId),secret); }
+function vote_voter_code_(pollId,memberId,secret){ return 'V1.' + vote_hmac_('voter|' + vote_poll_id_(pollId) + '|' + String(memberId).toUpperCase(),secret); }
+function vote_decision_code_(pollId,memberId,choicesRaw,receiptId,secret){ return 'D1.' + vote_hmac_('decision|' + vote_poll_id_(pollId) + '|' + String(memberId).toUpperCase() + '|' + String(choicesRaw) + '|' + String(receiptId),secret); }
 
-function vote_integrity_mac_(ballot, secret){
+function vote_integrity_mac_(ballot,secret){
   return 'I1.' + vote_hmac_(['ballot',String(ballot.electionId || ''),String(ballot.receiptId || ''),String(ballot.voterCode || ''),String(ballot.optionNo || ''),String(ballot.castAt || ''),String(ballot.decisionCode || '')].join('|'),secret);
 }
 
+function vote_parse_choices_(raw){
+  const value = String(raw || '').trim();
+  if (!value || value === VOTE_ABSTAIN_VALUE) return [];
+  if (value.charAt(0) !== '[') return [value];
+  try{
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(function(v){ return String(v || '').trim(); }).filter(Boolean) : [];
+  }catch(e){ return []; }
+}
+
 function vote_ballots_(pollId){
-  const poll = vote_poll_id_(pollId);
-  return vote_sheet_records_(VOTE_BALLOTS_SHEET).filter(function(r){ return !poll || vote_poll_id_(r.ElectionId) === poll; }).map(function(r){
+  const poll = vote_poll_id_(pollId), unified = !!vote_get_data_sheet_();
+  const rows = unified ? vote_data_records_(VOTE_RECORD_BALLOT) : vote_sheet_records_('Vote_Ballots');
+  return rows.filter(function(r){ return !poll || vote_record_poll_id_(r) === poll; }).map(function(r){
+    const raw = String(unified ? r.Choices || '' : r.OptionNo || '').trim();
     return {
-      rowNumber:r._rowNumber, electionId:vote_poll_id_(r.ElectionId), receiptId:String(r.ReceiptId || '').trim(), voterCode:String(r.VoterCode || '').trim(),
-      optionNo:String(r.OptionNo || '').trim(), castAt:vote_iso_(r.CastAt), decisionCode:String(r.DecisionCode || '').trim(), integrityMac:String(r.IntegrityMac || '').trim()
+      rowNumber:r._rowNumber, electionId:vote_record_poll_id_(r), receiptId:String(r.ReceiptId || '').trim(), voterCode:String(r.VoterCode || '').trim(),
+      optionNo:raw, choicesRaw:raw, choices:vote_parse_choices_(raw), abstained:raw === VOTE_ABSTAIN_VALUE,
+      castAt:vote_iso_(r.CastAt), decisionCode:String(r.DecisionCode || '').trim(), integrityMac:String(r.IntegrityMac || '').trim()
     };
   });
 }
 
 function vote_ballot_count_(pollId){ return vote_ballots_(pollId).length; }
-function vote_valid_ballot_(ballot, secret){ return String(ballot.integrityMac || '') === vote_integrity_mac_(ballot,secret); }
+function vote_valid_ballot_(ballot,secret){ return String(ballot.integrityMac || '') === vote_integrity_mac_(ballot,secret); }
 
-function vote_existing_ballot_for_member_(pollId, memberId){
+function vote_existing_ballot_for_member_(pollId,memberId){
   try{
     const secret = vote_get_secret_(), voterCode = vote_voter_code_(pollId,memberId,secret);
     const ballot = vote_ballots_(pollId).filter(function(b){ return b.voterCode === voterCode; })[0];
@@ -425,19 +577,24 @@ function vote_existing_ballot_for_member_(pollId, memberId){
   }catch(e){ return { hasVoted:false }; }
 }
 
-function vote_prior_cast_audit_(pollId, voterCode){
-  const poll = vote_poll_id_(pollId), rows = vote_sheet_records_(VOTE_AUDIT_SHEET);
-  for (let i=rows.length-1;i>=0;i--){
-    if (vote_poll_id_(rows[i].ElectionId) !== poll || String(rows[i].Action || '').trim() !== 'BALLOT_CAST' || String(rows[i].ActorId || '').trim() !== String(voterCode || '')) continue;
-    return { receiptId:String(rows[i].Target || '').trim(), timestamp:vote_iso_(rows[i].Timestamp) };
+function vote_audit_records_(){ return vote_get_data_sheet_() ? vote_data_records_(VOTE_RECORD_AUDIT) : vote_sheet_records_('Vote_Audit'); }
+
+function vote_prior_cast_audit_(pollId,voterCode){
+  const poll = vote_poll_id_(pollId), rows = vote_audit_records_();
+  for (let i=rows.length - 1;i>=0;i--){
+    if (vote_record_poll_id_(rows[i]) !== poll || String(rows[i].Action || '').trim() !== 'BALLOT_CAST' || String(rows[i].ActorId || '').trim() !== String(voterCode || '')) continue;
+    return { receiptId:String(rows[i].Target || '').trim(), timestamp:vote_iso_(rows[i].CreatedAt || rows[i].Timestamp) };
   }
   return null;
 }
 
-function vote_audit_(actor, pollId, action, target, reason, details){
+function vote_audit_(actor,pollId,action,target,reason,details){
   try{
-    const sh = vote_ensure_sheet_(VOTE_AUDIT_SHEET,VOTE_AUDIT_HEADERS);
-    sh.appendRow([new Date(),vote_poll_id_(pollId),String((actor && actor.id) || ''),String((actor && actor.role) || ''),String(action || ''),String(target || ''),String(reason || ''),String(details || '')]);
+    vote_append_record_({
+      RecordType:VOTE_RECORD_AUDIT, PollId:vote_poll_id_(pollId), RecordId:vote_new_record_id_('AUDIT'),
+      ActorId:String((actor && actor.id) || ''), ActorRole:String((actor && actor.role) || ''), Action:String(action || ''),
+      Target:String(target || ''), Reason:String(reason || ''), Details:String(details || ''), CreatedAt:new Date()
+    });
     return true;
   }catch(e){ return false; }
 }
@@ -446,13 +603,7 @@ function api_vote_admin_initialize(token){
   try{
     const s = vote_require_role_(token,['ADMIN']);
     if (!s.ok) return s;
-    vote_ensure_sheet_(VOTE_ELECTIONS_SHEET,VOTE_ELECTION_HEADERS);
-    vote_ensure_sheet_(VOTE_OPTIONS_SHEET,VOTE_OPTION_HEADERS);
-    vote_ensure_sheet_(VOTE_ELIGIBILITY_SHEET,VOTE_ELIGIBILITY_HEADERS);
-    vote_ensure_sheet_(VOTE_BALLOTS_SHEET,VOTE_BALLOT_HEADERS);
-    vote_ensure_sheet_(VOTE_SCRUTINEERS_SHEET,VOTE_SCRUTINEER_HEADERS);
-    vote_ensure_sheet_(VOTE_AUDIT_SHEET,VOTE_AUDIT_HEADERS);
-    const props = PropertiesService.getScriptProperties();
+    const migration = vote_migrate_legacy_sheets_(), props = PropertiesService.getScriptProperties();
     if (!String(props.getProperty(VOTE_SECRET_PROPERTY) || '').trim()){
       if (vote_ballot_count_('') > 0){
         vote_audit_({ id:s.member.id, role:s.role },'','SECRET_MISSING_BLOCK','','','Refused replacement secret because ballots exist.');
@@ -460,25 +611,12 @@ function api_vote_admin_initialize(token){
       }
       props.setProperty(VOTE_SECRET_PROPERTY,[Utilities.getUuid(),Utilities.getUuid(),Utilities.getUuid(),Utilities.getUuid()].join(''));
     }
-    vote_audit_({ id:s.member.id, role:s.role },'','POLL_SYSTEM_INITIALISE','','','Reusable polling system initialised.');
-    return Object.assign({ ok:true },vote_dashboard_for_member_(s.member));
+    vote_audit_({ id:s.member.id, role:s.role },'','POLL_SYSTEM_INITIALISE','','',JSON.stringify(migration));
+    return Object.assign({ ok:true, migration:migration },vote_dashboard_for_member_(s.member));
   }catch(e){ return vote_err_('E500','未能初始化投票系統。','Could not initialise the polling system.',e && e.message); }
 }
 
-function vote_validate_poll_content_(payload){
-  const p = payload || {}, titleZh = String(p.titleZh || '').trim(), titleEn = String(p.titleEn || '').trim();
-  if (!titleZh && !titleEn) return vote_err_('E422','請填寫投票標題。','Please enter a poll title.');
-  if (titleZh.length > 160 || titleEn.length > 160) return vote_err_('E422','投票標題過長。','The poll title is too long.');
-  const checked = vote_normalize_options_payload_(p.options);
-  return checked.ok ? { ok:true, titleZh:titleZh, titleEn:titleEn, options:checked.options } : checked;
-}
-
-function vote_write_election_field_(sh, rowNumber, col, field, value){
-  if (col[field] === undefined) throw new Error('Missing Vote_Elections column: ' + field);
-  sh.getRange(rowNumber,col[field] + 1).setValue(value);
-}
-
-function api_vote_admin_create_poll(token, payload){
+function api_vote_admin_create_poll(token,payload){
   try{
     const s = vote_require_role_(token,['ADMIN']);
     if (!s.ok) return s;
@@ -489,14 +627,22 @@ function api_vote_admin_create_poll(token, payload){
     lock.waitLock(30000);
     let madeCurrent = false;
     try{
-      const optionsSheet = vote_get_sheet_(VOTE_OPTIONS_SHEET);
-      content.options.forEach(function(o){ optionsSheet.appendRow([pollId,o.optionNo,o.labelZh,o.labelEn,o.sortOrder,'YES']); });
+      content.options.forEach(function(o){
+        vote_append_record_({
+          RecordType:VOTE_RECORD_OPTION, PollId:pollId, RecordId:vote_new_record_id_('OPTION'), OptionNo:o.optionNo,
+          OptionText:o.label, OptionTextAlt:o.labelAlt, SortOrder:o.sortOrder, Active:'YES', CreatedAt:new Date(), CreatedBy:s.member.id
+        });
+      });
       const digest = vote_options_digest_(pollId,content.options,secret);
-      vote_get_sheet_(VOTE_ELECTIONS_SHEET).appendRow([pollId,content.titleZh,content.titleEn,'','','DRAFT',digest,new Date(),s.member.id,new Date(),s.member.id]);
+      vote_append_record_({
+        RecordType:VOTE_RECORD_POLL, PollId:pollId, RecordId:pollId, Question:content.question, QuestionAlt:content.questionAlt,
+        AnswerType:content.answerType, MaxSelections:content.maxSelections, State:'DRAFT', OptionDigest:digest,
+        CreatedAt:new Date(), CreatedBy:s.member.id, UpdatedAt:new Date(), UpdatedBy:s.member.id
+      });
       const current = vote_get_election_(), currentState = vote_effective_state_(current,new Date());
       if (!current || (currentState !== 'OPEN' && currentState !== 'SCHEDULED')){ vote_set_current_poll_id_(pollId); madeCurrent = true; }
     }finally{ lock.releaseLock(); }
-    vote_audit_({ id:s.member.id, role:s.role },pollId,'POLL_CREATE',pollId,'',JSON.stringify({ optionCount:content.options.length, madeCurrent:madeCurrent }));
+    vote_audit_({ id:s.member.id, role:s.role },pollId,'POLL_CREATE',pollId,'',JSON.stringify({ optionCount:content.options.length, answerType:content.answerType, madeCurrent:madeCurrent }));
     return {
       ok:true, poll:vote_get_election_(pollId), options:vote_get_options_(pollId), madeCurrent:madeCurrent,
       warning:madeCurrent ? null : { code:'CURRENT_POLL_ACTIVE', zh:'新投票已儲存為草稿；現有投票仍在進行，因此未切換會員頁面。', en:'The new poll was saved as a draft. The member page was not switched because the current poll is active.' }
@@ -508,9 +654,9 @@ function vote_poll_list_payload_(){
   const currentId = vote_current_poll_id_();
   return vote_all_elections_().map(function(e){
     return {
-      electionId:e.electionId, titleZh:e.titleZh, titleEn:e.titleEn, state:e.state, effectiveState:vote_effective_state_(e,new Date()),
-      opensAt:e.opensAt, closesAt:e.closesAt, createdAt:e.createdAt, ballotCount:vote_ballot_count_(e.electionId),
-      optionCount:vote_get_options_(e.electionId).length, isCurrent:e.electionId === currentId
+      electionId:e.electionId, question:vote_join_text_(e.question,e.questionAlt), answerType:e.answerType, maxSelections:e.maxSelections,
+      state:e.state, effectiveState:vote_effective_state_(e,new Date()), opensAt:e.opensAt, closesAt:e.closesAt, createdAt:e.createdAt,
+      ballotCount:vote_ballot_count_(e.electionId), optionCount:vote_get_options_(e.electionId).length, isCurrent:e.electionId === currentId
     };
   }).sort(function(a,b){ return String(b.createdAt || b.electionId).localeCompare(String(a.createdAt || a.electionId)); });
 }
@@ -522,7 +668,12 @@ function api_vote_admin_polls(token){
   catch(e){ return vote_err_('E500','未能載入投票列表。','Could not load the poll list.',e && e.message); }
 }
 
-function api_vote_admin_poll_detail(token, pollId){
+function vote_count_scrutineers_(pollId){
+  const poll = vote_poll_id_(pollId);
+  return vote_scrutineer_records_().filter(function(r){ return vote_record_poll_id_(r) === poll && vote_bool_(r.Active); }).length;
+}
+
+function api_vote_admin_poll_detail(token,pollId){
   const s = vote_require_role_(token,['ADMIN']);
   if (!s.ok) return s;
   try{
@@ -537,7 +688,7 @@ function api_vote_admin_poll_detail(token, pollId){
   }catch(e){ return vote_err_('E500','未能載入投票資料。','Could not load poll details.',e && e.message); }
 }
 
-function api_vote_admin_set_current_poll(token, pollId){
+function api_vote_admin_set_current_poll(token,pollId){
   try{
     const s = vote_require_role_(token,['ADMIN']);
     if (!s.ok) return s;
@@ -556,40 +707,36 @@ function api_vote_admin_set_current_poll(token, pollId){
   }catch(e){ return vote_err_('E500','未能切換目前投票。','Could not switch the current poll.',e && e.message); }
 }
 
-function api_vote_admin_save_poll_content(token, pollId, payload){
+function api_vote_admin_save_poll_content(token,pollId,payload){
   try{
     const s = vote_require_role_(token,['ADMIN']);
     if (!s.ok) return s;
     const election = vote_get_election_(pollId);
     if (!election) return vote_err_('E412','找不到此投票。','Poll not found.');
-    if (election.state !== 'DRAFT' || vote_ballot_count_(election.electionId) > 0) return vote_err_('E_VOTE_LOCKED','只有未有選票的草稿可以修改標題及選項。','Only a draft with no ballots may change its title or options.');
+    if (election.state !== 'DRAFT' || vote_ballot_count_(election.electionId) > 0) return vote_err_('E_VOTE_LOCKED','只有未有選票的草稿可以修改問題及選項。','Only a draft with no ballots may change its question or options.');
     const content = vote_validate_poll_content_(payload);
     if (!content.ok) return content;
     const lock = LockService.getScriptLock();
     lock.waitLock(30000);
     try{
-      const optionSheet = vote_get_sheet_(VOTE_OPTIONS_SHEET), optionCol = vote_header_map_(optionSheet);
-      vote_sheet_records_(VOTE_OPTIONS_SHEET).forEach(function(r){ if (vote_poll_id_(r.ElectionId) === election.electionId) optionSheet.getRange(r._rowNumber,optionCol.Active + 1).setValue('NO'); });
-      content.options.forEach(function(o){ optionSheet.appendRow([election.electionId,o.optionNo,o.labelZh,o.labelEn,o.sortOrder,'YES']); });
-      const digest = vote_options_digest_(election.electionId,content.options,vote_get_secret_());
-      const sh = vote_get_sheet_(VOTE_ELECTIONS_SHEET), col = vote_header_map_(sh);
-      vote_write_election_field_(sh,election.rowNumber,col,'TitleZh',content.titleZh);
-      vote_write_election_field_(sh,election.rowNumber,col,'TitleEn',content.titleEn);
-      vote_write_election_field_(sh,election.rowNumber,col,'OptionDigest',digest);
-      vote_write_election_field_(sh,election.rowNumber,col,'UpdatedAt',new Date());
-      vote_write_election_field_(sh,election.rowNumber,col,'UpdatedBy',s.member.id);
+      vote_data_records_(VOTE_RECORD_OPTION).forEach(function(r){ if (vote_record_poll_id_(r) === election.electionId) vote_update_record_(r._rowNumber,{ Active:'NO', UpdatedAt:new Date(), UpdatedBy:s.member.id }); });
+      content.options.forEach(function(o){
+        vote_append_record_({
+          RecordType:VOTE_RECORD_OPTION, PollId:election.electionId, RecordId:vote_new_record_id_('OPTION'), OptionNo:o.optionNo,
+          OptionText:o.label, OptionTextAlt:o.labelAlt, SortOrder:o.sortOrder, Active:'YES', CreatedAt:new Date(), CreatedBy:s.member.id
+        });
+      });
+      vote_update_record_(election.rowNumber,{
+        Question:content.question, QuestionAlt:content.questionAlt, AnswerType:content.answerType, MaxSelections:content.maxSelections,
+        OptionDigest:vote_options_digest_(election.electionId,content.options,vote_get_secret_()), UpdatedAt:new Date(), UpdatedBy:s.member.id
+      });
     }finally{ lock.releaseLock(); }
-    vote_audit_({ id:s.member.id, role:s.role },election.electionId,'POLL_CONTENT_UPDATE',election.electionId,'',JSON.stringify({ optionCount:content.options.length }));
+    vote_audit_({ id:s.member.id, role:s.role },election.electionId,'POLL_CONTENT_UPDATE',election.electionId,'',JSON.stringify({ optionCount:content.options.length, answerType:content.answerType }));
     return api_vote_admin_poll_detail(token,election.electionId);
   }catch(e){ return vote_err_('E500','未能更新投票內容。','Could not update poll content.',e && e.message); }
 }
 
-function vote_count_scrutineers_(pollId){
-  const poll = vote_poll_id_(pollId);
-  return vote_sheet_records_(VOTE_SCRUTINEERS_SHEET).filter(function(r){ return vote_poll_id_(r.ElectionId) === poll && vote_bool_(r.Active); }).length;
-}
-
-function api_vote_admin_save_election(token, pollId, payload){
+function api_vote_admin_save_election(token,pollId,payload){
   try{
     const s = vote_require_role_(token,['ADMIN']);
     if (!s.ok) return s;
@@ -615,13 +762,8 @@ function api_vote_admin_save_election(token, pollId, payload){
         if (currentState === 'OPEN' || currentState === 'SCHEDULED') return vote_err_('E_VOTE_CURRENT_ACTIVE','另一個目前投票仍在進行或已排程。','Another current poll is open or scheduled.');
       }
     }
-    const sh = vote_get_sheet_(VOTE_ELECTIONS_SHEET), col = vote_header_map_(sh);
     const oldSummary = JSON.stringify({ state:election.state, opensAt:election.opensAt, closesAt:election.closesAt });
-    vote_write_election_field_(sh,election.rowNumber,col,'OpensAt',opensAt ? new Date(opensAt) : '');
-    vote_write_election_field_(sh,election.rowNumber,col,'ClosesAt',closesAt ? new Date(closesAt) : '');
-    vote_write_election_field_(sh,election.rowNumber,col,'State',state);
-    vote_write_election_field_(sh,election.rowNumber,col,'UpdatedAt',new Date());
-    vote_write_election_field_(sh,election.rowNumber,col,'UpdatedBy',s.member.id);
+    vote_update_record_(election.rowNumber,{ OpensAt:opensAt ? new Date(opensAt) : '', ClosesAt:closesAt ? new Date(closesAt) : '', State:state, UpdatedAt:new Date(), UpdatedBy:s.member.id });
     if (state === 'OPEN') vote_set_current_poll_id_(election.electionId);
     const warning = state === 'OPEN' && vote_count_scrutineers_(election.electionId) < 2 ? { code:'FEWER_THAN_TWO_SCRUTINEERS', zh:'目前少於兩名監票員；建議正式投票前至少指定兩名。', en:'Fewer than two scrutineers are appointed; at least two are recommended.' } : null;
     vote_audit_({ id:s.member.id, role:s.role },election.electionId,'POLL_SETTINGS_UPDATE',election.electionId,'',oldSummary + ' -> ' + JSON.stringify({ state:state, opensAt:opensAt, closesAt:closesAt }));
@@ -631,21 +773,23 @@ function api_vote_admin_save_election(token, pollId, payload){
   }catch(e){ return vote_err_('E500','未能儲存投票設定。','Could not save poll settings.',e && e.message); }
 }
 
-function vote_upsert_eligibility_(pollId, memberId, childEligible, explicitIneligible, reason, actorId){
-  const sh = vote_get_sheet_(VOTE_ELIGIBILITY_SHEET), current = vote_get_eligibility_flag_(pollId,memberId);
-  const values = [vote_poll_id_(pollId),memberId,childEligible ? 'YES' : 'NO',explicitIneligible ? 'YES' : 'NO',reason,new Date(),actorId];
-  if (current.rowNumber) sh.getRange(current.rowNumber,1,1,VOTE_ELIGIBILITY_HEADERS.length).setValues([values]);
-  else sh.appendRow(values);
+function vote_upsert_eligibility_(pollId,memberId,childEligible,explicitIneligible,reason,actorId){
+  const current = vote_get_eligibility_flag_(pollId,memberId), fields = {
+    PollId:vote_poll_id_(pollId), MemberId:String(memberId || '').trim().toUpperCase(), ChildEligible:childEligible ? 'YES' : 'NO',
+    ExplicitIneligible:explicitIneligible ? 'YES' : 'NO', Reason:String(reason || ''), UpdatedAt:new Date(), UpdatedBy:actorId
+  };
+  if (current.rowNumber) vote_update_record_(current.rowNumber,fields);
+  else vote_append_record_(Object.assign({ RecordType:VOTE_RECORD_ELIGIBILITY, RecordId:vote_new_record_id_('ELIGIBILITY') },fields));
 }
 
-function vote_staff_poll_scope_(s, pollId){
+function vote_staff_poll_scope_(s,pollId){
   const election = vote_get_election_(pollId);
   if (!election) return vote_err_('E412','找不到此投票。','Poll not found.');
   if (s.role === 'STAFF' && election.electionId !== vote_current_poll_id_()) return vote_err_('E403','STAFF 只可管理目前投票的資格。','STAFF may manage eligibility only for the current poll.');
   return { ok:true, election:election };
 }
 
-function api_vote_staff_set_eligibility(token, pollId, memberId, childEligible, explicitIneligible, reason){
+function api_vote_staff_set_eligibility(token,pollId,memberId,childEligible,explicitIneligible,reason){
   const s = vote_require_role_(token,['STAFF','ADMIN']);
   if (!s.ok) return s;
   try{
@@ -665,14 +809,14 @@ function api_vote_staff_set_eligibility(token, pollId, memberId, childEligible, 
   }catch(e){ return vote_err_('E500','未能更新投票資格。','Could not update voting eligibility.',e && e.message); }
 }
 
-function api_vote_staff_roster(token, pollId, query){
+function api_vote_staff_roster(token,pollId,query){
   const s = vote_require_role_(token,['STAFF','ADMIN']);
   if (!s.ok) return s;
   try{
     const scope = vote_staff_poll_scope_(s,pollId);
     if (!scope.ok) return scope;
     const poll = scope.election.electionId, q = String(query || '').trim().toLowerCase(), flagged = {};
-    vote_sheet_records_(VOTE_ELIGIBILITY_SHEET).forEach(function(r){ if (vote_poll_id_(r.ElectionId) === poll) flagged[String(r.MemberId || '').trim().toUpperCase()] = true; });
+    vote_get_eligibility_records_().forEach(function(r){ if (vote_record_poll_id_(r) === poll) flagged[String(r.MemberId || '').trim().toUpperCase()] = true; });
     let members = vote_all_members_().filter(function(m){
       if (!q) return m.isMinor || !!flagged[m.id];
       return [m.id,m.nameZh,m.nameEn,m.preferredName].join(' ').toLowerCase().indexOf(q) >= 0;
@@ -683,21 +827,21 @@ function api_vote_staff_roster(token, pollId, query){
   }catch(e){ return vote_err_('E500','未能載入會員投票資格。','Could not load voting eligibility.',e && e.message); }
 }
 
-function api_vote_admin_scrutineers(token, pollId){
+function api_vote_admin_scrutineers(token,pollId){
   const s = vote_require_role_(token,['ADMIN']);
   if (!s.ok) return s;
   try{
     const election = vote_get_election_(pollId);
     if (!election) return vote_err_('E412','找不到此投票。','Poll not found.');
-    const rows = vote_sheet_records_(VOTE_SCRUTINEERS_SHEET).filter(function(r){ return vote_poll_id_(r.ElectionId) === election.electionId && vote_bool_(r.Active); }).map(function(r){
+    const rows = vote_scrutineer_records_().filter(function(r){ return vote_record_poll_id_(r) === election.electionId && vote_bool_(r.Active); }).map(function(r){
       const m = vote_get_member_(r.MemberId);
-      return { memberId:String(r.MemberId || '').trim().toUpperCase(), nameZh:m ? m.nameZh : '', nameEn:m ? m.nameEn : '', addedAt:vote_iso_(r.AddedAt), addedBy:String(r.AddedBy || '') };
+      return { memberId:String(r.MemberId || '').trim().toUpperCase(), nameZh:m ? m.nameZh : '', nameEn:m ? m.nameEn : '', addedAt:vote_iso_(r.CreatedAt || r.AddedAt), addedBy:String(r.CreatedBy || r.AddedBy || '') };
     });
     return { ok:true, rows:rows, pollId:election.electionId };
   }catch(e){ return vote_err_('E500','未能載入監票員名單。','Could not load the scrutineer list.',e && e.message); }
 }
 
-function api_vote_admin_scrutineer_update(token, pollId, memberId, active){
+function api_vote_admin_scrutineer_update(token,pollId,memberId,active){
   const s = vote_require_role_(token,['ADMIN']);
   if (!s.ok) return s;
   try{
@@ -707,17 +851,15 @@ function api_vote_admin_scrutineer_update(token, pollId, memberId, active){
     if (!target) return vote_err_('E412','找不到此會員。','Member not found.');
     const targetEligibility = vote_evaluate_eligibility_(target,{ childEligible:true, explicitIneligible:false });
     if (['STATUS_MISSING','STATUS_DISABLED','STATUS_PROVISIONAL','STATUS_PENDING'].indexOf(targetEligibility.code) >= 0) return vote_err_('E403','此會員狀態不能獲委任為監票員。','This member status cannot be appointed as a scrutineer.');
-    const enabled = vote_bool_(active), sh = vote_get_sheet_(VOTE_SCRUTINEERS_SHEET), lock = LockService.getScriptLock();
+    const enabled = vote_bool_(active), lock = LockService.getScriptLock();
     lock.waitLock(30000);
     try{
-      const matches = vote_sheet_records_(VOTE_SCRUTINEERS_SHEET).filter(function(r){ return vote_poll_id_(r.ElectionId) === election.electionId && String(r.MemberId || '').trim().toUpperCase() === id; });
-      if (!matches.length){ if (enabled) sh.appendRow([election.electionId,id,'YES',new Date(),s.member.id,new Date(),s.member.id]); }
-      else{
+      const matches = vote_scrutineer_records_().filter(function(r){ return vote_record_poll_id_(r) === election.electionId && String(r.MemberId || '').trim().toUpperCase() === id; });
+      if (!matches.length){
+        if (enabled) vote_append_record_({ RecordType:VOTE_RECORD_SCRUTINEER, PollId:election.electionId, RecordId:vote_new_record_id_('SCRUTINEER'), MemberId:id, Active:'YES', CreatedAt:new Date(), CreatedBy:s.member.id, UpdatedAt:new Date(), UpdatedBy:s.member.id });
+      }else{
         const primary = matches[matches.length - 1];
-        matches.forEach(function(current){
-          const activeValue = enabled && current._rowNumber === primary._rowNumber ? 'YES' : 'NO';
-          sh.getRange(current._rowNumber,1,1,VOTE_SCRUTINEER_HEADERS.length).setValues([[election.electionId,id,activeValue,current.AddedAt || new Date(),current.AddedBy || s.member.id,new Date(),s.member.id]]);
-        });
+        matches.forEach(function(current){ vote_update_record_(current._rowNumber,{ Active:enabled && current._rowNumber === primary._rowNumber ? 'YES' : 'NO', UpdatedAt:new Date(), UpdatedBy:s.member.id }); });
       }
     }finally{ lock.releaseLock(); }
     vote_audit_({ id:s.member.id, role:s.role },election.electionId,enabled ? 'SCRUTINEER_ADD' : 'SCRUTINEER_REMOVE',id,'','Explicit appointment updated.');
@@ -725,7 +867,24 @@ function api_vote_admin_scrutineer_update(token, pollId, memberId, active){
   }catch(e){ return vote_err_('E500','未能更新監票員名單。','Could not update the scrutineer list.',e && e.message); }
 }
 
-function api_vote_cast(token, pollId, optionNo){
+function vote_normalize_cast_(election,options,selections,abstain){
+  if (vote_bool_(abstain)) return { ok:true, choices:[], choicesRaw:VOTE_ABSTAIN_VALUE, abstained:true };
+  const rawList = Array.isArray(selections) ? selections : [selections], seen = {}, choices = [];
+  rawList.forEach(function(value){
+    const choice = String(value || '').trim();
+    if (choice && !seen[choice]){ seen[choice] = true; choices.push(choice); }
+  });
+  const valid = {};
+  options.forEach(function(o){ valid[o.optionNo] = true; });
+  if (!choices.length || choices.some(function(choice){ return !valid[choice]; })) return vote_err_('E416','請選擇有效選項，或按棄權。','Choose valid option(s), or press Abstain.');
+  const type = election.answerType || VOTE_ANSWER_SINGLE;
+  if (type === VOTE_ANSWER_SINGLE && choices.length !== 1) return vote_err_('E422','此投票只可選一項。','This poll allows one choice.');
+  if (type === VOTE_ANSWER_MULTIPLE && choices.length > Number(election.maxSelections || options.length)) return vote_err_('E422','所選項目超過此投票的上限。','Too many options were selected.');
+  if (type === VOTE_ANSWER_RANKED && choices.length > options.length) return vote_err_('E422','排名項目過多。','Too many ranked options.');
+  return { ok:true, choices:choices, choicesRaw:JSON.stringify(choices), abstained:false };
+}
+
+function api_vote_cast(token,pollId,selections,abstain){
   const s = vote_require_session_(token);
   if (!s.ok) return s;
   try{
@@ -738,8 +897,8 @@ function api_vote_cast(token, pollId, optionNo){
     if (!vote_options_integrity_ok_(election,options)) return vote_err_('E_VOTE_OPTIONS_INTEGRITY','投票選項暫時未能使用。','Poll options are temporarily unavailable.');
     const flag = vote_get_eligibility_flag_(poll,s.member.id), eligibility = vote_evaluate_eligibility_(s.member,flag);
     if (!eligibility.eligible) return vote_err_('E_VOTE_INELIGIBLE',eligibility.zh,eligibility.en,eligibility.reason || eligibility.code);
-    const option = String(optionNo || '').trim();
-    if (!options.some(function(o){ return o.optionNo === option; })) return vote_err_('E416','請選擇一個有效選項。','Please select one valid option.');
+    const normalized = vote_normalize_cast_(election,options,selections,abstain);
+    if (!normalized.ok) return normalized;
     const secret = vote_get_secret_(), voterCode = vote_voter_code_(poll,s.member.id,secret), lock = LockService.getScriptLock();
     lock.waitLock(30000);
     try{
@@ -748,17 +907,17 @@ function api_vote_cast(token, pollId, optionNo){
       const priorAudit = vote_prior_cast_audit_(poll,voterCode);
       if (priorAudit) return vote_err_('E_VOTE_INTEGRITY','系統找到先前投票記錄，但選票資料不完整；為防止重複投票，請聯絡管理員。','A prior cast record exists but its ballot is incomplete. Contact an admin for review.',priorAudit.receiptId || priorAudit.timestamp);
       const receiptId = 'R-' + Utilities.getUuid().replace(/-/g,'').slice(0,20).toUpperCase(), castAt = new Date().toISOString();
-      const decisionCode = vote_decision_code_(poll,s.member.id,option,receiptId,secret);
-      const ballot = { electionId:poll, receiptId:receiptId, voterCode:voterCode, optionNo:option, castAt:castAt, decisionCode:decisionCode };
+      const decisionCode = vote_decision_code_(poll,s.member.id,normalized.choicesRaw,receiptId,secret);
+      const ballot = { electionId:poll, receiptId:receiptId, voterCode:voterCode, optionNo:normalized.choicesRaw, castAt:castAt, decisionCode:decisionCode };
       ballot.integrityMac = vote_integrity_mac_(ballot,secret);
-      vote_get_sheet_(VOTE_BALLOTS_SHEET).appendRow([poll,receiptId,voterCode,option,new Date(castAt),decisionCode,ballot.integrityMac]);
-      vote_audit_({ id:voterCode, role:'VOTER_CODE' },poll,'BALLOT_CAST',receiptId,'','Ballot recorded; option omitted from audit.');
+      vote_append_record_({ RecordType:VOTE_RECORD_BALLOT, PollId:poll, RecordId:vote_new_record_id_('BALLOT'), ReceiptId:receiptId, VoterCode:voterCode, Choices:normalized.choicesRaw, Abstained:normalized.abstained ? 'YES' : 'NO', CastAt:new Date(castAt), DecisionCode:decisionCode, IntegrityMac:ballot.integrityMac });
+      vote_audit_({ id:voterCode, role:'VOTER_CODE' },poll,'BALLOT_CAST',receiptId,'','Ballot recorded; response omitted from log.');
       return { ok:true, result:'CAST', receiptId:receiptId, castAt:castAt };
     }finally{ lock.releaseLock(); }
   }catch(e){ return vote_err_('E500','未能提交選票。','Could not submit the ballot.',e && e.message); }
 }
 
-function vote_require_results_viewer_(token, pollId, requireTrace){
+function vote_require_results_viewer_(token,pollId,requireTrace){
   const s = vote_require_session_(token);
   if (!s.ok) return s;
   const election = vote_get_election_(pollId);
@@ -770,7 +929,18 @@ function vote_require_results_viewer_(token, pollId, requireTrace){
   return s;
 }
 
-function api_vote_results(token, pollId){
+function vote_validate_recorded_choices_(election,options,ballot){
+  if (ballot.abstained) return { ok:true, abstained:true, choices:[] };
+  const valid = {}, choices = ballot.choices || [];
+  options.forEach(function(o){ valid[o.optionNo] = true; });
+  if (!choices.length || choices.some(function(c){ return !valid[c]; }) || new Set(choices).size !== choices.length) return { ok:false };
+  if (election.answerType === VOTE_ANSWER_SINGLE && choices.length !== 1) return { ok:false };
+  if (election.answerType === VOTE_ANSWER_MULTIPLE && choices.length > Number(election.maxSelections || options.length)) return { ok:false };
+  if (election.answerType === VOTE_ANSWER_RANKED && choices.length > options.length) return { ok:false };
+  return { ok:true, abstained:false, choices:choices };
+}
+
+function api_vote_results(token,pollId){
   const s = vote_require_session_(token);
   if (!s.ok) return s;
   try{
@@ -783,17 +953,19 @@ function api_vote_results(token, pollId){
     if (!vote_options_integrity_ok_(election,options)) return vote_err_('E_VOTE_OPTIONS_INTEGRITY','投票選項完整性檢查失敗。','Poll option integrity check failed.');
     const secret = vote_get_secret_(), counts = {};
     options.forEach(function(o){ counts[o.optionNo] = 0; });
-    let invalid = 0;
+    let invalid = 0, totalBallots = 0, abstentions = 0;
     vote_ballots_(election.electionId).forEach(function(b){
-      if (!vote_valid_ballot_(b,secret) || counts[b.optionNo] === undefined){ invalid++; return; }
-      counts[b.optionNo]++;
+      if (!vote_valid_ballot_(b,secret)){ invalid++; return; }
+      const checked = vote_validate_recorded_choices_(election,options,b);
+      if (!checked.ok){ invalid++; return; }
+      totalBallots++;
+      if (checked.abstained){ abstentions++; return; }
+      if (election.answerType !== VOTE_ANSWER_RANKED) checked.choices.forEach(function(choice){ counts[choice]++; });
     });
-    const rows = options.map(function(o){ return { optionNo:o.optionNo, labelZh:o.labelZh, labelEn:o.labelEn, votes:counts[o.optionNo] || 0 }; });
+    const rankedRecordOnly = election.answerType === VOTE_ANSWER_RANKED;
+    const rows = rankedRecordOnly ? [] : options.map(function(o){ return { optionNo:o.optionNo, label:o.label, labelAlt:o.labelAlt, labelZh:o.label, labelEn:o.labelAlt, votes:counts[o.optionNo] || 0 }; });
     vote_audit_({ id:s.member.id, role:vote_norm_status_(s.member.status) },election.electionId,'RESULTS_VIEW',election.electionId,'',JSON.stringify({ effectiveState:effectiveState, privileged:privileges.canViewEarlyResults }));
-    return {
-      ok:true, election:vote_client_election_(election), effectiveState:effectiveState, rows:rows, totalBallots:rows.reduce(function(sum,r){ return sum + r.votes; },0),
-      integrityExceptions:privileges.canTrace ? invalid : undefined
-    };
+    return { ok:true, election:vote_client_election_(election), effectiveState:effectiveState, rows:rows, totalBallots:totalBallots, abstentions:abstentions, rankedRecordOnly:rankedRecordOnly, integrityExceptions:privileges.canTrace ? invalid : undefined };
   }catch(e){ return vote_err_('E500','未能載入投票結果。','Could not load results.',e && e.message); }
 }
 
@@ -802,17 +974,14 @@ function api_vote_exception_polls(token){
   if (!s.ok) return s;
   try{
     const rows = vote_all_elections_().filter(function(e){ return vote_privileges_(s.member,e.electionId).canTrace; }).map(function(e){
-      return {
-        electionId:e.electionId, titleZh:e.titleZh, titleEn:e.titleEn,
-        effectiveState:vote_effective_state_(e,new Date()), opensAt:e.opensAt, closesAt:e.closesAt
-      };
+      return { electionId:e.electionId, question:vote_join_text_(e.question,e.questionAlt), effectiveState:vote_effective_state_(e,new Date()), opensAt:e.opensAt, closesAt:e.closesAt };
     }).sort(function(a,b){ return String(b.closesAt || b.opensAt || b.electionId).localeCompare(String(a.closesAt || a.opensAt || a.electionId)); });
     if (!rows.length) return vote_err_('E403','沒有權限執行此操作。','You do not have permission for this action.');
     return { ok:true, rows:rows };
   }catch(e){ return vote_err_('E500','未能載入正式核查頁面。','Could not load the formal review page.',e && e.message); }
 }
 
-function api_vote_trace(token, pollId, receiptOrDecisionCode, reason){
+function api_vote_trace(token,pollId,receiptOrDecisionCode,reason){
   const s = vote_require_results_viewer_(token,pollId,true);
   if (!s.ok) return s;
   try{
@@ -823,17 +992,21 @@ function api_vote_trace(token, pollId, receiptOrDecisionCode, reason){
     if (!ballot) return vote_err_('E412','找不到此選票。','Ballot not found.');
     const secret = vote_get_secret_();
     if (!vote_valid_ballot_(ballot,secret)) return vote_err_('E_VOTE_INTEGRITY','選票完整性檢查失敗。','Ballot integrity check failed.');
+    const options = vote_get_options_(poll), checked = vote_validate_recorded_choices_(s.election,options,ballot);
+    if (!checked.ok) return vote_err_('E_VOTE_INTEGRITY','選票內容完整性檢查失敗。','Ballot content integrity check failed.');
     const members = vote_all_members_();
     let member = null;
     for (let i=0;i<members.length;i++){ if (vote_voter_code_(poll,members[i].id,secret) === ballot.voterCode){ member = members[i]; break; } }
     if (!member) return vote_err_('E_VOTE_TRACE','未能配對會員；會員資料可能已被移除。','Could not match the member; its record may have been removed.');
-    const option = vote_get_options_(poll).filter(function(o){ return o.optionNo === ballot.optionNo; })[0] || { optionNo:ballot.optionNo, labelZh:'', labelEn:'' };
+    const optionMap = {};
+    options.forEach(function(o){ optionMap[o.optionNo] = o; });
+    const choices = checked.choices.map(function(choice){ return optionMap[choice] || { optionNo:choice, label:'', labelAlt:'', labelZh:'', labelEn:'' }; });
     const auditRecorded = vote_audit_({ id:s.member.id, role:vote_norm_status_(s.member.status) },poll,'BALLOT_TRACE',ballot.receiptId,why,JSON.stringify({ memberId:member.id, decisionCode:ballot.decisionCode }));
     if (!auditRecorded) return vote_err_('E_VOTE_AUDIT','未能寫入核查審計記錄，因此沒有顯示會員資料。請稍後重試。','The review audit could not be written, so member details were not disclosed. Please retry later.');
     return {
       ok:true, ballot:{ receiptId:ballot.receiptId, castAt:ballot.castAt },
       member:{ id:member.id, nameZh:member.nameZh, nameEn:member.nameEn, preferredName:member.preferredName, status:member.status },
-      choice:option, auditRecorded:true
+      choices:choices, choice:choices[0] || null, abstained:checked.abstained, auditRecorded:true
     };
   }catch(e){ return vote_err_('E500','未能完成選票核查。','Could not complete the ballot review.',e && e.message); }
 }
