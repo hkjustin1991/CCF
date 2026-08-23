@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-08-11.122
-  For Admin.gs: v2026-08-11.admin120
+  UI VERSION TAG: admin2-ui-2026-08-23.123
+  For Admin.gs: v2026-08-23.admin121
   CHANGELOG: Logistics index, child-serving approval/pairing, names, and QR uploads.
   ============================================================
   -->
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-11.122</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-23.123</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -1144,7 +1144,7 @@
     function roleIsAdmin(){
       if(!App.actor) return false;
       var r = String(App.actor.role||'').toUpperCase();
-      return (r === 'ADMIN' || r === 'SUPERUSER');
+      return (r === 'DEACON' || r === 'ADMIN' || r === 'SUPERUSER');
     }
     function roleIsGl(){
       if(!App.actor) return false;
@@ -1238,6 +1238,7 @@
     function displayMemberStatusLabel(st){
       st = String(st||'').trim().toUpperCase();
       if (st === 'ACTIVE') return 'Member';
+      if (st === 'DEACON') return 'DEACON';
       if (st === 'ADMIN') return 'staff';
       if (st === 'STAFF') return 'STAFF';
       if (st === 'HELPER') return 'HELPER';
@@ -1307,14 +1308,14 @@
 
     function canManageServingGroup_(groupKey){
       var role = String((App.actor && App.actor.role) || '').toUpperCase();
-      if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
+      if (role === 'DEACON' || role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
       if (role !== 'GL') return false;
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       return gl.some(function(g){ return normalizeServingGroupKey_(g) === groupKey; });
     }
     function actorServingGroupKeys_(){
       var role = String((App.actor && App.actor.role) || '').toUpperCase();
-      if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return ['worship','media','logistic','support','finance'];
+      if (role === 'DEACON' || role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return ['worship','media','logistic','support','finance'];
       var gl = (App.actor && Array.isArray(App.actor.glGroups)) ? App.actor.glGroups : [];
       var seen = {};
       var out = [];
@@ -1376,7 +1377,7 @@
           if (!addBtn) return;
           addBtn.onclick = function(){
             var role = String((App.actor && App.actor.role) || '').toUpperCase();
-            var isStaffAdmin = (role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER');
+            var isStaffAdmin = (role === 'STAFF' || role === 'DEACON' || role === 'ADMIN' || role === 'SUPERUSER');
 
             function finishAdd_(r, activeModal){
               var id = String((r && r.memberId) || '').trim().toUpperCase();
@@ -1412,8 +1413,8 @@
                 '<div class="big">➕ 新增組員 / Add member</div>'+
                 '<div class="small">可搜尋 CCF ID / 姓名 / Email。<br/>Search by CCF ID / name / email.</div>'+
                 (role === 'STAFF'
-                  ? '<div class="small">STAFF 可管理所有組別的一般會員；STAFF／ADMIN 帳戶只可由 ADMIN 修改。<br/>STAFF may manage ordinary members in all groups; only ADMIN may change STAFF/ADMIN accounts.</div>'
-                  : '<div class="small">ADMIN 可管理所有事奉組別及會員帳戶。<br/>ADMIN may manage all serving groups and member accounts.</div>')+
+                  ? '<div class="small">STAFF 可管理所有組別的一般會員；STAFF／DEACON／ADMIN 帳戶只可由 DEACON／ADMIN 修改。<br/>STAFF may manage ordinary members in all groups; only DEACON/ADMIN may change STAFF/DEACON/ADMIN accounts.</div>'
+                  : '<div class="small">DEACON／ADMIN 可管理所有事奉組別及會員帳戶。<br/>DEACON/ADMIN may manage all serving groups and member accounts.</div>')+
                 '<input id="addMemberQuery" class="input" placeholder="例如 / e.g.: CCF0001 / Alex / abc@x.com" />'+
                 '<div class="miniBtnRow">'+
                   '<button id="btnFindAddMember" class="btnMain">🔎 搜尋 / Search</button>'+
@@ -1546,7 +1547,7 @@
             if (roleNow === 'GL'){
               html += '<div class="small">你可管理自己帶領的組別；新增組員須掃描對方 QR。<br/>You may manage groups you lead; adding a member requires scanning their QR.</div>';
             } else if (roleNow === 'STAFF'){
-              html += '<div class="small">你可管理所有組別的一般會員；STAFF／ADMIN 帳戶只可由 ADMIN 修改。<br/>You may manage ordinary members in all groups; only ADMIN may change STAFF/ADMIN accounts.</div>';
+              html += '<div class="small">你可管理所有組別的一般會員；STAFF／DEACON／ADMIN 帳戶只可由 DEACON／ADMIN 修改。<br/>You may manage ordinary members in all groups; only DEACON/ADMIN may change STAFF/DEACON/ADMIN accounts.</div>';
             } else {
               html += '<div class="small">你可管理所有事奉組別及會員帳戶。<br/>You may manage all serving groups and member accounts.</div>';
             }
@@ -5250,7 +5251,7 @@ function viewAttendanceHome(){
         var canContact = !roleIsGl();
         var canStats = !roleIsGl();
         var actorRole = String((App.actor && App.actor.role) || '').toUpperCase();
-        var canApproveMinor = (actorRole === 'STAFF' || actorRole === 'ADMIN' || actorRole === 'SUPERUSER');
+        var canApproveMinor = (actorRole === 'STAFF' || actorRole === 'DEACON' || actorRole === 'ADMIN' || actorRole === 'SUPERUSER');
         var minorApproved = (m.minorServingApprovedGroups || []).some(function(g){ return normalizeServingGroupKey_(g) === 'logistic'; });
 
         var topBtns = '<div class="modalTopBtns">'+

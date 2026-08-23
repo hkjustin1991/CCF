@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-11.staff104
- * CHANGELOG: authoritative first-event New Friend classification and minor-serving fields.
+ * v2026-08-23.staff105
+ * CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level across portals.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-11.staff104';
+const APP_VERSION = '2026-08-23.staff105';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -55,6 +55,7 @@ const STATUS_ACTIVE = 'ACTIVE';
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROVISIONAL = 'PROVISIONAL';
 const STATUS_STAFF = 'STAFF';
+const STATUS_DEACON = 'DEACON';
 const STATUS_ADMIN = 'ADMIN';
 const STATUS_HELPER = 'HELPER';
 const STATUS_TEMP = 'TEMP';
@@ -62,11 +63,11 @@ const STATUS_TEMP = 'TEMP';
 // Check-in allowed
 const ALLOWED_STATUSES_FOR_CHECKIN = [
   STATUS_ACTIVE, STATUS_PENDING, STATUS_PROVISIONAL,
-  STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP
+  STATUS_STAFF, STATUS_DEACON, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP
 ];
 
 // Staff portal login allowed
-const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP];
+const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_DEACON, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP];
 
 // Privilege expiry configuration
 const HELPER_EXPIRY_DAYS = 31;
@@ -143,6 +144,8 @@ function doGet(e) {
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
   if (mode === 'rota') return doGetRotaPublic_(e);
+  if (mode === 'vote') return doGetVote_(e); // Vote.gs
+  if (mode === 'vote-review') return doGetVoteReview_(e); // Vote.gs — restricted, unlinked exception route
 
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
@@ -421,9 +424,13 @@ function isOptedOut_(optOutRaw){
   return ['1','Y','YES','TRUE','OPTOUT'].includes(v);
 }
 
+function isAdminLevel_(st){
+  st = normalizeStatus_(st);
+  return (st === STATUS_DEACON || st === STATUS_ADMIN);
+}
 function isPrivilegedStaff_(st){
   st = normalizeStatus_(st);
-  return (st === STATUS_STAFF || st === STATUS_ADMIN);
+  return (st === STATUS_STAFF || isAdminLevel_(st));
 }
 function isPortalUserAllowed_(st){
   st = normalizeStatus_(st);
@@ -920,7 +927,7 @@ function classifyNewFriendFromFirstEvent_(eventKey, memberId, status, firstEvent
   const ev = String(eventKey || '').trim();
   const id = String(memberId || '').trim().toUpperCase();
   const st = normalizeStatus_(status);
-  if (st === STATUS_STAFF || st === STATUS_ADMIN){
+  if (isPrivilegedStaff_(st)){
     return { isNewFriend:false, reason:'STAFF_EXCLUDED', firstEventKey:String(firstEventKey || '') };
   }
   const first = String(firstEventKey || ev).trim();
@@ -1654,12 +1661,12 @@ function api_auth_validate_approver(token, approverQrPayload){
   const st = normalizeStatus_(m.status);
 
   if (sessStaff.isSuper){
-    if (st !== STATUS_ADMIN){
+    if (!isAdminLevel_(st)){
       return {
         ok:false,
         code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+        en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
       };
     }
   } else {
@@ -1668,13 +1675,13 @@ function api_auth_validate_approver(token, approverQrPayload){
         ok:false,
         code:'E492',
         zh:'普通同工／管理員只可用你自己嘅 QR 作授權（自用）。請先登出，再用你自己嘅同工卡登入。',
-        en:'STAFF/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
+        en:'STAFF/DEACON/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
       };
     }
   }
 
-  if (!(st === STATUS_STAFF || st === STATUS_ADMIN)) {
-    return { ok:false, code:'E415', zh:'此 QR 並非同工/管理員，不能授權', en:'Not STAFF/ADMIN. Cannot authorise.' };
+  if (!isPrivilegedStaff_(st)) {
+    return { ok:false, code:'E415', zh:'此 QR 並非同工／執事／管理員，不能授權', en:'Not STAFF/DEACON/ADMIN. Cannot authorise.' };
   }
   if (!m.key || m.key !== parsed.key) {
     return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
@@ -1711,7 +1718,7 @@ function api_auth_validate_target(token, targetQrPayload){
 
   const st = normalizeStatus_(m.status);
   if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
-  if (st === STATUS_STAFF || st === STATUS_ADMIN) return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
+  if (isPrivilegedStaff_(st)) return { ok:false, code:'E488', zh:'不能更改同工／執事／管理員身份', en:'Cannot change STAFF/DEACON/ADMIN role.' };
 
   if (!m.key || m.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符（可能是舊 QR）', en:'Key mismatch (possibly old QR).' };
 
@@ -1739,12 +1746,12 @@ function api_auth_commit(token, approverId, targetId, newStatus){
   const apSt = normalizeStatus_(ap.status);
 
   if (sessStaff.isSuper){
-    if (apSt !== STATUS_ADMIN){
+    if (!isAdminLevel_(apSt)){
       return {
         ok:false,
         code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+        en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
       };
     }
   } else {
@@ -1754,12 +1761,12 @@ function api_auth_commit(token, approverId, targetId, newStatus){
         ok:false,
         code:'E492',
         zh:'普通同工／管理員只可用你自己嘅 QR 作授權（自用）。請先登出，再用你自己嘅同工卡登入。',
-        en:'STAFF/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
+        en:'STAFF/DEACON/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
       };
     }
   }
 
-  if (!(apSt === STATUS_STAFF || apSt === STATUS_ADMIN)) return { ok:false, code:'E415', zh:'授權者必須為同工/管理員', en:'Approver must be STAFF/ADMIN.' };
+  if (!isPrivilegedStaff_(apSt)) return { ok:false, code:'E415', zh:'授權者必須為同工／執事／管理員', en:'Approver must be STAFF/DEACON/ADMIN.' };
 
   const tgtId = String(targetId||'').trim().toUpperCase();
   if (!tgtId) return { ok:false, code:'E416', zh:'找不到目標會員', en:'Target not found.' };
@@ -1769,7 +1776,7 @@ function api_auth_commit(token, approverId, targetId, newStatus){
   if (!tgt) return { ok:false, code:'E412', zh:'找不到目標會員', en:'Target not found.' };
   const oldSt = normalizeStatus_(tgt.status);
   if (oldSt === STATUS_DISABLED) return { ok:false, code:'E414', zh:'目標帳號已停用', en:'Target disabled.' };
-  if (oldSt === STATUS_STAFF || oldSt === STATUS_ADMIN) return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
+  if (isPrivilegedStaff_(oldSt)) return { ok:false, code:'E488', zh:'不能更改同工／執事／管理員身份', en:'Cannot change STAFF/DEACON/ADMIN role.' };
 
   const sh = getMembersSheet_();
   const cols = mi.cols;
@@ -1962,8 +1969,8 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   const eventKey = getDefaultEventKey_();
   const mi = getMembersIndex_();
 
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   let auditLabel = staff.id;
   let auditNameZh = staff.nameZh||'';
@@ -1976,27 +1983,27 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   if (staff.isSuper){
     if (adminQrPayloadOptional){
       const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描執事／管理員（DEACON／ADMIN）QR 以作記錄', en:'DEACON/ADMIN QR required for audit.' };
 
       const admin = mi.byId[parsed.id];
       if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
       const admSt = normalizeStatus_(admin.status);
-      if (admSt !== STATUS_ADMIN){
+      if (!isAdminLevel_(admSt)){
         return {
           ok:false,
           code:'E491',
-          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+          zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+          en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
         };
       }
       if (!admin.key || admin.key !== parsed.key){
         return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
       }
 
-      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-      auditNameZh = admin.nameZh || 'ADMIN';
-      auditNameEn = admin.nameEn || 'ADMIN';
+      auditLabel = 'SUPERUSER (' + admSt + ':' + admin.id + ')';
+      auditNameZh = admin.nameZh || admSt;
+      auditNameEn = admin.nameEn || admSt;
 
       byId = admin.id;
       byNameZh = admin.nameZh || '';
@@ -2027,7 +2034,7 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
     if (!staffRec) return { ok:false, code:'E412', zh:'找不到同工記錄', en:'Staff record not found.' };
 
     const sst = normalizeStatus_(staffRec.status);
-    if (!(sst === STATUS_STAFF || sst === STATUS_ADMIN)) return { ok:false, code:'E493', zh:'此帳號不是同工/管理員', en:'Not staff/admin.' };
+    if (!isPrivilegedStaff_(sst)) return { ok:false, code:'E493', zh:'此帳號不是同工／執事／管理員', en:'Not STAFF/DEACON/ADMIN.' };
     if (!staffRec.key || staffRec.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
 
     byId = staff.id;
@@ -2105,8 +2112,8 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   const eventKey = getDefaultEventKey_();
   const mi = getMembersIndex_();
 
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   let auditLabel = staff.id;
   let auditNameZh = staff.nameZh||'';
@@ -2119,27 +2126,27 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   if (staff.isSuper){
     if (adminQrPayloadOptional){
       const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描執事／管理員（DEACON／ADMIN）QR 以作記錄', en:'DEACON/ADMIN QR required for audit.' };
 
       const admin = mi.byId[parsed.id];
       if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
       const admSt = normalizeStatus_(admin.status);
-      if (admSt !== STATUS_ADMIN){
+      if (!isAdminLevel_(admSt)){
         return {
           ok:false,
           code:'E491',
-          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+          zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+          en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
         };
       }
       if (!admin.key || admin.key !== parsed.key){
         return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
       }
 
-      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-      auditNameZh = admin.nameZh || 'ADMIN';
-      auditNameEn = admin.nameEn || 'ADMIN';
+      auditLabel = 'SUPERUSER (' + admSt + ':' + admin.id + ')';
+      auditNameZh = admin.nameZh || admSt;
+      auditNameEn = admin.nameEn || admSt;
 
       byId = admin.id;
       byNameZh = admin.nameZh || '';
@@ -2165,7 +2172,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     if (!staffRec) return { ok:false, code:'E412', zh:'找不到同工記錄', en:'Staff record not found.' };
 
     const sst = normalizeStatus_(staffRec.status);
-    if (!(sst === STATUS_STAFF || sst === STATUS_ADMIN)) return { ok:false, code:'E493', zh:'此帳號不是同工/管理員', en:'Not staff/admin.' };
+    if (!isPrivilegedStaff_(sst)) return { ok:false, code:'E493', zh:'此帳號不是同工／執事／管理員', en:'Not STAFF/DEACON/ADMIN.' };
     if (!staffRec.key || staffRec.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
 
     byId = staff.id;
@@ -2238,8 +2245,8 @@ function api_newfriend_mark_handled(token, memberId, eventKeyOptional){
 
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
   const targetId = String(memberId||'').trim().toUpperCase();
@@ -2281,8 +2288,8 @@ function api_checkin_delete(token, memberId, eventKeyOptional){
 
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
   const targetId = String(memberId||'').trim().toUpperCase();

@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-11.reg122
- * CHANGELOG: require the ROTA_PUBLIC_PASSWORD Script Property; no hardcoded fallback.
+ * v2026-08-23.reg123
+ * CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level across portals.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -28,14 +28,14 @@
  *     - Default window: last ~183 days ending today (UK).
  *     - Denominator start = max(Member_Since, windowStart).
  *
- * [5] Safety: preserve ADMIN status on self-update
- *     - If old status is ADMIN, do not downgrade to STAFF.
+ * [5] Safety: preserve DEACON/ADMIN status on self-update
+ *     - If old status is DEACON or ADMIN, do not downgrade to STAFF.
  *
  * PATCH BOUNDARIES:
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-11.reg122';
+const REG_VERSION = '2026-08-23.reg123';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -523,7 +523,7 @@ function regProjectCandidate_(r, score, nameHit){
     mobileMasked: regMaskMobile_(r.Mobile),
     vrmMasked: regMaskVrm_(r.VRM || r.VRM2),
     /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_BEGIN */
-    isStaff: (st === 'STAFF' || st === 'ADMIN'),
+    isStaff: regIsStaffLevel_(st),
     /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_END */
     nameHit: !!nameHit,
     _score: score
@@ -906,8 +906,8 @@ function api_reg_update_by_id_public(memberId, input){
       const stOld = regStatus_(oldRow.Status);
 
       /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_BLOCK_BEGIN */
-      if (stOld === 'STAFF' || stOld === 'ADMIN') {
-        const r = { ok:false, code:'STAFF', zh:'此為同工/管理員帳號，請聯絡影音同工處理。', en:'This is a staff/admin record. Please contact Media team.' };
+      if (regIsStaffLevel_(stOld)) {
+        const r = { ok:false, code:'STAFF', zh:'此為同工／執事／管理員帳號，請聯絡影音同工處理。', en:'This is a STAFF/DEACON/ADMIN record. Please contact Media team.' };
         regLogActivity_('REG_BLOCK_STAFF_OVERWRITE', id, 'STAFF', { deviceId, ua });
         return r;
       }
@@ -978,7 +978,7 @@ function api_reg_self_update_public(authQrPayload, input){
       }
 
       /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_SELF_FLAG_BEGIN */
-      const isStaff = (stOld === 'STAFF' || stOld === 'ADMIN');
+      const isStaff = regIsStaffLevel_(stOld);
       /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_SELF_FLAG_END */
 
       const res = regApplyUpdate_(ms, rowNumber, parsed.id, stOld, isStaff, v.data, inObj);
@@ -1019,7 +1019,7 @@ function api_reg_self_lookup_public(qrPayload){
         id: r.ID,
         status: st,
         /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_LOOKUP_BEGIN */
-        isStaff: (st === 'STAFF' || st === 'ADMIN'),
+        isStaff: regIsStaffLevel_(st),
         /* PATCH_BOUNDARY: REG1_ADMIN_AS_STAFFLIKE_LOOKUP_END */
         nameZh: String(r.NameZh||'').trim(),
         nameEn: String(r.NameEn||'').trim(),
@@ -1273,7 +1273,7 @@ function reg_getWorshipAuthFromAdminToken_(token){
 function reg_selfCanAccessAdminPortal_(statusNorm, glGroups){
   const role = String(statusNorm || '').trim().toUpperCase();
   const gl = Array.isArray(glGroups) ? glGroups.filter(Boolean) : [];
-  return role === 'STAFF' || role === 'ADMIN' || gl.length > 0 || role === 'GL';
+  return regIsStaffLevel_(role) || gl.length > 0 || role === 'GL';
 }
 
 function api_reg_issue_admin_handoff_public(qrPayload){
@@ -2363,7 +2363,7 @@ function api_reg_self_live_service_public(qrPayload){
             classification = classifyNewFriendFromFirstEvent_(ev, mid, st, firstSundayByMember[mid] || ev);
           }else{
             const suppressed = (typeof isNewFriendSuppressed_ === 'function') ? isNewFriendSuppressed_(ev, mid) : false;
-            classification = { isNewFriend:firstSundayByMember[mid] === ev && st !== 'STAFF' && st !== 'ADMIN' && !suppressed };
+            classification = { isNewFriend:firstSundayByMember[mid] === ev && !regIsStaffLevel_(st) && !suppressed };
           }
           if (classification && classification.isNewFriend) newFriend++;
         });
@@ -2538,7 +2538,7 @@ function reg_isWorshipMember_(member){
 
 function reg_isWorshipGlOrAdminForWorship_(member, statusNorm){
   const role = String(statusNorm || '').trim().toUpperCase();
-  if (role === 'ADMIN' || role === 'SUPERUSER') return reg_isWorshipMember_(member);
+  if (regIsAdminLevel_(role) || role === 'SUPERUSER') return reg_isWorshipMember_(member);
   const gl = (member && member.servingGLGroups) || [];
   return gl.some(function(g){ return admin_normalizeServingGroup_(g) === 'worship'; });
 }
@@ -4140,7 +4140,7 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
 
   const oldRow = regReadRow_(ms, rowNumber);
   // A member already marked under 18 cannot remove that flag through public
-  // self-service. STAFF/ADMIN performs the separate reauthenticated 18+ step.
+  // self-service. STAFF/DEACON/ADMIN performs the separate reauthenticated 18+ step.
   if (String(oldRow.IsMinor||'').trim().toUpperCase() === 'YES' && !data.isMinor){
     data.isMinor = true;
   }
@@ -4193,8 +4193,8 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
   // member's workflow state. Legacy non-family updates retain their existing
   // promotion behaviour.
   const preserveFamilyStatus = !!String(oldRow.FamilyID || '').trim();
-  const newStatusToWrite = (stOldNorm === 'ADMIN')
-    ? 'ADMIN'
+  const newStatusToWrite = regIsAdminLevel_(stOldNorm)
+    ? stOldNorm
     : ((stOldNorm === 'STAFF')
       ? 'STAFF'
       : (preserveFamilyStatus ? (stOldNorm || 'ACTIVE') : 'ACTIVE'));
@@ -5006,6 +5006,14 @@ function regDeviceHint_(inObj){
 }
 
 function regStatus_(s){ return String(s||'').trim().toUpperCase(); }
+function regIsAdminLevel_(s){
+  const st = regStatus_(s);
+  return st === 'DEACON' || st === 'ADMIN';
+}
+function regIsStaffLevel_(s){
+  const st = regStatus_(s);
+  return st === 'STAFF' || regIsAdminLevel_(st);
+}
 function regNormName_(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,''); }
 function regEnTokens_(s){ return String(s||'').trim().toLowerCase().split(/\s+/).filter(Boolean).map(t => t.replace(/[^a-z0-9]/g,'')); }
 function regNormEmail_(s){ return String(s||'').trim().toLowerCase(); }

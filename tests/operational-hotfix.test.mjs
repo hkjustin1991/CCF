@@ -266,16 +266,19 @@ test('group-member serving summary is independent of attendance date limits', ()
   assert.equal(clampContext.App.from, '2026-02-08');
 });
 
-test('GL STAFF and ADMIN group-membership controls follow one permission policy', () => {
+test('GL STAFF DEACON and ADMIN group-membership controls follow one permission policy', () => {
   const context = appsScriptContext();
   vm.runInContext(read('Admin.gs'), context, { filename:'Admin.gs' });
 
   assert.equal(context.admin_canManageServingGroupMembership_({ role:'STAFF' }, 'media'), true);
+  assert.equal(context.admin_canManageServingGroupMembership_({ role:'DEACON' }, 'finance'), true);
   assert.equal(context.admin_canManageServingGroupMembership_({ role:'ADMIN' }, 'finance'), true);
   assert.equal(context.admin_canManageServingGroupMembership_({ role:'GL', glGroups:['MEDIA'] }, 'media'), true);
   assert.equal(context.admin_canManageServingGroupMembership_({ role:'GL', glGroups:['MEDIA'] }, 'logistic'), false);
   assert.equal(context.admin_canManageServingGroupTarget_({ role:'STAFF' }, { status:'ACTIVE' }), true);
   assert.equal(context.admin_canManageServingGroupTarget_({ role:'STAFF' }, { status:'STAFF' }), false);
+  assert.equal(context.admin_canManageServingGroupTarget_({ role:'STAFF' }, { status:'DEACON' }), false);
+  assert.equal(context.admin_canManageServingGroupTarget_({ role:'DEACON' }, { status:'ADMIN' }), true);
   assert.equal(context.admin_canManageServingGroupTarget_({ role:'ADMIN' }, { status:'STAFF' }), true);
 
   let actor = { id:'CCF0001', role:'STAFF', glGroups:[] };
@@ -333,12 +336,41 @@ test('GL STAFF and ADMIN group-membership controls follow one permission policy'
     ui.indexOf('function renderGroupMemberManage_'),
     ui.indexOf('function openServingGroupMemberSummary_')
   );
-  assert.ok(addFlow.includes("role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER'"));
+  assert.ok(addFlow.includes("role === 'STAFF' || role === 'DEACON' || role === 'ADMIN' || role === 'SUPERUSER'"));
   assert.ok(addFlow.includes('id="addMemberMsg"'));
-  assert.ok(addFlow.includes('STAFF 可管理所有組別的一般會員；STAFF／ADMIN 帳戶只可由 ADMIN 修改。<br/>STAFF may manage ordinary members in all groups; only ADMIN may change STAFF/ADMIN accounts.'));
+  assert.ok(addFlow.includes('STAFF 可管理所有組別的一般會員；STAFF／DEACON／ADMIN 帳戶只可由 DEACON／ADMIN 修改。<br/>STAFF may manage ordinary members in all groups; only DEACON/ADMIN may change STAFF/DEACON/ADMIN accounts.'));
   assert.ok(addFlow.includes('GL must scan target member QR to authorise adding member.'));
   assert.ok(!addFlow.includes("showErr('app', r"));
   assert.ok(ui.includes("(res.canManage ? '<button id=\"btnRemoveThisGroup\""));
+});
+
+test('DEACON is distinct in data and receives ADMIN-level access across every portal', () => {
+  const live = appsScriptContext();
+  vm.runInContext(read('Code.gs'), live, { filename:'Code.gs' });
+  assert.equal(live.isAdminLevel_('DEACON'), true);
+  assert.equal(live.isPrivilegedStaff_('DEACON'), true);
+  assert.equal(vm.runInContext("ALLOWED_STATUSES_FOR_CHECKIN.includes('DEACON')", live), true);
+  assert.equal(vm.runInContext("ALLOWED_STATUSES_FOR_PORTAL.includes('DEACON')", live), true);
+
+  const admin = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), admin, { filename:'Admin.gs' });
+  assert.equal(admin.admin_isAdminStatus_('DEACON'), true);
+  assert.equal(admin.admin_isAdminActorRole_('DEACON'), true);
+  assert.equal(admin.admin_validateRange_({ role:'DEACON' }, '2026-01-01', '2026-12-31').ok, true);
+  admin.admin_parseQrStrict_ = () => ({ ok:true, id:'CCF0101', key:'secret' });
+  admin.admin_getMembersIndex_ = () => ({ byId:{ CCF0101:{ id:'CCF0101', key:'secret', status:'DEACON' } } });
+  assert.equal(admin.admin_verifyReauth_({ id:'SUPERUSER', role:'SUPERUSER' }, 'qr').ok, true);
+  assert.equal(admin.admin_verifyReauth_({ id:'CCF0101', role:'DEACON' }, 'qr').ok, true);
+
+  const reg = appsScriptContext();
+  vm.runInContext(read('Reg.gs'), reg, { filename:'Reg.gs' });
+  assert.equal(reg.regIsAdminLevel_('DEACON'), true);
+  assert.equal(reg.regIsStaffLevel_('DEACON'), true);
+  assert.equal(reg.reg_selfCanAccessAdminPortal_('DEACON', []), true);
+
+  assert.ok(read('index.html').includes("st === 'DEACON'"));
+  assert.ok(read('Admin2.html').includes("r === 'DEACON' || r === 'ADMIN' || r === 'SUPERUSER'"));
+  assert.ok(read('Reg2.html').includes("DEACON:{ zh:'執事', en:'DEACON' }"));
 });
 
 test('New Friend remains event-level through rescans and ends on handling or the next event', () => {
@@ -623,18 +655,18 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-11.staff104';"));
-  assert.ok(liveBackend.includes('* v2026-08-11.staff104'));
-  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-11.104'));
-  assert.ok(liveUi.includes('ui staff-ui-2026-08-11.104'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-23.staff105';"));
+  assert.ok(liveBackend.includes('* v2026-08-23.staff105'));
+  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-23.105'));
+  assert.ok(liveUi.includes('ui staff-ui-2026-08-23.105'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-11.admin120';"));
-  assert.ok(adminBackend.includes('* v2026-08-11.admin120'));
-  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-11.122'));
-  assert.ok(adminUi.includes('ui admin2-ui-2026-08-11.122'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-23.admin121';"));
+  assert.ok(adminBackend.includes('* v2026-08-23.admin121'));
+  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-23.123'));
+  assert.ok(adminUi.includes('ui admin2-ui-2026-08-23.123'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-11.reg122';"));
-  assert.ok(regBackend.includes('* v2026-08-11.reg122'));
-  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-11.120'));
-  assert.ok(regUi.includes('ui reg2-ui-2026-08-11.120'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-23.reg123';"));
+  assert.ok(regBackend.includes('* v2026-08-23.reg123'));
+  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-23.121'));
+  assert.ok(regUi.includes('ui reg2-ui-2026-08-23.121'));
 });

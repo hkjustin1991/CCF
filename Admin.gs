@@ -1,13 +1,13 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-11.admin120
- * CHANGELOG: child-serving safeguards, Logistics index dashboard, and member-name/minor metadata.
+ * v2026-08-23.admin121
+ * CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level across portals.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
  * Login:
- * - STAFF/ADMIN via personal QR (CCF####|k...)
+ * - STAFF/DEACON/ADMIN via personal QR (CCF####|k...)
  * - SUPERUSER via secret stored in Script Properties.
  *
  * IMPORTANT:
@@ -20,7 +20,7 @@
  *
  * Limits:
  * - STAFF: max 181 days range
- * - ADMIN/SUPERUSER: max 366 days range
+ * - DEACON/ADMIN/SUPERUSER: max 366 days range
  *
  * Extra requirements:
  * - DISABLED members:
@@ -37,18 +37,18 @@
  *      (reserved placeholders for offering/serving later)
  * - Contact/VRM reveal:
  *    • confirmation reason + QR re-scan (must match current session actor)
- *    • SUPERUSER must scan an ADMIN QR (and must match ADMIN member)
+ *    • SUPERUSER must scan a DEACON/ADMIN QR (and it must match that member)
  * - Status change (STAFF also allowed):
  *    • dropdown STAFF/ACTIVE/DISABLED/PROVISIONAL/TEMP/HELPER
  *    • TEMP via admin portal = 2 days (RoleExpires)
  *    • HELPER via admin portal = 31 days (RoleExpires)
  *    • QR re-scan confirmation (same rules as contact reveal)
- *    • Hard-stop: cannot change another ADMIN’s status (including ADMIN->ADMIN)
+ *    • Hard-stop: cannot change another DEACON/ADMIN account's status
  * - Separate audit sheet: Admin_Activity logs actions
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-11.admin120';
+const ADMIN_VERSION = '2026-08-23.admin121';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -288,7 +288,7 @@ function admin_actorFlagsForMember_(member){
 
 /**
  * Admin portal login:
- * - QR: must be STAFF or ADMIN (DISABLED/ACTIVE/etc rejected)
+ * - QR: must be STAFF, DEACON or ADMIN (DISABLED/ACTIVE/etc rejected)
  * - SUPERUSER via Script Properties secret key
  *
  * IMPORTANT: if secret login fails and input is NOT a QR payload, return E401
@@ -339,14 +339,14 @@ function api_admin_login(input){
   }
 
   const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
-  if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
+  if (!(admin_isStaffOrAdminStatus_(st) || glGroups.length)) {
     return { ok:false, code:'E_HANDOFF_UNAUTHORISED', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
   }
   if (!m.key || String(m.key) !== parsed.key){
     return admin_err_('E418','Key 不相符（可能是舊 QR）','Key mismatch (possibly old QR).');
   }
 
-  const role = (st === 'STAFF' || st === 'ADMIN') ? st : 'GL';
+  const role = admin_isStaffOrAdminStatus_(st) ? st : 'GL';
   const actor = {
     id:m.id,
     role:role,
@@ -393,11 +393,11 @@ function api_admin_login_with_handoff(handoffToken){
   }
 
   const glGroups = Array.isArray(m.servingGLGroups) ? m.servingGLGroups : [];
-  if (!(st === 'STAFF' || st === 'ADMIN' || glGroups.length)) {
+  if (!(admin_isStaffOrAdminStatus_(st) || glGroups.length)) {
     return { ok:false, code:'E_HANDOFF_UNAUTHORISED', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
   }
 
-  const role = (st === 'STAFF' || st === 'ADMIN') ? st : 'GL';
+  const role = admin_isStaffOrAdminStatus_(st) ? st : 'GL';
   const actor = {
     id:m.id,
     role:role,
@@ -455,7 +455,7 @@ function api_admin_sermon_page(token, ym){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')){
+  if (!(admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
@@ -483,7 +483,7 @@ function api_admin_sermon_save(token, payload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')){
+  if (!(admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
@@ -534,7 +534,7 @@ function sermonImportRequireAuth_(token){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF')) return admin_err_('E403','沒有權限','No permission');
+  if (!(admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER')) return admin_err_('E403','沒有權限','No permission');
   return s;
 }
 
@@ -902,7 +902,7 @@ function api_admin_sermon_speaker_suggest(token, speakerName){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF' || role === 'GL')){
+  if (!(admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER' || role === 'GL')){
     return admin_err_('E403','沒有權限','No permission');
   }
 
@@ -977,7 +977,7 @@ function admin_canEditServingGroup_(actor, groupKey){
   const key = admin_normalizeServingGroup_(groupKey);
   if (!key) return false;
   const role = String((actor && actor.role) || '').trim().toUpperCase();
-  if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
+  if (admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER') return true;
   if (role !== 'GL') return false;
   const glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
   return glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
@@ -985,7 +985,7 @@ function admin_canEditServingGroup_(actor, groupKey){
 
 /**
  * Group-membership management policy:
- * - ADMIN/SUPERUSER: every serving group.
+ * - DEACON/ADMIN/SUPERUSER: every serving group.
  * - STAFF: every serving group, but privileged targets are blocked separately.
  * - GL: only groups they lead.
  */
@@ -993,7 +993,7 @@ function admin_canManageServingGroupMembership_(actor, groupKey){
   const key = admin_normalizeServingGroup_(groupKey);
   if (!key) return false;
   const role = String((actor && actor.role) || '').trim().toUpperCase();
-  if (role === 'ADMIN' || role === 'SUPERUSER' || role === 'STAFF') return true;
+  if (admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER') return true;
   if (role !== 'GL') return false;
   const glGroups = Array.isArray(actor && actor.glGroups) ? actor.glGroups : [];
   return glGroups.some(function(g){ return admin_normalizeServingGroup_(g) === key; });
@@ -1001,10 +1001,10 @@ function admin_canManageServingGroupMembership_(actor, groupKey){
 
 function admin_canManageServingGroupTarget_(actor, target){
   const role = String((actor && actor.role) || '').trim().toUpperCase();
-  if (role === 'ADMIN' || role === 'SUPERUSER') return true;
+  if (admin_isAdminActorRole_(role)) return true;
   if (!(role === 'STAFF' || role === 'GL')) return false;
   const targetStatus = admin_normStatus_((target && target.status) || '');
-  return !(targetStatus === 'STAFF' || targetStatus === 'ADMIN');
+  return !admin_isStaffOrAdminStatus_(targetStatus);
 }
 
 function admin_getServingPlanEditMap_(actor, positions){
@@ -1107,7 +1107,7 @@ function admin_actorCanAccessServingGroup_(actor, groupKey){
   const key = admin_normalizeServingGroup_(groupKey);
   if (!key) return false;
   const role = String((actor && actor.role) || '').trim().toUpperCase();
-  if (role === 'ADMIN' || role === 'STAFF' || role === 'SUPERUSER') return true;
+  if (admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER') return true;
   if (role !== 'GL') return false;
 
   const glGroups = Array.isArray(actor.glGroups) ? actor.glGroups : [];
@@ -1150,7 +1150,7 @@ function api_admin_serving_group_member_update(token, groupKey, memberId, action
   if (!target) return admin_err_('E412','找不到此會員','Member not found.');
 
   if (!admin_canManageServingGroupTarget_(s.actor, target)){
-    return admin_err_('E403','只有 ADMIN 可修改 STAFF/ADMIN 的事奉組別','Only ADMIN can modify STAFF/ADMIN serving groups.');
+    return admin_err_('E403','只有 DEACON／ADMIN 可修改 STAFF／DEACON／ADMIN 的事奉組別','Only DEACON/ADMIN can modify STAFF/DEACON/ADMIN serving groups.');
   }
   if (up === 'ADD' && target.isMinor){
     const eligibility = admin_minorServingEligibility_(target, key);
@@ -1211,7 +1211,7 @@ function api_admin_member_remove_from_group(token, memberId, groupKey, reauthQrP
   if (!target) return admin_err_('E412','找不到此會員','Member not found.');
 
   if (!admin_canManageServingGroupTarget_(s.actor, target)){
-    return admin_err_('E403','只有 ADMIN 可修改 STAFF/ADMIN 的事奉組別','Only ADMIN can modify STAFF/ADMIN serving groups.');
+    return admin_err_('E403','只有 DEACON／ADMIN 可修改 STAFF／DEACON／ADMIN 的事奉組別','Only DEACON/ADMIN can modify STAFF/DEACON/ADMIN serving groups.');
   }
 
   const sh = admin_findMembersSheet_();
@@ -1389,7 +1389,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     }));
   }
   const role = String(s.actor.role||'').trim().toUpperCase();
-  const canOverride = (role === 'ADMIN' || role === 'SUPERUSER');
+  const canOverride = admin_isAdminActorRole_(role);
   if (invalidGroupAssignments.length){
     const detail = invalidGroupAssignments.map(function(x){
       const m = membersById[String(x.memberId||'').toUpperCase()] || null;
@@ -1730,7 +1730,7 @@ function api_admin_stats(token, fromDate, toDate){
 }
 
 /**
- * ADMIN/SUPERUSER only: rebuild firstSeen cache immediately.
+ * DEACON/ADMIN/SUPERUSER only: rebuild firstSeen cache immediately.
  */
 function api_admin_stats_rebuild(token){
   const s = admin_requireSession_(token);
@@ -1738,8 +1738,8 @@ function api_admin_stats_rebuild(token){
   const glBlock = admin_requireNonGl_(s.actor);
   if (glBlock) return glBlock;
 
-  if (!(s.actor.role === 'ADMIN' || s.actor.role === 'SUPERUSER')){
-    return admin_err_('E403','只有管理員可以重建統計快取','Only ADMIN can rebuild cache.');
+  if (!admin_isAdminActorRole_(s.actor.role)){
+    return admin_err_('E403','只有執事／管理員可以重建統計快取','Only DEACON/ADMIN can rebuild cache.');
   }
 
   CacheService.getScriptCache().remove(ADMIN_CACHE_FIRSTSEEN_KEY);
@@ -2374,7 +2374,7 @@ function api_admin_member_contact_reveal(token, memberId, reason, reauthQrPayloa
  * Allowed: STAFF / ACTIVE / DISABLED / PROVISIONAL / TEMP (2 days) / HELPER (31 days)
  *
  * Hard-stop:
- * - cannot change another ADMIN’s status (including ADMIN changing other admins)
+ * - cannot change another DEACON/ADMIN account's status
  */
 function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayload){
   const s = admin_requireSession_(token);
@@ -2429,10 +2429,10 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
 
   // effective confirmer:
   // - normal: self id
-  // - SUPERUSER: scanned ADMIN id
+  // - SUPERUSER: scanned DEACON/ADMIN id
   const effectiveActorId = String(auth.confirmedBy || s.actor.id || '').trim().toUpperCase();
 
-  if (oldStatus === 'ADMIN' && id !== effectiveActorId){
+  if (admin_isAdminStatus_(oldStatus) && id !== effectiveActorId){
     const zh = '帳號目前使用中，請稍後再試；如問題持續請聯絡影音同工。';
     const en = 'Account currently in use. Please try again later. If the problem persists, contact Media team.';
     admin_audit_(s.actor, 'STATUS_CHANGE_BLOCK_ADMIN', JSON.stringify({
@@ -2470,15 +2470,15 @@ function api_admin_member_status_change(token, memberId, newStatus, reauthQrPayl
 
 /**
  * Record or revoke the safeguarding approval used by the serving rules.
- * STAFF/ADMIN may approve; GL can see the state but cannot change it.
+ * STAFF/DEACON/ADMIN may approve; GL can see the state but cannot change it.
  * markAdult is the separate, reauthenticated transition once the member is 18.
  */
 function api_admin_member_minor_serving_update(token, memberId, options, reauthQrPayload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
-  if (!(role === 'STAFF' || role === 'ADMIN' || role === 'SUPERUSER')){
-    return admin_err_('E403','只有 STAFF／ADMIN 可更改未成年事奉批准','Only STAFF/ADMIN may change young-volunteer approval.');
+  if (!(admin_isStaffOrAdminStatus_(role) || role === 'SUPERUSER')){
+    return admin_err_('E403','只有 STAFF／DEACON／ADMIN 可更改未成年事奉批准','Only STAFF/DEACON/ADMIN may change young-volunteer approval.');
   }
   const id = String(memberId || '').trim().toUpperCase();
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
@@ -2546,6 +2546,18 @@ function api_admin_member_minor_serving_update(token, memberId, options, reauthQ
 function admin_openSs_(){ return SpreadsheetApp.openById(ADMIN_SPREADSHEET_ID); }
 function admin_nowIso_(){ return new Date().toISOString(); }
 function admin_normStatus_(s){ return String(s||'').trim().toUpperCase(); }
+function admin_isAdminStatus_(s){
+  const st = admin_normStatus_(s);
+  return st === 'DEACON' || st === 'ADMIN';
+}
+function admin_isAdminActorRole_(s){
+  const role = admin_normStatus_(s);
+  return role === 'SUPERUSER' || admin_isAdminStatus_(role);
+}
+function admin_isStaffOrAdminStatus_(s){
+  const st = admin_normStatus_(s);
+  return st === 'STAFF' || admin_isAdminStatus_(st);
+}
 function admin_normalizeServingGroupToken_(token){
   const t = String(token || '').trim().toUpperCase();
   if (!t) return '';
@@ -3300,7 +3312,7 @@ function admin_memberHasAdminStatus_(memberId, membersById){
   const m = map[id] || null;
   if (!m) return false;
   const st = String(m.status || '').trim().toUpperCase();
-  return (st === 'ADMIN');
+  return admin_isAdminStatus_(st);
 }
 function admin_getAwayPeriodForMember_(memberId){
   const mi = admin_getMembersIndex_();
@@ -4168,7 +4180,7 @@ function admin_validateRange_(actor, fromDate, toDate){
     return admin_err_('E423','結束日期不可早於開始日期','End date cannot be before start date.');
   }
   const days = admin_daysBetween_(from, to) + 1;
-  const isAdmin = (actor.role === 'ADMIN' || actor.role === 'SUPERUSER');
+  const isAdmin = admin_isAdminActorRole_(actor.role);
   const maxDays = isAdmin ? ADMIN_MAX_DAYS_ADMIN : ADMIN_MAX_DAYS_STAFF;
   if (days > maxDays){
     return admin_err_('E424','所選日期範圍過長（最多 ' + maxDays + ' 日）','Date range too long (max ' + maxDays + ' days).');
@@ -4555,7 +4567,7 @@ function admin_isNewFriendForEvent_(eventKey, memberId, firstSeenMap, membersByI
   if (typeof classifyNewFriendFromFirstEvent_ === 'function'){
     return !!classifyNewFriendFromFirstEvent_(ev, id, status, firstEvent || ev).isNewFriend;
   }
-  if (status === 'STAFF' || status === 'ADMIN') return false;
+  if (admin_isStaffOrAdminStatus_(status)) return false;
   if (!firstEvent || firstEvent !== ev) return false;
   try{
     if (typeof isNewFriendSuppressed_ === 'function' && isNewFriendSuppressed_(ev, id)) return false;
@@ -4772,7 +4784,7 @@ function admin_buildLowAttendanceFlags_(){
   return out;
 }
 
-// Reauth verification (normal: scan own QR; SUPERUSER: must scan ADMIN QR)
+// Reauth verification (normal: scan own QR; SUPERUSER: must scan DEACON/ADMIN QR)
 function admin_verifyReauth_(actor, reauthQrPayload){
   const raw = String(reauthQrPayload||'').trim();
   if (!raw) return admin_err_('E401','請掃描你本人同工 QR 作確認','Please scan your own staff QR to confirm.');
@@ -4792,11 +4804,11 @@ function admin_verifyReauth_(actor, reauthQrPayload){
   }
 
   if (bypass){
-    if (st !== 'ADMIN'){
+    if (!admin_isAdminStatus_(st)){
       return admin_err_(
         'E491',
-        '此操作需要管理員（ADMIN）QR 作確認',
-        'ADMIN QR required for this action.'
+        '此操作需要執事／管理員（DEACON／ADMIN）QR 作確認',
+        'DEACON/ADMIN QR required for this action.'
       );
     }
     return { ok:true, confirmedBy: parsed.id };
@@ -4820,7 +4832,7 @@ function admin_verifyReauth_(actor, reauthQrPayload){
     return { ok:true, confirmedBy: parsed.id, glGroups: glGroups };
   }
 
-  if (!(st === 'STAFF' || st === 'ADMIN')){
+  if (!admin_isStaffOrAdminStatus_(st)){
     return { ok:false, code:'E_HANDOFF_UNAUTHORISED', zh:'此管理平台只限已授權同工使用', en:'Admin portal for authorised staff only.' };
   }
   return { ok:true, confirmedBy: parsed.id };

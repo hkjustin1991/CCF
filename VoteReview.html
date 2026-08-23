@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>CCF Formal Review</title>
+  <style>
+    :root{--bg:#f5f1f4;--card:#fff;--text:#2f1726;--muted:#775d6c;--line:rgba(74,34,59,.17);--primary:#7b285a;--soft:#fff0f7;--bad:#a6274d;--bad-soft:#fff0f4;--good:#176c4c;--good-soft:#eafff5;--shadow:0 12px 30px rgba(66,25,50,.1);--radius:18px;--pad:clamp(12px,3.5vw,18px)}
+    *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}body.busy button{pointer-events:none;opacity:.62}.wrap{max-width:760px;margin:0 auto;padding:var(--pad)}
+    h1{font-size:clamp(23px,5vw,32px);margin:7px 0 3px}h2{font-size:clamp(19px,4vw,24px);margin:0 0 8px}.sub,.small{color:var(--muted);line-height:1.5}.small{font-size:13px}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:var(--pad);margin:11px 0;box-shadow:var(--shadow)}
+    .notice{border-radius:14px;padding:12px 13px;border:1px solid var(--line);line-height:1.5;margin:10px 0}.notice.bad{background:var(--bad-soft);border-color:rgba(166,39,77,.3)}.notice.good{background:var(--good-soft);border-color:rgba(23,108,76,.28)}.notice.info{background:#f3efff}.strong{font-weight:900}
+    button,input,select,textarea{font:inherit;color:var(--text);border:1px solid var(--line);border-radius:14px;background:#fff;padding:13px;width:100%}button{font-weight:850;cursor:pointer;min-height:48px;box-shadow:0 5px 13px rgba(66,25,50,.06)}button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}button.soft{background:var(--soft)}button.danger{background:var(--bad-soft);border-color:rgba(166,39,77,.3)}textarea{min-height:95px;resize:vertical}label.field{display:block;font-size:13px;color:var(--muted);margin:11px 0 5px}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.row>*{flex:1 1 180px}.hide{display:none!important}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere;background:#f8f5f7;border-radius:9px;padding:8px;margin-top:5px}.footer{font-size:12px;color:var(--muted);padding:10px 3px 18px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header><h1>正式例外核查</h1><div class="sub">Formal exception review</div></header>
+    <main id="app"><section class="card"><div class="strong">正在載入… / Loading…</div></section></main>
+    <footer class="footer">Restricted route · <?= VOTE_VERSION ?></footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script>
+    'use strict';
+    var State={token:'',polls:[],busy:0};
+    var EXTERNAL_SCANNER_URL=String(<?!= JSON.stringify(EXTERNAL_SCANNER_URL || '') ?>||'').trim();
+    var EXTERNAL_SCANNER_ORIGIN=String(<?!= JSON.stringify(EXTERNAL_SCANNER_ORIGIN || '') ?>||'').trim();
+    var EXTERNAL_SCANNER_TIMEOUT_MS=Number(<?!= JSON.stringify(EXTERNAL_SCANNER_TIMEOUT_MS || 120000) ?>)||120000;
+    var pendingExternalScanner_=null;
+
+    function $(id){return document.getElementById(id)}
+    function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])})}
+    function setBusy_(on){State.busy+=on?1:-1;if(State.busy<0)State.busy=0;document.body.classList.toggle('busy',State.busy>0)}
+    function errHtml_(r){return '<div class="notice bad"><div class="strong">'+esc((r&&r.zh)||'系統錯誤')+'</div><div>'+esc((r&&r.en)||'System error')+'</div>'+(r&&r.code?'<div class="small">Code: '+esc(r.code)+'</div>':'')+'</div>'}
+    function gas_(name){var args=Array.prototype.slice.call(arguments,1);setBusy_(true);return new Promise(function(resolve,reject){try{var run=google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);run[name].apply(run,args)}catch(e){reject(e)}}).finally(function(){setBusy_(false)})}
+    function call_(name){var args=Array.prototype.slice.call(arguments,1);return gas_.apply(null,[name].concat(args)).then(function(r){if(!r||!r.ok)throw(r||{code:'E500',zh:'沒有收到系統回應',en:'No response from server.'});return r})}
+    function stateLabel_(s){return({DRAFT:'草稿 / Draft',SCHEDULED:'已排程 / Scheduled',OPEN:'開放 / Open',CLOSED:'已結束 / Closed'})[s]||String(s||'')}
+
+    function scannerConfigOk_(){try{return !!EXTERNAL_SCANNER_URL&&!!EXTERNAL_SCANNER_ORIGIN&&new URL(EXTERNAL_SCANNER_URL).origin===new URL(EXTERNAL_SCANNER_ORIGIN).origin}catch(e){return false}}
+    function randomState_(){var a=new Uint8Array(16);if(window.crypto&&window.crypto.getRandomValues)window.crypto.getRandomValues(a);else for(var i=0;i<a.length;i++)a[i]=Math.floor(Math.random()*256);return Array.prototype.map.call(a,function(x){return x.toString(16).padStart(2,'0')}).join('')}
+    function openExternalScanner_(){
+      if(!scannerConfigOk_()){showLoginMessage_({code:'E_SCANNER_CONFIG',zh:'外置掃描器暫時未能使用，請改用 QR 圖片。',en:'The external scanner is unavailable; please use a QR image.'});return}
+      var state=randomState_(),target=new URL(EXTERNAL_SCANNER_URL),origin=window.location.origin||'';target.searchParams.set('origin',origin);target.searchParams.set('state',state);target.searchParams.set('flow','vote_formal_review');
+      var popup=null;try{popup=window.open(target.toString(),'_blank','width=460,height=760')}catch(e){}if(!popup){showLoginMessage_({code:'E_POPUP',zh:'彈出視窗被封鎖。',en:'The scanner popup was blocked.'});return}
+      pendingExternalScanner_={state:state,popup:popup,timer:setTimeout(function(){clearExternalScanner_();showLoginMessage_({code:'E_TIMEOUT',zh:'掃描逾時，請重試。',en:'Scanner timed out. Please retry.'})},EXTERNAL_SCANNER_TIMEOUT_MS)}
+    }
+    function clearExternalScanner_(){if(!pendingExternalScanner_)return;try{clearTimeout(pendingExternalScanner_.timer);if(pendingExternalScanner_.popup&&!pendingExternalScanner_.popup.closed)pendingExternalScanner_.popup.close()}catch(e){}pendingExternalScanner_=null}
+    window.addEventListener('message',function(event){if(!pendingExternalScanner_||event.origin!==EXTERNAL_SCANNER_ORIGIN||event.source!==pendingExternalScanner_.popup)return;var d=event.data||{};if(String(d.state||'')!==pendingExternalScanner_.state||['CCF_QR_RESULT','CCF_QR_CANCEL','CCF_QR_ERROR'].indexOf(String(d.type||''))<0)return;clearExternalScanner_();if(d.type==='CCF_QR_RESULT')loginWithQr_(String(d.payload||''));else if(d.type==='CCF_QR_ERROR')showLoginMessage_({code:'E_SCANNER',zh:'掃描器未能讀取 QR。',en:'The scanner could not read the QR.'})})
+    function decodeImage_(file){return new Promise(function(resolve,reject){if(!file){reject({code:'E415',zh:'請先選擇 QR 圖片。',en:'Please choose a QR image.'});return}var fr=new FileReader();fr.onerror=function(){reject({code:'E415',zh:'未能讀取圖片。',en:'Could not read the image.'})};fr.onload=function(){var img=new Image();img.onerror=function(){reject({code:'E415',zh:'圖片格式不支援。',en:'Unsupported image format.'})};img.onload=function(){try{var c=document.createElement('canvas'),max=1800,scale=Math.min(1,max/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height));c.width=Math.max(1,Math.round((img.naturalWidth||img.width)*scale));c.height=Math.max(1,Math.round((img.naturalHeight||img.height)*scale));var x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,c.width,c.height);var data=x.getImageData(0,0,c.width,c.height),qr=window.jsQR?window.jsQR(data.data,c.width,c.height):null;if(qr&&qr.data)resolve(String(qr.data));else reject({code:'E416',zh:'圖片中找不到 QR code。',en:'No QR code was found in the image.'})}catch(e){reject({code:'E500',zh:'圖片解碼失敗。',en:'Image decoding failed.'})}};img.src=fr.result};fr.readAsDataURL(file)})}
+
+    function renderLogin_(){
+      $('app').innerHTML='<section class="card"><div class="notice bad"><span class="strong">只可在正式例外處理時使用。</span><br>Use only for a formally authorised exception.</div><div class="row"><button id="btnExternal" class="primary" type="button">📷 外置掃描器 / External scanner</button><label><span class="hide">QR image</span><input id="qrFile" type="file" accept="image/*"></label><button id="btnImage" class="soft" type="button">🖼️ 上載 QR 圖片 / Upload QR image</button></div><div id="loginMsg"></div></section>';
+      $('btnExternal').onclick=openExternalScanner_;$('btnImage').onclick=function(){var f=$('qrFile').files&&$('qrFile').files[0];setBusy_(true);decodeImage_(f).then(loginWithQr_).catch(showLoginMessage_).finally(function(){setBusy_(false);if($('qrFile'))$('qrFile').value=''})}
+    }
+    function showLoginMessage_(r){if($('loginMsg'))$('loginMsg').innerHTML=errHtml_(r)}
+    function loginWithQr_(payload){var raw=String(payload||'');call_('api_vote_login',raw).then(function(r){raw='';State.token=r.token;return call_('api_vote_exception_polls',State.token)}).then(function(r){State.polls=r.rows||[];renderReview_()}).catch(function(e){raw='';showLoginMessage_(e)})}
+    function logout_(){State.token='';State.polls=[];renderLogin_()}
+
+    function renderReview_(){
+      var choices='';State.polls.forEach(function(p){choices+='<option value="'+esc(p.electionId)+'">'+esc(p.titleZh||p.titleEn||p.electionId)+' — '+esc(stateLabel_(p.effectiveState))+'</option>'});
+      $('app').innerHTML='<section class="card"><button id="btnLogout" class="soft" type="button">登出 / Sign out</button><label class="field">投票 / Poll</label><select id="reviewPoll">'+choices+'</select><label class="field">收據編號 / Receipt ID</label><input id="reviewReceipt" autocomplete="off"><label class="field">正式原因（至少 10 個字元） / Formal reason (minimum 10 characters)</label><textarea id="reviewReason"></textarea><button id="btnReview" class="danger" type="button" style="margin-top:12px">執行正式核查 / Run formal review</button><div id="reviewMsg"></div></section>';
+      $('btnLogout').onclick=logout_;$('btnReview').onclick=runReview_
+    }
+    function runReview_(){
+      var pollId=$('reviewPoll').value,receipt=$('reviewReceipt').value,reason=$('reviewReason').value;
+      if(!window.confirm('核查會顯示該選票的會員及選擇，並記錄你的身份和原因。繼續？\nThis review reveals the member and choice and records your identity and reason. Continue?'))return;
+      call_('api_vote_trace',State.token,pollId,receipt,reason).then(function(r){$('reviewMsg').innerHTML='<div class="notice bad"><div class="strong">核查結果（已記錄） / Review result (audited)</div><div>會員 / Member: <span class="strong">'+esc(r.member.id)+' · '+esc(r.member.nameZh||r.member.nameEn)+'</span></div><div>選擇 / Choice: <span class="strong">#'+esc(r.choice.optionNo)+' '+esc(r.choice.labelZh||r.choice.labelEn)+'</span></div><div class="small">'+esc(r.choice.labelEn&&r.choice.labelZh?r.choice.labelEn:'')+'<br>Receipt: '+esc(r.ballot.receiptId)+'</div></div>'}).catch(function(e){$('reviewMsg').innerHTML=errHtml_(e)})
+    }
+
+    renderLogin_();
+  </script>
+</body>
+</html>
+<!-- ===== END OF VoteReview.html (COMPLETE) ===== -->

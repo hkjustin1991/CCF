@@ -12,8 +12,8 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-08-11.120
-  CHANGELOG: family registration, independent email updates, child-serving safeguards, and QR uploads.
+  UI VERSION TAG: reg2-ui-2026-08-23.121
+  CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level.
   ============================================================
 
   Changes (reg2-ui-2026-06-14.118): Worship import v118: combined instrument role hints from Current Members, severity separation, collapsible preview UI.
@@ -202,7 +202,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-08-11.120</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-08-23.121</span></div>
     </header>
 
     <main id="app">
@@ -1075,6 +1075,7 @@
       var statusMap = {
         ACTIVE:{ zh:'正式會員', en:'Full Member' },
         STAFF:{ zh:'同工', en:'STAFF' },
+        DEACON:{ zh:'執事', en:'DEACON' },
         ADMIN:{ zh:'同工', en:'ADMIN' },
         PROVISIONAL:{ zh:'暫準會員', en:'PROVISIONAL MEMBER' },
         PENDING:{ zh:'已登記', en:'REGISTERED' },
@@ -1094,7 +1095,7 @@
       }).join('');
       var glGroups = (snap.member && Array.isArray(snap.member.servingGLGroups)) ? snap.member.servingGLGroups : [];
       var isGl = !!((snap.member && snap.member.isGl) || glGroups.length > 0 || rawStatus === 'GL');
-      var isPrivileged = (rawStatus === 'STAFF' || rawStatus === 'ADMIN' || isGl);
+      var isPrivileged = (rawStatus === 'STAFF' || rawStatus === 'DEACON' || rawStatus === 'ADMIN' || isGl);
       var glHtml = glGroups.map(function(g){
         var canonicalGroup = normalizeServingGroupKey(g);
         var cls = servingGroupCss(canonicalGroup);
@@ -1393,7 +1394,7 @@
           '<div class="card"><div class="msgBox '+(m.canSelfManageMinorServing?'ok':'warn')+'">'+
             '<div class="big '+(m.canSelfManageMinorServing?'ok':'warn')+'">🧒 未成年後勤事奉 / Young Logistics volunteer</div>'+
             '<div class="small">'+
-              (m.minorServingApproved ? '✅ 已獲 STAFF／ADMIN 批准 / Approved by STAFF/ADMIN<br/>' : '⛔ 尚未獲批准 / Not yet approved<br/>')+
+              (m.minorServingApproved ? '✅ 已獲 STAFF／DEACON／ADMIN 批准 / Approved by STAFF/DEACON/ADMIN<br/>' : '⛔ 尚未獲批准 / Not yet approved<br/>')+
               (m.minorServingSelfSignup ? '✅ 可自行報名及取消 / Self sign-up and cancellation allowed' : '⛔ 排期須由組長／同工處理 / Rota changes must be made by a GL or staff member')+
               '<br/>每次必須在同一聚會、同一崗位與成年同工配對。 / An adult must be paired in the exact same position and service.'+
             '</div></div></div>'
@@ -1805,7 +1806,7 @@ function viewSelfHoliday(m){
             '<input id="isMinor" type="checkbox" style="width:auto;transform:scale(1.1);" '+(isMinor?'checked':'')+' '+(lockMinor?'disabled':'')+' />'+
             '<div style="font-weight:950;">未滿 18 歲 / Under 18</div>'+
           '</div>'+
-          (lockMinor ? '<div class="small" style="margin-top:6px;">未滿 18 歲狀態只可由 STAFF／ADMIN 在確認成年後移除。<br/>Under-18 status can only be removed by STAFF/ADMIN after adulthood is confirmed.</div>' : '')+
+          (lockMinor ? '<div class="small" style="margin-top:6px;">未滿 18 歲狀態只可由 STAFF／DEACON／ADMIN 在確認成年後移除。<br/>Under-18 status can only be removed by STAFF/DEACON/ADMIN after adulthood is confirmed.</div>' : '')+
           '<div id="parentEmailBlock" class="'+(isMinor?'':'hide')+'" style="margin-top:10px;">'+
             '<div class="label">家長/監護人電郵（可選） / Parent email (optional)</div>'+
             '<input id="parentEmail" type="email" autocomplete="email" value="'+escapeHtml(prefill.parentEmail||'')+'" />'+

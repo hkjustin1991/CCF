@@ -11,8 +11,8 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff-ui-2026-08-11.104
-   * For Code.gs: v2026-08-11.staff104
+   * UI VERSION: staff-ui-2026-08-23.105
+   * For Code.gs: v2026-08-23.staff105
    * CHANGELOG: authoritative New Friend labels and QR-image upload for every non-check-in QR flow.
    *
    * IMPORTANT: No "Under18" variables anywhere.
@@ -176,7 +176,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-11.104</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-23.105</span></div>
     </header>
 
     <main id="app"></main>
@@ -708,14 +708,14 @@
       if(!App.staff) return false;
       if(App.staff.id === 'SUPERUSER') return true;
       var st = String(App.staff.status||'').toUpperCase();
-      return (st === 'STAFF' || st === 'ADMIN' || st === 'HELPER' || st === 'TEMP');
+      return (st === 'STAFF' || st === 'DEACON' || st === 'ADMIN' || st === 'HELPER' || st === 'TEMP');
     }
 
     function canUseAuth(){
       if(!App.staff) return false;
       if(App.staff.id === 'SUPERUSER') return true;
       var st = String(App.staff.status||'').toUpperCase();
-      return (st === 'STAFF' || st === 'ADMIN');
+      return (st === 'STAFF' || st === 'DEACON' || st === 'ADMIN');
     }
 
     function getDeviceId(){
@@ -1791,7 +1791,7 @@
 
         var m = res.member || {};
         var stNow = App.staff ? String(App.staff.status||'').toUpperCase() : '';
-        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'ADMIN'));
+        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'DEACON' || stNow === 'ADMIN'));
         var nameLine = formatMemberName_(m) || m.id || '';
         var chips = '<div class="chipRow">'+
           '<span class="chip">'+escapeHtml(m.id||'')+'</span>'+
@@ -2741,7 +2741,7 @@ if (btnC) {
 
         var m = res.member || {};
         var stNow = App.staff ? String(App.staff.status||'').toUpperCase() : '';
-        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'ADMIN'));
+        var canDestructive = (App.staff && (App.staff.id === 'SUPERUSER' || stNow === 'STAFF' || stNow === 'DEACON' || stNow === 'ADMIN'));
         var nameLine = formatMemberName_(m) || m.id || '';
         var pref = (m.preferredName||'').trim();
         var lastEvents = Array.isArray(res.last4EventKeys) ? res.last4EventKeys : [];
