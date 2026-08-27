@@ -11,9 +11,9 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff-ui-2026-08-23.105
-   * For Code.gs: v2026-08-23.staff105
-   * CHANGELOG: authoritative New Friend labels and QR-image upload for every non-check-in QR flow.
+   * UI VERSION: staff-ui-2026-08-27.106
+   * For Code.gs: v2026-08-27.staff106
+   * CHANGELOG: add an opt-in one-screen mobile check-in interface; classic UI remains the default.
    *
    * IMPORTANT: No "Under18" variables anywhere.
    * Uses only:
@@ -161,6 +161,44 @@
       .videoWrap{aspect-ratio:1/1}
       .menuGrid{grid-template-columns:1fr}
     }
+
+    /* Opt-in mobile check-in. These rules never affect the classic interface. */
+    body.mobileCheckinUi{background:#f4f7ff}
+    body.mobileCheckinUi .wrap{
+      max-width:560px;
+      min-height:100dvh;
+      padding:max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    }
+    body.mobileCheckinUi .topbar,
+    body.mobileCheckinUi .footer{display:none}
+    .mobileShell{min-height:calc(100dvh - 20px);display:flex;flex-direction:column;gap:10px}
+    .mobileHeader{
+      display:flex;align-items:flex-start;justify-content:space-between;gap:8px;
+      background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px;
+      box-shadow:0 5px 16px rgba(10,30,80,.08)
+    }
+    .mobileHeaderTitle{font-size:clamp(20px,6vw,27px);font-weight:950;line-height:1.15}
+    .mobileHeaderActions{display:flex;gap:6px;flex:0 0 auto}
+    .mobileHeaderActions button{width:auto;min-height:46px;padding:8px 10px;border-radius:12px;font-size:13px;box-shadow:none}
+    .mobileIdentity{font-size:14px;color:var(--muted);font-weight:750;margin-top:5px;line-height:1.3}
+    .mobileEvent{font-size:13px;color:var(--muted);font-weight:700;text-align:center;overflow-wrap:anywhere}
+    .mobileActionCard{
+      background:#fff;border:1px solid var(--border);border-radius:18px;padding:12px;
+      box-shadow:0 8px 20px rgba(10,30,80,.09)
+    }
+    .mobileScanButton{min-height:104px;font-size:clamp(22px,7vw,31px);border-radius:18px}
+    .mobileSecondaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .mobileSecondaryGrid button{min-height:58px;padding:10px;font-size:clamp(15px,4.2vw,18px)}
+    .mobileResult{min-height:72px}
+    .mobileResult .msgBox{margin-top:0;padding:14px}
+    .mobilePerson{font-size:clamp(22px,6.5vw,30px);font-weight:950;line-height:1.2;margin-top:8px;overflow-wrap:anywhere}
+    .mobileMeta{font-size:14px;color:var(--muted);line-height:1.4;margin-top:8px}
+    @media (max-width:360px){
+      .mobileHeader{display:block}
+      .mobileHeaderActions{margin-top:8px}
+      .mobileHeaderActions button{flex:1}
+      .mobileSecondaryGrid{grid-template-columns:1fr}
+    }
   </style>
 </head>
 
@@ -176,7 +214,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-23.105</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-27.106</span></div>
     </header>
 
     <main id="app"></main>
@@ -541,12 +579,13 @@
     }
     function ensureEventKey_(cb){
       if (App.eventKey){ if (cb) cb(); return; }
-      callApi('api_get_live_page', App.token, null).then(function(res){
+      callApi('api_get_checkin_context', App.token).then(function(res){
         if (res && res.ok){
           App.eventKey = res.eventKey || '';
           setEventKeyLine_('checkinEventKey');
           setEventKeyLine_('scanEventKey');
           setEventKeyLine_('manualEventKey');
+          setEventKeyLine_('mobileEventKey');
         }
         if (cb) cb();
       }).catch(function(){
@@ -1196,6 +1235,7 @@
         if(res && res.ok){
           App.token = token;
           App.staff = res.staff;
+          App.eventKey = res.eventKey || '';
           App.view = 'menu';
           render();
         } else {
@@ -1229,6 +1269,7 @@
       try { callApi('api_logout', App.token); } catch(e){}
       try { sessionStorage.removeItem('ccf_token'); } catch(e){}
       App.token=null; App.staff=null;
+      App.eventKey='';
       App.view='login';
       render();
     }
@@ -1255,9 +1296,11 @@
       }
 
       var root = $('app');
+      document.body.classList.toggle('mobileCheckinUi', App.view === 'mobileCheckin');
       try{ window.__CCF_LIVE_BOOT.rendered = true; }catch(e){}
       if(App.view==='login'){ root.innerHTML = viewLogin(); bindLogin(); applyExternalScannerGuard_('msg', []); restoreSession(); attachScrollControls_(root); return; }
       if(App.view==='menu'){ root.innerHTML = viewMenu(); bindMenu(); attachScrollControls_(root); return; }
+      if(App.view==='mobileCheckin'){ root.innerHTML = viewMobileCheckin(); bindMobileCheckin(); return; }
       if(App.view==='checkinMenu'){ root.innerHTML = viewCheckinMenu(); bindCheckinMenu(); attachScrollControls_(root); return; }
       if(App.view==='scanCheckin'){ root.innerHTML = viewScanCheckin(); bindScanCheckin(); attachScrollControls_(root); return; }
       if(App.view==='manualCheckin'){ root.innerHTML = viewManualCheckin(); bindManualCheckin(); attachScrollControls_(root); return; }
@@ -1327,6 +1370,10 @@
         '<div class="card">'+
           '<div class="big">📌 主選單 / Main menu</div>'+
           '<div class="miniBtnRow" style="margin-top:12px;">'+
+            '<button id="goMobileCheckin" class="blue" style="flex:1 1 100%;min-height:74px;">📱 手機簽到（新版） / Mobile check-in (new)</button>'+
+          '</div>'+
+          '<div class="small">可選用手機版；原有介面仍保留。<br/>The mobile view is optional; the classic interface remains available.</div>'+
+          '<div class="miniBtnRow">'+
             '<button id="goCheckin" class="primary" style="flex:1 1 100%;min-height:74px;">✅ 簽到 / Check-in</button>'+
           '</div>'+
           '<div class="miniBtnRow">'+
@@ -1340,6 +1387,34 @@
           '</div>'+
           '<div id="menuMsg"></div>'+
         '</div>';
+    }
+
+    function viewMobileCheckin(){
+      return ''+
+        '<section class="mobileShell">'+
+          '<div class="mobileHeader">'+
+            '<div>'+
+              '<div class="mobileHeaderTitle">📱 手機簽到<br/><span style="font-size:.72em;">Mobile check-in</span></div>'+
+              '<div class="mobileIdentity">👤 '+escapeHtml(staffDisplayName())+'</div>'+
+            '</div>'+
+            '<div class="mobileHeaderActions">'+
+              '<button id="mobileClassic" class="alt">原有介面<br/>Classic</button>'+
+              '<button id="mobileLogout" class="danger">登出<br/>Logout</button>'+
+            '</div>'+
+          '</div>'+
+          '<div id="mobileEventKey" class="mobileEvent"></div>'+
+          '<div class="mobileActionCard">'+
+            '<button id="mobileStartScan" class="primary mobileScanButton">📷 掃描下一位<br/>Scan next person</button>'+
+            '<div class="mobileSecondaryGrid">'+
+              '<button id="mobileUploadQr" class="alt">🖼️ 上傳 QR<br/>Upload QR</button>'+
+              '<button id="mobileManual" class="alt">🔎 手動搜尋<br/>Manual search</button>'+
+            '</div>'+
+            '<input id="mobileQrImageInput" type="file" accept="image/*" class="hide" />'+
+          '</div>'+
+          '<div id="mobileMsg" class="mobileResult" role="status" aria-live="polite">'+
+            '<div class="small" style="text-align:center;">準備掃描下一位 / Ready to scan the next person</div>'+
+          '</div>'+
+        '</section>';
     }
 
     function viewCheckinMenu(){
@@ -1645,6 +1720,7 @@
           if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
           App.token = res.token;
           App.staff = res.staff;
+          App.eventKey = res.eventKey || '';
           try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
           App.view='menu';
           render();
@@ -1664,6 +1740,7 @@
             if(!res || !res.ok){ showErr('msg', res || {code:'E500', zh:'系統錯誤', en:'Error'}); return; }
             App.token = res.token;
             App.staff = res.staff;
+            App.eventKey = res.eventKey || '';
             try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
             App.view='menu';
             render();
@@ -1728,6 +1805,7 @@
           if(!res || !res.ok){ showErr('msg', res || {code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.'}); return; }
           App.token = res.token;
           App.staff = res.staff;
+          App.eventKey = res.eventKey || '';
           try{ sessionStorage.setItem('ccf_token', App.token); }catch(e){}
           App.view='menu';
           render();
@@ -1738,12 +1816,96 @@
     }
 
     function bindMenu(){
+      $('goMobileCheckin').onclick = function(){ App.view='mobileCheckin'; render(); };
       $('goCheckin').onclick = function(){ App.view='checkinMenu'; render(); };
       $('goRealtime').onclick = function(){ App.view='realtime'; render(); };
       $('goVrm').onclick = function(){ App.view='vrm'; render(); };
       if ($('goAuth')) $('goAuth').onclick = function(){ App.view='auth'; render(); };
       if ($('goSelfcheck')) $('goSelfcheck').onclick = function(){ openSelfCheckModal(); };
       if ($('btnLogoutTop')) $('btnLogoutTop').onclick = function(){ logout(); };
+    }
+
+    function bindMobileCheckin(){
+      ensureEventKey_(function(){ setEventKeyLine_('mobileEventKey'); });
+      setEventKeyLine_('mobileEventKey');
+
+      function renderMobileResult_(res){
+        if(!res || !res.ok){
+          showErr('mobileMsg', res || {code:'E500', zh:'系統錯誤', en:'System error'});
+          return;
+        }
+        if(res.eventKey){
+          App.eventKey = res.eventKey;
+          setEventKeyLine_('mobileEventKey');
+        }
+
+        var m = res.member || {};
+        var already = res.result === 'ALREADY';
+        var record = already ? (res.already || {}) : res;
+        var nameLine = formatMemberName_(m) || m.id || '';
+        var emailUi = record.emailUi || emailUiFromStatus(record.emailStatus || res.emailStatus || '');
+        var timeLine = record.timeUk || res.timeUk || '';
+        var receipt = record.receiptId || res.receiptId || '';
+        var titleZh = already ? '✅ 已經簽到' : '✅ 簽到成功';
+        var titleEn = already ? 'Already checked-in' : 'Checked-in';
+
+        $('mobileMsg').innerHTML =
+          '<div class="msgBox '+(already ? 'already' : 'ok')+'">'+
+            '<div class="big ok">'+titleZh+' / '+titleEn+'</div>'+
+            '<div class="mobilePerson">'+escapeHtml(nameLine)+'</div>'+
+            '<div class="chipRow">'+
+              '<span class="chip">'+escapeHtml(m.id || '')+'</span>'+
+              '<span class="chip '+(already ? 'goodLight' : 'good')+'">'+(already ? 'Already' : 'OK')+'</span>'+
+            '</div>'+
+            '<div class="mobileMeta">'+
+              (timeLine ? ('時間 / Time: '+escapeHtml(timeLine)+'<br/>') : '')+
+              (receipt ? ('Receipt: '+escapeHtml(receipt)+'<br/>') : '')+
+              escapeHtml((emailUi && (emailUi.zh || emailUi.en)) || '')+
+            '</div>'+
+          '</div>'+
+          newFriendWelcomeHtml(m)+
+          isMinorNoticeHtml(!!m.isMinor);
+
+        try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e){}
+        try{ $('mobileMsg').scrollIntoView({behavior:'smooth', block:'nearest'}); }catch(e){}
+      }
+
+      function processPayload_(payload, source){
+        var text = String(payload || '').trim();
+        if(!text){
+          showErr('mobileMsg', {code:'E416', zh:'QR 格式錯誤', en:'Invalid QR'});
+          return;
+        }
+        showBox('mobileMsg', 'warn', '處理中…', 'Processing…');
+        callApi('api_checkin_scan', App.token, text, null, taggedDeviceId_(source || 'EXT_SCANNER'), taggedUa_(source || 'EXT_SCANNER'))
+          .then(renderMobileResult_)
+          .catch(function(){
+            showErr('mobileMsg', {code:'E500', zh:'系統錯誤，請聯絡影音同工', en:'System error. Please contact Media team.'});
+          });
+      }
+
+      $('mobileStartScan').onclick = function(){
+        startScan('mobileUnusedVideo', processPayload_, 'mobileMsg', { externalFlow:'checkin' });
+      };
+      $('mobileClassic').onclick = function(){ App.view='menu'; render(); };
+      $('mobileLogout').onclick = function(){ logout(); };
+      $('mobileManual').onclick = function(){ App.view='manualCheckin'; render(); };
+
+      $('mobileUploadQr').onclick = function(){
+        var input = $('mobileQrImageInput');
+        input.value = '';
+        input.click();
+      };
+      $('mobileQrImageInput').onchange = function(ev){
+        var file = ev && ev.target && ev.target.files && ev.target.files[0];
+        if(!file) return;
+        showBox('mobileMsg', 'warn', '讀取 QR 圖片中…', 'Reading QR image…');
+        decodeQrFromImageFile_(file).then(function(payload){
+          processPayload_(payload, 'UPLOAD_QR');
+        }).catch(function(err){
+          showErr('mobileMsg', err || {code:'E416', zh:'圖片中找不到 QR code', en:'No QR code found in the image.'});
+        }).finally(function(){ ev.target.value = ''; });
+      };
     }
 
     function bindCheckinMenu(){

@@ -87,6 +87,24 @@ test('Live login message and emergency field are outside the hidden camera panel
   assert.ok(login.includes('id="msg" role="alert" aria-live="assertive"'));
 });
 
+test('mobile check-in is opt-in and keeps the classic portal as the default', () => {
+  const html = read('index.html');
+  const menu = html.slice(html.indexOf('function viewMenu()'), html.indexOf('function viewMobileCheckin()'));
+  const mobile = html.slice(html.indexOf('function viewMobileCheckin()'), html.indexOf('function viewCheckinMenu()'));
+  const eventKeyHelper = html.slice(html.indexOf('function ensureEventKey_'), html.indexOf('var SERVING_GROUP_LABELS'));
+
+  assert.ok(html.includes("view:'login'"));
+  assert.ok(menu.includes('id="goMobileCheckin"'));
+  assert.ok(menu.includes('id="goCheckin"'));
+  assert.ok(mobile.includes('id="mobileClassic"'));
+  assert.ok(mobile.includes('id="mobileStartScan"'));
+  assert.ok(html.includes("App.view==='mobileCheckin'"));
+  assert.ok(html.includes("App.view='menu'; render();"));
+  assert.ok(html.includes('body.mobileCheckinUi .topbar'));
+  assert.ok(eventKeyHelper.includes("callApi('api_get_checkin_context'"));
+  assert.ok(!eventKeyHelper.includes("callApi('api_get_live_page'"));
+});
+
 test('Delete check-in reauthentication always binds a scan action', () => {
   const html = read('index.html');
   assert.ok(html.includes('id="btnScanUndo"'));
@@ -149,6 +167,7 @@ test('an existing check-in self-heals a member formerly stuck in PENDING', () =>
   context.requireSession_ = () => ({ ok:true, sess:{ staff:{ id:'CCF0001', nameZh:'', nameEn:'' } } });
   context.getMembersIndex_ = () => ({ byId:{ CCF0123:{ id:'CCF0123', key:'k123', status:'PENDING', nameZh:'測試', nameEn:'Test' } } });
   context.getCheckinsSheet_ = () => ({});
+  context.getCheckinHistoryIndex_ = () => ({ lastRow:2, firstEventById:{ CCF0123:'SundayService_2026-08-02' }, currentById:{} });
   context.findExistingCheckin_ = () => ({ eventKey:'SundayService_2026-08-02', timeUk:'13:00:00' });
   context.getDefaultEventKey_ = () => 'SundayService_2026-08-02';
   context.promotePendingMemberToActive_ = () => { promoted += 1; return true; };
@@ -158,6 +177,51 @@ test('an existing check-in self-heals a member formerly stuck in PENDING', () =>
   assert.equal(result.result, 'ALREADY');
   assert.equal(result.status, 'ACTIVE');
   assert.equal(promoted, 1);
+});
+
+test('check-in history index reuses one whole-sheet read until the row count changes', () => {
+  const values = [
+    [new Date('2026-08-02T12:00:00Z'), 'SundayService_2026-08-02', 'CCF0101', '甲', 'One', 'scan', 'CCF0001', '同工', 'Staff', 'R1', 'one@example.com', 'SENT'],
+    [new Date('2026-08-09T12:05:00Z'), 'SundayService_2026-08-09', 'CCF0101', '甲', 'One', 'scan', 'CCF0001', '同工', 'Staff', 'R2', 'one@example.com', 'SENT']
+  ];
+  let lastRow = 3;
+  let historyReads = 0;
+  const cacheValues = new Map();
+  const cache = {
+    get(key){ return cacheValues.has(key) ? cacheValues.get(key) : null; },
+    put(key, value){ cacheValues.set(key, value); },
+    remove(key){ cacheValues.delete(key); }
+  };
+  const sheet = {
+    getLastRow(){ return lastRow; },
+    getRange(row, col, rows, cols){
+      assert.deepEqual([row, col, rows, cols], [2, 1, lastRow - 1, 12]);
+      return { getValues(){ historyReads += 1; return values.slice(); } };
+    }
+  };
+  const context = appsScriptContext({
+    SpreadsheetApp:{},
+    PropertiesService:{ getScriptProperties(){ return { getProperty(){ return ''; } }; } },
+    Utilities:{ formatDate(date, zone, pattern){
+      assert.equal(zone, 'Europe/London');
+      return pattern === 'HH:mm:ss' ? date.toISOString().slice(11, 19) : '2026-08-09';
+    } },
+    ContentService:{}, HtmlService:{}, LockService:{}, MailApp:{},
+    CacheService:{ getScriptCache(){ return cache; } }
+  });
+  vm.runInContext(read('Code.gs'), context, { filename:'Code.gs' });
+
+  const first = context.getCheckinHistoryIndex_(sheet, 'SundayService_2026-08-09');
+  const second = context.getCheckinHistoryIndex_(sheet, 'SundayService_2026-08-09');
+  assert.equal(historyReads, 1);
+  assert.equal(first.firstEventById.CCF0101, 'SundayService_2026-08-02');
+  assert.equal(second.currentById.CCF0101.existing.receiptId, 'R2');
+
+  values.push([new Date('2026-08-09T12:06:00Z'), 'SundayService_2026-08-09', 'CCF0102', '乙', 'Two', 'scan', 'CCF0001', '同工', 'Staff', 'R3', '', 'NO_EMAIL']);
+  lastRow = 4;
+  const rebuilt = context.getCheckinHistoryIndex_(sheet, 'SundayService_2026-08-09');
+  assert.equal(historyReads, 2);
+  assert.equal(rebuilt.currentById.CCF0102.existing.receiptId, 'R3');
 });
 
 test('valid PROVISIONAL QR login survives an optional snapshot failure', () => {
@@ -655,10 +719,10 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-23.staff105';"));
-  assert.ok(liveBackend.includes('* v2026-08-23.staff105'));
-  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-23.105'));
-  assert.ok(liveUi.includes('ui staff-ui-2026-08-23.105'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-27.staff106';"));
+  assert.ok(liveBackend.includes('* v2026-08-27.staff106'));
+  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-27.106'));
+  assert.ok(liveUi.includes('ui staff-ui-2026-08-27.106'));
 
   assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-23.admin121';"));
   assert.ok(adminBackend.includes('* v2026-08-23.admin121'));

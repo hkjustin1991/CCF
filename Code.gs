@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-23.staff105
- * CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level across portals.
+ * v2026-08-27.staff106
+ * CHANGELOG: cache attendance history and support the opt-in mobile check-in UI.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-23.staff105';
+const APP_VERSION = '2026-08-27.staff106';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -36,6 +36,9 @@ const EXTERNAL_SCANNER_ORIGIN_DEFAULT = 'https://hkjustin1991.github.io';
 // Sheets
 const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
 const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
+const CHECKINS_SCHEMA_CACHE_KEY = 'checkins_schema_staff_v2';
+const CHECKIN_HISTORY_CACHE_PREFIX = 'checkin_history_staff_v2_';
+const CHECKIN_HISTORY_CACHE_SECONDS = 60;
 const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
 const NEW_FRIEND_HANDLED_SHEET_NAME = 'NewFriendHandled';
 const NEW_FRIEND_HANDLED_INDEX_CACHE_KEY = 'newHandled_index_v1';
@@ -644,6 +647,7 @@ function getCheckinsSheet_() {
   const ss = openSs_();
   let sh = ss.getSheetByName(CHECKINS_SHEET_NAME_PRIMARY);
   if (!sh) sh = ss.getSheetByName(CHECKINS_SHEET_NAME_LEGACY);
+  const cache = CacheService.getScriptCache();
 
   if (!sh) {
     sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
@@ -657,8 +661,14 @@ function getCheckinsSheet_() {
       'DeviceId','UserAgent'
     ]]);
     sh.getRange(1, 1, 1, 14).setFontWeight('bold');
+    try{ cache.put(CHECKINS_SCHEMA_CACHE_KEY, '1', 6 * 60 * 60); }catch(e){}
   } else {
-    ensureCheckinsSheetColumns_(sh);
+    let schemaReady = false;
+    try{ schemaReady = cache.get(CHECKINS_SCHEMA_CACHE_KEY) === '1'; }catch(e){}
+    if (!schemaReady){
+      ensureCheckinsSheetColumns_(sh);
+      try{ cache.put(CHECKINS_SCHEMA_CACHE_KEY, '1', 6 * 60 * 60); }catch(e){}
+    }
   }
   return sh;
 }
@@ -939,9 +949,12 @@ function classifyNewFriendFromFirstEvent_(eventKey, memberId, status, firstEvent
   }
   return { isNewFriend:true, reason:'FIRST_EVENT', firstEventKey:first || ev };
 }
-function classifyNewFriend_(sh, eventKey, member){
+function classifyNewFriend_(sh, eventKey, member, historyOptional){
   const m = member || {};
-  const first = firstAttendedEventForMember_(sh, m.id);
+  const id = String(m.id || '').trim().toUpperCase();
+  const first = historyOptional && historyOptional.firstEventById
+    ? String(historyOptional.firstEventById[id] || '')
+    : firstAttendedEventForMember_(sh, id);
   return classifyNewFriendFromFirstEvent_(eventKey, m.id, m.status, first || eventKey);
 }
 
@@ -968,7 +981,12 @@ function requireSession_(token) {
 function api_ping(token){
   const sess = getSession_(token);
   if (!sess) return { ok:false };
-  return { ok:true, staff: sess.staff };
+  return { ok:true, staff: sess.staff, eventKey:getDefaultEventKey_() };
+}
+function api_get_checkin_context(token){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+  return { ok:true, eventKey:getDefaultEventKey_() };
 }
 function api_logout(token){
   if (token) CacheService.getScriptCache().remove('sess_' + token);
@@ -1007,7 +1025,7 @@ function api_login(input) {
   if (bypass && raw === bypass) {
     const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
     const token = createSession_(staff);
-    return { ok:true, token, staff };
+    return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
   }
 
   const parsed = parseQrPayloadStrict_(raw);
@@ -1052,13 +1070,13 @@ function api_login(input) {
       }
       const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:stNow, isSuper:false };
       const token = createSession_(staff);
-      return { ok:true, token, staff };
+      return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
     }
   }
 
   const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:st, isSuper:false };
   const token = createSession_(staff);
-  return { ok:true, token, staff };
+  return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
 }
 
 function api_login_internal(input) {
@@ -1067,7 +1085,7 @@ function api_login_internal(input) {
   if (bypass && raw === bypass) {
     const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
     const token = createSession_(staff);
-    return { ok:true, token, staff };
+    return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
   }
   return { ok:false, code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.' };
 }
@@ -1106,33 +1124,138 @@ function api_log_scanner_e420(payload){
   }
 }
 
-/******** Check-in dedupe lookup ********/
-function findExistingCheckin_(sh, eventKey, memberId) {
-  const lastRow = sh.getLastRow();
-  if (lastRow < 2) return null;
+/******** Check-in history index + dedupe lookup ********/
+function checkinHistoryCacheKey_(eventKey){
+  return CHECKIN_HISTORY_CACHE_PREFIX + String(eventKey || '').trim().replace(/[^A-Za-z0-9_-]/g, '_');
+}
 
-  const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
-  for (let i = data.length - 1; i >= 0; i--) {
-    const row = data[i];
-    const ev = String(row[1] || '').trim();
-    const mid = String(row[2] || '').trim();
-    if (ev === eventKey && mid === memberId) {
+function checkinExistingFromRow_(row){
+  const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+  const emailTo = String(row[10] || '').trim();
+  const emailStatus = String(row[11] || '').trim();
+  return {
+    timeUk: fmtUk_(ts, 'HH:mm:ss'),
+    eventKey: String(row[1] || '').trim(),
+    handledBy: {
+      staffId: String(row[6] || ''),
+      nameZh: String(row[7] || ''),
+      nameEn: String(row[8] || '')
+    },
+    receiptId: String(row[9] || ''),
+    method: String(row[5] || ''),
+    emailStatus: emailStatus,
+    emailToMasked: emailTo ? maskEmail_(emailTo) : '',
+    emailUi: emailUiFromStatus_(emailStatus)
+  };
+}
+
+function buildCheckinHistoryIndex_(rows, eventKey, lastRow){
+  const evWanted = String(eventKey || '').trim();
+  const firstEventById = {};
+  const currentById = {};
+  let lastSignIn = null;
+
+  (rows || []).forEach(function(row){
+    const ev = String((row && row[1]) || '').trim();
+    const mid = String((row && row[2]) || '').trim().toUpperCase();
+    if (!mid) return;
+    if (ev) firstEventById[mid] = newFriendEarlierEvent_(firstEventById[mid], ev);
+    if (ev !== evWanted) return;
+
+    const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+    const t = isNaN(ts.getTime()) ? 0 : ts.getTime();
+    const existing = checkinExistingFromRow_(row);
+    const entry = currentById[mid] || { latestT:-1, latestNameZh:'', latestNameEn:'', existing:null };
+
+    // Dedupe historically returns the bottom-most matching row.
+    entry.existing = existing;
+    if (t > entry.latestT){
+      entry.latestT = t;
+      entry.latestNameZh = String(row[3] || '');
+      entry.latestNameEn = String(row[4] || '');
+    }
+    currentById[mid] = entry;
+    lastSignIn = {
+      timeUk: existing.timeUk,
+      nameZh: String(row[3] || ''),
+      nameEn: String(row[4] || '')
+    };
+  });
+
+  return {
+    lastRow: Number(lastRow || 0),
+    firstEventById: firstEventById,
+    currentById: currentById,
+    lastSignIn: lastSignIn
+  };
+}
+
+function cacheCheckinHistoryIndex_(eventKey, index){
+  try{
+    CacheService.getScriptCache().put(
+      checkinHistoryCacheKey_(eventKey),
+      JSON.stringify(index),
+      CHECKIN_HISTORY_CACHE_SECONDS
+    );
+  }catch(e){}
+}
+
+function getCheckinHistoryIndex_(sh, eventKey){
+  const lastRow = sh.getLastRow();
+  const key = checkinHistoryCacheKey_(eventKey);
+  try{
+    const raw = CacheService.getScriptCache().get(key);
+    if (raw){
+      const cached = JSON.parse(raw);
+      if (cached && Number(cached.lastRow) === Number(lastRow)) return cached;
+    }
+  }catch(e){}
+
+  const rows = lastRow >= 2 ? sh.getRange(2, 1, lastRow - 1, 12).getValues() : [];
+  const index = buildCheckinHistoryIndex_(rows, eventKey, lastRow);
+  cacheCheckinHistoryIndex_(eventKey, index);
+  return index;
+}
+
+function updateCheckinHistoryIndexAfterAppend_(index, eventKey, row, appendedRowNumber){
+  const updated = index || buildCheckinHistoryIndex_([], eventKey, 1);
+  const ev = String((row && row[1]) || '').trim();
+  const mid = String((row && row[2]) || '').trim().toUpperCase();
+  if (ev && mid){
+    updated.firstEventById = updated.firstEventById || {};
+    updated.currentById = updated.currentById || {};
+    updated.firstEventById[mid] = newFriendEarlierEvent_(updated.firstEventById[mid], ev);
+    if (ev === String(eventKey || '').trim()){
       const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-      const emailTo = String(row[10] || '').trim();
-      const emailStatus = String(row[11] || '').trim();
-      return {
-        timeUk: fmtUk_(ts, 'HH:mm:ss'),
-        eventKey: ev,
-        handledBy: { staffId: String(row[6] || ''), nameZh: String(row[7] || ''), nameEn: String(row[8] || '') },
-        receiptId: String(row[9] || ''),
-        method: String(row[5] || ''),
-        emailStatus: emailStatus || '',
-        emailToMasked: emailTo ? maskEmail_(emailTo) : '',
-        emailUi: emailUiFromStatus_(emailStatus || '')
+      const t = isNaN(ts.getTime()) ? 0 : ts.getTime();
+      const existing = checkinExistingFromRow_(row);
+      updated.currentById[mid] = {
+        latestT:t,
+        latestNameZh:String(row[3] || ''),
+        latestNameEn:String(row[4] || ''),
+        existing:existing
+      };
+      updated.lastSignIn = {
+        timeUk:existing.timeUk,
+        nameZh:String(row[3] || ''),
+        nameEn:String(row[4] || '')
       };
     }
   }
-  return null;
+  updated.lastRow = Number(appendedRowNumber || updated.lastRow || 0);
+  cacheCheckinHistoryIndex_(eventKey, updated);
+  return updated;
+}
+
+function clearCheckinHistoryCache_(eventKey){
+  try{ CacheService.getScriptCache().remove(checkinHistoryCacheKey_(eventKey)); }catch(e){}
+}
+
+function findExistingCheckin_(sh, eventKey, memberId, historyOptional) {
+  const history = historyOptional || getCheckinHistoryIndex_(sh, eventKey);
+  const id = String(memberId || '').trim().toUpperCase();
+  const entry = history && history.currentById ? history.currentById[id] : null;
+  return entry && entry.existing ? entry.existing : null;
 }
 
 function validateMemberForCheckin_(m, parsedKeyOrNull) {
@@ -1241,12 +1364,13 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
   try {
     const sh = getCheckinsSheet_();
     const stNorm = normalizeStatus_(m.status);
+    const history = getCheckinHistoryIndex_(sh, eventKey);
 
-    const existing = findExistingCheckin_(sh, eventKey, m.id);
+    const existing = findExistingCheckin_(sh, eventKey, m.id, history);
     if (existing) {
       // Repair members left in PENDING by the former broken promotion path.
       const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
-      const newFriend = classifyNewFriend_(sh, eventKey, m);
+      const newFriend = classifyNewFriend_(sh, eventKey, m, history);
       return {
         ok:true,
         result:'ALREADY',
@@ -1263,14 +1387,14 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
       };
     }
 
-    const newFriend = classifyNewFriend_(sh, eventKey, m);
+    const newFriend = classifyNewFriend_(sh, eventKey, m, history);
 
     const ts = nowUk_();
     const receiptId = makeReceiptId_(ts);
 
     const email = maybeSendProofEmail_(m, eventKey, receiptId, ts);
 
-    sh.appendRow([
+    const checkinRow = [
       ts, eventKey,
       m.id, m.nameZh || '', m.nameEn || '',
       'scan',
@@ -1280,7 +1404,9 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
       email.status,
       String(deviceId || ''),
       String(ua || '')
-    ]);
+    ];
+    sh.appendRow(checkinRow);
+    updateCheckinHistoryIndexAfterAppend_(history, eventKey, checkinRow, Number(history.lastRow || 1) + 1);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
     if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
@@ -1336,12 +1462,13 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
   try {
     const sh = getCheckinsSheet_();
     const stNorm = normalizeStatus_(m.status);
+    const history = getCheckinHistoryIndex_(sh, eventKey);
 
-    const existing = findExistingCheckin_(sh, eventKey, m.id);
+    const existing = findExistingCheckin_(sh, eventKey, m.id, history);
     if (existing) {
       // Repair members left in PENDING by the former broken promotion path.
       const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
-      const newFriend = classifyNewFriend_(sh, eventKey, m);
+      const newFriend = classifyNewFriend_(sh, eventKey, m, history);
       return {
         ok:true,
         result:'ALREADY',
@@ -1358,14 +1485,14 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
       };
     }
 
-    const newFriend = classifyNewFriend_(sh, eventKey, m);
+    const newFriend = classifyNewFriend_(sh, eventKey, m, history);
 
     const ts = nowUk_();
     const receiptId = makeReceiptId_(ts);
 
     const email = maybeSendProofEmail_(m, eventKey, receiptId, ts);
 
-    sh.appendRow([
+    const checkinRow = [
       ts, eventKey,
       m.id, m.nameZh || '', m.nameEn || '',
       'manual',
@@ -1375,7 +1502,9 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
       email.status,
       String(deviceId || ''),
       String(ua || '')
-    ]);
+    ];
+    sh.appendRow(checkinRow);
+    updateCheckinHistoryIndexAfterAppend_(history, eventKey, checkinRow, Number(history.lastRow || 1) + 1);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
     if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
@@ -1505,44 +1634,21 @@ function api_get_live_page(token, eventKeyOptional) {
   if (cached) return JSON.parse(cached);
 
   const sh = getCheckinsSheet_();
-  const lastRow = sh.getLastRow();
+  const history = getCheckinHistoryIndex_(sh, eventKey);
   const members = getMembersIndex_().byId;
 
   const latestById = {};
-  const firstEventById = {};
-  let lastSignIn = null;
-
-  if (lastRow >= 2) {
-    const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
-
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      const ev = String(row[1] || '').trim();
-      const mid = String(row[2] || '').trim().toUpperCase();
-      if (!mid) continue;
-      if (ev) firstEventById[mid] = newFriendEarlierEvent_(firstEventById[mid], ev);
-      if (ev !== eventKey) continue;
-
-      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-      const t = ts.getTime();
-
-      const nameZh = String(row[3] || '') || (members[mid] ? (members[mid].nameZh || '') : '');
-      const nameEn = String(row[4] || '') || (members[mid] ? (members[mid].nameEn || '') : '');
-
-      const prev = latestById[mid];
-      if (!prev || t > prev.t) latestById[mid] = { t, nameZh, nameEn };
-    }
-
-    for (let i = data.length - 1; i >= 0; i--) {
-      const row = data[i];
-      const ev = String(row[1] || '').trim();
-      if (ev !== eventKey) continue;
-
-      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-      lastSignIn = { timeUk: fmtUk_(ts, 'HH:mm:ss'), nameZh: String(row[3] || ''), nameEn: String(row[4] || '') };
-      break;
-    }
-  }
+  const firstEventById = history.firstEventById || {};
+  const currentById = history.currentById || {};
+  const lastSignIn = history.lastSignIn || null;
+  Object.keys(currentById).forEach(function(mid){
+    const n = currentById[mid] || {};
+    latestById[mid] = {
+      t:Number(n.latestT || 0),
+      nameZh:String(n.latestNameZh || '') || (members[mid] ? (members[mid].nameZh || '') : ''),
+      nameEn:String(n.latestNameEn || '') || (members[mid] ? (members[mid].nameEn || '') : '')
+    };
+  });
 
   const ids = Object.keys(latestById);
   ids.sort((a,b) => latestById[b].t - latestById[a].t);
@@ -2099,6 +2205,7 @@ function deleteCheckinsForEventMember_(eventKey, memberId){
   for (let i=rowsToDelete.length-1;i>=0;i--){
     sh.deleteRow(rowsToDelete[i]);
   }
+  if (rowsToDelete.length) clearCheckinHistoryCache_(eventKey);
   return rowsToDelete.length;
 }
 
