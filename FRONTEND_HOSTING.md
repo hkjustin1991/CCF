@@ -24,7 +24,12 @@ Resulting scanner URL format:
 
 `https://<org-or-user>.github.io/CCF/scanner/`
 
-The scanner page hands the QR payload to one of the existing portal flows by appending `?handoff=<payload>` (also mirrored to `sessionStorage` as fallback).
+The scanner supports two return paths:
+
+- Classic portal: `postMessage` returns the result to the popup opener.
+- Mobile portal: the scanner submits a same-tab HTTPS `POST` back to the Apps Script web-app URL. The QR payload is not placed in the URL. A one-time state value is matched before the portal processes the result.
+
+The mobile return path requires both parts of the same release: deploy the updated Apps Script `Code.gs` and `index.html`, and publish the updated `scanner/index.html` and `scanner/scanner.js` on the configured scanner host.
 
 ## 2) Keep Apps Script as API backend
 

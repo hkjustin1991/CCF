@@ -5,6 +5,9 @@
   var origin = (qs.get('origin') || '*').trim();
   var state = (qs.get('state') || '').trim();
   var flow = (qs.get('flow') || 'checkin').trim();
+  var returnMode = (qs.get('returnMode') || '').trim().toLowerCase();
+  var returnUrl = (qs.get('returnUrl') || '').trim();
+  var returnView = (qs.get('returnView') || '').trim();
 
   var video = document.getElementById('video');
   var statusEl = document.getElementById('status');
@@ -28,6 +31,60 @@
 
   function canPostToOpener(){
     return !!(window.opener && !window.opener.closed);
+  }
+
+  function validatedReturnUrl(){
+    if(returnMode !== 'post' || returnView !== 'mobileScan') return '';
+    try{
+      var parsed = new URL(returnUrl);
+      var validHost = parsed.protocol === 'https:' && parsed.hostname === 'script.google.com';
+      var validPath = /\/macros\/.+\/(exec|dev)$/.test(parsed.pathname);
+      return (validHost && validPath) ? parsed.toString() : '';
+    }catch(e){
+      return '';
+    }
+  }
+
+  var postReturnUrl = validatedReturnUrl();
+
+  function canPostReturn(){
+    return !!postReturnUrl;
+  }
+
+  function postReturn(type, payload, detail){
+    if(!canPostReturn()) return false;
+    try{
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = postReturnUrl;
+      form.target = '_top';
+      form.style.display = 'none';
+
+      var fields = {
+        scannerReturn:'1',
+        type:type,
+        state:state,
+        flow:flow,
+        returnView:returnView
+      };
+      if(typeof payload !== 'undefined') fields.payload = String(payload || '');
+      if(typeof detail !== 'undefined') fields.detail = String(detail || '');
+
+      Object.keys(fields).forEach(function(name){
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = fields[name];
+        form.appendChild(input);
+      });
+      document.body.appendChild(form);
+      setStatus('正在返回同工專頁… / Returning to the staff portal…');
+      form.submit();
+      return true;
+    }catch(err){
+      setStatus('無法返回同工專頁 / Unable to return to the staff portal');
+      return false;
+    }
   }
 
   function safeOrigin(){
@@ -74,6 +131,7 @@
 
   function finishSuccess(payload){
     stopScan();
+    if(postReturn('CCF_QR_RESULT', payload)) return;
     if(!canPostToOpener()){
       openerMissingNotice('已掃描：' + String(payload || ''));
       return;
@@ -84,6 +142,7 @@
 
   function finishCancel(detail){
     stopScan();
+    if(postReturn('CCF_QR_CANCEL', undefined, detail || 'cancelled')) return;
     if(!canPostToOpener()){
       openerMissingNotice('已取消掃描。 / Scan cancelled.');
       return;
@@ -94,6 +153,7 @@
 
   function finishError(detail){
     stopScan();
+    if(postReturn('CCF_QR_ERROR', undefined, detail || 'unknown error')) return;
     if(!canPostToOpener()){
       openerMissingNotice('相機錯誤：' + String(detail || 'unknown error'));
       return;
@@ -212,6 +272,6 @@
   btnCancel.addEventListener('click', function(){ finishCancel('user_cancelled'); });
   window.addEventListener('beforeunload', function(){ stopScan(); });
 
-  if(!canPostToOpener()) openerMissingNotice('請返回原頁面重新開啟掃描器。 / Please return to the portal and reopen scanner.');
+  if(!canPostReturn() && !canPostToOpener()) openerMissingNotice('請返回原頁面重新開啟掃描器。 / Please return to the portal and reopen scanner.');
   startScan();
 })();

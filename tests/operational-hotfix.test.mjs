@@ -87,22 +87,69 @@ test('Live login message and emergency field are outside the hidden camera panel
   assert.ok(login.includes('id="msg" role="alert" aria-live="assertive"'));
 });
 
-test('mobile check-in is opt-in and keeps the classic portal as the default', () => {
+test('four-function mobile portal is opt-in and keeps the classic portal as the default', () => {
   const html = read('index.html');
-  const menu = html.slice(html.indexOf('function viewMenu()'), html.indexOf('function viewMobileCheckin()'));
-  const mobile = html.slice(html.indexOf('function viewMobileCheckin()'), html.indexOf('function viewCheckinMenu()'));
+  const menu = html.slice(html.indexOf('function viewMenu()'), html.indexOf('function mobileSubviewHeader_'));
+  const mobile = html.slice(html.indexOf('function viewMobileHome()'), html.indexOf('function viewCheckinMenu()'));
   const eventKeyHelper = html.slice(html.indexOf('function ensureEventKey_'), html.indexOf('var SERVING_GROUP_LABELS'));
 
   assert.ok(html.includes("view:'login'"));
   assert.ok(menu.includes('id="goMobileCheckin"'));
   assert.ok(menu.includes('id="goCheckin"'));
   assert.ok(mobile.includes('id="mobileClassic"'));
+  assert.ok(mobile.includes('class="mobileMenuGrid"'));
+  assert.equal((mobile.match(/class="[^"]*mobileMenuTile/g) || []).length, 4);
+  assert.ok(mobile.includes('id="mobileGoScan"'));
+  assert.ok(mobile.includes('id="mobileGoManual"'));
+  assert.ok(mobile.includes('id="mobileGoLive"'));
+  assert.ok(mobile.includes('id="mobileGoVrm"'));
   assert.ok(mobile.includes('id="mobileStartScan"'));
-  assert.ok(html.includes("App.view==='mobileCheckin'"));
+  assert.ok(html.includes("App.view==='mobileHome'"));
+  assert.ok(html.includes("App.view==='mobileManual'"));
+  assert.ok(html.includes("App.view==='mobileLive'"));
+  assert.ok(html.includes("App.view==='mobileVrm'"));
   assert.ok(html.includes("App.view='menu'; render();"));
-  assert.ok(html.includes('body.mobileCheckinUi .topbar'));
+  assert.ok(html.includes('body.mobilePortalUi .topbar'));
+  assert.ok(html.includes('--mobile-tile-size:min(calc((100vw - 34px)/2), calc((100dvh - 156px)/2))'));
   assert.ok(eventKeyHelper.includes("callApi('api_get_checkin_context'"));
   assert.ok(!eventKeyHelper.includes("callApi('api_get_live_page'"));
+});
+
+test('mobile scanner returns by same-tab POST while classic opener messaging remains available', () => {
+  const liveBackend = read('Code.gs');
+  const liveUi = read('index.html');
+  const scanner = read('scanner/scanner.js');
+
+  assert.ok(liveUi.includes("returnMode:'post'"));
+  assert.ok(liveUi.includes("link.target = '_top'"));
+  assert.ok(liveUi.includes("sessionStorage.setItem(MOBILE_SCAN_STATE_KEY, state)"));
+  assert.ok(liveUi.includes("returnedState !== expectedState"));
+  assert.ok(scanner.includes("form.method = 'POST'"));
+  assert.ok(scanner.includes("form.target = '_top'"));
+  assert.ok(scanner.includes("scannerReturn:'1'"));
+  assert.ok(scanner.includes("postReturn('CCF_QR_RESULT', payload)"));
+  assert.ok(scanner.includes('window.opener.postMessage(message, safeOrigin())'));
+  assert.ok(!liveUi.includes("target.searchParams.set('payload'"));
+  assert.ok(liveBackend.includes('const scannerReturn = scannerReturnFromPost_(e);'));
+  assert.ok(liveBackend.includes('if (scannerReturn) return renderLivePortal_(scannerReturn);'));
+});
+
+test('scanner POST handoff only accepts the mobile check-in route and valid QR data', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Code.gs'), context, { filename:'Code.gs' });
+  const state = '0123456789abcdef0123456789abcdef';
+  const valid = context.scannerReturnFromPost_({ parameter:{
+    scannerReturn:'1', type:'CCF_QR_RESULT', state, flow:'checkin', returnView:'mobileScan', payload:'CCF0137|kYannie'
+  }});
+  assert.deepEqual(JSON.parse(JSON.stringify(valid)), {
+    type:'CCF_QR_RESULT', state, flow:'checkin', returnView:'mobileScan', payload:'CCF0137|kYannie'
+  });
+  const invalid = context.scannerReturnFromPost_({ parameter:{
+    scannerReturn:'1', type:'CCF_QR_RESULT', state, flow:'checkin', returnView:'mobileScan', payload:'not-a-member-qr'
+  }});
+  assert.equal(invalid.type, 'CCF_QR_ERROR');
+  assert.equal(invalid.payload, undefined);
+  assert.equal(context.scannerReturnFromPost_({ parameter:{} }), null);
 });
 
 test('Delete check-in reauthentication always binds a scan action', () => {
@@ -719,10 +766,10 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-27.staff106';"));
-  assert.ok(liveBackend.includes('* v2026-08-27.staff106'));
-  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-27.106'));
-  assert.ok(liveUi.includes('ui staff-ui-2026-08-27.106'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-28.staff107';"));
+  assert.ok(liveBackend.includes('* v2026-08-28.staff107'));
+  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-28.107'));
+  assert.ok(liveUi.includes('ui staff-ui-2026-08-28.107'));
 
   assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-23.admin121';"));
   assert.ok(adminBackend.includes('* v2026-08-23.admin121'));

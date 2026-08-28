@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-27.staff106
- * CHANGELOG: cache attendance history and support the opt-in mobile check-in UI.
+ * v2026-08-28.staff107
+ * CHANGELOG: add secure same-tab scanner return and the expanded opt-in mobile portal.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-27.staff106';
+const APP_VERSION = '2026-08-28.staff107';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -150,15 +150,70 @@ function doGet(e) {
   if (mode === 'vote') return doGetVote_(e); // Vote.gs
   if (mode === 'vote-review') return doGetVoteReview_(e); // Vote.gs — restricted, unlinked exception route
 
+  return renderLivePortal_(null);
+}
+
+function getLiveWebAppUrl_(){
+  try{
+    return String(ScriptApp.getService().getUrl() || '').trim();
+  }catch(e){
+    return '';
+  }
+}
+
+function safeInlineJson_(value){
+  return JSON.stringify(value == null ? null : value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function renderLivePortal_(scannerReturn){
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   const scannerCfg = getExternalScannerConfig_();
   t.EXTERNAL_SCANNER_URL = scannerCfg.url;
   t.EXTERNAL_SCANNER_ORIGIN = scannerCfg.origin;
   t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
+  t.WEB_APP_URL = getLiveWebAppUrl_();
+  t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
   return t.evaluate()
     .setTitle('CCF Live Service Portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function scannerReturnFromPost_(e){
+  const p = (e && e.parameter) ? e.parameter : {};
+  if (String(p.scannerReturn || '') !== '1') return null;
+
+  const type = String(p.type || '').trim();
+  const state = String(p.state || '').trim().toLowerCase();
+  const flow = String(p.flow || '').trim().toLowerCase();
+  const returnView = String(p.returnView || '').trim();
+  const allowedTypes = ['CCF_QR_RESULT','CCF_QR_CANCEL','CCF_QR_ERROR'];
+
+  if (allowedTypes.indexOf(type) < 0 || !/^[a-f0-9]{32}$/.test(state) || flow !== 'checkin' || returnView !== 'mobileScan') {
+    return {
+      type:'CCF_QR_ERROR', state:state, flow:'checkin', returnView:'mobileScan',
+      detail:'Invalid scanner return.'
+    };
+  }
+
+  const result = { type:type, state:state, flow:flow, returnView:returnView };
+  if (type === 'CCF_QR_RESULT') {
+    const payload = String(p.payload || '').trim();
+    const parsed = parseQrPayloadStrict_(payload);
+    if (!parsed.ok) {
+      result.type = 'CCF_QR_ERROR';
+      result.detail = 'Invalid QR result.';
+    } else {
+      result.payload = payload;
+    }
+  } else {
+    result.detail = String(p.detail || '').slice(0, 300);
+  }
+  return result;
 }
 
 
@@ -330,6 +385,9 @@ function getExternalScannerConfig_(){
 
 function doPost(e) {
   try {
+    const scannerReturn = scannerReturnFromPost_(e);
+    if (scannerReturn) return renderLivePortal_(scannerReturn);
+
     const raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
     const body = JSON.parse(raw);
     const fn = String(body.fn || '').trim();
