@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-23.reg123
- * CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level across portals.
+ * v2026-08-28.reg124
+ * CHANGELOG: let one optional DisplayNameZh value replace the final gender-derived Chinese display name.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-23.reg123';
+const REG_VERSION = '2026-08-28.reg124';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -45,7 +45,7 @@ const REG_WA_LINK = 'https://chat.whatsapp.com/G08XRgAsM520nexCGHW9q4';
 const REG_QR_BASE = 'https://quickchart.io/qr';
 
 const REG_EXTRA_HEADERS = [
-  'Member_Since','PreferredName','Gender','HasCar','VRM','VRM2','IsMinor','ParentEmail',
+  'Member_Since','PreferredName','Gender','DisplayNameZh','HasCar','VRM','VRM2','IsMinor','ParentEmail',
   'MinorServingApprovedGroups','MinorServingSelfSignup','MinorServingApprovedBy','MinorServingApprovedAt',
   /* PATCH_BOUNDARY: REG2_REFERREDBY_HEADER_BEGIN */
   'ReferredBy'
@@ -1037,6 +1037,7 @@ function api_reg_self_lookup_public(qrPayload){
         minorServingApprovedGroups: reg_parseServingGroupsCsvSafe_(r.MinorServingApprovedGroups||''),
         minorServingSelfSignup: String(r.MinorServingSelfSignup||'').trim().toUpperCase() === 'YES',
         gender: String(r.Gender||'').trim().toUpperCase(),
+        displayNameZh: String(r.DisplayNameZh||'').trim(),
         /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_BEGIN */
         referredBy: String(r.ReferredBy||'').trim(),
         /* PATCH_BOUNDARY: REG2_REFERREDBY_LOOKUP_END */
@@ -1347,6 +1348,47 @@ function regDisplayNameForPortal_(m){
   if (en) return en;
   if (zh) return zh;
   return '(' + String((m && m.id) || '').trim().toUpperCase() + ')';
+}
+
+/**
+ * Members.DisplayNameZh is the exact final Chinese label to show. Keeping the
+ * override separate preserves the member's real NameZh for search, identity
+ * and registration. A blank override retains the existing Gender fallback.
+ * This field is sheet-maintained and is never written by self-registration.
+ */
+function regResolveDisplayNameZh_(member, fallbackNameZh){
+  const m = member || {};
+  const exact = String(m.displayNameZh || m.DisplayNameZh || '').trim();
+  if (exact) return exact;
+
+  const base = String(fallbackNameZh || m.nameZh || m.NameZh || '').trim();
+  if (!base || regNameHasDisplayTitleZh_(base)) return base;
+
+  const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
+  if (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') return base + '弟兄';
+  if (genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') return base + '姊妹';
+  return base;
+}
+
+function regNameHasDisplayTitleZh_(value){
+  return /(牧師|牧师|師母|师母|傳道|传道|長老|长老|執事|执事|弟兄|姊妹|姐妹)$/.test(String(value || '').trim());
+}
+
+function regOverlayDisplayFieldsFromRows_(byId, dataRows){
+  const out = byId || {};
+  (Array.isArray(dataRows) ? dataRows : []).forEach(function(row){
+    const r = row || {};
+    const id = String(r.ID || r.id || '').trim().toUpperCase();
+    if (!id) return;
+    const member = out[id] || { id:id };
+    member.displayNameZh = String(r.DisplayNameZh || r.displayNameZh || '').trim();
+    member.gender = String(r.Gender || r.gender || member.gender || '').trim();
+    member.nameZh = String(r.NameZh || r.nameZh || member.nameZh || '').trim();
+    member.nameEn = String(r.NameEn || r.nameEn || member.nameEn || '').trim();
+    member.preferredName = String(r.PreferredName || r.preferredName || member.preferredName || '').trim();
+    out[id] = member;
+  });
+  return out;
 }
 
 function reg_parseServingGroupsCsvSafe_(raw){
@@ -2084,12 +2126,8 @@ function reg_buildLiveServiceEntry_(eventKey, byId, prefetched){
   }
   const serving = servingRaw.map(function(r){
     const m = memberById[String(r.memberId||'').trim().toUpperCase()] || {};
-    const genderRaw = String(m.gender || m.Gender || '').trim().toUpperCase();
-    const suffixZh = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? '弟兄'
-      : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? '姊妹' : '');
-    const suffixEn = (genderRaw === 'M' || genderRaw === 'MALE' || genderRaw === '男') ? 'Brother'
-      : ((genderRaw === 'F' || genderRaw === 'FEMALE' || genderRaw === '女') ? 'Sister' : '');
-    const nameZh = String(r.nameZh||'').trim();
+    const sourceNameZh = String(r.nameZh||'').trim();
+    const nameZh = regResolveDisplayNameZh_(m, sourceNameZh);
     const nameEn = String(r.nameEn||'').trim();
     return {
       eventKey: r.eventKey,
@@ -2103,9 +2141,9 @@ function reg_buildLiveServiceEntry_(eventKey, byId, prefetched){
       memberId: String(r.memberId || ''),
       nameZh: nameZh,
       nameEn: nameEn,
-      suffixZh: suffixZh,
-      suffixEn: suffixEn,
-      displayName: [nameZh, nameEn].filter(Boolean).join(' / ') + (suffixZh || suffixEn ? (' · ' + [suffixZh, suffixEn].filter(Boolean).join(' / ')) : '')
+      suffixZh: '',
+      suffixEn: '',
+      displayName: [nameZh, nameEn].filter(Boolean).join(' / ')
     };
   });
 
@@ -2176,13 +2214,13 @@ function reg_resolveExportDisplayNameZh_(entry, byId, warnings){
 
   if (!zh && (mid || raw)) warns.push('Chinese name unavailable for ' + (mid || raw));
 
-  const titled = /(牧師|傳道|弟兄|姊妹)$/.test(base);
+  const exact = String(member.displayNameZh || member.DisplayNameZh || '').trim();
+  if (exact) return exact;
+
+  const titled = regNameHasDisplayTitleZh_(base);
   if (titled) return base;
 
-  const genderRaw = String(member.gender || member.Gender || '').trim().toLowerCase();
-  if (genderRaw === 'male' || genderRaw === 'm' || genderRaw === '男') return base + '弟兄';
-  if (genderRaw === 'female' || genderRaw === 'f' || genderRaw === '女') return base + '姊妹';
-  return base;
+  return regResolveDisplayNameZh_(member, base);
 }
 
 function reg_csvEscape_(value){
@@ -2223,7 +2261,7 @@ function api_reg_self_sailor_saturn_csv_public(qrPayload, whichMonth){
 
     const matrix = admin_getServingPlanMatrix_(events) || {};
     const membersIndex = admin_getMembersIndex_() || {};
-    const byId = membersIndex.byId || {};
+    const byId = regOverlayDisplayFieldsFromRows_(membersIndex.byId || {}, auth.ms && auth.ms.dataRows);
     const sermonMap = admin_getSermonMapByEventKeys_(events.map(function(ev){ return ev.eventKey; })) || {};
     const warnings = [];
 
@@ -2245,7 +2283,7 @@ function api_reg_self_sailor_saturn_csv_public(qrPayload, whichMonth){
       const sermon = sermonMap[eventKey] || {};
       const raw = String(sermon.speaker || '').trim();
       if (!raw) return '';
-      if (/(牧師|傳道|弟兄|姊妹)/.test(raw)) return raw;
+      if (regNameHasDisplayTitleZh_(raw)) return raw;
       const hit = Object.keys(byId).find(function(mid){
         const m = byId[mid] || {};
         return raw === String(m.nameZh || '').trim() || raw === String(m.nameEn || '').trim() || raw === String(m.preferredName || '').trim();
@@ -2333,7 +2371,7 @@ function api_reg_self_live_service_public(qrPayload){
     const offeringMap = (typeof admin_getOfferingMap_ === 'function') ? admin_getOfferingMap_() : {};
 
     const mi = admin_getMembersIndex_() || {};
-    const byId = mi.byId || {};
+    const byId = regOverlayDisplayFieldsFromRows_(mi.byId || {}, auth.ms && auth.ms.dataRows);
     const countByEvent = {};
     const breakdownByEvent = {};
     // New Friend handling must be reflected immediately, so the classification
@@ -4581,6 +4619,7 @@ function regRowObj_(col, row, rowNumber){
     MinorServingApprovedBy: String(g('MinorServingApprovedBy')||'').trim(),
     MinorServingApprovedAt: String(g('MinorServingApprovedAt')||'').trim(),
     Gender: String(g('Gender')||'').trim().toUpperCase(),
+    DisplayNameZh: String(g('DisplayNameZh')||'').trim(),
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_BEGIN */
     ReferredBy: String(g('ReferredBy')||'').trim(),
     /* PATCH_BOUNDARY: REG2_REFERREDBY_ROWOBJ_END */
@@ -5036,7 +5075,10 @@ function regClearMembersIndexCache_(){
   try{
     const c = CacheService.getScriptCache();
     c.remove('membersIndex_staff_v1');
+    c.remove('membersIndex_staff_v2');
     c.remove('membersIndex_v6');
+    c.remove('admin_membersIndex_v3');
+    c.remove('admin_membersIndex_v4');
   }catch(e){}
 }
 /* ============================================================

@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-23.admin121
- * CHANGELOG: add DEACON as an ADMIN-equivalent authorisation level across portals.
+ * v2026-08-28.admin122
+ * CHANGELOG: carry the optional exact Chinese display name through shared member indexes.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-23.admin121';
+const ADMIN_VERSION = '2026-08-28.admin122';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -4326,10 +4326,11 @@ function admin_ensureMemberColumns_(sh, col, fields){
 function admin_clearMembersCache_(){
   try{ CacheService.getScriptCache().remove('admin_membersIndex_v2'); }catch(e){}
   try{ CacheService.getScriptCache().remove('admin_membersIndex_v3'); }catch(e){}
+  try{ CacheService.getScriptCache().remove('admin_membersIndex_v4'); }catch(e){}
 }
 function admin_getMembersIndex_(){
   const cache = CacheService.getScriptCache();
-  const key = 'admin_membersIndex_v3';
+  const key = 'admin_membersIndex_v4';
   const cached = cache.get(key);
   if (cached) return JSON.parse(cached);
 
@@ -4365,6 +4366,7 @@ function admin_getMembersIndex_(){
         vrm: (col.VRM!==undefined) ? String(row[col.VRM]||'').trim() : '',
         vrm2:(col.VRM2!==undefined)? String(row[col.VRM2]||'').trim() : '',
         preferredName: (col.PreferredName!==undefined) ? String(row[col.PreferredName]||'').trim() : '',
+        displayNameZh: (col.DisplayNameZh!==undefined) ? String(row[col.DisplayNameZh]||'').trim() : '',
         isMinor: (col.IsMinor!==undefined) ? String(row[col.IsMinor]||'').trim().toUpperCase() === 'YES' : false,
         minorServingApprovedGroups: (col.MinorServingApprovedGroups!==undefined) ? admin_parseGroupsCsv_(row[col.MinorServingApprovedGroups]) : [],
         minorServingSelfSignup: (col.MinorServingSelfSignup!==undefined) ? String(row[col.MinorServingSelfSignup]||'').trim().toUpperCase() === 'YES' : false,

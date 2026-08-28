@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-28.staff107
- * CHANGELOG: add secure same-tab scanner return and the expanded opt-in mobile portal.
+ * v2026-08-28.staff108
+ * CHANGELOG: support an optional exact Chinese display-name override without changing existing member rows.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-28.staff107';
+const APP_VERSION = '2026-08-28.staff108';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -81,6 +81,7 @@ const MEMBERS_OPTIONAL_HEADERS = [
   'VRM','VRM2',
   'RoleExpires',
   'PreferredName',
+  'DisplayNameZh',
   'IsMinor',
   'MinorServingApprovedGroups',
   'MinorServingSelfSignup',
@@ -603,7 +604,7 @@ function getMembersIndex_(opts) {
   opts = opts || {};
   var ensureOptional = (opts.ensureOptional !== false);
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'membersIndex_staff_v1';
+  const cacheKey = 'membersIndex_staff_v2';
   const cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
@@ -633,6 +634,7 @@ function getMembersIndex_(opts) {
     const roleExpires = ('RoleExpires' in col) ? safeToDate_(row[col['RoleExpires']]) : null;
 
     const preferredName = ('PreferredName' in col) ? String(row[col['PreferredName']] || '').trim() : '';
+    const displayNameZh = ('DisplayNameZh' in col) ? String(row[col['DisplayNameZh']] || '').trim() : '';
     const isMinorRaw = ('IsMinor' in col) ? String(row[col['IsMinor']] || '').trim().toUpperCase() : '';
     const isMinor = (isMinorRaw === 'YES');
     const servingGroups = ('ServingGroups' in col) ? parseGroupsCsv_(row[col['ServingGroups']]) : [];
@@ -647,6 +649,7 @@ function getMembersIndex_(opts) {
       nameZh: String(row[col['NameZh']] || '').trim(),
       nameEn: String(row[col['NameEn']] || '').trim(),
       preferredName: preferredName,
+      displayNameZh: displayNameZh,
       isMinor: !!isMinor,
       minorServingApprovedGroups: ('MinorServingApprovedGroups' in col) ? parseGroupsCsv_(row[col['MinorServingApprovedGroups']]) : [],
       minorServingSelfSignup: ('MinorServingSelfSignup' in col) ? String(row[col['MinorServingSelfSignup']] || '').trim().toUpperCase() === 'YES' : false,
@@ -673,6 +676,7 @@ function getMembersIndex_(opts) {
 
 function clearMembersIndexCache_(){
   try{ CacheService.getScriptCache().remove('membersIndex_staff_v1'); }catch(e){}
+  try{ CacheService.getScriptCache().remove('membersIndex_staff_v2'); }catch(e){}
   try{ CacheService.getScriptCache().remove('membersIndex_v6'); }catch(e){}
   try{
     if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();

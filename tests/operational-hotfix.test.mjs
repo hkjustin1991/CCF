@@ -152,6 +152,38 @@ test('scanner POST handoff only accepts the mobile check-in route and valid QR d
   assert.equal(context.scannerReturnFromPost_({ parameter:{} }), null);
 });
 
+test('one optional DisplayNameZh replaces the final Chinese label without changing member identity', () => {
+  const context = appsScriptContext();
+  vm.runInContext(read('Reg.gs'), context, { filename:'Reg.gs' });
+
+  assert.equal(context.regResolveDisplayNameZh_({ gender:'FEMALE' }, '麥潔儀'), '麥潔儀姊妹');
+  assert.equal(context.regResolveDisplayNameZh_({ gender:'FEMALE', displayNameZh:'袁師母' }, '麥潔儀'), '袁師母');
+  assert.equal(context.regResolveDisplayNameZh_({ gender:'MALE', DisplayNameZh:'袁牧師' }, '袁榮業'), '袁牧師');
+  assert.equal(context.regResolveDisplayNameZh_({ gender:'FEMALE' }, '王師母'), '王師母');
+
+  const byId = {
+    CCF0201:{ nameZh:'麥潔儀', nameEn:'Vienna Mak', gender:'FEMALE', displayNameZh:'袁師母' },
+    CCF0202:{ nameZh:'李小明', gender:'MALE', displayNameZh:'' }
+  };
+  assert.equal(context.reg_resolveExportDisplayNameZh_({ memberId:'CCF0201' }, byId, []), '袁師母');
+  assert.equal(context.reg_resolveExportDisplayNameZh_({ memberId:'CCF0202' }, byId, []), '李小明弟兄');
+  assert.equal(context.regNameHasDisplayTitleZh_('王師母'), true);
+  const cached = { CCF0201:{ id:'CCF0201', displayNameZh:'麥潔儀姊妹', gender:'FEMALE' } };
+  context.regOverlayDisplayFieldsFromRows_(cached, [{ ID:'CCF0201', DisplayNameZh:'袁師母', Gender:'FEMALE', NameZh:'麥潔儀' }]);
+  assert.equal(cached.CCF0201.displayNameZh, '袁師母');
+  assert.equal(cached.CCF0201.nameZh, '麥潔儀');
+
+  const liveBackend = read('Code.gs');
+  const adminBackend = read('Admin.gs');
+  const regBackend = read('Reg.gs');
+  assert.ok(liveBackend.includes("'DisplayNameZh',"));
+  assert.ok(adminBackend.includes("displayNameZh: (col.DisplayNameZh!==undefined)"));
+  assert.ok(regBackend.includes("'Member_Since','PreferredName','Gender','DisplayNameZh'"));
+  assert.ok(regBackend.includes('const nameZh = regResolveDisplayNameZh_(m, sourceNameZh);'));
+  assert.ok(regBackend.includes('regOverlayDisplayFieldsFromRows_(mi.byId || {}, auth.ms && auth.ms.dataRows)'));
+  assert.ok(!regBackend.includes("set('DisplayNameZh'"));
+});
+
 test('Delete check-in reauthentication always binds a scan action', () => {
   const html = read('index.html');
   assert.ok(html.includes('id="btnScanUndo"'));
@@ -766,18 +798,18 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-28.staff107';"));
-  assert.ok(liveBackend.includes('* v2026-08-28.staff107'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-28.staff108';"));
+  assert.ok(liveBackend.includes('* v2026-08-28.staff108'));
   assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-28.107'));
   assert.ok(liveUi.includes('ui staff-ui-2026-08-28.107'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-23.admin121';"));
-  assert.ok(adminBackend.includes('* v2026-08-23.admin121'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-28.admin122';"));
+  assert.ok(adminBackend.includes('* v2026-08-28.admin122'));
   assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-23.123'));
   assert.ok(adminUi.includes('ui admin2-ui-2026-08-23.123'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-23.reg123';"));
-  assert.ok(regBackend.includes('* v2026-08-23.reg123'));
-  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-23.121'));
-  assert.ok(regUi.includes('ui reg2-ui-2026-08-23.121'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-28.reg124';"));
+  assert.ok(regBackend.includes('* v2026-08-28.reg124'));
+  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-28.122'));
+  assert.ok(regUi.includes('ui reg2-ui-2026-08-28.122'));
 });
