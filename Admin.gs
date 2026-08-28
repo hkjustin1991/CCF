@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-28.admin122
- * CHANGELOG: carry the optional exact Chinese display name through shared member indexes.
+ * v2026-08-28.admin123
+ * CHANGELOG: carry the optional exact Chinese display name through every serving-rota payload.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-28.admin122';
+const ADMIN_VERSION = '2026-08-28.admin123';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -3205,15 +3205,17 @@ function admin_memberLabelCompact_(m){
   const id = String((m && m.id) || '').trim().toUpperCase();
   const pref = String((m && m.preferredName) || '').trim();
   const zh = String((m && m.nameZh) || '').trim();
+  const displayNameZh = String((m && m.displayNameZh) || '').trim();
   const en = String((m && m.nameEn) || '').trim();
   const fallback = [en, zh].filter(Boolean).join(' / ');
-  const hasName = !!(pref || fallback || zh || en);
-  const display = pref || fallback || zh || en || '⚠️ 找不到會員姓名 / Member name not found';
+  const hasName = !!(displayNameZh || pref || fallback || zh || en);
+  const display = displayNameZh || pref || fallback || zh || en || '⚠️ 找不到會員姓名 / Member name not found';
   const isMinor = !!(m && m.isMinor);
   const prefix = isMinor ? '🧒 ' : '';
   return {
     id: id,
     nameZh: zh,
+    displayNameZh: displayNameZh,
     nameEn: en,
     preferredName: pref,
     isMinor: isMinor,
@@ -4068,6 +4070,7 @@ function admin_getServingPlanMatrix_(events){
           memberId: canonicalId || '',
           rawValue: token,
           nameZh: String(member.nameZh || ''),
+          displayNameZh: String(member.displayNameZh || ''),
           nameEn: String(member.nameEn || ''),
           preferredName: String(member.preferredName || ''),
           isMinor: !!member.isMinor,

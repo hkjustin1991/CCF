@@ -160,6 +160,8 @@ test('one optional DisplayNameZh replaces the final Chinese label without changi
   assert.equal(context.regResolveDisplayNameZh_({ gender:'FEMALE', displayNameZh:'袁師母' }, '麥潔儀'), '袁師母');
   assert.equal(context.regResolveDisplayNameZh_({ gender:'MALE', DisplayNameZh:'袁牧師' }, '袁榮業'), '袁牧師');
   assert.equal(context.regResolveDisplayNameZh_({ gender:'FEMALE' }, '王師母'), '王師母');
+  assert.equal(context.regResolveRotaDisplayNameZh_({ gender:'FEMALE', displayNameZh:'袁師母' }, '麥潔儀'), '袁師母');
+  assert.equal(context.regResolveRotaDisplayNameZh_({ gender:'FEMALE' }, '麥潔儀'), '麥潔儀');
 
   const byId = {
     CCF0201:{ nameZh:'麥潔儀', nameEn:'Vienna Mak', gender:'FEMALE', displayNameZh:'袁師母' },
@@ -167,20 +169,38 @@ test('one optional DisplayNameZh replaces the final Chinese label without changi
   };
   assert.equal(context.reg_resolveExportDisplayNameZh_({ memberId:'CCF0201' }, byId, []), '袁師母');
   assert.equal(context.reg_resolveExportDisplayNameZh_({ memberId:'CCF0202' }, byId, []), '李小明弟兄');
+  assert.deepEqual(JSON.parse(JSON.stringify(context.reg_publicRotaMemberLabel_({
+    memberId:'CCF0201', nameZh:'麥潔儀', displayNameZh:'袁師母', nameEn:'Vienna Mak'
+  }))), { textZh:'袁師母', textEn:'Vienna Mak', textPreferred:'袁師母' });
+  assert.equal(context.regResolveRotaReferenceDisplayNameZh_('麥潔儀', byId), '袁師母');
   assert.equal(context.regNameHasDisplayTitleZh_('王師母'), true);
   const cached = { CCF0201:{ id:'CCF0201', displayNameZh:'麥潔儀姊妹', gender:'FEMALE' } };
   context.regOverlayDisplayFieldsFromRows_(cached, [{ ID:'CCF0201', DisplayNameZh:'袁師母', Gender:'FEMALE', NameZh:'麥潔儀' }]);
   assert.equal(cached.CCF0201.displayNameZh, '袁師母');
   assert.equal(cached.CCF0201.nameZh, '麥潔儀');
 
+  const adminContext = appsScriptContext();
+  vm.runInContext(read('Admin.gs'), adminContext, { filename:'Admin.gs' });
+  assert.equal(adminContext.admin_memberLabelCompact_({
+    id:'CCF0201', nameZh:'麥潔儀', nameEn:'Vienna Mak', preferredName:'Vienna', displayNameZh:'袁師母'
+  }).label, 'CCF0201 · 袁師母');
+
   const liveBackend = read('Code.gs');
   const adminBackend = read('Admin.gs');
+  const adminUi = read('Admin2.html');
   const regBackend = read('Reg.gs');
+  const regUi = read('Reg2.html');
   assert.ok(liveBackend.includes("'DisplayNameZh',"));
+  assert.ok(liveBackend.includes('m.displayNameZh || m.nameZh || m.nameEn || memberId'));
   assert.ok(adminBackend.includes("displayNameZh: (col.DisplayNameZh!==undefined)"));
+  assert.ok(adminBackend.includes("displayNameZh: String(member.displayNameZh || '')"));
+  assert.ok(adminUi.includes('o.displayNameZh || o.nameZh'));
   assert.ok(regBackend.includes("'Member_Since','PreferredName','Gender','DisplayNameZh'"));
   assert.ok(regBackend.includes('const nameZh = regResolveDisplayNameZh_(m, sourceNameZh);'));
+  assert.ok(regBackend.includes('regResolveRotaReferenceDisplayNameZh_(sermon.speaker, membersById)'));
+  assert.ok(regBackend.includes('entry.displayNameZh || entry.preferredName || entry.nameZh'));
   assert.ok(regBackend.includes('regOverlayDisplayFieldsFromRows_(mi.byId || {}, auth.ms && auth.ms.dataRows)'));
+  assert.ok(regUi.includes("m.displayNameZh||m.nameZh||''"));
   assert.ok(!regBackend.includes("set('DisplayNameZh'"));
 });
 
@@ -798,18 +818,18 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-28.staff108';"));
-  assert.ok(liveBackend.includes('* v2026-08-28.staff108'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-28.staff109';"));
+  assert.ok(liveBackend.includes('* v2026-08-28.staff109'));
   assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-28.107'));
   assert.ok(liveUi.includes('ui staff-ui-2026-08-28.107'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-28.admin122';"));
-  assert.ok(adminBackend.includes('* v2026-08-28.admin122'));
-  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-23.123'));
-  assert.ok(adminUi.includes('ui admin2-ui-2026-08-23.123'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-28.admin123';"));
+  assert.ok(adminBackend.includes('* v2026-08-28.admin123'));
+  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-28.124'));
+  assert.ok(adminUi.includes('ui admin2-ui-2026-08-28.124'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-28.reg124';"));
-  assert.ok(regBackend.includes('* v2026-08-28.reg124'));
-  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-28.122'));
-  assert.ok(regUi.includes('ui reg2-ui-2026-08-28.122'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-28.reg125';"));
+  assert.ok(regBackend.includes('* v2026-08-28.reg125'));
+  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-28.123'));
+  assert.ok(regUi.includes('ui reg2-ui-2026-08-28.123'));
 });

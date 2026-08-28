@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-28.reg124
- * CHANGELOG: let one optional DisplayNameZh value replace the final gender-derived Chinese display name.
+ * v2026-08-28.reg125
+ * CHANGELOG: apply DisplayNameZh consistently to public, admin-fed and member-facing rota outputs.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-28.reg124';
+const REG_VERSION = '2026-08-28.reg125';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -116,7 +116,7 @@ function reg_publicRotaMemberLabel_(entry){
   const e = entry || {};
   const memberId = String(e.memberId || '').trim().toUpperCase();
   if (memberId){
-    const zh = String(e.nameZh || '').trim();
+    const zh = String(e.displayNameZh || e.nameZh || '').trim();
     const en = String(e.nameEn || '').trim();
     const preferred = String(e.preferredName || '').trim();
     return {
@@ -177,6 +177,8 @@ function api_public_rota_view(password, weeks){
     const weekCount = (Number(weeks) === 12) ? 12 : 8;
     const events = reg_publicRotaNextWeeksEvents_(from, weekCount);
     const matrix = admin_getServingPlanMatrix_(events);
+    const membersIndex = admin_getMembersIndex_() || {};
+    const membersById = membersIndex.byId || {};
     const eventKeys = (matrix.events || []).map(function(ev){ return String(ev.eventKey || '').trim(); }).filter(Boolean);
     const sermonMap = admin_getSermonInfoForMonth_(eventKeys);
 
@@ -281,7 +283,7 @@ function api_public_rota_view(password, weeks){
         eventKey: eventKey,
         dateYmd: String(ev.dateYmd || '').trim(),
         sermonTitle: String(sermon.sermonTitle || '').trim() || '-',
-        speaker: String(sermon.speaker || '').trim() || '-',
+        speaker: regResolveRotaReferenceDisplayNameZh_(sermon.speaker, membersById) || '-',
         sermonPassageZh: sermonPassageZh,
         sermonPassageEn: reg_publicRotaPassageEn_(sermonPassageZh) || sermonPassageZh,
         responsePassageZh: responsePassageZh,
@@ -354,7 +356,7 @@ function api_public_serving_rota(password){
       if (admin_isServingNaValue_(raw) || admin_isServingClosedValue_(raw)){
         return { text:'-', isVacancy:false };
       }
-      const display = String((entry && (entry.preferredName || entry.nameZh || entry.nameEn || entry.memberId)) || '').trim();
+      const display = String((entry && (entry.displayNameZh || entry.preferredName || entry.nameZh || entry.nameEn || entry.memberId)) || '').trim();
       return display ? { text:display, isVacancy:false } : { text:'', isVacancy:true };
     }
 
@@ -1370,6 +1372,31 @@ function regResolveDisplayNameZh_(member, fallbackNameZh){
   return base;
 }
 
+// Rota views keep their existing no-title fallback, but an exact sheet value
+// always supersedes the ordinary member name.
+function regResolveRotaDisplayNameZh_(member, fallbackNameZh){
+  const m = member || {};
+  return String(m.displayNameZh || m.DisplayNameZh || fallbackNameZh || m.nameZh || m.NameZh || '').trim();
+}
+
+function regResolveRotaReferenceDisplayNameZh_(value, byId){
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const members = byId || {};
+  const directId = raw.toUpperCase();
+  const direct = members[directId] || null;
+  if (direct) return regResolveRotaDisplayNameZh_(direct, raw) || raw;
+
+  const hit = Object.keys(members).find(function(mid){
+    const m = members[mid] || {};
+    return raw === String(m.displayNameZh || '').trim()
+      || raw === String(m.nameZh || '').trim()
+      || raw === String(m.nameEn || '').trim()
+      || raw === String(m.preferredName || '').trim();
+  });
+  return hit ? (regResolveRotaDisplayNameZh_(members[hit], raw) || raw) : raw;
+}
+
 function regNameHasDisplayTitleZh_(value){
   return /(牧師|牧师|師母|师母|傳道|传道|長老|长老|執事|执事|弟兄|姊妹|姐妹)$/.test(String(value || '').trim());
 }
@@ -1776,7 +1803,8 @@ function api_reg_public_rota_public(fromDate){
       const vals = cellList.map(function(it){
         const raw = String((it && it.rawValue) || '').trim();
         if (!raw) return '';
-        return normalizeDisplay_(raw);
+        const display = String((it && (it.displayNameZh || it.nameZh || it.preferredName || it.nameEn)) || '').trim();
+        return normalizeDisplay_(display || raw);
       }).filter(function(v){ return !!v && v !== '-'; });
       if (!vals.length) return '-';
       return vals.join(', ');
@@ -2676,6 +2704,7 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
   const effectiveMember = cachedMember ? {
     id: cachedMember.id,
     nameZh: cachedMember.nameZh || '',
+    displayNameZh: cachedMember.displayNameZh || '',
     nameEn: cachedMember.nameEn || '',
     preferredName: cachedMember.preferredName || '',
     servingGroups: reg_mergeServingGroups_(cachedMember.servingGroups || [], rowServing.serving || []),
@@ -2683,6 +2712,7 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
   } : {
     id: auth.parsed.id,
     nameZh: String((auth.row && auth.row.NameZh) || '').trim(),
+    displayNameZh: String((auth.row && auth.row.DisplayNameZh) || '').trim(),
     nameEn: String((auth.row && auth.row.NameEn) || '').trim(),
     preferredName: String((auth.row && auth.row.PreferredName) || '').trim(),
     servingGroups: rowServing.serving || [],
@@ -2799,6 +2829,7 @@ function reg_buildWorshipPagePayload_(auth, includeMembers){
         return {
           id: m.id || id,
           nameZh: m.nameZh || '',
+          displayNameZh: m.displayNameZh || '',
           nameEn: m.nameEn || '',
           preferredName: m.preferredName || '',
           gender: m.gender || '',

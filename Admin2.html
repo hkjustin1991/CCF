@@ -12,9 +12,9 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-08-23.123
-  For Admin.gs: v2026-08-23.admin121
-  CHANGELOG: Logistics index, child-serving approval/pairing, names, and QR uploads.
+  UI VERSION TAG: admin2-ui-2026-08-28.124
+  For Admin.gs: v2026-08-28.admin123
+  CHANGELOG: prefer the sheet-maintained Chinese display name throughout serving-rota screens.
   ============================================================
   -->
 
@@ -424,7 +424,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-23.123</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-28.124</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -1976,6 +1976,7 @@ function eventDateYmdFromKey(ev){
       return renderServingPersonLabelHtml_({
         id: id,
         nameZh: entry.nameZh || '',
+        displayNameZh: entry.displayNameZh || '',
         nameEn: entry.nameEn || '',
         preferredName: entry.preferredName || '',
         isMinor: !!entry.isMinor
@@ -2088,7 +2089,7 @@ function eventDateYmdFromKey(ev){
     function servingPersonLines_(m){
       var o = m || {};
       var id = String(o.id || o.memberId || '').trim().toUpperCase();
-      var zh = String(o.nameZh || '').trim();
+      var zh = String(o.displayNameZh || o.nameZh || '').trim();
       var en = String(o.nameEn || '').trim();
       var isMinor = !!o.isMinor;
       if (!zh && !en){
@@ -2129,7 +2130,7 @@ function eventDateYmdFromKey(ev){
       var id = String(memberId||'').trim().toUpperCase();
       var m = memberMap[id];
       if (!m) return id || String(memberId||'');
-      var names = [String(m.nameZh||'').trim(), String(m.nameEn||'').trim()].filter(Boolean).join(' / ');
+      var names = [String(m.displayNameZh||m.nameZh||'').trim(), String(m.nameEn||'').trim()].filter(Boolean).join(' / ');
       return m.id + (names ? (' ('+names+')') : '');
     }
     function buildHolidayConflictDetailHtml_(conflicts, memberMap){

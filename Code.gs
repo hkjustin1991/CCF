@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-28.staff108
- * CHANGELOG: support an optional exact Chinese display-name override without changing existing member rows.
+ * v2026-08-28.staff109
+ * CHANGELOG: apply the optional exact Chinese display name to the legacy public-rota output.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-28.staff108';
+const APP_VERSION = '2026-08-28.staff109';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -317,7 +317,7 @@ function api_rota_public_current_next_month(token){
         const matched = String(t || '').trim().match(/CCF\d{4}/i);
         const memberId = matched ? matched[0].toUpperCase() : '';
         const m = memberId ? membersById[memberId] : null;
-        const display = m ? (m.nameZh || m.nameEn || memberId) : (memberId || String(t || '').trim());
+        const display = m ? (m.displayNameZh || m.nameZh || m.nameEn || memberId) : (memberId || String(t || '').trim());
         return rotaPublicLabel_(display);
       }).filter(Boolean);
 
