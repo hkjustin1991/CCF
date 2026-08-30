@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-06-13.staff102
- * CHANGELOG: version alignment for responsiveness/admin handoff patch set.
+ * v2026-08-30.staff110
+ * CHANGELOG: prevent Live login E500 by chunking the member index cache and keeping login read-only.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-06-13.staff102';
+const APP_VERSION = '2026-08-30.staff110';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -36,8 +36,13 @@ const EXTERNAL_SCANNER_ORIGIN_DEFAULT = 'https://hkjustin1991.github.io';
 // Sheets
 const CHECKINS_SHEET_NAME_PRIMARY = 'Checkins';
 const CHECKINS_SHEET_NAME_LEGACY = 'CHECKINS';
+const CHECKINS_SCHEMA_CACHE_KEY = 'checkins_schema_staff_v2';
+const CHECKIN_HISTORY_CACHE_PREFIX = 'checkin_history_staff_v2_';
+const CHECKIN_HISTORY_CACHE_SECONDS = 60;
 const ACTIVITY_LOG_SHEET_NAME = 'Activity_log';
 const NEW_FRIEND_HANDLED_SHEET_NAME = 'NewFriendHandled';
+const NEW_FRIEND_HANDLED_INDEX_CACHE_KEY = 'newHandled_index_v1';
+var NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = null;
 
 // Healthcheck (self-test) sheet (NEW)
 const HEALTHCHECK_SHEET_NAME = 'Healthcheck';
@@ -47,12 +52,20 @@ const MEMBERS_HEADERS_REQUIRED = [
   'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
 ];
 
+// CacheService accepts at most 100 KB per value. Keep parts below that hard limit.
+const LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY = 'membersIndex_staff_v3_manifest';
+const LIVE_MEMBERS_INDEX_CACHE_PART_PREFIX = 'membersIndex_staff_v3_part_';
+const LIVE_MEMBERS_INDEX_CACHE_TTL_SECONDS = 300;
+const LIVE_MEMBERS_INDEX_CACHE_PART_MAX_BYTES = 85000;
+const LIVE_MEMBERS_INDEX_CACHE_MAX_PARTS = 64;
+
 // Statuses
 const STATUS_DISABLED = 'DISABLED';
 const STATUS_ACTIVE = 'ACTIVE';
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROVISIONAL = 'PROVISIONAL';
 const STATUS_STAFF = 'STAFF';
+const STATUS_DEACON = 'DEACON';
 const STATUS_ADMIN = 'ADMIN';
 const STATUS_HELPER = 'HELPER';
 const STATUS_TEMP = 'TEMP';
@@ -60,11 +73,11 @@ const STATUS_TEMP = 'TEMP';
 // Check-in allowed
 const ALLOWED_STATUSES_FOR_CHECKIN = [
   STATUS_ACTIVE, STATUS_PENDING, STATUS_PROVISIONAL,
-  STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP
+  STATUS_STAFF, STATUS_DEACON, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP
 ];
 
 // Staff portal login allowed
-const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP];
+const ALLOWED_STATUSES_FOR_PORTAL = [STATUS_STAFF, STATUS_DEACON, STATUS_ADMIN, STATUS_HELPER, STATUS_TEMP];
 
 // Privilege expiry configuration
 const HELPER_EXPIRY_DAYS = 31;
@@ -75,7 +88,12 @@ const MEMBERS_OPTIONAL_HEADERS = [
   'VRM','VRM2',
   'RoleExpires',
   'PreferredName',
+  'DisplayNameZh',
   'IsMinor',
+  'MinorServingApprovedGroups',
+  'MinorServingSelfSignup',
+  'MinorServingApprovedBy',
+  'MinorServingApprovedAt',
   'ServingGroups',
   'ServingGLGroups',
   'AwayFrom1',
@@ -137,16 +155,73 @@ function doGet(e) {
   if (mode === 'reg') return doGetReg_(e); // Reg.gs
   if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
   if (mode === 'rota') return doGetRotaPublic_(e);
+  if (mode === 'vote') return doGetVote_(e); // Vote.gs
+  if (mode === 'vote-review') return doGetVoteReview_(e); // Vote.gs — restricted, unlinked exception route
 
+  return renderLivePortal_(null);
+}
+
+function getLiveWebAppUrl_(){
+  try{
+    return String(ScriptApp.getService().getUrl() || '').trim();
+  }catch(e){
+    return '';
+  }
+}
+
+function safeInlineJson_(value){
+  return JSON.stringify(value == null ? null : value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function renderLivePortal_(scannerReturn){
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   const scannerCfg = getExternalScannerConfig_();
   t.EXTERNAL_SCANNER_URL = scannerCfg.url;
   t.EXTERNAL_SCANNER_ORIGIN = scannerCfg.origin;
   t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
+  t.WEB_APP_URL = getLiveWebAppUrl_();
+  t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
   return t.evaluate()
     .setTitle('CCF Live Service Portal')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function scannerReturnFromPost_(e){
+  const p = (e && e.parameter) ? e.parameter : {};
+  if (String(p.scannerReturn || '') !== '1') return null;
+
+  const type = String(p.type || '').trim();
+  const state = String(p.state || '').trim().toLowerCase();
+  const flow = String(p.flow || '').trim().toLowerCase();
+  const returnView = String(p.returnView || '').trim();
+  const allowedTypes = ['CCF_QR_RESULT','CCF_QR_CANCEL','CCF_QR_ERROR'];
+
+  if (allowedTypes.indexOf(type) < 0 || !/^[a-f0-9]{32}$/.test(state) || flow !== 'checkin' || returnView !== 'mobileScan') {
+    return {
+      type:'CCF_QR_ERROR', state:state, flow:'checkin', returnView:'mobileScan',
+      detail:'Invalid scanner return.'
+    };
+  }
+
+  const result = { type:type, state:state, flow:flow, returnView:returnView };
+  if (type === 'CCF_QR_RESULT') {
+    const payload = String(p.payload || '').trim();
+    const parsed = parseQrPayloadStrict_(payload);
+    if (!parsed.ok) {
+      result.type = 'CCF_QR_ERROR';
+      result.detail = 'Invalid QR result.';
+    } else {
+      result.payload = payload;
+    }
+  } else {
+    result.detail = String(p.detail || '').slice(0, 300);
+  }
+  return result;
 }
 
 
@@ -249,7 +324,7 @@ function api_rota_public_current_next_month(token){
         const matched = String(t || '').trim().match(/CCF\d{4}/i);
         const memberId = matched ? matched[0].toUpperCase() : '';
         const m = memberId ? membersById[memberId] : null;
-        const display = m ? (m.nameZh || m.nameEn || memberId) : (memberId || String(t || '').trim());
+        const display = m ? (m.displayNameZh || m.nameZh || m.nameEn || memberId) : (memberId || String(t || '').trim());
         return rotaPublicLabel_(display);
       }).filter(Boolean);
 
@@ -318,6 +393,9 @@ function getExternalScannerConfig_(){
 
 function doPost(e) {
   try {
+    const scannerReturn = scannerReturnFromPost_(e);
+    if (scannerReturn) return renderLivePortal_(scannerReturn);
+
     const raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
     const body = JSON.parse(raw);
     const fn = String(body.fn || '').trim();
@@ -415,9 +493,13 @@ function isOptedOut_(optOutRaw){
   return ['1','Y','YES','TRUE','OPTOUT'].includes(v);
 }
 
+function isAdminLevel_(st){
+  st = normalizeStatus_(st);
+  return (st === STATUS_DEACON || st === STATUS_ADMIN);
+}
 function isPrivilegedStaff_(st){
   st = normalizeStatus_(st);
-  return (st === STATUS_STAFF || st === STATUS_ADMIN);
+  return (st === STATUS_STAFF || isAdminLevel_(st));
 }
 function isPortalUserAllowed_(st){
   st = normalizeStatus_(st);
@@ -525,13 +607,148 @@ function ensureMembersOptionalColumns_(){
   }
 }
 
+function membersIndexUtf8ByteLength_(value){
+  const s = String(value || '');
+  let bytes = 0;
+  for (let i = 0; i < s.length; i++){
+    const code = s.charCodeAt(i);
+    if (code < 0x80){
+      bytes += 1;
+    } else if (code < 0x800){
+      bytes += 2;
+    } else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length && s.charCodeAt(i + 1) >= 0xDC00 && s.charCodeAt(i + 1) <= 0xDFFF){
+      bytes += 4;
+      i++;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function splitMembersIndexCacheValue_(value, maxBytes){
+  const s = String(value || '');
+  const limit = Math.max(4, Number(maxBytes || 0));
+  const parts = [];
+  let start = 0;
+  let i = 0;
+  let bytes = 0;
+
+  while (i < s.length){
+    const code = s.charCodeAt(i);
+    let units = 1;
+    let charBytes = 3;
+    if (code < 0x80){
+      charBytes = 1;
+    } else if (code < 0x800){
+      charBytes = 2;
+    } else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length && s.charCodeAt(i + 1) >= 0xDC00 && s.charCodeAt(i + 1) <= 0xDFFF){
+      units = 2;
+      charBytes = 4;
+    }
+
+    if (bytes > 0 && bytes + charBytes > limit){
+      parts.push(s.slice(start, i));
+      start = i;
+      bytes = 0;
+      continue;
+    }
+    bytes += charBytes;
+    i += units;
+  }
+
+  if (start < s.length) parts.push(s.slice(start));
+  return parts.length ? parts : [''];
+}
+
+function getMembersIndexCacheManifest_(cache){
+  try{
+    const raw = cache.get(LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY);
+    if (!raw) return null;
+    const manifest = JSON.parse(raw);
+    const keys = manifest && Array.isArray(manifest.keys) ? manifest.keys : [];
+    if (Number(manifest.version) !== 3 || !keys.length || keys.length > LIVE_MEMBERS_INDEX_CACHE_MAX_PARTS) return null;
+    if (!keys.every(function(key){
+      const k = String(key || '');
+      return k.indexOf(LIVE_MEMBERS_INDEX_CACHE_PART_PREFIX) === 0 && k.length < 250;
+    })) return null;
+    return manifest;
+  }catch(e){
+    return null;
+  }
+}
+
+function readMembersIndexCache_(cache){
+  try{
+    const manifest = getMembersIndexCacheManifest_(cache);
+    if (!manifest) return null;
+
+    let serialized = '';
+    for (let i = 0; i < manifest.keys.length; i++){
+      const part = cache.get(manifest.keys[i]);
+      if (part === null || part === undefined) return null;
+      serialized += String(part);
+    }
+    if (manifest.bytes && membersIndexUtf8ByteLength_(serialized) !== Number(manifest.bytes)) return null;
+
+    const payload = JSON.parse(serialized);
+    if (!payload || typeof payload !== 'object' || !payload.byId || !payload.cols) return null;
+    return payload;
+  }catch(e){
+    return null;
+  }
+}
+
+function membersIndexCacheGeneration_(){
+  try{
+    const uuid = String(Utilities.getUuid() || '').replace(/[^A-Za-z0-9]/g, '');
+    if (uuid) return uuid;
+  }catch(e){}
+  return String(Date.now()) + String(Math.random()).slice(2);
+}
+
+function removeMembersIndexCacheParts_(cache, manifest){
+  if (!manifest || !Array.isArray(manifest.keys)) return;
+  manifest.keys.forEach(function(key){
+    try{ cache.remove(String(key || '')); }catch(e){}
+  });
+}
+
+function writeMembersIndexCache_(cache, payload){
+  const previous = getMembersIndexCacheManifest_(cache);
+  const serialized = JSON.stringify(payload);
+  const parts = splitMembersIndexCacheValue_(serialized, LIVE_MEMBERS_INDEX_CACHE_PART_MAX_BYTES);
+  if (!parts.length || parts.length > LIVE_MEMBERS_INDEX_CACHE_MAX_PARTS) return false;
+
+  const generation = membersIndexCacheGeneration_();
+  const keys = parts.map(function(part, i){
+    return LIVE_MEMBERS_INDEX_CACHE_PART_PREFIX + generation + '_' + i;
+  });
+
+  try{
+    for (let i = 0; i < parts.length; i++){
+      cache.put(keys[i], parts[i], LIVE_MEMBERS_INDEX_CACHE_TTL_SECONDS);
+    }
+    cache.put(LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY, JSON.stringify({
+      version:3,
+      keys:keys,
+      bytes:membersIndexUtf8ByteLength_(serialized)
+    }), LIVE_MEMBERS_INDEX_CACHE_TTL_SECONDS);
+  }catch(e){
+    removeMembersIndexCacheParts_(cache, { keys:keys });
+    return false;
+  }
+
+  removeMembersIndexCacheParts_(cache, previous);
+  return true;
+}
+
 function getMembersIndex_(opts) {
   opts = opts || {};
   var ensureOptional = (opts.ensureOptional !== false);
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'membersIndex_staff_v1';
-  const cached = cache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
+  const cached = readMembersIndexCache_(cache);
+  if (cached) return cached;
 
   if (ensureOptional) ensureMembersOptionalColumns_();
 
@@ -559,6 +776,7 @@ function getMembersIndex_(opts) {
     const roleExpires = ('RoleExpires' in col) ? safeToDate_(row[col['RoleExpires']]) : null;
 
     const preferredName = ('PreferredName' in col) ? String(row[col['PreferredName']] || '').trim() : '';
+    const displayNameZh = ('DisplayNameZh' in col) ? String(row[col['DisplayNameZh']] || '').trim() : '';
     const isMinorRaw = ('IsMinor' in col) ? String(row[col['IsMinor']] || '').trim().toUpperCase() : '';
     const isMinor = (isMinorRaw === 'YES');
     const servingGroups = ('ServingGroups' in col) ? parseGroupsCsv_(row[col['ServingGroups']]) : [];
@@ -573,7 +791,12 @@ function getMembersIndex_(opts) {
       nameZh: String(row[col['NameZh']] || '').trim(),
       nameEn: String(row[col['NameEn']] || '').trim(),
       preferredName: preferredName,
+      displayNameZh: displayNameZh,
       isMinor: !!isMinor,
+      minorServingApprovedGroups: ('MinorServingApprovedGroups' in col) ? parseGroupsCsv_(row[col['MinorServingApprovedGroups']]) : [],
+      minorServingSelfSignup: ('MinorServingSelfSignup' in col) ? String(row[col['MinorServingSelfSignup']] || '').trim().toUpperCase() === 'YES' : false,
+      minorServingApprovedBy: ('MinorServingApprovedBy' in col) ? String(row[col['MinorServingApprovedBy']] || '').trim() : '',
+      minorServingApprovedAt: ('MinorServingApprovedAt' in col) ? String(row[col['MinorServingApprovedAt']] || '').trim() : '',
       email: String(row[col['Email']] || '').trim(),
       mobile: String(row[col['Mobile']] || '').trim(),
       status: String(row[col['Status']] || '').trim(),
@@ -589,12 +812,27 @@ function getMembersIndex_(opts) {
   }
 
   const payload = { byId, sheetName: sh.getName(), cols: col, hasVRM };
-  cache.put(cacheKey, JSON.stringify(payload), 300);
+  // Cache failures must never block login or check-in; the live payload remains usable uncached.
+  writeMembersIndexCache_(cache, payload);
   return payload;
 }
 
+function clearLiveMembersIndexCache_(){
+  try{
+    const cache = CacheService.getScriptCache();
+    removeMembersIndexCacheParts_(cache, getMembersIndexCacheManifest_(cache));
+    cache.remove(LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY);
+    cache.remove('membersIndex_staff_v1');
+    cache.remove('membersIndex_staff_v2');
+    cache.remove('membersIndex_v6');
+  }catch(e){}
+}
+
 function clearMembersIndexCache_(){
-  try{ CacheService.getScriptCache().remove('membersIndex_staff_v1'); }catch(e){}
+  clearLiveMembersIndexCache_();
+  try{
+    if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
+  }catch(e){}
 }
 
 /******** System sheets ********/
@@ -623,6 +861,7 @@ function getCheckinsSheet_() {
   const ss = openSs_();
   let sh = ss.getSheetByName(CHECKINS_SHEET_NAME_PRIMARY);
   if (!sh) sh = ss.getSheetByName(CHECKINS_SHEET_NAME_LEGACY);
+  const cache = CacheService.getScriptCache();
 
   if (!sh) {
     sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
@@ -636,8 +875,14 @@ function getCheckinsSheet_() {
       'DeviceId','UserAgent'
     ]]);
     sh.getRange(1, 1, 1, 14).setFontWeight('bold');
+    try{ cache.put(CHECKINS_SCHEMA_CACHE_KEY, '1', 6 * 60 * 60); }catch(e){}
   } else {
-    ensureCheckinsSheetColumns_(sh);
+    let schemaReady = false;
+    try{ schemaReady = cache.get(CHECKINS_SCHEMA_CACHE_KEY) === '1'; }catch(e){}
+    if (!schemaReady){
+      ensureCheckinsSheetColumns_(sh);
+      try{ cache.put(CHECKINS_SCHEMA_CACHE_KEY, '1', 6 * 60 * 60); }catch(e){}
+    }
   }
   return sh;
 }
@@ -788,24 +1033,36 @@ function ensureNewFriendHandledSheet_(){
 function newFriendHandledKey_(eventKey, memberId){
   return 'newHandled_' + String(eventKey||'').trim() + '_' + String(memberId||'').trim().toUpperCase();
 }
-function isNewFriendSuppressed_(eventKey, memberId){
-  const key = newFriendHandledKey_(eventKey, memberId);
+function getNewFriendHandledIndex_(){
+  if (NEW_FRIEND_HANDLED_RUNTIME_INDEX_) return NEW_FRIEND_HANDLED_RUNTIME_INDEX_;
+  const cache = CacheService.getScriptCache();
   try{
-    if (CacheService.getScriptCache().get(key)) return true;
+    const cached = cache.get(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY);
+    if (cached){
+      NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = JSON.parse(cached) || {};
+      return NEW_FRIEND_HANDLED_RUNTIME_INDEX_;
+    }
   }catch(e){}
+  const index = {};
   const sh = ensureNewFriendHandledSheet_();
   const lastRow = sh.getLastRow();
-  if (lastRow < 2) return false;
-  const data = sh.getRange(2,1,lastRow-1,3).getValues();
+  if (lastRow >= 2){
+    const data = sh.getRange(2,1,lastRow-1,3).getValues();
+    data.forEach(function(row){
+      const ev = String((row && row[1]) || '').trim();
+      const mid = String((row && row[2]) || '').trim().toUpperCase();
+      if (ev && mid) index[ev + '|' + mid] = true;
+    });
+  }
+  NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = index;
+  try{ cache.put(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY, JSON.stringify(index), 5 * 60); }catch(e){}
+  return index;
+}
+function isNewFriendSuppressed_(eventKey, memberId){
   const ev = String(eventKey||'').trim();
   const mid = String(memberId||'').trim().toUpperCase();
-  for (let i=0;i<data.length;i++){
-    if (String(data[i][1]||'').trim() === ev && String(data[i][2]||'').trim().toUpperCase() === mid){
-      try{ CacheService.getScriptCache().put(key, '1', 12 * 60 * 60); }catch(e){}
-      return true;
-    }
-  }
-  return false;
+  if (!ev || !mid) return false;
+  return !!getNewFriendHandledIndex_()[ev + '|' + mid];
 }
 function setNewFriendSuppressed_(eventKey, memberId, staff){
   const sh = ensureNewFriendHandledSheet_();
@@ -817,10 +1074,22 @@ function setNewFriendSuppressed_(eventKey, memberId, staff){
     staff && staff.nameZh ? staff.nameZh : '',
     staff && staff.nameEn ? staff.nameEn : ''
   ]);
-  try{ CacheService.getScriptCache().put(newFriendHandledKey_(eventKey, memberId), '1', 12 * 60 * 60); }catch(e){}
+  const ev = String(eventKey||'').trim();
+  const mid = String(memberId||'').trim().toUpperCase();
+  if (NEW_FRIEND_HANDLED_RUNTIME_INDEX_ && ev && mid) NEW_FRIEND_HANDLED_RUNTIME_INDEX_[ev + '|' + mid] = true;
+  try{
+    const cache = CacheService.getScriptCache();
+    cache.remove(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY);
+    cache.put(newFriendHandledKey_(eventKey, memberId), '1', 12 * 60 * 60);
+  }catch(e){}
 }
 function clearNewFriendSuppressed_(eventKey, memberId){
-  try{ CacheService.getScriptCache().remove(newFriendHandledKey_(eventKey, memberId)); }catch(e){}
+  NEW_FRIEND_HANDLED_RUNTIME_INDEX_ = null;
+  try{
+    const cache = CacheService.getScriptCache();
+    cache.remove(newFriendHandledKey_(eventKey, memberId));
+    cache.remove(NEW_FRIEND_HANDLED_INDEX_CACHE_KEY);
+  }catch(e){}
   const sh = ensureNewFriendHandledSheet_();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return;
@@ -843,6 +1112,64 @@ function hasAnyCheckinEver_(sh, memberId){
   const rng = sh.getRange(2, 3, lastRow - 1, 1); // MemberId col
   const hit = rng.createTextFinder(id).matchEntireCell(true).findNext();
   return !!hit;
+}
+
+/**
+ * New Friend is an event-level state, not a one-response state. A non-staff
+ * member remains new for their earliest attended Sunday service, including a
+ * repeat scan during that service, until staff explicitly marks it handled.
+ */
+function newFriendEventSortKey_(eventKey){
+  const ev = String(eventKey || '').trim();
+  const m = ev.match(/^SundayService_(\d{4}-\d{2}-\d{2})$/);
+  return m ? m[1] : ev;
+}
+function newFriendEarlierEvent_(a, b){
+  const av = String(a || '').trim();
+  const bv = String(b || '').trim();
+  if (!av) return bv;
+  if (!bv) return av;
+  return newFriendEventSortKey_(av) <= newFriendEventSortKey_(bv) ? av : bv;
+}
+function firstAttendedEventForMember_(sh, memberId){
+  if (!sh || typeof sh.getLastRow !== 'function') return '';
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return '';
+  const id = String(memberId || '').trim().toUpperCase();
+  if (!id) return '';
+  const rows = sh.getRange(2, 2, lastRow - 1, 2).getValues();
+  let first = '';
+  rows.forEach(function(row){
+    const ev = String((row && row[0]) || '').trim();
+    const mid = String((row && row[1]) || '').trim().toUpperCase();
+    if (mid !== id || !ev) return;
+    first = newFriendEarlierEvent_(first, ev);
+  });
+  return first;
+}
+function classifyNewFriendFromFirstEvent_(eventKey, memberId, status, firstEventKey){
+  const ev = String(eventKey || '').trim();
+  const id = String(memberId || '').trim().toUpperCase();
+  const st = normalizeStatus_(status);
+  if (isPrivilegedStaff_(st)){
+    return { isNewFriend:false, reason:'STAFF_EXCLUDED', firstEventKey:String(firstEventKey || '') };
+  }
+  const first = String(firstEventKey || ev).trim();
+  if (first && first !== ev){
+    return { isNewFriend:false, reason:'PRIOR_ATTENDANCE', firstEventKey:first };
+  }
+  if (isNewFriendSuppressed_(ev, id)){
+    return { isNewFriend:false, reason:'SUPPRESSED', firstEventKey:first || ev };
+  }
+  return { isNewFriend:true, reason:'FIRST_EVENT', firstEventKey:first || ev };
+}
+function classifyNewFriend_(sh, eventKey, member, historyOptional){
+  const m = member || {};
+  const id = String(m.id || '').trim().toUpperCase();
+  const first = historyOptional && historyOptional.firstEventById
+    ? String(historyOptional.firstEventById[id] || '')
+    : firstAttendedEventForMember_(sh, id);
+  return classifyNewFriendFromFirstEvent_(eventKey, m.id, m.status, first || eventKey);
 }
 
 /******** Sessions ********/
@@ -868,7 +1195,12 @@ function requireSession_(token) {
 function api_ping(token){
   const sess = getSession_(token);
   if (!sess) return { ok:false };
-  return { ok:true, staff: sess.staff };
+  return { ok:true, staff: sess.staff, eventKey:getDefaultEventKey_() };
+}
+function api_get_checkin_context(token){
+  const auth = requireSession_(token);
+  if (!auth.ok) return auth;
+  return { ok:true, eventKey:getDefaultEventKey_() };
 }
 function api_logout(token){
   if (token) CacheService.getScriptCache().remove('sess_' + token);
@@ -907,13 +1239,13 @@ function api_login(input) {
   if (bypass && raw === bypass) {
     const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
     const token = createSession_(staff);
-    return { ok:true, token, staff };
+    return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
   }
 
   const parsed = parseQrPayloadStrict_(raw);
   if (!parsed.ok) return parsed;
 
-  const mi = getMembersIndex_();
+  const mi = getMembersIndex_({ ensureOptional:false });
   const m = mi.byId[parsed.id];
   if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
 
@@ -952,13 +1284,13 @@ function api_login(input) {
       }
       const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:stNow, isSuper:false };
       const token = createSession_(staff);
-      return { ok:true, token, staff };
+      return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
     }
   }
 
   const staff = { id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '', status:st, isSuper:false };
   const token = createSession_(staff);
-  return { ok:true, token, staff };
+  return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
 }
 
 function api_login_internal(input) {
@@ -967,7 +1299,7 @@ function api_login_internal(input) {
   if (bypass && raw === bypass) {
     const staff = { id:'SUPERUSER', nameZh:'SUPERUSER', nameEn:'SUPERUSER', status:'SUPERUSER', isSuper:true };
     const token = createSession_(staff);
-    return { ok:true, token, staff };
+    return { ok:true, token, staff, eventKey:getDefaultEventKey_() };
   }
   return { ok:false, code:'E401', zh:'請掃描你的個人 QR code 登入', en:'Please scan your personal QR code to log in.' };
 }
@@ -1006,33 +1338,138 @@ function api_log_scanner_e420(payload){
   }
 }
 
-/******** Check-in dedupe lookup ********/
-function findExistingCheckin_(sh, eventKey, memberId) {
-  const lastRow = sh.getLastRow();
-  if (lastRow < 2) return null;
+/******** Check-in history index + dedupe lookup ********/
+function checkinHistoryCacheKey_(eventKey){
+  return CHECKIN_HISTORY_CACHE_PREFIX + String(eventKey || '').trim().replace(/[^A-Za-z0-9_-]/g, '_');
+}
 
-  const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
-  for (let i = data.length - 1; i >= 0; i--) {
-    const row = data[i];
-    const ev = String(row[1] || '').trim();
-    const mid = String(row[2] || '').trim();
-    if (ev === eventKey && mid === memberId) {
+function checkinExistingFromRow_(row){
+  const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+  const emailTo = String(row[10] || '').trim();
+  const emailStatus = String(row[11] || '').trim();
+  return {
+    timeUk: fmtUk_(ts, 'HH:mm:ss'),
+    eventKey: String(row[1] || '').trim(),
+    handledBy: {
+      staffId: String(row[6] || ''),
+      nameZh: String(row[7] || ''),
+      nameEn: String(row[8] || '')
+    },
+    receiptId: String(row[9] || ''),
+    method: String(row[5] || ''),
+    emailStatus: emailStatus,
+    emailToMasked: emailTo ? maskEmail_(emailTo) : '',
+    emailUi: emailUiFromStatus_(emailStatus)
+  };
+}
+
+function buildCheckinHistoryIndex_(rows, eventKey, lastRow){
+  const evWanted = String(eventKey || '').trim();
+  const firstEventById = {};
+  const currentById = {};
+  let lastSignIn = null;
+
+  (rows || []).forEach(function(row){
+    const ev = String((row && row[1]) || '').trim();
+    const mid = String((row && row[2]) || '').trim().toUpperCase();
+    if (!mid) return;
+    if (ev) firstEventById[mid] = newFriendEarlierEvent_(firstEventById[mid], ev);
+    if (ev !== evWanted) return;
+
+    const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
+    const t = isNaN(ts.getTime()) ? 0 : ts.getTime();
+    const existing = checkinExistingFromRow_(row);
+    const entry = currentById[mid] || { latestT:-1, latestNameZh:'', latestNameEn:'', existing:null };
+
+    // Dedupe historically returns the bottom-most matching row.
+    entry.existing = existing;
+    if (t > entry.latestT){
+      entry.latestT = t;
+      entry.latestNameZh = String(row[3] || '');
+      entry.latestNameEn = String(row[4] || '');
+    }
+    currentById[mid] = entry;
+    lastSignIn = {
+      timeUk: existing.timeUk,
+      nameZh: String(row[3] || ''),
+      nameEn: String(row[4] || '')
+    };
+  });
+
+  return {
+    lastRow: Number(lastRow || 0),
+    firstEventById: firstEventById,
+    currentById: currentById,
+    lastSignIn: lastSignIn
+  };
+}
+
+function cacheCheckinHistoryIndex_(eventKey, index){
+  try{
+    CacheService.getScriptCache().put(
+      checkinHistoryCacheKey_(eventKey),
+      JSON.stringify(index),
+      CHECKIN_HISTORY_CACHE_SECONDS
+    );
+  }catch(e){}
+}
+
+function getCheckinHistoryIndex_(sh, eventKey){
+  const lastRow = sh.getLastRow();
+  const key = checkinHistoryCacheKey_(eventKey);
+  try{
+    const raw = CacheService.getScriptCache().get(key);
+    if (raw){
+      const cached = JSON.parse(raw);
+      if (cached && Number(cached.lastRow) === Number(lastRow)) return cached;
+    }
+  }catch(e){}
+
+  const rows = lastRow >= 2 ? sh.getRange(2, 1, lastRow - 1, 12).getValues() : [];
+  const index = buildCheckinHistoryIndex_(rows, eventKey, lastRow);
+  cacheCheckinHistoryIndex_(eventKey, index);
+  return index;
+}
+
+function updateCheckinHistoryIndexAfterAppend_(index, eventKey, row, appendedRowNumber){
+  const updated = index || buildCheckinHistoryIndex_([], eventKey, 1);
+  const ev = String((row && row[1]) || '').trim();
+  const mid = String((row && row[2]) || '').trim().toUpperCase();
+  if (ev && mid){
+    updated.firstEventById = updated.firstEventById || {};
+    updated.currentById = updated.currentById || {};
+    updated.firstEventById[mid] = newFriendEarlierEvent_(updated.firstEventById[mid], ev);
+    if (ev === String(eventKey || '').trim()){
       const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-      const emailTo = String(row[10] || '').trim();
-      const emailStatus = String(row[11] || '').trim();
-      return {
-        timeUk: fmtUk_(ts, 'HH:mm:ss'),
-        eventKey: ev,
-        handledBy: { staffId: String(row[6] || ''), nameZh: String(row[7] || ''), nameEn: String(row[8] || '') },
-        receiptId: String(row[9] || ''),
-        method: String(row[5] || ''),
-        emailStatus: emailStatus || '',
-        emailToMasked: emailTo ? maskEmail_(emailTo) : '',
-        emailUi: emailUiFromStatus_(emailStatus || '')
+      const t = isNaN(ts.getTime()) ? 0 : ts.getTime();
+      const existing = checkinExistingFromRow_(row);
+      updated.currentById[mid] = {
+        latestT:t,
+        latestNameZh:String(row[3] || ''),
+        latestNameEn:String(row[4] || ''),
+        existing:existing
+      };
+      updated.lastSignIn = {
+        timeUk:existing.timeUk,
+        nameZh:String(row[3] || ''),
+        nameEn:String(row[4] || '')
       };
     }
   }
-  return null;
+  updated.lastRow = Number(appendedRowNumber || updated.lastRow || 0);
+  cacheCheckinHistoryIndex_(eventKey, updated);
+  return updated;
+}
+
+function clearCheckinHistoryCache_(eventKey){
+  try{ CacheService.getScriptCache().remove(checkinHistoryCacheKey_(eventKey)); }catch(e){}
+}
+
+function findExistingCheckin_(sh, eventKey, memberId, historyOptional) {
+  const history = historyOptional || getCheckinHistoryIndex_(sh, eventKey);
+  const id = String(memberId || '').trim().toUpperCase();
+  const entry = history && history.currentById ? history.currentById[id] : null;
+  return entry && entry.existing ? entry.existing : null;
 }
 
 function validateMemberForCheckin_(m, parsedKeyOrNull) {
@@ -1140,35 +1577,38 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
 
   try {
     const sh = getCheckinsSheet_();
+    const stNorm = normalizeStatus_(m.status);
+    const history = getCheckinHistoryIndex_(sh, eventKey);
 
-    const existing = findExistingCheckin_(sh, eventKey, m.id);
+    const existing = findExistingCheckin_(sh, eventKey, m.id, history);
     if (existing) {
+      // Repair members left in PENDING by the former broken promotion path.
+      const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+      const newFriend = classifyNewFriend_(sh, eventKey, m, history);
       return {
         ok:true,
         result:'ALREADY',
         eventKey,
-        status: v.status,
+        status: promotedToActive ? STATUS_ACTIVE : v.status,
         member:{
           id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
           preferredName: m.preferredName || '',
           isMinor: !!m.isMinor,
-          isNewFriend: false
+          isNewFriend: !!newFriend.isNewFriend,
+          newFriendReason: newFriend.reason
         },
         already: existing
       };
     }
 
-    // New friend = no prior check-in ever and not STAFF/ADMIN
-    const hadAny = hasAnyCheckinEver_(sh, m.id);
-    const stNorm = normalizeStatus_(m.status);
-    const isNewFriend = (!hadAny && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
+    const newFriend = classifyNewFriend_(sh, eventKey, m, history);
 
     const ts = nowUk_();
     const receiptId = makeReceiptId_(ts);
 
     const email = maybeSendProofEmail_(m, eventKey, receiptId, ts);
 
-    sh.appendRow([
+    const checkinRow = [
       ts, eventKey,
       m.id, m.nameZh || '', m.nameEn || '',
       'scan',
@@ -1178,11 +1618,14 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
       email.status,
       String(deviceId || ''),
       String(ua || '')
-    ]);
+    ];
+    sh.appendRow(checkinRow);
+    updateCheckinHistoryIndexAfterAppend_(history, eventKey, checkinRow, Number(history.lastRow || 1) + 1);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
-    const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+    const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
     const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
 
     return {
@@ -1195,7 +1638,8 @@ function api_checkin_scan(token, qrPayload, eventKeyOptional, deviceId, ua) {
         id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
         preferredName: m.preferredName || '',
         isMinor: !!m.isMinor,
-        isNewFriend: !!isNewFriend
+        isNewFriend: !!newFriend.isNewFriend,
+        newFriendReason: newFriend.reason
       },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
@@ -1231,34 +1675,38 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
 
   try {
     const sh = getCheckinsSheet_();
+    const stNorm = normalizeStatus_(m.status);
+    const history = getCheckinHistoryIndex_(sh, eventKey);
 
-    const existing = findExistingCheckin_(sh, eventKey, m.id);
+    const existing = findExistingCheckin_(sh, eventKey, m.id, history);
     if (existing) {
+      // Repair members left in PENDING by the former broken promotion path.
+      const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+      const newFriend = classifyNewFriend_(sh, eventKey, m, history);
       return {
         ok:true,
         result:'ALREADY',
         eventKey,
-        status: v.status,
+        status: promotedToActive ? STATUS_ACTIVE : v.status,
         member:{
           id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
           preferredName: m.preferredName || '',
           isMinor: !!m.isMinor,
-          isNewFriend: false
+          isNewFriend: !!newFriend.isNewFriend,
+          newFriendReason: newFriend.reason
         },
         already: existing
       };
     }
 
-    const hadAny = hasAnyCheckinEver_(sh, m.id);
-    const stNorm = normalizeStatus_(m.status);
-    const isNewFriend = (!hadAny && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
+    const newFriend = classifyNewFriend_(sh, eventKey, m, history);
 
     const ts = nowUk_();
     const receiptId = makeReceiptId_(ts);
 
     const email = maybeSendProofEmail_(m, eventKey, receiptId, ts);
 
-    sh.appendRow([
+    const checkinRow = [
       ts, eventKey,
       m.id, m.nameZh || '', m.nameEn || '',
       'manual',
@@ -1268,11 +1716,14 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
       email.status,
       String(deviceId || ''),
       String(ua || '')
-    ]);
+    ];
+    sh.appendRow(checkinRow);
+    updateCheckinHistoryIndexAfterAppend_(history, eventKey, checkinRow, Number(history.lastRow || 1) + 1);
 
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
-    const promotedToActive = (!hadAny && stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
+    const promotedToActive = (stNorm === STATUS_PENDING) ? promotePendingMemberToActive_(m) : false;
     const effectiveStatus = promotedToActive ? STATUS_ACTIVE : v.status;
 
     return {
@@ -1285,7 +1736,8 @@ function api_checkin_manual(token, memberId, eventKeyOptional, deviceId, ua) {
         id:m.id, nameZh:m.nameZh || '', nameEn:m.nameEn || '',
         preferredName: m.preferredName || '',
         isMinor: !!m.isMinor,
-        isNewFriend: !!isNewFriend
+        isNewFriend: !!newFriend.isNewFriend,
+        newFriendReason: newFriend.reason
       },
       staff:{ id:staff.id, nameZh:staff.nameZh || '', nameEn:staff.nameEn || '' },
       receiptId,
@@ -1396,47 +1848,21 @@ function api_get_live_page(token, eventKeyOptional) {
   if (cached) return JSON.parse(cached);
 
   const sh = getCheckinsSheet_();
-  const lastRow = sh.getLastRow();
+  const history = getCheckinHistoryIndex_(sh, eventKey);
   const members = getMembersIndex_().byId;
 
   const latestById = {};
-  const hadPriorEvent = new Set(); // any check-in with eventKey != current
-  let lastSignIn = null;
-
-  if (lastRow >= 2) {
-    const data = sh.getRange(2, 1, lastRow - 1, 12).getValues();
-
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      const ev = String(row[1] || '').trim();
-      const mid = String(row[2] || '').trim();
-      if (!mid) continue;
-
-      if (ev !== eventKey) {
-        hadPriorEvent.add(mid);
-        continue;
-      }
-
-      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-      const t = ts.getTime();
-
-      const nameZh = String(row[3] || '') || (members[mid] ? (members[mid].nameZh || '') : '');
-      const nameEn = String(row[4] || '') || (members[mid] ? (members[mid].nameEn || '') : '');
-
-      const prev = latestById[mid];
-      if (!prev || t > prev.t) latestById[mid] = { t, nameZh, nameEn };
-    }
-
-    for (let i = data.length - 1; i >= 0; i--) {
-      const row = data[i];
-      const ev = String(row[1] || '').trim();
-      if (ev !== eventKey) continue;
-
-      const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
-      lastSignIn = { timeUk: fmtUk_(ts, 'HH:mm:ss'), nameZh: String(row[3] || ''), nameEn: String(row[4] || '') };
-      break;
-    }
-  }
+  const firstEventById = history.firstEventById || {};
+  const currentById = history.currentById || {};
+  const lastSignIn = history.lastSignIn || null;
+  Object.keys(currentById).forEach(function(mid){
+    const n = currentById[mid] || {};
+    latestById[mid] = {
+      t:Number(n.latestT || 0),
+      nameZh:String(n.latestNameZh || '') || (members[mid] ? (members[mid].nameZh || '') : ''),
+      nameEn:String(n.latestNameEn || '') || (members[mid] ? (members[mid].nameEn || '') : '')
+    };
+  });
 
   const ids = Object.keys(latestById);
   ids.sort((a,b) => latestById[b].t - latestById[a].t);
@@ -1447,11 +1873,8 @@ function api_get_live_page(token, eventKeyOptional) {
   for (const id of ids) {
     const n = latestById[id];
     const m = members[id];
-    const stNorm = m ? normalizeStatus_(m.status) : '';
-
-    const isNewHistory = (!hadPriorEvent.has(id) && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
-    const suppressed = isNewHistory ? isNewFriendSuppressed_(eventKey, id) : false;
-    const isNew = isNewHistory && !suppressed;
+    const classification = classifyNewFriendFromFirstEvent_(eventKey, id, m ? m.status : '', firstEventById[id]);
+    const isNew = !!classification.isNewFriend;
 
     if (isNew) newCount++;
 
@@ -1461,6 +1884,7 @@ function api_get_live_page(token, eventKeyOptional) {
       preferredName: m ? (m.preferredName || '') : '',
       id: id,
       isNew: isNew,
+      newFriendReason: classification.reason,
       isMinor: !!(m && m.isMinor)
     });
   }
@@ -1557,12 +1981,12 @@ function api_auth_validate_approver(token, approverQrPayload){
   const st = normalizeStatus_(m.status);
 
   if (sessStaff.isSuper){
-    if (st !== STATUS_ADMIN){
+    if (!isAdminLevel_(st)){
       return {
         ok:false,
         code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+        en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
       };
     }
   } else {
@@ -1571,13 +1995,13 @@ function api_auth_validate_approver(token, approverQrPayload){
         ok:false,
         code:'E492',
         zh:'普通同工／管理員只可用你自己嘅 QR 作授權（自用）。請先登出，再用你自己嘅同工卡登入。',
-        en:'STAFF/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
+        en:'STAFF/DEACON/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
       };
     }
   }
 
-  if (!(st === STATUS_STAFF || st === STATUS_ADMIN)) {
-    return { ok:false, code:'E415', zh:'此 QR 並非同工/管理員，不能授權', en:'Not STAFF/ADMIN. Cannot authorise.' };
+  if (!isPrivilegedStaff_(st)) {
+    return { ok:false, code:'E415', zh:'此 QR 並非同工／執事／管理員，不能授權', en:'Not STAFF/DEACON/ADMIN. Cannot authorise.' };
   }
   if (!m.key || m.key !== parsed.key) {
     return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
@@ -1614,7 +2038,7 @@ function api_auth_validate_target(token, targetQrPayload){
 
   const st = normalizeStatus_(m.status);
   if (st === STATUS_DISABLED) return { ok:false, code:'E414', zh:'此帳號已停用', en:'Account disabled.' };
-  if (st === STATUS_STAFF || st === STATUS_ADMIN) return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
+  if (isPrivilegedStaff_(st)) return { ok:false, code:'E488', zh:'不能更改同工／執事／管理員身份', en:'Cannot change STAFF/DEACON/ADMIN role.' };
 
   if (!m.key || m.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符（可能是舊 QR）', en:'Key mismatch (possibly old QR).' };
 
@@ -1642,12 +2066,12 @@ function api_auth_commit(token, approverId, targetId, newStatus){
   const apSt = normalizeStatus_(ap.status);
 
   if (sessStaff.isSuper){
-    if (apSt !== STATUS_ADMIN){
+    if (!isAdminLevel_(apSt)){
       return {
         ok:false,
         code:'E491',
-        zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-        en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+        zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+        en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
       };
     }
   } else {
@@ -1657,12 +2081,12 @@ function api_auth_commit(token, approverId, targetId, newStatus){
         ok:false,
         code:'E492',
         zh:'普通同工／管理員只可用你自己嘅 QR 作授權（自用）。請先登出，再用你自己嘅同工卡登入。',
-        en:'STAFF/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
+        en:'STAFF/DEACON/ADMIN can only approve using your own QR (self-only). Log out and log in with your own ID.'
       };
     }
   }
 
-  if (!(apSt === STATUS_STAFF || apSt === STATUS_ADMIN)) return { ok:false, code:'E415', zh:'授權者必須為同工/管理員', en:'Approver must be STAFF/ADMIN.' };
+  if (!isPrivilegedStaff_(apSt)) return { ok:false, code:'E415', zh:'授權者必須為同工／執事／管理員', en:'Approver must be STAFF/DEACON/ADMIN.' };
 
   const tgtId = String(targetId||'').trim().toUpperCase();
   if (!tgtId) return { ok:false, code:'E416', zh:'找不到目標會員', en:'Target not found.' };
@@ -1672,7 +2096,7 @@ function api_auth_commit(token, approverId, targetId, newStatus){
   if (!tgt) return { ok:false, code:'E412', zh:'找不到目標會員', en:'Target not found.' };
   const oldSt = normalizeStatus_(tgt.status);
   if (oldSt === STATUS_DISABLED) return { ok:false, code:'E414', zh:'目標帳號已停用', en:'Target disabled.' };
-  if (oldSt === STATUS_STAFF || oldSt === STATUS_ADMIN) return { ok:false, code:'E488', zh:'不能更改同工／管理員身份', en:'Cannot change STAFF/ADMIN role.' };
+  if (isPrivilegedStaff_(oldSt)) return { ok:false, code:'E488', zh:'不能更改同工／執事／管理員身份', en:'Cannot change STAFF/DEACON/ADMIN role.' };
 
   const sh = getMembersSheet_();
   const cols = mi.cols;
@@ -1774,7 +2198,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
   let today = null;
   const eventKeys = [];
-  let hadPriorEvent = false;
+  let firstEventKey = '';
 
   if (lastRow >= 2){
     const data = sh.getRange(2, 1, lastRow-1, 12).getValues();
@@ -1795,7 +2219,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
       if (mid !== id) continue;
 
-      if (ev && ev !== eventKey) hadPriorEvent = true;
+      if (ev) firstEventKey = newFriendEarlierEvent_(firstEventKey, ev);
       if (!today && ev === eventKey){
         const ts = row[0] instanceof Date ? row[0] : new Date(row[0]);
         today = {
@@ -1809,8 +2233,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
 
       if (ev && !seenEv.has(ev)){
         seenEv.add(ev);
-        eventKeys.push(ev);
-        if (eventKeys.length >= 4) break;
+        if (eventKeys.length < 4) eventKeys.push(ev);
       }
     }
   }
@@ -1833,6 +2256,7 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
     familyMembers.sort(function(a,b){ return String(a.id||'').localeCompare(String(b.id||'')); });
   }
 
+  const newFriend = classifyNewFriendFromFirstEvent_(eventKey, id, m.status, firstEventKey);
   return {
     ok:true,
     member:{
@@ -1845,12 +2269,8 @@ function api_live_get_member_detail(token, memberId, eventKeyOptional){
       vrm2: m.vrm2||'',
       familyId: familyIdVal,
       status: normalizeStatus_(m.status),
-      isNewFriend: (function(){
-        const stNorm = normalizeStatus_(m.status);
-        const isNewHistory = (!hadPriorEvent && !(stNorm === STATUS_STAFF || stNorm === STATUS_ADMIN));
-        if (!isNewHistory) return false;
-        return !isNewFriendSuppressed_(eventKey, id);
-      })()
+      isNewFriend:newFriend.isNewFriend,
+      newFriendReason:newFriend.reason
     },
     familyMembers: familyMembers,
     today: today,
@@ -1869,8 +2289,8 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   const eventKey = getDefaultEventKey_();
   const mi = getMembersIndex_();
 
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   let auditLabel = staff.id;
   let auditNameZh = staff.nameZh||'';
@@ -1883,27 +2303,27 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
   if (staff.isSuper){
     if (adminQrPayloadOptional){
       const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描執事／管理員（DEACON／ADMIN）QR 以作記錄', en:'DEACON/ADMIN QR required for audit.' };
 
       const admin = mi.byId[parsed.id];
       if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
       const admSt = normalizeStatus_(admin.status);
-      if (admSt !== STATUS_ADMIN){
+      if (!isAdminLevel_(admSt)){
         return {
           ok:false,
           code:'E491',
-          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+          zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+          en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
         };
       }
       if (!admin.key || admin.key !== parsed.key){
         return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
       }
 
-      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-      auditNameZh = admin.nameZh || 'ADMIN';
-      auditNameEn = admin.nameEn || 'ADMIN';
+      auditLabel = 'SUPERUSER (' + admSt + ':' + admin.id + ')';
+      auditNameZh = admin.nameZh || admSt;
+      auditNameEn = admin.nameEn || admSt;
 
       byId = admin.id;
       byNameZh = admin.nameZh || '';
@@ -1934,7 +2354,7 @@ function api_live_suppress_new_friend(token, memberId, reauthQrPayload, adminQrP
     if (!staffRec) return { ok:false, code:'E412', zh:'找不到同工記錄', en:'Staff record not found.' };
 
     const sst = normalizeStatus_(staffRec.status);
-    if (!(sst === STATUS_STAFF || sst === STATUS_ADMIN)) return { ok:false, code:'E493', zh:'此帳號不是同工/管理員', en:'Not staff/admin.' };
+    if (!isPrivilegedStaff_(sst)) return { ok:false, code:'E493', zh:'此帳號不是同工／執事／管理員', en:'Not STAFF/DEACON/ADMIN.' };
     if (!staffRec.key || staffRec.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
 
     byId = staff.id;
@@ -1999,6 +2419,7 @@ function deleteCheckinsForEventMember_(eventKey, memberId){
   for (let i=rowsToDelete.length-1;i>=0;i--){
     sh.deleteRow(rowsToDelete[i]);
   }
+  if (rowsToDelete.length) clearCheckinHistoryCache_(eventKey);
   return rowsToDelete.length;
 }
 
@@ -2012,8 +2433,8 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   const eventKey = getDefaultEventKey_();
   const mi = getMembersIndex_();
 
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   let auditLabel = staff.id;
   let auditNameZh = staff.nameZh||'';
@@ -2026,27 +2447,27 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
   if (staff.isSuper){
     if (adminQrPayloadOptional){
       const parsed = parseQrPayloadStrict_(adminQrPayloadOptional);
-      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描管理員（ADMIN）QR 以作記錄', en:'ADMIN QR required for audit.' };
+      if (!parsed.ok) return { ok:false, code:'E490', zh:'需要掃描執事／管理員（DEACON／ADMIN）QR 以作記錄', en:'DEACON/ADMIN QR required for audit.' };
 
       const admin = mi.byId[parsed.id];
       if (!admin) return { ok:false, code:'E412', zh:'找不到管理員記錄', en:'Admin not found.' };
 
       const admSt = normalizeStatus_(admin.status);
-      if (admSt !== STATUS_ADMIN){
+      if (!isAdminLevel_(admSt)){
         return {
           ok:false,
           code:'E491',
-          zh:'此操作需要管理員（ADMIN）授權。你掃描咗同工卡（STAFF）。請先登出，再用你自己嘅同工卡登入／或請管理員處理。',
-          en:'ADMIN authorisation required. You scanned STAFF. Please log out and log in with your own ID, or ask an ADMIN.'
+          zh:'此操作需要執事／管理員（DEACON／ADMIN）授權。請先登出，再用你自己嘅授權卡登入，或請執事／管理員處理。',
+          en:'DEACON/ADMIN authorisation required. Please log out and use your own authorised ID, or ask a DEACON/ADMIN.'
         };
       }
       if (!admin.key || admin.key !== parsed.key){
         return { ok:false, code:'E418', zh:'管理員 Key 不相符（舊卡/錯誤 QR）', en:'Admin key mismatch.' };
       }
 
-      auditLabel = 'SUPERUSER (ADMIN:' + admin.id + ')';
-      auditNameZh = admin.nameZh || 'ADMIN';
-      auditNameEn = admin.nameEn || 'ADMIN';
+      auditLabel = 'SUPERUSER (' + admSt + ':' + admin.id + ')';
+      auditNameZh = admin.nameZh || admSt;
+      auditNameEn = admin.nameEn || admSt;
 
       byId = admin.id;
       byNameZh = admin.nameZh || '';
@@ -2072,7 +2493,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
     if (!staffRec) return { ok:false, code:'E412', zh:'找不到同工記錄', en:'Staff record not found.' };
 
     const sst = normalizeStatus_(staffRec.status);
-    if (!(sst === STATUS_STAFF || sst === STATUS_ADMIN)) return { ok:false, code:'E493', zh:'此帳號不是同工/管理員', en:'Not staff/admin.' };
+    if (!isPrivilegedStaff_(sst)) return { ok:false, code:'E493', zh:'此帳號不是同工／執事／管理員', en:'Not STAFF/DEACON/ADMIN.' };
     if (!staffRec.key || staffRec.key !== parsed.key) return { ok:false, code:'E418', zh:'Key 不相符（舊卡/錯誤 QR）', en:'Key mismatch.' };
 
     byId = staff.id;
@@ -2093,6 +2514,7 @@ function api_live_delete_today_checkin(token, memberId, reauthQrPayload, adminQr
 
     clearNewFriendSuppressed_(eventKey, targetId);
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
     const emailRes = maybeSendDeleteNoticeEmail_(target, eventKey, auditLabel);
 
@@ -2144,8 +2566,8 @@ function api_newfriend_mark_handled(token, memberId, eventKeyOptional){
 
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
   const targetId = String(memberId||'').trim().toUpperCase();
@@ -2187,8 +2609,8 @@ function api_checkin_delete(token, memberId, eventKeyOptional){
 
   const staff = auth.sess.staff;
   const st = normalizeStatus_(staff.status);
-  const isPriv = staff.isSuper || (st === STATUS_STAFF || st === STATUS_ADMIN);
-  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工/管理員使用', en:'Staff/Admin only.' };
+  const isPriv = staff.isSuper || isPrivilegedStaff_(st);
+  if (!isPriv) return { ok:false, code:'E403', zh:'此功能只供同工／執事／管理員使用', en:'STAFF/DEACON/ADMIN only.' };
 
   const eventKey = String(eventKeyOptional||'').trim() || getDefaultEventKey_();
   const targetId = String(memberId||'').trim().toUpperCase();
@@ -2206,6 +2628,7 @@ function api_checkin_delete(token, memberId, eventKeyOptional){
 
     clearNewFriendSuppressed_(eventKey, targetId);
     CacheService.getScriptCache().remove('liveNames_' + eventKey);
+    if (typeof admin_clearCheckinsDerivedCache_ === 'function') admin_clearCheckinsDerivedCache_();
 
     const logSh = ensureActivityLogSheet_();
     logSh.appendRow([
@@ -2381,6 +2804,15 @@ function api_selfcheck_mark_completed(token, deviceId, ua){
 }
 
 /******** Members sheet row helpers ********/
+function getMembersColMap_(sh){
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function(h){ return String(h || '').trim(); });
+  const cols = {};
+  headers.forEach(function(h, i){ if (h) cols[h] = i; });
+  return cols;
+}
+
 function findMemberRowById_(sh, cols, id){
   const idx = cols['ID'];
   if (idx === undefined) return null;

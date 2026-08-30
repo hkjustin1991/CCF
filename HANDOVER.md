@@ -75,8 +75,8 @@ Keep these as-is:
 
 ### New concept: **GL = Group Leader** (NOT a Status)
 GL is a **role flag**, not a new Status.
-- A GL might be ACTIVE (not STAFF/ADMIN).
-- If someone is already STAFF/ADMIN, that “trumps” GL.
+- A GL might be ACTIVE (not STAFF/DEACON/ADMIN).
+- If someone is already STAFF/DEACON/ADMIN, that “trumps” GL.
 
 GL access:
 - **Admin portal:** access only the serving functions (other buttons disabled)
@@ -84,7 +84,7 @@ GL access:
 
 New authority rule:
 - **HELPER can now only be authorised from Admin Portal** by:
-  - STAFF/ADMIN, OR
+  - STAFF/DEACON/ADMIN, OR
   - a **GL** from the allowed group(s) that support worship functions (see §6)
 
 ---
@@ -118,14 +118,14 @@ Service time window (FYI for UI text):
 
 ### Eligibility
 - A member can only self-sign-up for positions **within their own serving group(s)**.
-- Group leaders (GL) can manage only their group scope (unless STAFF/ADMIN).
+- Group leaders (GL) can manage only their group scope (unless STAFF/DEACON/ADMIN).
 
 ### Per-event limits
 Default:
 - Self-sign-up: **max 1 position per eventKey** per person.
 
 Override (Admin/GL):
-- STAFF/ADMIN/GL can manually assign **up to 2 jobs per eventKey**,
+- STAFF/DEACON/ADMIN/GL can manually assign **up to 2 jobs per eventKey**,
   - **EXCEPT**: if the person is assigned any **WORSHIP** position for that eventKey → they cannot have any other position (inside or outside WORSHIP) for that eventKey.
 
 WORSHIP special rule (clarified):
@@ -137,7 +137,7 @@ WORSHIP special rule (clarified):
 - After 4-week cutoff:
   - They can still self sign-up (if slot available),
   - But UI must warn “sure?” and tell them **contact GL for changes/cancellation**.
-- GL/STAFF/ADMIN can edit rota up to last minute and even retroactively.
+- GL/STAFF/DEACON/ADMIN can edit rota up to last minute and even retroactively.
 - Rota entries expire **day +1** after service date (still viewable historically if you choose; business rule says “rota only expire day+1”).
 
 ### Visibility windows
@@ -155,14 +155,14 @@ WORSHIP special rule (clarified):
 - Implementation recommendation: when Admin assigns a Welcome role (or at “publish rota”), automatically set:
   - `Status = TEMP`
   - `RoleExpires = now + 2 days`
-  - unless already STAFF/ADMIN/HELPER/TEMP
+  - unless already STAFF/DEACON/ADMIN/HELPER/TEMP
 
 ---
 
 ## 6) GL authority scope (HELPER authorisation)
 
 HELPER (31 days) can only be granted via **Admin portal** by:
-- STAFF/ADMIN, OR
+- STAFF/DEACON/ADMIN, OR
 - GL from allowed group(s) that “support worship functions”
 
 Practical default (safe + matches ops):
@@ -171,7 +171,7 @@ Practical default (safe + matches ops):
 
 Also limit GL-granted HELPER:
 - GL can grant HELPER **only to members within their own group** (or only for Welcome team if LOGISTIC GL).  
-  STAFF/ADMIN can grant across groups.
+  STAFF/DEACON/ADMIN can grant across groups.
 
 ---
 
@@ -243,7 +243,7 @@ Use same beta message copy/paste where needed.
 
 Existing two-scan workflow stays:
 - scan target QR
-- scan approver QR (STAFF/ADMIN, or SUPERUSER rules as implemented)
+- scan approver QR (STAFF/DEACON/ADMIN, or SUPERUSER rules as implemented)
 
 Do not remove:
 - validation endpoints
@@ -276,7 +276,7 @@ Only adjust expiry constants:
 3) In `admin4`:
    - Add `ServingGroups` + `ServingGLGroups` handling (read/filter)
    - Implement serving-only UI mode for GL
-   - Implement HELPER(31 days) grant rules (STAFF/ADMIN or GL per group)
+   - Implement HELPER(31 days) grant rules (STAFF/DEACON/ADMIN or GL per group)
 4) Add/confirm `Serving` sheet schema + read/write helpers.
 5) Add scheduled email reminders (2 weeks + 1 day) — can be a later milestone.
 
@@ -285,7 +285,7 @@ Only adjust expiry constants:
 ## 12) Quick test checklist (manual)
 
 - Live portal login:
-  - STAFF/ADMIN works
+  - STAFF/DEACON/ADMIN works
   - HELPER/TEMP works only if RoleExpires valid
   - GL (ACTIVE + ServingGLGroups set) can access allowed views (per design)
 - Check-in scan:
@@ -297,7 +297,7 @@ Only adjust expiry constants:
 - Authorise:
   - target + approver scans still function
 - Admin portal:
-  - STAFF/ADMIN full features unchanged
+  - STAFF/DEACON/ADMIN full features unchanged
   - GL sees serving-only mode
   - HELPER grant sets expiry 31 days
 

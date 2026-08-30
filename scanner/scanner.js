@@ -5,11 +5,16 @@
   var origin = (qs.get('origin') || '*').trim();
   var state = (qs.get('state') || '').trim();
   var flow = (qs.get('flow') || 'checkin').trim();
+  var returnMode = (qs.get('returnMode') || '').trim().toLowerCase();
+  var returnUrl = (qs.get('returnUrl') || '').trim();
+  var returnView = (qs.get('returnView') || '').trim();
 
   var video = document.getElementById('video');
   var statusEl = document.getElementById('status');
   var btnRetry = document.getElementById('btnRetry');
+  var btnUpload = document.getElementById('btnUpload');
   var btnCancel = document.getElementById('btnCancel');
+  var qrImageInput = document.getElementById('qrImageInput');
 
   var scanner = {
     stream:null,
@@ -26,6 +31,60 @@
 
   function canPostToOpener(){
     return !!(window.opener && !window.opener.closed);
+  }
+
+  function validatedReturnUrl(){
+    if(returnMode !== 'post' || returnView !== 'mobileScan') return '';
+    try{
+      var parsed = new URL(returnUrl);
+      var validHost = parsed.protocol === 'https:' && parsed.hostname === 'script.google.com';
+      var validPath = /\/macros\/.+\/(exec|dev)$/.test(parsed.pathname);
+      return (validHost && validPath) ? parsed.toString() : '';
+    }catch(e){
+      return '';
+    }
+  }
+
+  var postReturnUrl = validatedReturnUrl();
+
+  function canPostReturn(){
+    return !!postReturnUrl;
+  }
+
+  function postReturn(type, payload, detail){
+    if(!canPostReturn()) return false;
+    try{
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = postReturnUrl;
+      form.target = '_top';
+      form.style.display = 'none';
+
+      var fields = {
+        scannerReturn:'1',
+        type:type,
+        state:state,
+        flow:flow,
+        returnView:returnView
+      };
+      if(typeof payload !== 'undefined') fields.payload = String(payload || '');
+      if(typeof detail !== 'undefined') fields.detail = String(detail || '');
+
+      Object.keys(fields).forEach(function(name){
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = fields[name];
+        form.appendChild(input);
+      });
+      document.body.appendChild(form);
+      setStatus('正在返回同工專頁… / Returning to the staff portal…');
+      form.submit();
+      return true;
+    }catch(err){
+      setStatus('無法返回同工專頁 / Unable to return to the staff portal');
+      return false;
+    }
   }
 
   function safeOrigin(){
@@ -72,6 +131,7 @@
 
   function finishSuccess(payload){
     stopScan();
+    if(postReturn('CCF_QR_RESULT', payload)) return;
     if(!canPostToOpener()){
       openerMissingNotice('已掃描：' + String(payload || ''));
       return;
@@ -82,6 +142,7 @@
 
   function finishCancel(detail){
     stopScan();
+    if(postReturn('CCF_QR_CANCEL', undefined, detail || 'cancelled')) return;
     if(!canPostToOpener()){
       openerMissingNotice('已取消掃描。 / Scan cancelled.');
       return;
@@ -92,6 +153,7 @@
 
   function finishError(detail){
     stopScan();
+    if(postReturn('CCF_QR_ERROR', undefined, detail || 'unknown error')) return;
     if(!canPostToOpener()){
       openerMissingNotice('相機錯誤：' + String(detail || 'unknown error'));
       return;
@@ -172,10 +234,44 @@
     });
   }
 
+  function decodeUploadedQr(file){
+    if(!file){ setStatus('請先選擇圖片 / Please choose an image first.'); return; }
+    stopScan();
+    setStatus('讀取圖片中… / Reading image…');
+    var reader = new FileReader();
+    reader.onload = function(){
+      var image = new Image();
+      image.onload = function(){
+        try{
+          var canvas = document.createElement('canvas');
+          canvas.width = image.naturalWidth || image.width;
+          canvas.height = image.naturalHeight || image.height;
+          var ctx = canvas.getContext('2d', { willReadFrequently:true });
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          var data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          var decoded = window.jsQR ? window.jsQR(data.data, canvas.width, canvas.height) : null;
+          if(decoded && decoded.data){ finishSuccess(String(decoded.data)); return; }
+          setStatus('圖片中找不到 QR code，請選擇更清晰圖片。 / No QR code found. Choose a clearer image.');
+        }catch(err){
+          setStatus('圖片解碼失敗 / Image decode failed');
+        }
+      };
+      image.onerror = function(){ setStatus('圖片格式不支援 / Unsupported image format'); };
+      image.src = reader.result;
+    };
+    reader.onerror = function(){ setStatus('檔案讀取失敗 / Failed to read file'); };
+    reader.readAsDataURL(file);
+  }
+
   btnRetry.addEventListener('click', startScan);
+  btnUpload.addEventListener('click', function(){ qrImageInput.value=''; qrImageInput.click(); });
+  qrImageInput.addEventListener('change', function(ev){
+    var file = ev && ev.target && ev.target.files && ev.target.files[0];
+    decodeUploadedQr(file);
+  });
   btnCancel.addEventListener('click', function(){ finishCancel('user_cancelled'); });
   window.addEventListener('beforeunload', function(){ stopScan(); });
 
-  if(!canPostToOpener()) openerMissingNotice('請返回原頁面重新開啟掃描器。 / Please return to the portal and reopen scanner.');
+  if(!canPostReturn() && !canPostToOpener()) openerMissingNotice('請返回原頁面重新開啟掃描器。 / Please return to the portal and reopen scanner.');
   startScan();
 })();
