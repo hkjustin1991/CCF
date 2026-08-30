@@ -1,8 +1,8 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-28.admin123
- * CHANGELOG: carry the optional exact Chinese display name through every serving-rota payload.
+ * v2026-08-30.admin124
+ * CHANGELOG: invalidate the chunked Live member cache after Members-sheet changes.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
  *
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-28.admin123';
+const ADMIN_VERSION = '2026-08-30.admin124';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -4330,6 +4330,7 @@ function admin_clearMembersCache_(){
   try{ CacheService.getScriptCache().remove('admin_membersIndex_v2'); }catch(e){}
   try{ CacheService.getScriptCache().remove('admin_membersIndex_v3'); }catch(e){}
   try{ CacheService.getScriptCache().remove('admin_membersIndex_v4'); }catch(e){}
+  try{ if (typeof clearLiveMembersIndexCache_ === 'function') clearLiveMembersIndexCache_(); }catch(e){}
 }
 function admin_getMembersIndex_(){
   const cache = CacheService.getScriptCache();

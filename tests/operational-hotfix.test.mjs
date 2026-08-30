@@ -204,6 +204,88 @@ test('one optional DisplayNameZh replaces the final Chinese label without changi
   assert.ok(!regBackend.includes("set('DisplayNameZh'"));
 });
 
+test('Live member index stays available when its JSON exceeds the CacheService item limit', () => {
+  const headers = [
+    'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes','DisplayNameZh'
+  ];
+  const rows = Array.from({ length:211 }, (_, index) => {
+    const number = String(index + 1).padStart(4, '0');
+    return [
+      'F' + number, 'A', 'CCF' + number, 'k' + number,
+      '會員' + number, 'Member ' + number, 'member' + number + '@example.com',
+      '0700000' + number, 'STAFF', '', 'n'.repeat(700), index === 0 ? '袁師母' : ''
+    ];
+  });
+  let memberDataReads = 0;
+  const sheet = {
+    getLastRow(){ return rows.length + 1; },
+    getLastColumn(){ return headers.length; },
+    getName(){ return 'Members'; },
+    getRange(row){
+      if (row === 1) return { getValues(){ return [headers]; } };
+      return { getValues(){ memberDataReads += 1; return rows; } };
+    }
+  };
+  const values = new Map();
+  let rejectWrites = false;
+  const cache = {
+    get(key){ return values.has(key) ? values.get(key) : null; },
+    put(key, value){
+      if (rejectWrites || Buffer.byteLength(String(value), 'utf8') > 100000) throw new Error('Cache value too large');
+      values.set(key, String(value));
+    },
+    remove(key){ values.delete(key); }
+  };
+  const context = appsScriptContext({
+    Utilities:{ getUuid(){ return '01234567-89ab-cdef-0123-456789abcdef'; } },
+    CacheService:{ getScriptCache(){ return cache; } }
+  });
+  vm.runInContext(read('Code.gs'), context, { filename:'Code.gs' });
+  context.getMembersSheet_ = () => sheet;
+
+  const first = context.getMembersIndex_({ ensureOptional:false });
+  assert.equal(Object.keys(first.byId).length, 211);
+  assert.equal(memberDataReads, 1);
+  const manifest = JSON.parse(values.get('membersIndex_staff_v3_manifest'));
+  assert.ok(manifest.keys.length >= 2);
+  manifest.keys.forEach(key => assert.ok(Buffer.byteLength(values.get(key), 'utf8') <= 85000));
+
+  const cached = context.getMembersIndex_({ ensureOptional:false });
+  assert.equal(Object.keys(cached.byId).length, 211);
+  assert.equal(memberDataReads, 1);
+
+  context.clearLiveMembersIndexCache_();
+  assert.equal(values.has('membersIndex_staff_v3_manifest'), false);
+  manifest.keys.forEach(key => assert.equal(values.has(key), false));
+  const rebuilt = context.getMembersIndex_({ ensureOptional:false });
+  assert.equal(Object.keys(rebuilt.byId).length, 211);
+  assert.equal(memberDataReads, 2);
+
+  values.clear();
+  rejectWrites = true;
+  const uncachedFallback = context.getMembersIndex_({ ensureOptional:false });
+  assert.equal(Object.keys(uncachedFallback.byId).length, 211);
+  assert.equal(memberDataReads, 3);
+});
+
+test('Live QR login reads members without attempting optional schema changes', () => {
+  let requestedOptions = null;
+  const context = appsScriptContext();
+  vm.runInContext(read('Code.gs'), context, { filename:'Code.gs' });
+  context.getStaffBypassCode_ = () => '';
+  context.getMembersIndex_ = options => {
+    requestedOptions = options;
+    return { byId:{ CCF0137:{ id:'CCF0137', key:'k-valid', nameZh:'測試', nameEn:'Test', status:'STAFF' } } };
+  };
+  context.createSession_ = () => 'session-token';
+  context.getDefaultEventKey_ = () => 'SundayService_2026-08-30';
+
+  const result = context.api_login('CCF0137|k-valid');
+  assert.equal(result.ok, true);
+  assert.equal(result.token, 'session-token');
+  assert.equal(requestedOptions.ensureOptional, false);
+});
+
 test('Delete check-in reauthentication always binds a scan action', () => {
   const html = read('index.html');
   assert.ok(html.includes('id="btnScanUndo"'));
@@ -818,18 +900,18 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-28.staff109';"));
-  assert.ok(liveBackend.includes('* v2026-08-28.staff109'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-30.staff110';"));
+  assert.ok(liveBackend.includes('* v2026-08-30.staff110'));
   assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-28.107'));
   assert.ok(liveUi.includes('ui staff-ui-2026-08-28.107'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-28.admin123';"));
-  assert.ok(adminBackend.includes('* v2026-08-28.admin123'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-30.admin124';"));
+  assert.ok(adminBackend.includes('* v2026-08-30.admin124'));
   assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-28.124'));
   assert.ok(adminUi.includes('ui admin2-ui-2026-08-28.124'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-28.reg125';"));
-  assert.ok(regBackend.includes('* v2026-08-28.reg125'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-30.reg126';"));
+  assert.ok(regBackend.includes('* v2026-08-30.reg126'));
   assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-28.123'));
   assert.ok(regUi.includes('ui reg2-ui-2026-08-28.123'));
 });

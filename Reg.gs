@@ -1,8 +1,8 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-28.reg125
- * CHANGELOG: apply DisplayNameZh consistently to public, admin-fed and member-facing rota outputs.
+ * v2026-08-30.reg126
+ * CHANGELOG: invalidate the chunked Live member cache after registration changes.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
  *
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-28.reg125';
+const REG_VERSION = '2026-08-30.reg126';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -5104,6 +5104,7 @@ function regMobilesMatch_(a, b){
  * ============================================================ */
 function regClearMembersIndexCache_(){
   try{
+    if (typeof clearLiveMembersIndexCache_ === 'function') clearLiveMembersIndexCache_();
     const c = CacheService.getScriptCache();
     c.remove('membersIndex_staff_v1');
     c.remove('membersIndex_staff_v2');

@@ -1,8 +1,8 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-28.staff109
- * CHANGELOG: apply the optional exact Chinese display name to the legacy public-rota output.
+ * v2026-08-30.staff110
+ * CHANGELOG: prevent Live login E500 by chunking the member index cache and keeping login read-only.
  *
  * ============================================================
  * CHANGELOG (staff8)
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-28.staff109';
+const APP_VERSION = '2026-08-30.staff110';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -51,6 +51,13 @@ const HEALTHCHECK_SHEET_NAME = 'Healthcheck';
 const MEMBERS_HEADERS_REQUIRED = [
   'FamilyID','MemberLetter','ID','Key','NameZh','NameEn','Email','Mobile','Status','OptOutEmail','Notes'
 ];
+
+// CacheService accepts at most 100 KB per value. Keep parts below that hard limit.
+const LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY = 'membersIndex_staff_v3_manifest';
+const LIVE_MEMBERS_INDEX_CACHE_PART_PREFIX = 'membersIndex_staff_v3_part_';
+const LIVE_MEMBERS_INDEX_CACHE_TTL_SECONDS = 300;
+const LIVE_MEMBERS_INDEX_CACHE_PART_MAX_BYTES = 85000;
+const LIVE_MEMBERS_INDEX_CACHE_MAX_PARTS = 64;
 
 // Statuses
 const STATUS_DISABLED = 'DISABLED';
@@ -600,13 +607,148 @@ function ensureMembersOptionalColumns_(){
   }
 }
 
+function membersIndexUtf8ByteLength_(value){
+  const s = String(value || '');
+  let bytes = 0;
+  for (let i = 0; i < s.length; i++){
+    const code = s.charCodeAt(i);
+    if (code < 0x80){
+      bytes += 1;
+    } else if (code < 0x800){
+      bytes += 2;
+    } else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length && s.charCodeAt(i + 1) >= 0xDC00 && s.charCodeAt(i + 1) <= 0xDFFF){
+      bytes += 4;
+      i++;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function splitMembersIndexCacheValue_(value, maxBytes){
+  const s = String(value || '');
+  const limit = Math.max(4, Number(maxBytes || 0));
+  const parts = [];
+  let start = 0;
+  let i = 0;
+  let bytes = 0;
+
+  while (i < s.length){
+    const code = s.charCodeAt(i);
+    let units = 1;
+    let charBytes = 3;
+    if (code < 0x80){
+      charBytes = 1;
+    } else if (code < 0x800){
+      charBytes = 2;
+    } else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length && s.charCodeAt(i + 1) >= 0xDC00 && s.charCodeAt(i + 1) <= 0xDFFF){
+      units = 2;
+      charBytes = 4;
+    }
+
+    if (bytes > 0 && bytes + charBytes > limit){
+      parts.push(s.slice(start, i));
+      start = i;
+      bytes = 0;
+      continue;
+    }
+    bytes += charBytes;
+    i += units;
+  }
+
+  if (start < s.length) parts.push(s.slice(start));
+  return parts.length ? parts : [''];
+}
+
+function getMembersIndexCacheManifest_(cache){
+  try{
+    const raw = cache.get(LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY);
+    if (!raw) return null;
+    const manifest = JSON.parse(raw);
+    const keys = manifest && Array.isArray(manifest.keys) ? manifest.keys : [];
+    if (Number(manifest.version) !== 3 || !keys.length || keys.length > LIVE_MEMBERS_INDEX_CACHE_MAX_PARTS) return null;
+    if (!keys.every(function(key){
+      const k = String(key || '');
+      return k.indexOf(LIVE_MEMBERS_INDEX_CACHE_PART_PREFIX) === 0 && k.length < 250;
+    })) return null;
+    return manifest;
+  }catch(e){
+    return null;
+  }
+}
+
+function readMembersIndexCache_(cache){
+  try{
+    const manifest = getMembersIndexCacheManifest_(cache);
+    if (!manifest) return null;
+
+    let serialized = '';
+    for (let i = 0; i < manifest.keys.length; i++){
+      const part = cache.get(manifest.keys[i]);
+      if (part === null || part === undefined) return null;
+      serialized += String(part);
+    }
+    if (manifest.bytes && membersIndexUtf8ByteLength_(serialized) !== Number(manifest.bytes)) return null;
+
+    const payload = JSON.parse(serialized);
+    if (!payload || typeof payload !== 'object' || !payload.byId || !payload.cols) return null;
+    return payload;
+  }catch(e){
+    return null;
+  }
+}
+
+function membersIndexCacheGeneration_(){
+  try{
+    const uuid = String(Utilities.getUuid() || '').replace(/[^A-Za-z0-9]/g, '');
+    if (uuid) return uuid;
+  }catch(e){}
+  return String(Date.now()) + String(Math.random()).slice(2);
+}
+
+function removeMembersIndexCacheParts_(cache, manifest){
+  if (!manifest || !Array.isArray(manifest.keys)) return;
+  manifest.keys.forEach(function(key){
+    try{ cache.remove(String(key || '')); }catch(e){}
+  });
+}
+
+function writeMembersIndexCache_(cache, payload){
+  const previous = getMembersIndexCacheManifest_(cache);
+  const serialized = JSON.stringify(payload);
+  const parts = splitMembersIndexCacheValue_(serialized, LIVE_MEMBERS_INDEX_CACHE_PART_MAX_BYTES);
+  if (!parts.length || parts.length > LIVE_MEMBERS_INDEX_CACHE_MAX_PARTS) return false;
+
+  const generation = membersIndexCacheGeneration_();
+  const keys = parts.map(function(part, i){
+    return LIVE_MEMBERS_INDEX_CACHE_PART_PREFIX + generation + '_' + i;
+  });
+
+  try{
+    for (let i = 0; i < parts.length; i++){
+      cache.put(keys[i], parts[i], LIVE_MEMBERS_INDEX_CACHE_TTL_SECONDS);
+    }
+    cache.put(LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY, JSON.stringify({
+      version:3,
+      keys:keys,
+      bytes:membersIndexUtf8ByteLength_(serialized)
+    }), LIVE_MEMBERS_INDEX_CACHE_TTL_SECONDS);
+  }catch(e){
+    removeMembersIndexCacheParts_(cache, { keys:keys });
+    return false;
+  }
+
+  removeMembersIndexCacheParts_(cache, previous);
+  return true;
+}
+
 function getMembersIndex_(opts) {
   opts = opts || {};
   var ensureOptional = (opts.ensureOptional !== false);
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'membersIndex_staff_v2';
-  const cached = cache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
+  const cached = readMembersIndexCache_(cache);
+  if (cached) return cached;
 
   if (ensureOptional) ensureMembersOptionalColumns_();
 
@@ -670,14 +812,24 @@ function getMembersIndex_(opts) {
   }
 
   const payload = { byId, sheetName: sh.getName(), cols: col, hasVRM };
-  cache.put(cacheKey, JSON.stringify(payload), 300);
+  // Cache failures must never block login or check-in; the live payload remains usable uncached.
+  writeMembersIndexCache_(cache, payload);
   return payload;
 }
 
+function clearLiveMembersIndexCache_(){
+  try{
+    const cache = CacheService.getScriptCache();
+    removeMembersIndexCacheParts_(cache, getMembersIndexCacheManifest_(cache));
+    cache.remove(LIVE_MEMBERS_INDEX_CACHE_MANIFEST_KEY);
+    cache.remove('membersIndex_staff_v1');
+    cache.remove('membersIndex_staff_v2');
+    cache.remove('membersIndex_v6');
+  }catch(e){}
+}
+
 function clearMembersIndexCache_(){
-  try{ CacheService.getScriptCache().remove('membersIndex_staff_v1'); }catch(e){}
-  try{ CacheService.getScriptCache().remove('membersIndex_staff_v2'); }catch(e){}
-  try{ CacheService.getScriptCache().remove('membersIndex_v6'); }catch(e){}
+  clearLiveMembersIndexCache_();
   try{
     if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_();
   }catch(e){}
@@ -1093,7 +1245,7 @@ function api_login(input) {
   const parsed = parseQrPayloadStrict_(raw);
   if (!parsed.ok) return parsed;
 
-  const mi = getMembersIndex_();
+  const mi = getMembersIndex_({ ensureOptional:false });
   const m = mi.byId[parsed.id];
   if (!m) return { ok:false, code:'E412', zh:'找不到此 ID，請聯絡影音同工', en:'Member ID not found. Please contact Media team.' };
 
