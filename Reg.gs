@@ -1110,7 +1110,9 @@ function api_reg_self_bootstrap_public(qrPayload){
 }
 
 function regGetCheckinsDataMinimal_(){
-  const check = (typeof admin_getCheckinsData_ === 'function') ? admin_getCheckinsData_() : null;
+  const check = (typeof admin_getCheckinsDataCached_ === 'function')
+    ? admin_getCheckinsDataCached_()
+    : ((typeof admin_getCheckinsData_ === 'function') ? admin_getCheckinsData_() : null);
   if (!check || !check.ok) return check || { ok:false, code:'E500', zh:'讀取簽到資料失敗', en:'Failed to read checkins.' };
   const rows = (check.rows || []).map(function(r){
     return { eventKey:String(r.eventKey||''), memberId:String(r.memberId||'') };
@@ -1442,7 +1444,7 @@ function regRefreshMembersCachesForSelfPortal_(){
   try{ if (typeof admin_clearMembersCache_ === 'function') admin_clearMembersCache_(); }catch(e){}
 }
 
-function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
+function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw, checkRowsOptional){
   const id = String(memberId||'').trim().toUpperCase();
   let earliest = null;
   const msDt = regSafeToDate_(memberSinceRaw);
@@ -1450,18 +1452,20 @@ function regSelfMemberSinceEarliestYmd_(memberId, memberSinceRaw){
     earliest = Utilities.formatDate(msDt, 'Europe/London', 'yyyy-MM-dd');
   }
 
-  try{
-    const check = admin_getCheckinsData_();
-    if (check && check.ok){
-      check.rows.forEach(function(r){
-        if (r.memberId !== id) return;
-        if (!admin_isSundayServiceKey_(r.eventKey)) return;
-        const ymd = (String(r.eventKey||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/) || [])[1] || '';
-        if (!ymd) return;
-        if (!earliest || ymd < earliest) earliest = ymd;
-      });
-    }
-  }catch(e){}
+  let rows = Array.isArray(checkRowsOptional) ? checkRowsOptional : null;
+  if (!rows){
+    try{
+      const check = regGetCheckinsDataMinimal_();
+      if (check && check.ok) rows = check.rows;
+    }catch(e){}
+  }
+  (rows || []).forEach(function(r){
+    if (r.memberId !== id) return;
+    if (!admin_isSundayServiceKey_(r.eventKey)) return;
+    const ymd = (String(r.eventKey||'').match(/^SundayService_(\d{4}-\d{2}-\d{2})$/) || [])[1] || '';
+    if (!ymd) return;
+    if (!earliest || ymd < earliest) earliest = ymd;
+  });
 
   return earliest || '';
 }
@@ -1551,7 +1555,9 @@ function api_reg_self_portal_snapshot_public(qrPayload){
       ? rowServing.gl
       : (member ? reg_mergeServingGroups_(member.servingGLGroups, []) : []);
 
-    const memberSinceEarliest = regSelfMemberSinceEarliestYmd_(id, memberSinceRaw);
+    const memberSinceEarliest = regSelfMemberSinceEarliestYmd_(id, memberSinceRaw, att && att.attendance && att.attendance.attendedEventKeys
+      ? att.attendance.attendedEventKeys.map(function(ev){ return { eventKey: ev, memberId: id }; })
+      : null);
 
     return {
       ok:true,
