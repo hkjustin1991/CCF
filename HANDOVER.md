@@ -35,6 +35,9 @@ Current tracked versions you stated:
 4) **Do not infer member status / group membership from Checkins logs**
    - Checkins is an activity log. Authority comes from **Members** (and serving membership data).
 
+5) **Admin warn/err message policy**
+   - Admin portal warn/err messages must use catalog key + code (`E###` or `S###`), no inline literals.
+
 ---
 
 ## 2) Portals (3) — roles & scope
@@ -300,6 +303,9 @@ Only adjust expiry constants:
   - STAFF/DEACON/ADMIN full features unchanged
   - GL sees serving-only mode
   - HELPER grant sets expiry 31 days
+- Admin message policy guard:
+  - Run `python3 scripts/check_admin_bilingual_messages.py --file Admin2.html`
+  - Fix any reported warn/err inline literals, missing bilingual pair (`zh` + `en`), or missing/invalid code (`E###`/`S###`) before release
 
 ---
 
