@@ -1,7 +1,7 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-30.staff110
+ * v2026-10-04.staff111
  * CHANGELOG: prevent Live login E500 by chunking the member index cache and keeping login read-only.
  *
  * ============================================================
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-30.staff110';
+const APP_VERSION = '2026-10-04.staff111';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -139,6 +139,8 @@ function getWebMode_(e){
 
 function doGet(e) {
   const mode = getWebMode_(e);
+  if (mode === 'live-mobile') return renderPgccMobile_(pgccTakeTicket_(e,'live-mobile'));
+  if (mode === 'service-plan') return renderPgccServicePlan_(e);
 
   // Public health ping for uptime/deployment checks (NEW)
   if (mode === 'healthping') {
@@ -152,13 +154,14 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
 
-  if (mode === 'reg') return doGetReg_(e); // Reg.gs
-  if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
-  if (mode === 'rota') return doGetRotaPublic_(e);
-  if (mode === 'vote') return doGetVote_(e); // Vote.gs
-  if (mode === 'vote-review') return doGetVoteReview_(e); // Vote.gs — restricted, unlinked exception route
+  // Set the parent browser-tab title here; changing the iframe's title is insufficient.
+  if (mode === 'reg') return doGetReg_(e).setTitle('Preston Grace · Member portal');
+  if (mode === 'admin') return doGetAdmin_(e).setTitle('Preston Grace · Admin');
+  if (mode === 'rota') return doGetRotaPublic_(e).setTitle('Preston Grace · Serving rota');
+  if (mode === 'vote') return doGetVote_(e).setTitle('Preston Grace · Member polls');
+  if (mode === 'vote-review') return doGetVoteReview_(e).setTitle('Preston Grace · Formal review'); // Restricted, unlinked exception route
 
-  return renderLivePortal_(null);
+  return renderLivePortal_(null,pgccTakeTicket_(e,'classic'),mode);
 }
 
 function getLiveWebAppUrl_(){
@@ -177,7 +180,7 @@ function safeInlineJson_(value){
     .replace(/\u2029/g, '\\u2029');
 }
 
-function renderLivePortal_(scannerReturn){
+function renderLivePortal_(scannerReturn,handoff,mode){
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   const scannerCfg = getExternalScannerConfig_();
@@ -186,8 +189,12 @@ function renderLivePortal_(scannerReturn){
   t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
   t.WEB_APP_URL = getLiveWebAppUrl_();
   t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
-  return t.evaluate()
-    .setTitle('CCF Live Service Portal')
+  t.PGCC_CONFIG = safeInlineJson_(Object.assign(pgccConfig_(),{token:handoff?handoff.token:'',mode:mode||'',scannerReturn:!!scannerReturn}));
+  const output=t.evaluate();
+  if(!scannerReturn && mode!=='classic')return renderPgccEntry_(output.getContent());
+  return output
+    .setTitle('Preston Grace Live Portal')
+    .addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -393,6 +400,8 @@ function getExternalScannerConfig_(){
 
 function doPost(e) {
   try {
+    const mobileReturn = pgccScannerPost_(e);
+    if (mobileReturn) return mobileReturn;
     const scannerReturn = scannerReturnFromPost_(e);
     if (scannerReturn) return renderLivePortal_(scannerReturn);
 
@@ -435,7 +444,9 @@ function invokeRpcFunction_(fn, args){
     throw new Error('Function not found: ' + fn);
   }
 
-  return target.apply(null, args || []);
+  // Login parsers already accept both prefixes; leave configured bypass secrets untouched.
+  const loginSecret = ['api_login','api_login_internal','api_admin_login'].indexOf(fn) >= 0;
+  return target.apply(null, loginSecret ? (args || []) : (args || []).map(pgccNormalizeInput_));
 }
 
 /******** Helpers ********/
@@ -601,7 +612,7 @@ function ensureMembersOptionalColumns_(){
   let cur = lastCol;
   for (const h of MEMBERS_OPTIONAL_HEADERS){
     if (col[h] !== undefined) continue;
-    sh.insertColumnAfter(cur);
+    pgccSchemaApproval_('Missing columns');
     cur++;
     sh.getRange(1, cur).setValue(h).setFontWeight('bold');
   }
@@ -839,7 +850,7 @@ function clearMembersIndexCache_(){
 function ensureCheckinsSheetColumns_(sh) {
   const needCols = 14;
   const lastCol = sh.getLastColumn();
-  if (lastCol < needCols) sh.insertColumnsAfter(lastCol, needCols - lastCol);
+  if (lastCol < needCols) pgccSchemaApproval_('Missing columns');
 
   const hdr = sh.getRange(1, 1, 1, needCols).getValues()[0];
   const wanted = [
@@ -853,7 +864,7 @@ function ensureCheckinsSheetColumns_(sh) {
   ];
   for (let i = 0; i < wanted.length; i++) {
     const v = String(hdr[i] || '').trim();
-    if (!v) sh.getRange(1, i + 1).setValue(wanted[i]);
+    if (v !== wanted[i]) pgccSchemaApproval_('Checkins header: ' + wanted[i]);
   }
 }
 
@@ -864,7 +875,7 @@ function getCheckinsSheet_() {
   const cache = CacheService.getScriptCache();
 
   if (!sh) {
-    sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
+    sh = pgccSchemaApproval_('Missing sheet: ' + CHECKINS_SHEET_NAME_PRIMARY);
     sh.getRange(1, 1, 1, 14).setValues([[
       'Timestamp','EventKey',
       'MemberId','MemberNameZh','MemberNameEn',
@@ -891,7 +902,7 @@ function ensureActivityLogSheet_() {
   const ss = openSs_();
   let sh = ss.getSheetByName(ACTIVITY_LOG_SHEET_NAME);
   if (!sh) {
-    sh = ss.insertSheet(ACTIVITY_LOG_SHEET_NAME);
+    sh = pgccSchemaApproval_('Missing sheet: ' + ACTIVITY_LOG_SHEET_NAME);
     sh.appendRow(['Timestamp','StaffId','StaffNameZh','StaffNameEn','Action','Details','EventKey']);
     sh.getRange(1, 1, 1, 7).setFontWeight('bold');
   }
@@ -1012,7 +1023,7 @@ function ensureHealthcheckSheet_(){
   const ss = openSs_();
   let sh = ss.getSheetByName(HEALTHCHECK_SHEET_NAME);
   if (!sh){
-    sh = ss.insertSheet(HEALTHCHECK_SHEET_NAME);
+    sh = pgccSchemaApproval_('Missing sheet: ' + HEALTHCHECK_SHEET_NAME);
     sh.appendRow(['Timestamp','StaffId','StaffNameZh','StaffNameEn','Action','Details','EventKey','DeviceId','UserAgent']);
     sh.getRange(1,1,1,9).setFontWeight('bold');
   }
@@ -1024,7 +1035,7 @@ function ensureNewFriendHandledSheet_(){
   const ss = openSs_();
   let sh = ss.getSheetByName(NEW_FRIEND_HANDLED_SHEET_NAME);
   if (!sh){
-    sh = ss.insertSheet(NEW_FRIEND_HANDLED_SHEET_NAME);
+    sh = pgccSchemaApproval_('Missing sheet: ' + NEW_FRIEND_HANDLED_SHEET_NAME);
     sh.appendRow(['Timestamp','EventKey','MemberId','StaffId','StaffNameZh','StaffNameEn']);
     sh.getRange(1,1,1,6).setFontWeight('bold');
   }
@@ -1214,7 +1225,7 @@ function parseQrPayloadStrict_(raw) {
   if (parts.length !== 2) {
     return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
   }
-  const id = String(parts[0] || '').trim().toUpperCase();
+  const id = pgccCanonicalId_(parts[0]);
   const key = String(parts[1] || '').trim();
 
   if (!id || !key) return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
@@ -1908,7 +1919,8 @@ function api_get_live_page(token, eventKeyOptional) {
     servingToday
   };
 
-  cache.put(cacheKey, JSON.stringify(payload), 15);
+  // Cache is an optimisation; an oversized live list must still be returned.
+  try{ cache.put(cacheKey, JSON.stringify(payload), 15); }catch(e){}
   return payload;
 }
 

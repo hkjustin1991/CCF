@@ -38,6 +38,7 @@ function voteContext(extra = {}){
     HtmlService:{},
     ...extra
   });
+  vm.runInContext(read('Pgcc.gs'),context,{filename:'Pgcc.gs'});
   vm.runInContext(read('Vote.gs'),context,{ filename:'Vote.gs' });
   context.__propertyData = propertyData;
   return context;
@@ -150,7 +151,7 @@ class FakeSpreadsheet{
   deleteSheet(sheet){ this.deleted.push(sheet.name); this.sheets.delete(sheet.name); }
 }
 
-test('legacy migration creates Vote and Vote Audit, verifies rows, then removes the six legacy tabs', () => {
+test('legacy Vote tabs remain untouched and require schema approval', () => {
   const legacy = [
     new FakeSheet('Vote_Elections',[[ 'ElectionId','TitleZh','TitleEn','State' ],[ 'POLL_OLD','舊問題','Old question','CLOSED' ]]),
     new FakeSheet('Vote_Options',[[ 'ElectionId','OptionNo','LabelZh','LabelEn','SortOrder','Active' ],[ 'POLL_OLD','1','甲','A',1,'YES' ]]),
@@ -161,16 +162,13 @@ test('legacy migration creates Vote and Vote Audit, verifies rows, then removes 
   ];
   const ss = new FakeSpreadsheet(legacy), context = voteContext();
   context.vote_open_ss_ = () => ss;
-  const result = context.vote_migrate_legacy_sheets_();
-  assert.equal(result.migrated,6);
-  assert.equal(result.removedSheets,6);
-  assert.deepEqual(new Set(ss.deleted),new Set(legacy.map(sheet => sheet.name)));
-  assert.deepEqual([...ss.sheets.keys()],['Vote','Vote Audit']);
-  assert.equal(context.vote_data_records_('').length,2);
-  assert.equal(context.vote_audit_data_records_('').length,4);
+  const before=JSON.stringify([...ss.sheets.values()]);
+  assert.throws(()=>context.vote_migrate_legacy_sheets_(),/E_SCHEMA_APPROVAL/);
+  assert.equal(JSON.stringify([...ss.sheets.values()]),before);
+  assert.deepEqual(ss.deleted,[]);
 });
 
-test('the previous unified Vote layout is safely split without losing ballots', () => {
+test('unified Vote layout and ballots remain untouched without schema approval', () => {
   const oldHeaders = [
     'RecordType','PollId','RecordId','MemberId','Question','QuestionAlt','OptionNo','OptionText','OptionTextAlt','SortOrder',
     'AnswerType','MaxSelections','State','OpensAt','ClosesAt','Active','OptionDigest','ChildEligible','ExplicitIneligible','Reason',
@@ -187,17 +185,11 @@ test('the previous unified Vote layout is safely split without losing ballots', 
   ]);
   const ss = new FakeSpreadsheet([vote]), context = voteContext();
   context.vote_open_ss_ = () => ss;
-  const result = context.vote_migrate_legacy_sheets_();
-  assert.equal(result.migrated,2);
-  assert.equal(result.splitRows,2);
-  assert.equal(result.removedSheets,0);
-  assert.deepEqual([...ss.sheets.keys()],['Vote','Vote Audit']);
-  assert.deepEqual(context.vote_data_records_('').map(record => record.RecordType),['POLL','OPTION']);
-  assert.deepEqual(context.vote_audit_data_records_('').map(record => record.RecordType),['BALLOT','AUDIT']);
-  assert.equal(context.vote_ballots_('POLL_OLD')[0].receiptId,'R-1');
-  const voteHeaders = vote.values[0].filter(Boolean);
-  ['IncludeChildren','FinalResult','ResultNotes'].forEach(header => assert.ok(voteHeaders.includes(header)));
-  ['MemberId','VoterCode','Choices','Action'].forEach(header => assert.equal(voteHeaders.includes(header),false));
+  const before=JSON.stringify(vote.values);
+  assert.throws(()=>context.vote_migrate_legacy_sheets_(),/E_SCHEMA_APPROVAL/);
+  assert.equal(JSON.stringify(vote.values),before);
+  assert.deepEqual([...ss.sheets.keys()],['Vote']);
+  assert.deepEqual(ss.deleted,[]);
 });
 
 test('eligibility blocks excluded statuses, explicit exclusions, and children when the poll-wide box is off', () => {

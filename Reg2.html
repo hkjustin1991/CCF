@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Reg2.html (Registration UI)
-  UI VERSION TAG: reg2-ui-2026-08-28.123
+  UI VERSION TAG: reg2-ui-2026-10-04.124
   CHANGELOG: prefer the exact sheet-maintained Chinese name in member-facing rota displays and selectors.
   ============================================================
 
@@ -191,6 +191,7 @@
       input,select,textarea,button{font-size:16px}
     }
   </style>
+<?!= pgccUi_() ?>
 </head>
 
 <body>
@@ -202,7 +203,7 @@
         <div id="globalClock" class="sub"></div>
 
       </div>
-      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-08-28.123</span></div>
+      <div><span class="pill">reg <?= REG_VERSION ?> · ui reg2-ui-2026-10-04.124</span></div>
     </header>
 
     <main id="app">
@@ -308,7 +309,7 @@
             .withFailureHandler(function(err){
               reject({ message: clientErrText_(err), raw: err });
             });
-          runner[fn].apply(runner, args || []);
+          runner.api_rpc(fn, args || []);
         }catch(err){
           reject({ message: clientErrText_(err), raw: err });
         }
@@ -1162,7 +1163,7 @@
           '<div class="selfMainGrid">'+
             '<button id="btnSelfDetails" class="primary selfMainBtn">🪪 更改資料 / Change details</button>'+
             (!isPending ? '<button id="btnSelfServing" class="alt selfMainBtn">🧩 事奉報名/更改 / Serving</button>' : '')+
-            (!isPending && hasWorship ? '<button id="btnSelfWorship" class="btnWorship selfMainBtn">🎵 敬拜排期 / Worship planning</button>' : '')+
+            (!isPending && hasWorship ? '<button id="btnSelfWorship" class="btnWorship selfMainBtn">🎵 崇拜安排 / Service planning</button>' : '')+
             '<button id="btnSelfLive" class="alt selfMainBtn">📡 聚會資訊 / Service information</button>'+
             (!isPending ? '<button id="btnSelfHoliday" class="alt selfMainBtn">🏖️ 請假 / Absence</button>' : '')+
           '</div>'+
@@ -1460,7 +1461,7 @@
       var who = 'CCF ID: '+escapeHtml(String(viewer.id||''))+' · '+escapeHtml(String(viewer.preferredName||''))+' · '+escapeHtml(String(viewer.status||''));
       var memberOptions = members.map(function(m){ return '<option value="'+escapeHtml(memberOption_(m))+'"></option>'; }).join('');
 
-      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 敬拜排期 / Worship planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存（5秒延遲） / Auto-save (5s delay) <button id="btnWorshipAutoSaveNow" class="alt autosaveStatusBtn" type="button" title="立即儲存目前編輯段落 / Save current edited section now">💾❌</button></div></div><div><button id="btnWorshipImportMenu" class="btnWorship worshipExportBtn">📥 匯入 / Import</button><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
+      var html = '<div class="card"><div class="worshipTopRow"><div><div class="big">🎵 崇拜安排 / Service planning</div><div class="small">'+who+'</div><div>'+gBadges+'</div><div>'+glBadges+'</div><div class="autosaveHint">自動儲存（5秒延遲） / Auto-save (5s delay) <button id="btnWorshipAutoSaveNow" class="alt autosaveStatusBtn" type="button" title="立即儲存目前編輯段落 / Save current edited section now">💾❌</button></div></div><div><button id="btnWorshipImportMenu" class="btnWorship worshipExportBtn">📥 匯入 / Import</button><button id="btnWorshipExportMenu" class="btnWorship worshipExportBtn">匯出 / Export ▾</button></div></div>'+
         '<datalist id="worshipMemberOptions">'+memberOptions+'</datalist>'+
         '<div class="hide"><button id="btnWorshipExportXlsx" class="btnWorship">x</button><button id="btnWorshipExportPdf" class="btnWorship">x</button></div>'+
         '<div class="label" style="margin-top:10px;">月份 / Month</div>'+
@@ -2334,36 +2335,10 @@ function viewSelfHoliday(m){
       };
 
       if ($('btnSelfWorship')) $('btnSelfWorship').onclick = function(){
-        if (isPending){ showPendingActivationMessage(); return; }
-        $('selfMsg').innerHTML = showBox('warn','載入中…','Loading…');
-        callApi('api_reg_self_worship_page_public', State.authQrPayload).then(function(res){
-          if(!res || !res.ok){ $('selfMsg').innerHTML = showServerErr(res); return; }
-          State.lastResult = res;
-          State.view = 'selfWorship';
-          render();
-          var now = Date.now();
-          var staleMs = 5 * 60 * 1000;
-          if (State.worshipMembersLoaded && State.worshipMembersFetchedAt && (now - State.worshipMembersFetchedAt) < staleMs){
-            return;
-          }
-          return callApi('api_reg_self_worship_members_public', State.authQrPayload).then(function(mr){
-            if (mr && mr.ok){
-              State.worshipMembers = Array.isArray(mr.members) ? mr.members : [];
-              State.worshipMembersLoaded = true;
-              State.worshipMembersFetchedAt = Date.now();
-              if (State.view === 'selfWorship') render();
-            }
-          });
-        }).catch(function(err){
-          var msg = clientErrText_(err);
-          var detail = msg ? ('<div class="small">'+escapeHtml(msg)+'</div>') : '';
-          $('selfMsg').innerHTML = showBox(
-            'err',
-            '系統錯誤（開啟敬拜頁失敗）',
-            'System error (failed opening worship page)',
-            detail
-          );
-        });
+        if(isPending){showPendingActivationMessage();return;}
+        callApi('api_pgcc_open_plan',State.authQrPayload,'self').then(function(r){
+          if(!r||!r.ok){$('selfMsg').innerHTML=showServerErr(r);return;}$('selfMsg').innerHTML='<a target="_top" href="'+escapeHtml(r.url)+'">繼續 / Continue</a>';navigateTop_(r.url);
+        }).catch(function(e){$('selfMsg').innerHTML=showBox('err','未能載入','Unable to open service planning',escapeHtml(e.message||''));});
       };
     }
 

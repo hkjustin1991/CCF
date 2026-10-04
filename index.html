@@ -11,7 +11,7 @@
 
   <!-- ============================================================
    * FILE: index.html (Live Service Portal UI)
-   * UI VERSION: staff-ui-2026-08-28.107
+   * UI VERSION: staff-ui-2026-10-04.108
    * For Code.gs: v2026-08-28.staff107
    * CHANGELOG: add the four-function mobile portal and secure same-tab scanner return; classic UI remains available.
    *
@@ -227,6 +227,7 @@
       .mobileMenuGrid{--mobile-tile-size:min(calc((100vw - 28px)/2), calc((100dvh - 190px)/2))}
     }
   </style>
+<?!= pgccUi_() ?>
 </head>
 
 <body>
@@ -241,7 +242,7 @@
           Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
         </div>
       </div>
-      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-08-28.107</span></div>
+      <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-10-04.108</span></div>
     </header>
 
     <main id="app"></main>
@@ -263,6 +264,8 @@
 
     var WEB_APP_URL = String(<?!= JSON.stringify(WEB_APP_URL || '') ?> || '').trim();
     var SCANNER_RETURN = <?!= SCANNER_RETURN_JSON ?>;
+    var PGCC_CONFIG = <?!= PGCC_CONFIG ?>;
+    if(PGCC_CONFIG.token){try{sessionStorage.setItem('ccf_token',PGCC_CONFIG.token);}catch(e){}}
 
     var App = {
       token:null, staff:null,
@@ -390,7 +393,7 @@
       return new Promise(function(resolve, reject){
         try{
           var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-          runner[fn].apply(runner, args || []);
+          runner.api_rpc(fn, args || []);
         }catch(err){
           reject(err);
         }
@@ -1288,6 +1291,19 @@
       });
     }
 
+    function pgccOpenMobile(){
+      var liveToken=App.token||PGCC_CONFIG.token||'';try{if(!liveToken)liveToken=sessionStorage.getItem('ccf_token')||'';}catch(e){}
+      callApi('api_pgcc_live_switch',liveToken,'live-mobile').then(function(r){
+        if(!r||!r.ok){alert((r&&r.en)||'Unable to switch. Please sign in again.');return;}
+        try{localStorage.setItem('pgcc_ui','mobile');}catch(e){}
+        var a=document.createElement('a');a.href=r.url;a.target='_top';a.textContent='進入手機版 / Open mobile interface';a.style.cssText='display:block;padding:16px;text-align:center';document.body.insertBefore(a,document.body.firstChild);a.click();
+      }).catch(function(e){alert(e.message||'Unable to switch interface');});
+    }
+    document.addEventListener('DOMContentLoaded',function(){
+      var button=document.createElement('button');button.id='pgccMobileEntry';button.textContent='手機版 / Mobile interface';button.style.cssText='display:block;margin:12px auto;min-height:48px;max-width:420px';button.onclick=pgccOpenMobile;document.body.insertBefore(button,document.body.firstChild);
+      var pref='';try{pref=localStorage.getItem('pgcc_ui')||'';if(PGCC_CONFIG.mode==='classic'){pref='classic';localStorage.setItem('pgcc_ui',pref);}}catch(e){}
+    });
+
     function nextViewAfterLogin_(){
       return (App.scannerReturn && App.scannerReturn.returnView === 'mobileScan') ? 'mobileScan' : 'menu';
     }
@@ -1964,7 +1980,7 @@
     }
 
     function bindMenu(){
-      $('goMobileCheckin').onclick = function(){ App.view='mobileHome'; render(); };
+      $('goMobileCheckin').onclick = pgccOpenMobile;
       $('goCheckin').onclick = function(){ App.view='checkinMenu'; render(); };
       $('goRealtime').onclick = function(){ App.view='realtime'; render(); };
       $('goVrm').onclick = function(){ App.view='vrm'; render(); };

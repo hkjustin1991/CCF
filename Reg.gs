@@ -1,7 +1,7 @@
 /***************************************
  * CCF Registration Portal (public, no sign-in)
  * File: Reg.gs
- * v2026-08-30.reg126
+ * v2026-10-04.reg127
  * CHANGELOG: invalidate the chunked Live member cache after registration changes.
  *
  * SOURCE OF TRUTH: Based on v2026-01-24.reg1 with minimal requested changes only.
@@ -35,7 +35,7 @@
  *   - Search for "PATCH_BOUNDARY:" to locate changes.
  ***************************************/
 
-const REG_VERSION = '2026-08-30.reg126';
+const REG_VERSION = '2026-10-04.reg127';
 const REG_TEMPLATE = 'Reg2';
 
 const REG_MIN_ID_NUM = 101;   // CCF0101
@@ -630,7 +630,7 @@ function api_reg_create_member_public(input){
       ms.sh.appendRow(row);
       regClearMembersIndexCache_();
 
-      const payload = alloc.id + '|' + alloc.key;
+      const payload = pgccQr_(alloc.id + '|' + alloc.key);
 
       const emailMeta = { optInEmail: !!v.data.optInEmail, emailProvided: !!v.data.email };
       const toEmail = v.data.optInEmail ? v.data.email : '';
@@ -812,7 +812,7 @@ function api_reg_create_family_public(input){
         const greet = regPickGreetings_(data.nameZh, data.nameEn, data.preferredName);
         created.push({
           memberId:alloc.id,
-          qrPayload:alloc.id + '|' + alloc.key,
+          qrPayload:pgccQr_(alloc.id + '|' + alloc.key),
           nameZh:data.nameZh,
           nameEn:data.nameEn,
           preferredName:data.preferredName,
@@ -2512,15 +2512,7 @@ function reg_openSsForWorship_(){
 }
 
 function reg_ensureWorshipPlanningSheet_(){
-  const ss = reg_openSsForWorship_();
-  if (!ss) throw new Error('Spreadsheet unavailable');
-  let sh = ss.getSheetByName(REG_WORSHIP_PLANNING_SHEET);
-  if (!sh) sh = ss.insertSheet(REG_WORSHIP_PLANNING_SHEET);
-  const headers = ['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID'];
-  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
-  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
-  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-  return sh;
+  return pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_PLANNING_SHEET,['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID']);
 }
 
 
@@ -2586,15 +2578,7 @@ function reg_sortAndDedupWorshipPlanningSheet_(sh){
 }
 
 function reg_ensureWorshipAuditSheet_(){
-  const ss = reg_openSsForWorship_();
-  if (!ss) throw new Error('Spreadsheet unavailable');
-  let sh = ss.getSheetByName(REG_WORSHIP_AUDIT_SHEET);
-  if (!sh) sh = ss.insertSheet(REG_WORSHIP_AUDIT_SHEET);
-  const headers = ['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context'];
-  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
-  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
-  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-  return sh;
+  return pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_AUDIT_SHEET,['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context']);
 }
 
 function reg_isWorshipMember_(member){
@@ -2887,6 +2871,10 @@ function api_reg_self_worship_members_public(qrPayload){
 
 
 function reg_worship_song_save_with_auth_(auth, payload, actionSource){
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
+  try{return reg_saveWorshipSongUnlocked_(auth,payload,actionSource);}finally{lock.releaseLock();}
+}
+function reg_saveWorshipSongUnlocked_(auth, payload, actionSource){
   const base = reg_buildWorshipPagePayload_(auth, false);
   if (!base.ok) return { ok:false, code:'E_WORSHIP_PERMISSION', zh:'你沒有權限修改敬拜資料', en:'No permission to edit worship data.' };
   const ev = String((payload && payload.eventKey) || '').trim();
@@ -2927,10 +2915,11 @@ function reg_worship_song_save_with_auth_(auth, payload, actionSource){
       next.songTitle = yt.title;
     }
   }
+  reg_ensureWorshipAuditSheet_();
   const row = [ev, section, next.songTitle, next.songKey, next.capo, next.versionNote, next.linkUrl, next.linkTitle, now, actor];
   if (targetRow){ sh.getRange(targetRow,1,1,10).setValues([row]); }
   else { sh.getRange(sh.getLastRow()+1,1,1,10).setValues([row]); }
-  reg_sortAndDedupWorshipPlanningSheet_(sh);
+  // Preserve unrelated rows and sheet ordering on individual saves.
 
   const auditRows = [];
   ['songTitle','songKey','capo','versionNote','linkUrl','linkTitle'].forEach(function(k){
@@ -3099,16 +3088,7 @@ function worshipError_(code, zh, en, detail, subCode){
 }
 
 function worshipEnsureAliasSheet_(){
-  const ss = reg_openSsForWorship_();
-  if (!ss) throw new Error('Spreadsheet unavailable');
-  let sh = ss.getSheetByName(REG_WORSHIP_ALIAS_SHEET);
-  if (!sh) sh = ss.insertSheet(REG_WORSHIP_ALIAS_SHEET);
-  const headers = ['CCFID','Aliases'];
-  const current = sh.getLastRow() >= 1 ? sh.getRange(1,1,1,2).getValues()[0] : [];
-  if (String(current[0]||'').trim() !== headers[0] || String(current[1]||'').trim() !== headers[1]){
-    sh.getRange(1,1,1,2).setValues([headers]).setFontWeight('bold');
-  }
-  return sh;
+  return pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_ALIAS_SHEET,['CCFID','Aliases']);
 }
 
 function worshipNormalizeAlias_(value){
@@ -4036,7 +4016,7 @@ function worshipCommitImportChanges_(auth, input, overrideAway, actionSource){
     Object.keys(byEvent).forEach(function(ev){
       const rotaRows = byEvent[ev].rota.map(function(c){ return { position:c.fieldName, value:c.newValue }; });
       if (rotaRows.length){
-        const res = api_admin_serving_event_save(token, ev, rotaRows, !!overrideAway, 'WORSHIP');
+        const res = admin_saveServingEventUnlocked_(token, ev, rotaRows, !!overrideAway, 'WORSHIP');
         if (!res || !res.ok) throw new Error(JSON.stringify(res || worshipError_('E_WORSHIP_ROTA_SAVE','排更儲存失敗','Rota save failed')));
       }
       const songBySec = {};
@@ -4045,7 +4025,7 @@ function worshipCommitImportChanges_(auth, input, overrideAway, actionSource){
         const old = reg_getWorshipPlanningMapByEventKeys_([ev])[ev][sec] || {};
         const p = Object.assign({ eventKey:ev, songSection:sec, songTitle:old.songTitle||'', songKey:old.songKey||'', capo:old.capo||'', versionNote:old.versionNote||'', linkUrl:old.linkUrl||'', linkTitle:old.linkTitle||'' }, songBySec[sec]);
         if (p.linkUrl && !p.songTitle){ const yt = reg_tryFetchYoutubeMeta_(p.linkUrl); if (yt.ok && yt.title){ p.songTitle = yt.title; p.linkTitle = yt.title; } }
-        const sr = reg_worship_song_save_with_auth_(auth, p, actionSource || 'SELF_WORSHIP_IMPORT');
+        const sr = reg_saveWorshipSongUnlocked_(auth, p, actionSource || 'SELF_WORSHIP_IMPORT');
         if (!sr || !sr.ok) throw new Error(JSON.stringify(sr));
       });
     });
@@ -4272,7 +4252,7 @@ function regApplyUpdate_(ms, rowNumber, memberId, stOld, isStaff, data, inObj){
 
   regClearMembersIndexCache_();
 
-  const payload = memberId + '|' + keyToUse;
+  const payload = pgccQr_(memberId + '|' + keyToUse);
 
   const includeWhatsApp = (!isStaff && String(stOld||'').toUpperCase() === 'PROVISIONAL');
 
@@ -4607,7 +4587,7 @@ function regGetMembersScan_(opts){
     let curLast = lastCol;
     for (const h of REG_EXTRA_HEADERS){
       if (col[h] !== undefined) continue;
-      sh.insertColumnAfter(curLast);
+      pgccSchemaApproval_('Missing columns');
       curLast++;
       sh.getRange(1, curLast).setValue(h).setFontWeight('bold');
       col[h] = curLast - 1;
@@ -4789,7 +4769,7 @@ function regBuildAppendRow_(ms, obj){
 function regQrUrl_(text, sizePx){
   const s = Math.max(220, Math.min(900, Number(sizePx || 360)));
   return REG_QR_BASE +
-    '?text=' + encodeURIComponent(String(text||'')) +
+    '?text=' + encodeURIComponent(pgccQr_(text)) +
     '&size=' + encodeURIComponent(String(s)) +
     '&ecLevel=M&margin=2&format=png';
 }
@@ -5124,7 +5104,7 @@ function regParseQr_(raw){
   const s = String(raw||'').trim();
   const parts = s.split('|');
   if (parts.length !== 2) return { ok:false, code:'E416', zh:'QR 格式錯誤', en:'Invalid QR format.' };
-  const id = String(parts[0]||'').trim().toUpperCase();
+  const id = pgccCanonicalId_(parts[0]);
   const key = String(parts[1]||'').trim();
   if (!/^CCF\d{4}$/.test(id)) return { ok:false, code:'E416', zh:'QR 格式錯誤', en:'Invalid QR format.' };
   if (!/^k.+/.test(key)) return { ok:false, code:'E416', zh:'QR 格式錯誤', en:'Invalid QR format.' };
@@ -5150,7 +5130,7 @@ function regEnsureRegActivity_(){
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sh = ss.getSheetByName(REG_ACTIVITY_SHEET);
   if (!sh){
-    sh = ss.insertSheet(REG_ACTIVITY_SHEET);
+    sh = pgccSchemaApproval_('Missing sheet: ' + REG_ACTIVITY_SHEET);
     sh.appendRow(['Timestamp','Action','TargetId','ResultCode','Details','DeviceId','UserAgent']);
     sh.getRange(1,1,1,7).setFontWeight('bold');
   }

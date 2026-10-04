@@ -43,6 +43,7 @@
     .footer{font-size:12px;color:var(--muted);padding:10px 3px 18px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
     @media(max-width:650px){.choiceGrid,.toolGrid{grid-template-columns:1fr}.resultRow{grid-template-columns:minmax(0,1fr) 54px}.questionCard{padding:18px}}
   </style>
+<?!= pgccUi_() ?>
 </head>
 <body>
   <div class="wrap">
@@ -64,7 +65,7 @@
     function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])})}
     function setBusy_(on){State.busy+=on?1:-1;if(State.busy<0)State.busy=0;document.body.classList.toggle('busy',State.busy>0)}
     function errHtml_(r){return '<div class="notice bad"><div class="strong">'+esc((r&&r.zh)||'系統錯誤')+'</div><div>'+esc((r&&r.en)||'System error')+'</div>'+(r&&r.code?'<div class="small">Code: '+esc(r.code)+'</div>':'')+'</div>'}
-    function gas_(name){var args=Array.prototype.slice.call(arguments,1);setBusy_(true);return new Promise(function(resolve,reject){try{var run=google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);run[name].apply(run,args)}catch(e){reject(e)}}).finally(function(){setBusy_(false)})}
+    function gas_(name){var args=Array.prototype.slice.call(arguments,1);setBusy_(true);return new Promise(function(resolve,reject){try{var run=google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);run.api_rpc(name,args)}catch(e){reject(e)}}).finally(function(){setBusy_(false)})}
     function call_(name){var args=Array.prototype.slice.call(arguments,1);return gas_.apply(null,[name].concat(args)).then(function(r){if(!r||!r.ok)throw(r||{code:'E500',zh:'沒有收到系統回應',en:'No response from server.'});return r})}
     function stateLabel_(s){return({NO_CURRENT_POLL:'暫時沒有投票 / No current poll',DRAFT:'草稿 / Draft',SCHEDULED:'已排程 / Scheduled',OPEN:'投票開放 / Poll open',CLOSED:'投票結束 / Poll closed',UNAVAILABLE:'暫時未能使用 / Unavailable'})[s]||String(s||'')}
     function answerLabel_(s){return({SINGLE:'單選 / One choice',MULTIPLE:'多選 / Multiple choice',RANKED:'排序 / Ordered choice'})[s]||String(s||'')}

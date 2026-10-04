@@ -12,7 +12,7 @@
   <!--
   ============================================================
   FILE: Admin2.html (Admin Portal UI)
-  UI VERSION TAG: admin2-ui-2026-08-28.124
+  UI VERSION TAG: admin2-ui-2026-10-04.125
   For Admin.gs: v2026-08-28.admin123
   CHANGELOG: prefer the sheet-maintained Chinese display name throughout serving-rota screens.
   ============================================================
@@ -408,6 +408,7 @@
       body.serving-rota-mode .servingPlanEntry{font-size:14px;padding:10px}
     }
   </style>
+<?!= pgccUi_() ?>
 </head>
 
 <body>
@@ -424,7 +425,7 @@
           此管理平台只供獲授權同工使用。請啟用 Cookies、保持網絡穩定，並允許所有所需權限提示。<br/>Admin portal for authorised staff only. Please enable cookies, ensure good internet connection, and allow all permission prompts.
         </div>
       </div>
-      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-08-28.124</span></div>
+      <div><span class="pill">v<?= ADMIN_VERSION ?> · ui admin2-ui-2026-10-04.125</span></div>
     </header>
 
     <main id="app" data-static-boot="1"><div class="card" id="adminStaticBoot"><div class="big">Loading admin portal...</div><div class="small">正在載入管理頁面… If this stays here, the page will retry automatically.</div></div></main>
@@ -584,7 +585,7 @@
             }
             resolve(res);
           }).withFailureHandler(function(err){ reject(normalizeApiError_(err, 'GAS call failed')); });
-          runner[fn].apply(runner, args || []);
+          runner.api_rpc(fn, args || []);
         }catch(err){
           reject(normalizeApiError_(err, 'GAS call failed'));
         }
@@ -2705,8 +2706,7 @@ function eventDateYmdFromKey(ev){
             '<div class="menuGrid">'+
               '<button id="goGroupMembersGl" class="btnMain">👥 管理事奉組員 / Manage serving group members</button>'+
               '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
-              (actorInFinanceGroup_() ? '<button id="goFinance" class="btnMain">💷 財務 / Finance</button>' : '')+
-              (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
+              '<button id="goServicePlan" class="btnWorship">崇拜安排 / Service planning</button>'+
             '</div>'+
             '<div class="divider"></div>'+
             '<button id="btnLogout" class="btnDanger">🚪 登出 / Logout</button>'+
@@ -2740,10 +2740,8 @@ function eventDateYmdFromKey(ev){
           '<div class="menuGrid">'+
             '<button id="goAttendance" class="btnMain">📊 會員管理及出席 / Member admin and attendance</button>'+
             '<button id="goGroupMembersAdmin" class="btnLookup">👥 管理事奉組員 / Manage serving group members</button>'+
-            '<button id="goFinance" class="btnMain">💷 財務 / Finance</button>'+
             '<button id="goServingPlan" class="btnPeriod">🧩 事奉排期 / Serving plan</button>'+
-            (actorCanAccessWorshipPlanning_() ? '<button id="goWorshipPlan" class="btnWorship">🎵 敬拜排期 / Worship planning</button>' : '')+
-            '<button id="goSermonInfo" class="btnPeriod">📖 Set Sermon info / 設定講道資料</button>'+
+            '<button id="goServicePlan" class="btnWorship">崇拜安排 / Service planning</button>'+
             '<button class="btnGhost" disabled>✨ 更多功能 / Coming soon</button>'+
           '</div>'+
           '<div class="divider"></div>'+
@@ -2753,6 +2751,9 @@ function eventDateYmdFromKey(ev){
     }
 
     function bindMenu(){
+      if($('goServicePlan'))$('goServicePlan').onclick=function(){
+        callApi('api_pgcc_open_plan',App.token,'admin').then(function(r){if(!r||!r.ok){showErr('menuMsg',r);return;}var a=document.createElement('a');a.href=r.url;a.target='_top';a.textContent='繼續 / Continue';$('menuMsg').appendChild(a);a.click();}).catch(function(e){showErr('menuMsg',e);});
+      };
       var glManage = $('goGroupMembersGl');
       if (glManage){
         glManage.onclick = function(){
@@ -4018,7 +4019,8 @@ function viewAttendanceHome(){
                   btn.className = 'btnDanger';
                   btn.textContent = '仍然儲存 / Override';
                   btn.onclick = function(){
-                    callApi('api_admin_serving_event_save', App.token, ev, payload, true, filterGroupKey).then(function(res3){
+                    var exception=pgccDuplicateConfirmation(res2);if(!exception)return;
+                    callApi('api_admin_serving_event_save', App.token, ev, payload, false, filterGroupKey, exception).then(function(res3){
                       if(!res3 || !res3.ok){ showErr('servingEditMsg', res3 || {code:'E500', zh:'系統錯誤', en:'System error'}); return; }
                       var warnHtml = buildAdminOverrideWarningHtml_(res3.warnings || {}, (res3 && res3.dateYmd) || ev.replace('SundayService_',''));
                       showBox('servingEditMsg', warnHtml ? 'warn' : 'ok', warnHtml ? '已儲存（有提示）' : '已儲存', warnHtml ? 'Saved with warnings.' : 'Saved.', warnHtml);
@@ -4116,7 +4118,7 @@ function viewAttendanceHome(){
           return [{ position: pos, value: String(values[pos] || '').trim() }];
         }
         function saveWithOverride_(override){
-          callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), override, groupKeyNorm).then(function(res2){
+          callApi('api_admin_serving_event_save', App.token, ev, buildPayload_(), false, groupKeyNorm, override||null).then(function(res2){
             if (!res2 || !res2.ok){
               if (res2 && res2.code === 'E409' && res2.subCode === 'MEMBER_NOT_IN_SERVING_GROUP'){
                 var mismatchTitle = toBilingualText_(res2, '成員不屬於該事奉組別', 'Member is NOT a member of this serving group.');
@@ -4171,7 +4173,7 @@ function viewAttendanceHome(){
                 btn.className = 'btnDanger';
                 btn.textContent = '仍然儲存 / Override';
                 btn.onclick = function(){
-                  saveWithOverride_(true);
+                  var exception=pgccDuplicateConfirmation(res2);if(exception)saveWithOverride_(exception);
                 };
                 var btnCancel = document.createElement('button');
                 btnCancel.className = 'btnBack';

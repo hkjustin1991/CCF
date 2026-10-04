@@ -1,0 +1,27 @@
+<script>
+// Display-only conversion: data attributes, form values, QR secrets and storage IDs are untouched.
+(function(){
+  function brand(s){return String(s).replace(/\bCCF(?=\d{4,}\b)/g,'PGCC').replace(/\bCCF ID\b/g,'PGCC ID').replace(/CCF(?=會員|同工)/g,'Preston Grace ').replace(/\bCCF\b/g,'Preston Grace');}
+  function refresh(node){
+    if(node.nodeType===3){if(node.parentElement && !node.parentElement.closest('script,style,textarea,pre,code')){var v=brand(node.nodeValue);if(v!==node.nodeValue)node.nodeValue=v;}return;}
+    if(node.nodeType!==1 && node.nodeType!==9)return;
+    if(node.nodeType===1 && /^(SCRIPT|STYLE|TEXTAREA|PRE|CODE)$/.test(node.tagName))return;
+    Array.from(node.childNodes).forEach(refresh);
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    document.title=brand(document.title);
+    refresh(document.body);
+    new MutationObserver(function(items){items.forEach(function(i){if(i.type==='characterData')refresh(i.target);else i.addedNodes.forEach(refresh);});}).observe(document.body,{childList:true,subtree:true,characterData:true});
+  });
+  window.pgccDisplayId=function(id){return String(id||'').replace(/^CCF(?=\d)/,'PGCC');};
+  window.pgccCanonicalId=function(id){return String(id||'').replace(/^PGCC(?=\d)/i,'CCF');};
+  window.pgccDuplicateConfirmation=function(result){
+    var details=(result.duplicates||[]).map(function(d){return window.pgccDisplayId(d.memberId)+' '+(d.name||'')+' · '+d.dateYmd+'\n已安排 / Existing: '+(d.existingPositions||[]).join(', ')+'\n嘗試安排 / Proposed: '+(d.attemptedPositions||[]).join(', ');}).join('\n\n');
+    var reason=prompt(details+'\n\n請填寫詳細原因（至少10字） / Detailed override reason (at least 10 characters):');
+    if(!reason || reason.trim().length<10){if(reason!==null)alert('請填寫至少10字的原因 / Please enter at least 10 characters');return null;}
+    if(!confirm(details+'\n\n原因 / Reason: '+reason.trim()+'\n\n確認例外安排？ / Confirm this exception?'))return null;
+    return {confirmed:true,reason:reason.trim(),conflictKey:result.conflictKey};
+  };
+})();
+</script>
+<!-- ===== END OF PgccUi.html (COMPLETE) ===== -->
