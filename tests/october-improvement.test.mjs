@@ -23,6 +23,18 @@ test('old and new QR prefixes resolve to the same identity without altering thei
   assert.equal(c.pgccQr_('CCF0137|kCCF0137-PGCC0034'),'PGCC0137|kCCF0137-PGCC0034');
   assert.deepEqual(plain(c.pgccNormalizeInput_({rows:[{position:'Media_AV',value:'PGCC0137, PGCC0002'}],reason:'PGCC0137 is available',key:'PGCC0137'})),{rows:[{position:'Media_AV',value:'CCF0137, CCF0002'}],reason:'PGCC0137 is available',key:'PGCC0137'});
 });
+test('existing Checkins layouts are accepted without renaming headers or adding columns',()=>{
+  const c=context();
+  const established={getLastColumn:()=>14,getRange:()=>{throw new Error('headers must not be read or changed during check-in');}};
+  assert.doesNotThrow(()=>c.ensureCheckinsSheetColumns_(established));
+  assert.throws(()=>c.ensureCheckinsSheetColumns_({getLastColumn:()=>13}),/E_SCHEMA_APPROVAL/);
+});
+test('established portals keep direct Apps Script calls while future mobile auto-selection remains configurable',()=>{
+  for(const file of ['index.html','Admin2.html','Reg2.html','Vote.html','VoteReview.html'])assert.doesNotMatch(read(file),/\.api_rpc\(/,file+' must not use the generic RPC wrapper');
+  assert.match(read('Pgcc.gs'),/PGCC_AUTO_MOBILE/);
+  assert.match(read('PgccEntry.html'),/entry\.autoMobile/);
+  assert.match(read('PgccUi.html'),/普恩基督教會/);
+});
 test('scanner return uses a single-use server ticket bound to flow and event',()=>{
   const c=context();c.requireSession_=t=>t==='live'?{ok:true}:{ok:false,code:'E401'};c.renderPgccMobile_=x=>x;
   assert.equal(c.api_mobile_scanner('invalid','checkin','event').code,'E401');

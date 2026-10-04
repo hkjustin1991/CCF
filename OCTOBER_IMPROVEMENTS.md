@@ -8,12 +8,12 @@ Branch: `Oct-improvement`. Base: `main` at `c795cb2` (includes the live-login ca
 
 - Separate mobile Live interface: four square home buttons, QR scan/upload, person search and confirmation, car lookup, attendance cards and serving list. The classic interface remains available. The PGCC logo is embedded locally; it does not depend on a Drive permission or image-hosting link.
 - One-time, three-minute scanner-return tickets retain the authenticated session and event. The existing scanner's same-tab `POST` path is used; no opener is required. The QR key is never put in the return URL. Navigation handoffs expire after two minutes and can be consumed once.
-- Mobile is an explicit opt-in from the stable classic portal. This preserves the current portal as the default while mobile device acceptance testing is completed; automatic browser-width routing is deliberately deferred.
+- Mobile is an explicit opt-in from the stable classic portal while `PGCC_AUTO_MOBILE` is unset. Later, setting the Script Property `PGCC_AUTO_MOBILE=true` enables automatic mobile selection at widths up to 700px for visitors without a saved local preference. A deliberate Classic/Mobile selection is stored only in that browser's local storage (`pgcc_ui`).
 - PGCC member-number display and input aliases. Persisted IDs, keys, relationships and spreadsheet headers remain CCF-based. Old CCF QR codes remain valid; newly generated QR images use PGCC with the same keys. External integrations reading raw sheets continue to see the original CCF IDs.
 - Admin/GL service-planning entry replaces the old worship-planning and sermon-info menu entries. The member worship entry also opens the consolidated page. Sermon information, songs and serving assignments use existing records. Save/Cancel, unsaved-change prompts and revision checks protect edits. Existing permissions determine which sections can be edited; GL scope is preserved. Live users can read the plan; Staff/Deacon/Admin can open editing from More.
 - Finance feature buttons are hidden. Existing finance records and the offering rota position are preserved.
 - Non-Worship duplicate allocations can be overridden by GL/Staff/Deacon/Admin/Superuser within their existing edit scope. The user must review the member, date, existing and attempted positions, confirm explicitly and supply a reason of at least 10 characters. The existing `Admin_Activity` sheet records the exception. An attempted Worship assignment cannot use this override. Holiday, group-membership and young-volunteer restrictions remain enforced.
-- Automatic sheet creation, column additions and legacy Vote/Serving layout migrations are blocked with `E_SCHEMA_APPROVAL`. No tabs or columns are added, renamed, deleted or reordered. Existing rows may be updated/appended by normal operations. Missing structures must be reviewed with Justin first.
+- The new service-planning path uses existing sheets and does not create, rename, delete or reorder tabs or columns. Existing classic portal compatibility helpers remain unchanged, so established check-in, admin, registration and vote workflows are not blocked by a new schema gate. Legacy Vote/Serving migrations remain blocked with `E_SCHEMA_APPROVAL`.
 
 Time, venue and announcements do not get new storage fields in this release. They require a separate decision if the current sheets do not already provide appropriate fields.
 
@@ -28,6 +28,7 @@ Add:
 | Script | `Pgcc` | `Pgcc.gs` |
 | HTML | `LiveMobile` | `LiveMobile.html` |
 | HTML | `ServicePlan` | `ServicePlan.html` |
+| HTML | `PgccEntry` | `PgccEntry.html` |
 | HTML | `PgccUi` | `PgccUi.html` |
 | HTML | `PgccLogo` | `PgccLogo.html` |
 
@@ -38,9 +39,9 @@ The optional scanner change accepts an additional return-view name. Testing the 
 ## Test deployment and rollback
 
 1. Prefer a separate Apps Script project and a copy of the current workbook for testing. Set `SPREADSHEET_ID` in the test project's `Code.gs` to that copy. Review test email recipients and any existing triggers before submitting check-ins that send receipts. Do not change the production workbook.
-2. Copy the complete branch files above. Preserve required existing Script Properties (including scanner configuration and authentication settings) in the test project.
+2. Copy the complete branch files above. Preserve required existing Script Properties (including scanner configuration and authentication settings) in the test project; leave `PGCC_AUTO_MOBILE` unset initially.
 3. Deploy a **new test web-app deployment**, retaining the current production deployment/version. Use its `/exec` URL for device testing; merely saving editor files does not update an existing versioned deployment. Confirm the scanner's return URL is the same test deployment.
-4. Open `?mode=live-mobile` or choose **手機版 / Mobile interface** from the classic portal. `?mode=classic` provides the original interface. Service planning opens from a signed-in menu; a bare `?mode=service-plan` URL is not an authentication bypass.
+4. Open `?mode=live-mobile` or choose **手機版 / Mobile interface** from the classic portal. `?mode=classic` provides the original interface. Service planning opens from a signed-in menu; a bare `?mode=service-plan` URL is not an authentication bypass. Do not enable `PGCC_AUTO_MOBILE` until mobile acceptance testing is complete.
 5. Record any `E_SCHEMA_APPROVAL` detail; do not add a sheet/column to work around it without Justin's approval.
 6. Roll back testing by returning to the retained production URL/version. No data migration or prefix conversion needs reversing. Test data edits remain in the test workbook.
 

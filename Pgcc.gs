@@ -39,12 +39,19 @@ function pgccRequireSheet_(ss, name, headers){
 function pgccUi_(){ return HtmlService.createHtmlOutputFromFile('PgccUi').getContent(); }
 function pgccLogo_(){ return HtmlService.createHtmlOutputFromFile('PgccLogo').getContent().split('<!--')[0].trim(); }
 function pgccConfig_(){
-  return { url:getLiveWebAppUrl_(), logo:pgccLogo_(), version:APP_VERSION };
+  let auto = false;
+  try{ auto = PropertiesService.getScriptProperties().getProperty('PGCC_AUTO_MOBILE') === 'true'; }catch(e){}
+  return { url:getLiveWebAppUrl_(), autoMobile:auto, logo:pgccLogo_(), version:APP_VERSION };
 }
 function renderPgccMobile_(resume){
   const t = HtmlService.createTemplateFromFile('LiveMobile');
   t.BOOT = safeInlineJson_({ config:pgccConfig_(), resume:resume || null, scanner:getExternalScannerConfig_() });
-  return t.evaluate().setTitle('Preston Grace · Live').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return t.evaluate().setTitle('普恩基督教會 · Live').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+function renderPgccEntry_(classic){
+  const t=HtmlService.createTemplateFromFile('PgccEntry');
+  t.ENTRY=safeInlineJson_({autoMobile:pgccConfig_().autoMobile,classic:classic,mobile:renderPgccMobile_(null).getContent()});
+  return t.evaluate().setTitle('普恩基督教會 · Preston Grace').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 function api_mobile_scanner(token, flow, eventKey){
   if (flow !== 'login' && flow !== 'checkin') return {ok:false, code:'E416'};
@@ -121,7 +128,7 @@ function api_pgcc_open_plan(token,kind){
 function renderPgccServicePlan_(e){
   const t=HtmlService.createTemplateFromFile('ServicePlan');
   t.BOOT=safeInlineJson_({config:pgccConfig_(),session:pgccTakeTicket_(e,'service-plan')});
-  return t.evaluate().setTitle('Preston Grace · Service planning').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover');
+  return t.evaluate().setTitle('普恩基督教會 · Service planning').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
 // The planning page writes existing Sermon_Info, Worship_Planning and Serving fields only.

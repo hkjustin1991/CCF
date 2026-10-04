@@ -1,7 +1,7 @@
 <script>
 // Display-only conversion: data attributes, form values, QR secrets and storage IDs are untouched.
 (function(){
-  function brand(s){return String(s).replace(/\bCCF(?=\d{4,}\b)/g,'PGCC').replace(/\bCCF ID\b/g,'PGCC ID').replace(/CCF(?=會員|同工)/g,'Preston Grace ').replace(/\bCCF\b/g,'Preston Grace');}
+  function brand(s){return String(s).replace(/粵語基督徒團契/g,'普恩基督教會').replace(/Cantonese Christian Fellowship/g,'Preston Grace Christian Church').replace(/\bCCF(?=\d{4,}\b)/g,'PGCC').replace(/\bCCF ID\b/g,'PGCC ID').replace(/CCF(?=會員|同工)/g,'Preston Grace ').replace(/\bCCF\b/g,'Preston Grace');}
   function refresh(node){
     if(node.nodeType===3){if(node.parentElement && !node.parentElement.closest('script,style,textarea,pre,code')){var v=brand(node.nodeValue);if(v!==node.nodeValue)node.nodeValue=v;}return;}
     if(node.nodeType!==1 && node.nodeType!==9)return;

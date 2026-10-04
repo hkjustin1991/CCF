@@ -155,11 +155,11 @@ function doGet(e) {
   }
 
   // Set the parent browser-tab title here; changing the iframe's title is insufficient.
-  if (mode === 'reg') return doGetReg_(e).setTitle('Preston Grace · Member portal');
-  if (mode === 'admin') return doGetAdmin_(e).setTitle('Preston Grace · Admin');
-  if (mode === 'rota') return doGetRotaPublic_(e).setTitle('Preston Grace · Serving rota');
-  if (mode === 'vote') return doGetVote_(e).setTitle('Preston Grace · Member polls');
-  if (mode === 'vote-review') return doGetVoteReview_(e).setTitle('Preston Grace · Formal review'); // Restricted, unlinked exception route
+  if (mode === 'reg') return doGetReg_(e).setTitle('普恩基督教會 · Member portal');
+  if (mode === 'admin') return doGetAdmin_(e).setTitle('普恩基督教會 · Admin');
+  if (mode === 'rota') return doGetRotaPublic_(e).setTitle('普恩基督教會 · Serving rota');
+  if (mode === 'vote') return doGetVote_(e).setTitle('普恩基督教會 · Member polls');
+  if (mode === 'vote-review') return doGetVoteReview_(e).setTitle('普恩基督教會 · Formal review'); // Restricted, unlinked exception route
 
   return renderLivePortal_(null,pgccTakeTicket_(e,'classic'),mode);
 }
@@ -190,8 +190,13 @@ function renderLivePortal_(scannerReturn,handoff,mode){
   t.WEB_APP_URL = getLiveWebAppUrl_();
   t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
   t.PGCC_CONFIG = safeInlineJson_(Object.assign(pgccConfig_(),{token:handoff?handoff.token:'',mode:mode||'',scannerReturn:!!scannerReturn}));
-  return t.evaluate()
-    .setTitle('Preston Grace Live Portal')
+  const output = t.evaluate();
+  // Keep the established classic portal direct and stable by default.  When the
+  // optional Script Property is enabled later, the entry page can choose the
+  // mobile interface for new phone visitors (while respecting local preference).
+  if (!scannerReturn && mode !== 'classic' && pgccConfig_().autoMobile) return renderPgccEntry_(output.getContent());
+  return output
+    .setTitle('普恩基督教會 · Live Portal')
     .addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -848,22 +853,9 @@ function clearMembersIndexCache_(){
 function ensureCheckinsSheetColumns_(sh) {
   const needCols = 14;
   const lastCol = sh.getLastColumn();
-  if (lastCol < needCols) sh.insertColumnsAfter(lastCol, needCols - lastCol);
-
-  const hdr = sh.getRange(1, 1, 1, needCols).getValues()[0];
-  const wanted = [
-    'Timestamp','EventKey',
-    'MemberId','MemberNameZh','MemberNameEn',
-    'Method',
-    'StaffId','StaffNameZh','StaffNameEn',
-    'ReceiptId',
-    'EmailTo','EmailStatus',
-    'DeviceId','UserAgent'
-  ];
-  for (let i = 0; i < wanted.length; i++) {
-    const v = String(hdr[i] || '').trim();
-    if (!v) sh.getRange(1, i + 1).setValue(wanted[i]);
-  }
+  // The live portal has historically read this established positional layout.
+  // Do not rename its headings or add columns during a check-in attempt.
+  if (lastCol < needCols) pgccSchemaApproval_('Checkins needs at least ' + needCols + ' existing columns');
 }
 
 function getCheckinsSheet_() {
@@ -873,18 +865,7 @@ function getCheckinsSheet_() {
   const cache = CacheService.getScriptCache();
 
   if (!sh) {
-    sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
-    sh.getRange(1, 1, 1, 14).setValues([[
-      'Timestamp','EventKey',
-      'MemberId','MemberNameZh','MemberNameEn',
-      'Method',
-      'StaffId','StaffNameZh','StaffNameEn',
-      'ReceiptId',
-      'EmailTo','EmailStatus',
-      'DeviceId','UserAgent'
-    ]]);
-    sh.getRange(1, 1, 1, 14).setFontWeight('bold');
-    try{ cache.put(CHECKINS_SCHEMA_CACHE_KEY, '1', 6 * 60 * 60); }catch(e){}
+    pgccSchemaApproval_('Missing sheet: ' + CHECKINS_SHEET_NAME_PRIMARY);
   } else {
     let schemaReady = false;
     try{ schemaReady = cache.get(CHECKINS_SCHEMA_CACHE_KEY) === '1'; }catch(e){}
