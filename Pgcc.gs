@@ -1,6 +1,6 @@
 /** Preston Grace October release. Existing CCF IDs remain the storage identity. */
 function pgccCanonicalId_(value){
-  return String(value || '').trim().replace(/^PGCC(?=\d{4,}$)/i, 'CCF').toUpperCase();
+  return String(value || '').trim().replace(/^PGCC(?=\d)/i, 'CCF').toUpperCase();
 }
 function pgccDisplayText_(value){
   return String(value == null ? '' : value).replace(/\bCCF(?=\d{4,}\b)/g, 'PGCC');
@@ -39,18 +39,11 @@ function pgccRequireSheet_(ss, name, headers){
 function pgccUi_(){ return HtmlService.createHtmlOutputFromFile('PgccUi').getContent(); }
 function pgccLogo_(){ return HtmlService.createHtmlOutputFromFile('PgccLogo').getContent().split('<!--')[0].trim(); }
 function pgccConfig_(){
-  let auto = false;
-  try{ auto = PropertiesService.getScriptProperties().getProperty('PGCC_AUTO_MOBILE') === 'true'; }catch(e){}
-  return { url:getLiveWebAppUrl_(), autoMobile:auto, logo:pgccLogo_(), version:APP_VERSION };
+  return { url:getLiveWebAppUrl_(), logo:pgccLogo_(), version:APP_VERSION };
 }
 function renderPgccMobile_(resume){
   const t = HtmlService.createTemplateFromFile('LiveMobile');
   t.BOOT = safeInlineJson_({ config:pgccConfig_(), resume:resume || null, scanner:getExternalScannerConfig_() });
-  return t.evaluate().setTitle('Preston Grace · Live').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-function renderPgccEntry_(classic){
-  const t=HtmlService.createTemplateFromFile('PgccEntry');
-  t.ENTRY=safeInlineJson_({autoMobile:pgccConfig_().autoMobile,classic:classic,mobile:renderPgccMobile_(null).getContent()});
   return t.evaluate().setTitle('Preston Grace · Live').addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover').setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 function api_mobile_scanner(token, flow, eventKey){
@@ -146,9 +139,20 @@ function pgccPlanAuth_(token, kind){
 function pgccPlanRevision_(value){
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,JSON.stringify(value)));
 }
+function pgccReadWorshipMap_(eventKey){
+  const out={};
+  const sh=reg_openSsForWorship_().getSheetByName(REG_WORSHIP_PLANNING_SHEET);
+  if(!sh || sh.getLastRow()<2)return out;
+  sh.getRange(2,1,sh.getLastRow()-1,10).getValues().forEach(function(r){
+    if(String(r[0]||'').trim()!==eventKey || REG_WORSHIP_SECTIONS.indexOf(String(r[1]||'').trim().toUpperCase())<0)return;
+    const sec=String(r[1]||'').trim().toUpperCase();
+    out[sec]={songTitle:String(r[2]||'').trim(),songKey:String(r[3]||'').trim(),capo:String(r[4]||'').trim(),versionNote:String(r[5]||'').trim(),linkUrl:String(r[6]||'').trim(),linkTitle:String(r[7]||'').trim(),lastUpdatedAt:reg_clientSafeDateTime_(r[8]),lastUpdatedBy:String(r[9]||'').trim().toUpperCase()};
+  });
+  return out;
+}
 function pgccPlanData_(actor, ev){
   const sermon = admin_getSermonRecordByEventKey_(ev);
-  const songMap = reg_getWorshipPlanningMapByEventKeys_([ev])[ev] || {};
+  const songMap = pgccReadWorshipMap_(ev);
   const values = admin_getServingValuesForEvent_(ev);
   const mi = admin_getMembersIndex_();
   const role = String(actor.role || '');
@@ -181,13 +185,19 @@ function api_service_plan_save(token, eventKey, revision, section, payload, kind
     if(!revision || revision!==current.revision)return {ok:false,code:'E409',en:'Another edit was saved. Reload before saving your changes.',zh:'資料已被更改，請重新載入再儲存。'};
     if(section==='sermon'){
       if(!current.canSermon)return {ok:false,code:'E403'};
+      pgccRequireSheet_(admin_openSs_(),ADMIN_SERMON_SHEET_NAME,['EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus','ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole','ResponseSpeaker']);
       const r=admin_saveSermonUnlocked_(admin_newSession_(s.actor),Object.assign({},payload,{eventKey:eventKey})); if(!r.ok)return r;
     }else if(section==='song'){
       if(!current.canSongs)return {ok:false,code:'E403'};
+      pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_PLANNING_SHEET,['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID']);
+      pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_AUDIT_SHEET,['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context']);
       const auth=regGetSelfMemberByIdForAdmin_(s.actor.id);if(!auth.ok)return auth;
       const r=reg_saveWorshipSongUnlocked_(auth,Object.assign({},payload,{eventKey:eventKey}),'SERVICE_PLAN'); if(!r.ok)return r;
     }else if(section==='rota'){
       if(['GL','STAFF','DEACON','ADMIN','SUPERUSER'].indexOf(s.actor.role)<0)return {ok:false,code:'E403'};
+      const serving=pgccRequireSheet_(admin_openSs_(),ADMIN_SERVING_SHEET_NAME);
+      const map=admin_getServingMatrixHeaderMap_(serving);
+      if((payload.rows||[]).some(function(row){return !map[row.position];}))return {ok:false,code:'E_SCHEMA_APPROVAL',en:'The requested Serving column is missing.',zh:'所需的 Serving 欄位不存在。'};
       const r=admin_saveServingEventUnlocked_(admin_newSession_(s.actor),eventKey,payload.rows,false,payload.group,payload.override || null);
       if(!r.ok)return r;
     }else return {ok:false,code:'E416'};

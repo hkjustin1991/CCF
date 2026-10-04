@@ -75,7 +75,7 @@ test('duplicate override cannot bypass leave restrictions or a required audit',(
 test('schema guards reject missing or mismatched structures without writing',()=>{
   const c=context();assert.throws(()=>c.pgccRequireSheet_({getSheetByName:()=>null},'Serving'),/E_SCHEMA_APPROVAL/);
   const sh={getLastColumn:()=>1,getRange:()=>({getValues:()=>[['Old']]})};assert.throws(()=>c.pgccRequireSheet_({getSheetByName:()=>sh},'Sermon_Info',['EventKey']),/E_SCHEMA_APPROVAL/);
-  c.admin_getServingMatrixHeaderMap_=()=>({});assert.throws(()=>c.admin_ensureServingHeaders_({getRange:()=>({getValue:()=> 'EventKey'})}),/E_SCHEMA_APPROVAL/);
+  c.admin_getServingMatrixHeaderMap_=()=>({});assert.deepEqual(plain(c.admin_ensureServingHeaders_({})),{});
 });
 test('stale service plan revision and viewer edits are rejected before any write',()=>{
   const c=context();c.pgccPlanAuth_=()=>({ok:true,actor:{id:'CCF0001',role:'VIEWER'}});c.pgccPlanData_=()=>({revision:'r1',canSermon:false,canSongs:false});
@@ -83,7 +83,7 @@ test('stale service plan revision and viewer edits are rejected before any write
   for(const section of ['sermon','song','rota'])assert.equal(c.api_service_plan_save('t','SundayService_2026-10-04','r1',section,{},'plan').code,'E403');
 });
 test('service plan exposes only assigned names to viewers and enforces GL group scope',()=>{
-  const c=context();c.admin_getSermonRecordByEventKey_=()=>({});c.reg_getWorshipPlanningMapByEventKeys_=()=>({});c.admin_getServingValuesForEvent_=()=>({Media_AV:'CCF0002'});
+  const c=context();c.admin_getSermonRecordByEventKey_=()=>({});c.pgccReadWorshipMap_=()=>({});c.admin_getServingValuesForEvent_=()=>({Media_AV:'CCF0002'});
   c.admin_getMembersIndex_=()=>({byId:{CCF0001:{nameZh:'GL',servingGroups:['MEDIA']},CCF0002:{nameZh:'Assigned'},CCF0003:{nameZh:'Unassigned'}}});
   const v=c.pgccPlanData_({id:'CCF0001',role:'VIEWER'},'SundayService_2026-10-04');assert.deepEqual(plain(v.members.map(m=>m.id)),['CCF0002']);assert.ok(v.positions.every(p=>!p.canEdit));
   const gl=c.pgccPlanData_({id:'CCF0001',role:'GL',glGroups:['MEDIA']},'SundayService_2026-10-04');assert.ok(gl.positions.filter(p=>p.canEdit).every(p=>p.group==='media'));assert.equal(gl.canSermon,false);assert.equal(gl.canSongs,false);

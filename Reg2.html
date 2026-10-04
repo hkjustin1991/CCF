@@ -309,7 +309,7 @@
             .withFailureHandler(function(err){
               reject({ message: clientErrText_(err), raw: err });
             });
-          runner.api_rpc(fn, args || []);
+          runner[fn].apply(runner, args || []);
         }catch(err){
           reject({ message: clientErrText_(err), raw: err });
         }

@@ -2512,7 +2512,15 @@ function reg_openSsForWorship_(){
 }
 
 function reg_ensureWorshipPlanningSheet_(){
-  return pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_PLANNING_SHEET,['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID']);
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
+  let sh = ss.getSheetByName(REG_WORSHIP_PLANNING_SHEET);
+  if (!sh) sh = ss.insertSheet(REG_WORSHIP_PLANNING_SHEET);
+  const headers = ['EventKey','SongSection','SongTitle','SongKey','Capo','VersionNote','LinkUrl','LinkTitle','LastUpdatedAt','LastUpdatedByCCFID'];
+  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
+  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
+  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return sh;
 }
 
 
@@ -2578,7 +2586,15 @@ function reg_sortAndDedupWorshipPlanningSheet_(sh){
 }
 
 function reg_ensureWorshipAuditSheet_(){
-  return pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_AUDIT_SHEET,['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context']);
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
+  let sh = ss.getSheetByName(REG_WORSHIP_AUDIT_SHEET);
+  if (!sh) sh = ss.insertSheet(REG_WORSHIP_AUDIT_SHEET);
+  const headers = ['Timestamp','ActorCCFID','EventKey','Area','FieldName','OldValue','NewValue','ActionSource','Context'];
+  const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
+  const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
+  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return sh;
 }
 
 function reg_isWorshipMember_(member){
@@ -3088,7 +3104,16 @@ function worshipError_(code, zh, en, detail, subCode){
 }
 
 function worshipEnsureAliasSheet_(){
-  return pgccRequireSheet_(reg_openSsForWorship_(),REG_WORSHIP_ALIAS_SHEET,['CCFID','Aliases']);
+  const ss = reg_openSsForWorship_();
+  if (!ss) throw new Error('Spreadsheet unavailable');
+  let sh = ss.getSheetByName(REG_WORSHIP_ALIAS_SHEET);
+  if (!sh) sh = ss.insertSheet(REG_WORSHIP_ALIAS_SHEET);
+  const headers = ['CCFID','Aliases'];
+  const current = sh.getLastRow() >= 1 ? sh.getRange(1,1,1,2).getValues()[0] : [];
+  if (String(current[0]||'').trim() !== headers[0] || String(current[1]||'').trim() !== headers[1]){
+    sh.getRange(1,1,1,2).setValues([headers]).setFontWeight('bold');
+  }
+  return sh;
 }
 
 function worshipNormalizeAlias_(value){
@@ -5130,7 +5155,7 @@ function regEnsureRegActivity_(){
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sh = ss.getSheetByName(REG_ACTIVITY_SHEET);
   if (!sh){
-    sh = pgccSchemaApproval_('Missing sheet: ' + REG_ACTIVITY_SHEET);
+    sh = ss.insertSheet(REG_ACTIVITY_SHEET);
     sh.appendRow(['Timestamp','Action','TargetId','ResultCode','Details','DeviceId','UserAgent']);
     sh.getRange(1,1,1,7).setFontWeight('bold');
   }

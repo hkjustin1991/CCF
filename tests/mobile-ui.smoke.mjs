@@ -5,7 +5,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 const {chromium}=require(require.resolve('playwright',{paths:[process.cwd(),process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES||process.cwd()]}));
 const read=f=>fs.readFileSync(new URL('../'+f,import.meta.url),'utf8');
-const config={url:'https://pgcc-test.local/exec',logo:read('PgccLogo.html').split('<!--')[0].trim(),version:'October test',autoMobile:false};
+const config={url:'https://pgcc-test.local/exec',logo:read('PgccLogo.html').split('<!--')[0].trim(),version:'October test'};
 const member={id:'CCF0137',nameZh:'測試同工',nameEn:'Test Member',status:'STAFF'};
 const eventKey='SundayService_2026-10-04';
 const plan={ok:true,eventKey,events:[{eventKey},{eventKey:'SundayService_2026-10-11'}],revision:'r1',canSermon:true,canSongs:true,
@@ -40,10 +40,6 @@ try{
     let target='LiveMobile.html';
     await page.route('https://pgcc-test.local/**',route=>{
       const liveBoot={config,resume:{token:'live',eventKey},scanner:{url:'https://scanner-test.local/'}};
-      if(target==='PgccEntry.html'){
-        const mobile=read('LiveMobile.html').replace('<?!= BOOT ?>',JSON.stringify(liveBoot)).replace(/<script src="https:\/\/cdn[^>]*><\/script>/g,'');
-        return route.fulfill({contentType:'text/html',body:read(target).replace('<?!= ENTRY ?>',JSON.stringify({autoMobile:true,mobile,classic:'<p id="classicPreview">Classic selected</p>'}).replace(/</g,'\\u003c'))});
-      }
       const boot=target==='LiveMobile.html'?liveBoot:{config,session:{token:'plan',back:'admin'}};
       route.fulfill({contentType:'text/html',body:read(target).replace('<?!= BOOT ?>',JSON.stringify(boot)).replace(/<script src="https:\/\/cdn[^>]*><\/script>/g,'')});
     });
@@ -62,9 +58,6 @@ try{
     target='ServicePlan.html';await page.goto(config.url+'?mode=service-plan');await page.locator('[data-edit="sermon"]').waitFor();if(width===390)await page.screenshot({path:'/tmp/pgcc-planning-390.png',fullPage:true});await page.locator('[data-edit="sermon"]').click();await page.locator('#f-sermonTitle').fill('新講題');await page.locator('#save').click();await page.locator('#message').filter({hasText:'Saved'}).waitFor();assert.match(await page.locator('#content').innerText(),/新講題/);
     await page.locator('[data-edit="sermon"]').click();await page.locator('#f-sermonTitle').fill('Unsaved');await page.evaluate(()=>window.failSave=true);await page.locator('#save').click();await page.locator('#message.error').waitFor();assert.equal(await page.locator('#f-sermonTitle').inputValue(),'Unsaved');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-    // Exercise document.write selection in the Apps Script entry shell, with API globals intact.
-    await page.evaluate(()=>{dirty=false;localStorage.removeItem('pgcc_ui');});target='PgccEntry.html';await page.goto(config.url);await page.locator('.tile').last().waitFor();
-    await page.evaluate(()=>localStorage.setItem('pgcc_ui','classic'));await page.reload();await page.locator('#classicPreview').waitFor();
     assert.deepEqual(errors,[]);await page.close();
   }
   console.log('Passed mobile flow/layout checks at 320, 390 and 430px; '+screenshots+' screenshots in /tmp. Camera hardware and deployed Apps Script still require device testing.');

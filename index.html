@@ -393,7 +393,7 @@
       return new Promise(function(resolve, reject){
         try{
           var runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-          runner.api_rpc(fn, args || []);
+          runner[fn].apply(runner, args || []);
         }catch(err){
           reject(err);
         }

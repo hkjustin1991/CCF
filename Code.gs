@@ -190,9 +190,7 @@ function renderLivePortal_(scannerReturn,handoff,mode){
   t.WEB_APP_URL = getLiveWebAppUrl_();
   t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
   t.PGCC_CONFIG = safeInlineJson_(Object.assign(pgccConfig_(),{token:handoff?handoff.token:'',mode:mode||'',scannerReturn:!!scannerReturn}));
-  const output=t.evaluate();
-  if(!scannerReturn && mode!=='classic')return renderPgccEntry_(output.getContent());
-  return output
+  return t.evaluate()
     .setTitle('Preston Grace Live Portal')
     .addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -612,7 +610,7 @@ function ensureMembersOptionalColumns_(){
   let cur = lastCol;
   for (const h of MEMBERS_OPTIONAL_HEADERS){
     if (col[h] !== undefined) continue;
-    pgccSchemaApproval_('Missing columns');
+    sh.insertColumnAfter(cur);
     cur++;
     sh.getRange(1, cur).setValue(h).setFontWeight('bold');
   }
@@ -850,7 +848,7 @@ function clearMembersIndexCache_(){
 function ensureCheckinsSheetColumns_(sh) {
   const needCols = 14;
   const lastCol = sh.getLastColumn();
-  if (lastCol < needCols) pgccSchemaApproval_('Missing columns');
+  if (lastCol < needCols) sh.insertColumnsAfter(lastCol, needCols - lastCol);
 
   const hdr = sh.getRange(1, 1, 1, needCols).getValues()[0];
   const wanted = [
@@ -864,7 +862,7 @@ function ensureCheckinsSheetColumns_(sh) {
   ];
   for (let i = 0; i < wanted.length; i++) {
     const v = String(hdr[i] || '').trim();
-    if (v !== wanted[i]) pgccSchemaApproval_('Checkins header: ' + wanted[i]);
+    if (!v) sh.getRange(1, i + 1).setValue(wanted[i]);
   }
 }
 
@@ -875,7 +873,7 @@ function getCheckinsSheet_() {
   const cache = CacheService.getScriptCache();
 
   if (!sh) {
-    sh = pgccSchemaApproval_('Missing sheet: ' + CHECKINS_SHEET_NAME_PRIMARY);
+    sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
     sh.getRange(1, 1, 1, 14).setValues([[
       'Timestamp','EventKey',
       'MemberId','MemberNameZh','MemberNameEn',
@@ -902,7 +900,7 @@ function ensureActivityLogSheet_() {
   const ss = openSs_();
   let sh = ss.getSheetByName(ACTIVITY_LOG_SHEET_NAME);
   if (!sh) {
-    sh = pgccSchemaApproval_('Missing sheet: ' + ACTIVITY_LOG_SHEET_NAME);
+    sh = ss.insertSheet(ACTIVITY_LOG_SHEET_NAME);
     sh.appendRow(['Timestamp','StaffId','StaffNameZh','StaffNameEn','Action','Details','EventKey']);
     sh.getRange(1, 1, 1, 7).setFontWeight('bold');
   }
@@ -1023,7 +1021,7 @@ function ensureHealthcheckSheet_(){
   const ss = openSs_();
   let sh = ss.getSheetByName(HEALTHCHECK_SHEET_NAME);
   if (!sh){
-    sh = pgccSchemaApproval_('Missing sheet: ' + HEALTHCHECK_SHEET_NAME);
+    sh = ss.insertSheet(HEALTHCHECK_SHEET_NAME);
     sh.appendRow(['Timestamp','StaffId','StaffNameZh','StaffNameEn','Action','Details','EventKey','DeviceId','UserAgent']);
     sh.getRange(1,1,1,9).setFontWeight('bold');
   }
@@ -1035,7 +1033,7 @@ function ensureNewFriendHandledSheet_(){
   const ss = openSs_();
   let sh = ss.getSheetByName(NEW_FRIEND_HANDLED_SHEET_NAME);
   if (!sh){
-    sh = pgccSchemaApproval_('Missing sheet: ' + NEW_FRIEND_HANDLED_SHEET_NAME);
+    sh = ss.insertSheet(NEW_FRIEND_HANDLED_SHEET_NAME);
     sh.appendRow(['Timestamp','EventKey','MemberId','StaffId','StaffNameZh','StaffNameEn']);
     sh.getRange(1,1,1,6).setFontWeight('bold');
   }
@@ -1779,7 +1777,7 @@ function api_search_members(token, query) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
 
-  const q = String(query || '').trim();
+  const q = pgccCanonicalId_(query);
   if (!q) return { ok:true, results:[] };
 
   const byId = getMembersIndex_().byId;

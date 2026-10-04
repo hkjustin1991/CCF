@@ -585,7 +585,7 @@
             }
             resolve(res);
           }).withFailureHandler(function(err){ reject(normalizeApiError_(err, 'GAS call failed')); });
-          runner.api_rpc(fn, args || []);
+          runner[fn].apply(runner, args || []);
         }catch(err){
           reject(normalizeApiError_(err, 'GAS call failed'));
         }

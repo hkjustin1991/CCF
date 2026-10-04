@@ -809,11 +809,11 @@ function admin_requireFinanceEditor_(actor){
 function admin_ensureFinanceOfferingSheet_(){
   const ss = admin_openSs_();
   let sh = ss.getSheetByName(ADMIN_FINANCE_OFFERING_SHEET_NAME);
-  if (!sh) sh = pgccSchemaApproval_('Missing sheet: ' + ADMIN_FINANCE_OFFERING_SHEET_NAME);
+  if (!sh) sh = ss.insertSheet(ADMIN_FINANCE_OFFERING_SHEET_NAME);
   const headers = ['EventKey','OfferingAmount','UpdatedAtIso','UpdatedByCCFID'];
   const current = (sh.getLastRow() >= 1) ? sh.getRange(1, 1, 1, headers.length).getValues()[0] : [];
   const need = headers.some(function(h, i){ return String(current[i] || '').trim() !== h; });
-  if (need) pgccSchemaApproval_('Unexpected Finance headers');
+  if (need) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
   return sh;
 }
 function admin_getOfferingMap_(){
@@ -2673,8 +2673,18 @@ function admin_ensureSermonInfoSheet_(){
     'EventKey','Speaker','SermonTitle','SermonPassageRaw','SermonPassageCanonical','SermonPassageStatus',
     'ResponsePassageRaw','ResponsePassageCanonical','ResponsePassageStatus','UpdatedAt','UpdatedBy','UpdatedRole','ResponseSpeaker'
   ];
-  if (!sh) sh = pgccSchemaApproval_('Missing sheet: ' + ADMIN_SERMON_SHEET_NAME);
-  return pgccRequireSheet_(ss,ADMIN_SERMON_SHEET_NAME,headers);
+  if (!sh) sh = ss.insertSheet(ADMIN_SERMON_SHEET_NAME);
+  const existingCols = Math.max(sh.getLastColumn(), headers.length);
+  const existing = existingCols > 0 ? sh.getRange(1,1,1,existingCols).getValues()[0].map(function(v){ return String(v||'').trim(); }) : [];
+  let needsHeader = (sh.getLastRow() === 0);
+  if (!needsHeader){
+    for (let i=0;i<headers.length;i++){
+      if (existing[i] !== headers[i]){ needsHeader = true; break; }
+    }
+  }
+  if (needsHeader) sh.getRange(1,1,1,headers.length).setValues([headers]);
+  sh.getRange(1,1,1,headers.length).setFontWeight('bold');
+  return sh;
 }
 function admin_getSermonInfoHeaderMap_(sh){
   const lastCol = Math.max((sh && sh.getLastColumn()) || 0, 13);
@@ -3042,7 +3052,7 @@ function admin_ensureServingSheet_(){
   const ss = admin_openSs_();
   let sh = ss.getSheetByName(ADMIN_SERVING_SHEET_NAME);
   if (!sh){
-    sh = pgccSchemaApproval_('Missing sheet: ' + ADMIN_SERVING_SHEET_NAME);
+    sh = ss.insertSheet(ADMIN_SERVING_SHEET_NAME);
     sh.appendRow(['EventKey'].concat(ADMIN_SERVING_POSITIONS.map(admin_servingHeaderLabel_)));
     sh.getRange(1,1,1,1 + ADMIN_SERVING_POSITIONS.length).setFontWeight('bold');
   }
@@ -3082,17 +3092,15 @@ function admin_ensureServingEventKeys_(sh){
   );
 }
 function admin_ensureServingHeaders_(sh){
-  // Preserve existing column order, labels and extra columns. Never migrate implicitly.
-  const map = admin_getServingMatrixHeaderMap_(sh);
-  const first = String(sh.getRange(1,1).getValue() || '').trim();
-  if (first !== 'EventKey') pgccSchemaApproval_('Serving EventKey header');
-  if (ADMIN_SERVING_POSITIONS.some(function(pos){return !map[pos];})) pgccSchemaApproval_('Missing Serving position columns');
+  // Do not migrate, reorder or delete existing columns during normal use.
+  // The save path reports a missing requested position without changing the sheet.
+  return admin_getServingMatrixHeaderMap_(sh);
 }
 function admin_ensureAwaySheet_(){
   const ss = admin_openSs_();
   let sh = ss.getSheetByName(ADMIN_SERVING_AWAY_SHEET_NAME);
   if (!sh){
-    sh = pgccSchemaApproval_('Missing sheet: ' + ADMIN_SERVING_AWAY_SHEET_NAME);
+    sh = ss.insertSheet(ADMIN_SERVING_AWAY_SHEET_NAME);
     sh.appendRow(['MemberId','FromYmd','ToYmd','UpdatedAt','UpdatedBy','UpdatedRole']);
     sh.getRange(1,1,1,6).setFontWeight('bold');
   }
@@ -4072,7 +4080,7 @@ function admin_audit_(actor, action, details, context){
     const ss = admin_openSs_();
     let sh = ss.getSheetByName(ADMIN_AUDIT_SHEET_NAME);
     if (!sh){
-      sh = pgccSchemaApproval_('Missing sheet: ' + ADMIN_AUDIT_SHEET_NAME);
+      sh = ss.insertSheet(ADMIN_AUDIT_SHEET_NAME);
       sh.appendRow(['Timestamp','ActorId','ActorRole','Action','Details','Context']);
       sh.getRange(1,1,1,6).setFontWeight('bold');
     }
@@ -4233,7 +4241,7 @@ function admin_findMemberRowById_(sh, col, id){
 function admin_ensureRoleExpiresColumn_(sh, col){
   if (col.RoleExpires !== undefined) return col.RoleExpires;
   const lastCol = sh.getLastColumn();
-  pgccSchemaApproval_('Missing columns');
+  sh.insertColumnAfter(lastCol);
   const newCol = lastCol + 1;
   sh.getRange(1, newCol).setValue('RoleExpires').setFontWeight('bold');
   col.RoleExpires = newCol - 1;
@@ -4244,7 +4252,7 @@ function admin_ensureAwayColumns_(sh, col){
   fields.forEach(function(field){
     if (col[field] !== undefined) return;
     const lastCol = sh.getLastColumn();
-    pgccSchemaApproval_('Missing columns');
+    sh.insertColumnAfter(lastCol);
     const newCol = lastCol + 1;
     sh.getRange(1, newCol).setValue(field).setFontWeight('bold');
     col[field] = newCol - 1;
@@ -4256,7 +4264,7 @@ function admin_ensureMemberColumns_(sh, col, fields){
   list.forEach(function(field){
     if (!field || col[field] !== undefined) return;
     const lastCol = sh.getLastColumn();
-    pgccSchemaApproval_('Missing columns');
+    sh.insertColumnAfter(lastCol);
     const newCol = lastCol + 1;
     sh.getRange(1, newCol).setValue(field).setFontWeight('bold');
     col[field] = newCol - 1;

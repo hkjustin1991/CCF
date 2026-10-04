@@ -37,7 +37,7 @@
     function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])})}
     function setBusy_(on){State.busy+=on?1:-1;if(State.busy<0)State.busy=0;document.body.classList.toggle('busy',State.busy>0)}
     function errHtml_(r){return '<div class="notice bad"><div class="strong">'+esc((r&&r.zh)||'系統錯誤')+'</div><div>'+esc((r&&r.en)||'System error')+'</div>'+(r&&r.code?'<div class="small">Code: '+esc(r.code)+'</div>':'')+'</div>'}
-    function gas_(name){var args=Array.prototype.slice.call(arguments,1);setBusy_(true);return new Promise(function(resolve,reject){try{var run=google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);run.api_rpc(name,args)}catch(e){reject(e)}}).finally(function(){setBusy_(false)})}
+    function gas_(name){var args=Array.prototype.slice.call(arguments,1);setBusy_(true);return new Promise(function(resolve,reject){try{var run=google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);run[name].apply(run,args)}catch(e){reject(e)}}).finally(function(){setBusy_(false)})}
     function call_(name){var args=Array.prototype.slice.call(arguments,1);return gas_.apply(null,[name].concat(args)).then(function(r){if(!r||!r.ok)throw(r||{code:'E500',zh:'沒有收到系統回應',en:'No response from server.'});return r})}
     function stateLabel_(s){return({DRAFT:'草稿 / Draft',SCHEDULED:'已排程 / Scheduled',OPEN:'開放 / Open',CLOSED:'已結束 / Closed'})[s]||String(s||'')}
 
