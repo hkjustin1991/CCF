@@ -40,6 +40,8 @@
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#eaf1ff;color:var(--text);overflow-x:hidden}
     .wrap{max-width:760px;margin:0 auto;padding:var(--pad)}
     .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:8px 2px 8px}
+    .brandBlock{display:flex;align-items:flex-start;gap:10px;min-width:0}
+    .classicLogo{width:58px;height:58px;object-fit:contain;border-radius:12px;background:#fff;border:1px solid var(--border);flex:0 0 auto}
     .title{font-size:var(--fs-title);font-weight:900}
     .sub{font-size:var(--fs-body);color:var(--muted);margin-top:2px}
     .hint{font-size:var(--fs-body);color:var(--muted);margin-top:8px;line-height:1.45}
@@ -233,13 +235,16 @@
 <body>
   <div class="wrap">
     <header class="topbar">
-      <div>
-        <div class="title">粵語基督徒團契 主日崇拜同工專頁</div>
-        <div class="sub" style="font-size:var(--fs-small);font-weight:600;">CCF Live Service Portal</div>
-        <div class="sub">同工專用 / Staff only</div>
-        <div class="hint">
-          請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
-          Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
+      <div class="brandBlock">
+        <img id="classicLogo" class="classicLogo" alt="普恩基督教會" hidden />
+        <div>
+          <div class="title">粵語基督徒團契 主日崇拜同工專頁</div>
+          <div class="sub" style="font-size:var(--fs-small);font-weight:600;">CCF Live Service Portal</div>
+          <div class="sub">同工專用 / Staff only</div>
+          <div class="hint">
+            請啟用 Cookies、確保網絡連線良好，並允許裝置提示的所有權限。<br/>
+            Please enable cookies, ensure good internet connection, and allow all permission prompts while using the portal.
+          </div>
         </div>
       </div>
       <div><span class="pill">v<?!= APP_VERSION ?> · ui staff-ui-2026-10-04.108</span></div>
@@ -633,6 +638,7 @@
     }
     function formatHandledBy_(handled){
       if (!handled) return '';
+      if (String(handled.id||'').trim().toUpperCase() === 'SUPERUSER') return '系統管理員 / Superuser';
       var zh = String(handled.nameZh||'').trim();
       var en = String(handled.nameEn||'').trim();
       return [zh, en].filter(Boolean).join(' ');
@@ -1302,6 +1308,10 @@
     document.addEventListener('DOMContentLoaded',function(){
       var button=document.createElement('button');button.id='pgccMobileEntry';button.textContent='手機版 / Mobile interface';button.style.cssText='display:block;margin:12px auto;min-height:48px;max-width:420px';button.onclick=pgccOpenMobile;document.body.insertBefore(button,document.body.firstChild);
       var pref='';try{pref=localStorage.getItem('pgcc_ui')||'';if(PGCC_CONFIG.mode==='classic'){pref='classic';localStorage.setItem('pgcc_ui',pref);}}catch(e){}
+      callApi('api_pgcc_branding').then(function(brand){
+        var logo=$('classicLogo');
+        if (logo && brand && brand.ok && brand.logo){ logo.src=brand.logo; logo.hidden=false; }
+      }).catch(function(){});
     });
 
     function nextViewAfterLogin_(){
@@ -2576,18 +2586,18 @@ if (btnC) {
           var stamp   = (rr.result === 'ALREADY') ? ((rr.already||{}).timeUk||'')    : (rr.timeUk||'');
           var method  = (rr.result === 'ALREADY') ? ((rr.already||{}).method||'')    : (rr.method||'manual');
           var handledBy = (rr.result === 'ALREADY') ? formatHandledBy_((rr.already||{}).handledBy) : formatHandledBy_(rr.handledBy);
-          var statusTxt = (!rr.ok) ? '❌ Failed' : (rr.result === 'ALREADY' ? '✅ Already' : '✅ Checked-in');
+          var statusTxt = (!rr.ok) ? '❌ 失敗 / Failed' : (rr.result === 'ALREADY' ? '✅ 已有簽到紀錄 / Already checked in' : '✅ 已簽到 / Checked-in');
 
           return '<li><b>'+escapeHtml(nameLine)+'</b> · '+escapeHtml(statusTxt)+
-                 '<details class="receiptDetails"><summary>Receipt</summary>'+
-                 kvHtml([{k:'Time',v:stamp},{k:'Method',v:method},{k:'Receipt',v:receipt},{k:'By',v:handledBy}])+
+                 '<details class="receiptDetails"><summary>收據詳情 / Receipt details</summary>'+
+                 kvHtml([{k:'時間 / Time',v:stamp},{k:'方式 / Method',v:method},{k:'收據編號 / Receipt',v:receipt},{k:'經手同工 / By',v:handledBy}])+
                  '</details></li>';
         }).join('');
 
         confirmEl.innerHTML =
           '<div class="msgBox ok">'+
             '<div class="big ok">✅ 完成簽到 / Bulk completed</div>'+
-            '<div class="small">Checked-in: '+okCount+' · Already: '+alreadyCount+' · Failed: '+failCount+'</div>'+
+            '<div class="small">新完成 / Checked-in: '+okCount+' · 已有紀錄 / Already: '+alreadyCount+' · 失敗 / Failed: '+failCount+'</div>'+
             (detailRows ? '<ul style="margin:8px 0 0 18px;padding:0;">'+detailRows+'</ul>' : '')+
           '</div>'+
           '<div class="miniBtnRow">'+

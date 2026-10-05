@@ -189,7 +189,7 @@ function renderLivePortal_(scannerReturn,handoff,mode){
   t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
   t.WEB_APP_URL = getLiveWebAppUrl_();
   t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
-  t.PGCC_CONFIG = safeInlineJson_(Object.assign(pgccConfig_(),{token:handoff?handoff.token:'',mode:mode||'',scannerReturn:!!scannerReturn}));
+  t.PGCC_CONFIG = safeInlineJson_(Object.assign(pgccConfig_(false),{token:handoff?handoff.token:'',mode:mode||'',scannerReturn:!!scannerReturn}));
   const output = t.evaluate();
   // Keep the established classic portal direct and stable by default.  When the
   // optional Script Property is enabled later, the entry page can choose the
@@ -1476,6 +1476,15 @@ function validateMemberForCheckin_(m, parsedKeyOrNull) {
 }
 
 /******** Email proof (check-in) ********/
+function checkinSermonPassage_(eventKey){
+  try{
+    const sermon = admin_getSermonRecordByEventKey_(eventKey) || {};
+    return String(sermon.sermonPassageRaw || sermon.sermonPassageCanonical || '').trim();
+  }catch(e){
+    // A receipt must never fail merely because sermon information is unavailable.
+    return '';
+  }
+}
 function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
   const emailTo = String(member.email || '').trim();
 
@@ -1496,22 +1505,39 @@ function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
   const greetName = pref || nameEn || nameZh || 'there';
 
   const dtLine = fmtUk_(ts, 'yyyy-MM-dd HH:mm:ss');
+  const passage = checkinSermonPassage_(eventKey);
+  const passageEn = passage ? `\nToday’s Scripture passage: ${passage}\n` : '';
+  const passageZh = passage ? `\n今日分享經文：${passage}\n` : '';
 
-  const subject = `CCF Check-in proof / 簽到證明: ${eventKey} (Receipt ${receiptId})`;
+  const subject = `普恩基督教會 · Check-in confirmation / 簽到確認: ${eventKey}`;
   const body =
-`Hi ${greetName},
+`Dear ${greetName},
 
-This is your proof of check-in:
-Event: ${eventKey}
+Grace and peace to you.
+
+Thank you for joining us at Preston Grace Christian Church today. Your attendance has been recorded.
+
+Service: ${eventKey}
 Time (UK): ${dtLine}
 Receipt ID: ${receiptId}
+${passageEn}
+May the Lord bless you through our worship, fellowship and the sharing of His Word.
 
-${nameZh ? nameZh + '，' : ''}你好：
+With every blessing,
+Preston Grace Christian Church
 
-以下為你的簽到證明：
-活動：${eventKey}
+${nameZh || greetName} 平安：
+
+感謝你今天來到普恩基督教會參與主日崇拜；你的簽到已記錄。
+
+聚會：${eventKey}
 時間（英國）：${dtLine}
-Receipt ID：${receiptId}
+收據編號：${receiptId}
+${passageZh}
+願主藉著敬拜、團契和祂的話語賜福給你。
+
+主內平安，
+普恩基督教會
 `;
 
   try {

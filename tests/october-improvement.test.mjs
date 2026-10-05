@@ -35,6 +35,31 @@ test('established portals keep direct Apps Script calls while future mobile auto
   assert.match(read('PgccEntry.html'),/entry\.autoMobile/);
   assert.match(read('PgccUi.html'),/普恩基督教會/);
 });
+test('classic portal does not bootstrap the large logo, but loads PGCC branding after it is usable',()=>{
+  const c=context();c.getLiveWebAppUrl_=()=> 'https://example.test/exec';
+  const config=plain(c.pgccConfig_(false));assert.equal(Object.hasOwn(config,'logo'),false);
+  assert.match(read('Code.gs'),/pgccConfig_\(false\)/);
+  assert.match(read('Pgcc.gs'),/function api_pgcc_branding\(\)/);
+  assert.match(read('index.html'),/id="classicLogo"/);
+  assert.match(read('index.html'),/callApi\('api_pgcc_branding'\)/);
+});
+test('bulk check-in receipt wording is bilingual and does not expose a duplicated SUPERUSER name',()=>{
+  const html=read('index.html');
+  for(const text of ['新完成 / Checked-in','已有紀錄 / Already','收據詳情 / Receipt details','時間 / Time','方式 / Method','收據編號 / Receipt','經手同工 / By','系統管理員 / Superuser'])assert.match(html,new RegExp(text));
+});
+test('check-in email includes a pastoral greeting and the sermon passage only when one is set',()=>{
+  const c=context(),sent=[];c.admin_getSermonRecordByEventKey_=()=>({sermonPassageRaw:'約翰福音 3:16'});
+  c.MailApp={getRemainingDailyQuota:()=>10,sendEmail:(to,subject,body)=>sent.push({to,subject,body})};
+  const result=c.maybeSendProofEmail_({email:'member@example.test',nameZh:'麥潔儀',preferredName:'袁師母'},'SundayService_2026-10-04','R1',new Date());
+  assert.equal(result.status,'SENT');assert.match(sent[0].subject,/普恩基督教會/);assert.match(sent[0].body,/Grace and peace to you/);assert.match(sent[0].body,/今日分享經文：約翰福音 3:16/);assert.match(sent[0].body,/普恩基督教會/);
+  c.admin_getSermonRecordByEventKey_=()=>({});c.maybeSendProofEmail_({email:'member@example.test'},'SundayService_2026-10-11','R2',new Date());assert.doesNotMatch(sent[1].body,/Scripture passage|分享經文/);
+});
+test('mobile check-in opens the scanner from the check-in tile and keeps image upload as an explicit fallback',()=>{
+  const mobile=read('LiveMobile.html');
+  assert.match(mobile,/if\(b\.dataset\.view==='scan'\)\$\('scan'\)\.click\(\)/);
+  assert.match(mobile,/上載 QR 圖片（備用）/);
+  assert.match(mobile,/Opening the scanner/);
+});
 test('scanner return uses a single-use server ticket bound to flow and event',()=>{
   const c=context();c.requireSession_=t=>t==='live'?{ok:true}:{ok:false,code:'E401'};c.renderPgccMobile_=x=>x;
   assert.equal(c.api_mobile_scanner('invalid','checkin','event').code,'E401');
