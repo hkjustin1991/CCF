@@ -8,7 +8,7 @@ const read = (name) => fs.readFileSync(new URL(name, root), 'utf8');
 
 function appsScriptContext(extra = {}) {
   const cache = { get(){ return null; }, put(){}, remove(){} };
-  return vm.createContext({
+  const context = vm.createContext({
     console,
     Date,
     JSON,
@@ -30,6 +30,8 @@ function appsScriptContext(extra = {}) {
     CacheService: { getScriptCache(){ return cache; } },
     ...extra
   });
+  vm.runInContext(read('Pgcc.gs'),context,{filename:'Pgcc.gs'});
+  return context;
 }
 
 test('serving events are appended when historical rows leave no blanks', () => {
@@ -799,7 +801,7 @@ test('a later family email change preserves identity, status and approval fields
     parentEmail:'parent@example.com', gender:'FEMALE', referredBy:''
   }, { keepExistingQr:true, deviceId:'test', ua:'node' });
   const written = Object.fromEntries(writes.map(item => [item.field, item.value]));
-  assert.equal(result.qrPayload, 'CCF0102|k2');
+  assert.equal(result.qrPayload, 'PGCC0102|k2');
   assert.equal(result.keepExistingQr, true);
   assert.equal(written.Status, 'PENDING');
   for (const protectedField of [
@@ -900,18 +902,18 @@ test('source and visible UI version tags identify this hotfix', () => {
   const regBackend = read('Reg.gs');
   const regUi = read('Reg2.html');
 
-  assert.ok(liveBackend.includes("const APP_VERSION = '2026-08-30.staff110';"));
-  assert.ok(liveBackend.includes('* v2026-08-30.staff110'));
-  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-08-28.107'));
-  assert.ok(liveUi.includes('ui staff-ui-2026-08-28.107'));
+  assert.ok(liveBackend.includes("const APP_VERSION = '2026-10-04.staff111';"));
+  assert.ok(liveBackend.includes('* v2026-10-04.staff111'));
+  assert.ok(liveUi.includes('* UI VERSION: staff-ui-2026-10-04.108'));
+  assert.ok(liveUi.includes('ui staff-ui-2026-10-04.108'));
 
-  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-08-30.admin124';"));
-  assert.ok(adminBackend.includes('* v2026-08-30.admin124'));
-  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-08-28.124'));
-  assert.ok(adminUi.includes('ui admin2-ui-2026-08-28.124'));
+  assert.ok(adminBackend.includes("const ADMIN_VERSION = '2026-10-04.admin125';"));
+  assert.ok(adminBackend.includes('* v2026-10-04.admin125'));
+  assert.ok(adminUi.includes('UI VERSION TAG: admin2-ui-2026-10-04.125'));
+  assert.ok(adminUi.includes('ui admin2-ui-2026-10-04.125'));
 
-  assert.ok(regBackend.includes("const REG_VERSION = '2026-08-30.reg126';"));
-  assert.ok(regBackend.includes('* v2026-08-30.reg126'));
-  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-08-28.123'));
-  assert.ok(regUi.includes('ui reg2-ui-2026-08-28.123'));
+  assert.ok(regBackend.includes("const REG_VERSION = '2026-10-04.reg127';"));
+  assert.ok(regBackend.includes('* v2026-10-04.reg127'));
+  assert.ok(regUi.includes('UI VERSION TAG: reg2-ui-2026-10-04.124'));
+  assert.ok(regUi.includes('ui reg2-ui-2026-10-04.124'));
 });

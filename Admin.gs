@@ -1,7 +1,7 @@
 /***************************************
  * CCF Admin Portal (attendance & stats)
  * File: Admin.gs
- * v2026-08-30.admin124
+ * v2026-10-04.admin125
  * CHANGELOG: invalidate the chunked Live member cache after Members-sheet changes.
  *
  * Route: ?mode=admin  -> doGetAdmin_() renders Admin2.html
@@ -48,7 +48,7 @@
  ***************************************/
 
 // ---- Config ----
-const ADMIN_VERSION = '2026-08-30.admin124';
+const ADMIN_VERSION = '2026-10-04.admin125';
 const ADMIN_TEMPLATE = 'Admin2'; // Admin2.html
 
 // Uses main project spreadsheet if present; else fallback.
@@ -480,6 +480,10 @@ function api_admin_sermon_page(token, ym){
 }
 
 function api_admin_sermon_save(token, payload){
+  const lock=LockService.getScriptLock();lock.waitLock(10000);
+  try{return admin_saveSermonUnlocked_(token,payload);}finally{lock.releaseLock();}
+}
+function admin_saveSermonUnlocked_(token, payload){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
   const role = String((s.actor && s.actor.role) || '').trim().toUpperCase();
@@ -1271,7 +1275,12 @@ function api_admin_serving_event_rows(token, eventKey){
  * Serving event save (replace rows for one event).
  * rows: [{position, value}]
  */
-function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scopeGroupKey){
+function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scopeGroupKey, duplicateOverride){
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try { return admin_saveServingEventUnlocked_(token,eventKey,rows,overrideAway,scopeGroupKey,duplicateOverride); }
+  finally { lock.releaseLock(); }
+}
+function admin_saveServingEventUnlocked_(token, eventKey, rows, overrideAway, scopeGroupKey, duplicateOverride){
   const s = admin_requireSession_(token);
   if (!s.ok) return s;
 
@@ -1292,7 +1301,7 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const allowed = new Set(ADMIN_SERVING_POSITIONS);
   for (const r of list){
     const position = String(r.position||'').trim();
-    const valueRaw = String(r.value||'').trim();
+    const valueRaw = String(pgccNormalizeInput_(r.value)||'').trim();
     if (!position && !valueRaw) continue;
     if (!allowed.has(position)) continue;
     const normalizedValue = admin_normalizeServingValue_(valueRaw, ADMIN_SERVING_POSITION_MAX[position] || 1);
@@ -1306,7 +1315,6 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   const mi = admin_getMembersIndex_();
   const membersById = mi.byId || {};
   const existingValues = admin_getServingValuesForEvent_(ev);
-  const existingDupMap = admin_getDuplicatePositionMapFromValues_(existingValues);
   const mergedValues = Object.assign({}, existingValues);
 
   const changedPositions = new Set();
@@ -1363,19 +1371,22 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     const effectivePositions = admin_filterDuplicateConflictPositions_(positions);
     if (effectivePositions.length <= 1) return;
     if (scopeGroup){
-      const touchesScopedGroup = positions.some(function(p){ return (ADMIN_SERVING_POSITION_GROUP[p] || '') === scopeGroup; });
+      const touchesScopedGroup = positions.some(function(p){ return admin_normalizeServingGroup_(ADMIN_SERVING_POSITION_GROUP[p] || '') === scopeGroup; });
       if (!touchesScopedGroup) return;
     }
     const normalized = effectivePositions.slice().sort();
-    const existing = admin_filterDuplicateConflictPositions_(existingDupMap[id] || []);
+    const existing = admin_filterDuplicateConflictPositions_(ADMIN_SERVING_POSITIONS.filter(function(p){
+      return admin_extractMemberIdsFromServingValue_(existingValues[p] || '').indexOf(id) >= 0;
+    })).sort();
     const isNewDup = (existing.join('|') !== normalized.join('|'));
     if (!isNewDup) return;
     const attemptedPositions = normalized.filter(function(p){ return existing.indexOf(p) < 0; });
     duplicateDetails.push({
       memberId: id,
-      positions: effectivePositions.slice(0, 2),
-      existingPositions: existing.slice(0, 2),
-      attemptedPositions: attemptedPositions.slice(0, 2),
+      name: admin_memberLabelCompact_(membersById[id] || {id:id}).label,
+      positions: effectivePositions,
+      existingPositions: existing,
+      attemptedPositions: attemptedPositions,
       dateYmd: eventDateYmd,
       newlyIntroduced:true
     });
@@ -1389,7 +1400,10 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
     }));
   }
   const role = String(s.actor.role||'').trim().toUpperCase();
-  const canOverride = admin_isAdminActorRole_(role);
+  const worshipAttempt = duplicateDetails.some(function(d){return d.attemptedPositions.some(function(p){return admin_normalizeServingGroup_(ADMIN_SERVING_POSITION_GROUP[p]) === 'worship';});});
+  const canOverride = ['GL','STAFF','DEACON','ADMIN','SUPERUSER'].indexOf(role) >= 0 && !worshipAttempt;
+  const override = duplicateOverride || {};
+  const conflictKey = JSON.stringify({event:ev,duplicates:duplicateDetails});
   if (invalidGroupAssignments.length){
     const detail = invalidGroupAssignments.map(function(x){
       const m = membersById[String(x.memberId||'').toUpperCase()] || null;
@@ -1433,8 +1447,8 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
         canOverride:false
       };
     }
-    if (!overrideAway){
-      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'該會員已在此崗位事奉', en:'They are already serving this position.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true };
+    if (override.confirmed !== true || String(override.reason || '').trim().length < 10 || override.conflictKey !== conflictKey){
+      return { ok:false, code:'E409', subCode:'DUPLICATE_ASSIGNMENT', subGroup:'SERVING_ASSIGNMENT', zh:'請核對重複安排並填寫原因', en:'Review these assignments and provide an override reason.', duplicates: duplicateDetails, dateYmd: eventDateYmd, canOverride:true, conflictKey:conflictKey };
     }
   }
   if (conflicts.length){
@@ -1455,12 +1469,18 @@ function api_admin_serving_event_save(token, eventKey, rows, overrideAway, scope
   }
 
   const updatedHeaderMap = admin_getServingMatrixHeaderMap_(sh);
+  if(cleaned.some(function(r){return !updatedHeaderMap[r.position];})) return pgccSchemaApproval_('Missing Serving position column');
   const lastCol = sh.getLastColumn();
   const rowValues = sh.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
   cleaned.forEach(function(r){
     const colIdx = updatedHeaderMap[r.position];
     if (colIdx) rowValues[colIdx-1] = r.value || '';
   });
+  if(duplicateDetails.length){
+    // A required exception audit must succeed before applying the allocation.
+    const audit = pgccRequireSheet_(admin_openSs_(),ADMIN_AUDIT_SHEET_NAME);
+    audit.appendRow([new Date(),s.actor.id,role,'SERVING_DUPLICATE_OVERRIDE',JSON.stringify({eventKey:ev,duplicates:duplicateDetails,reason:String(override.reason).trim()}),'serving']);
+  }
   sh.getRange(rowIndex, 1, 1, lastCol).setValues([rowValues]);
 
   admin_audit_(
@@ -3072,82 +3092,9 @@ function admin_ensureServingEventKeys_(sh){
   );
 }
 function admin_ensureServingHeaders_(sh){
-  const lastRow = sh.getLastRow();
-  const lastCol = sh.getLastColumn();
-  const existing = sh.getRange(1,1,1,lastCol).getValues()[0].map(v => String(v||'').trim());
-  const desired = ['EventKey'].concat(ADMIN_SERVING_POSITIONS.map(admin_servingHeaderLabel_));
-
-  const headerNeedsMigration = existing.some(function(h){
-    const raw = String(h || '').trim();
-    return raw.indexOf('Worship_Singer_1') >= 0 || raw.indexOf('Worship_Singer_2') >= 0 || raw.indexOf('Worship_Instrument_1') >= 0 || raw.indexOf('Worship_Instrument_2') >= 0;
-  });
-  const sameHeader = (existing.length === desired.length) && desired.every(function(label, idx){ return existing[idx] === label; });
-  if (!headerNeedsMigration && sameHeader) return;
-
-  const data = (lastRow > 0 && lastCol > 0) ? sh.getRange(1,1,lastRow,lastCol).getValues() : [];
-  const oldHeaders = data.length ? data[0].map(v => String(v||'').trim()) : existing;
-  const keyByCol = oldHeaders.map(admin_extractServingKey_);
-
-  function mergedValue_(vals, maxSlots){
-    const out = [];
-    const seen = {};
-    vals.forEach(function(raw){
-      admin_splitServingValues_(raw).forEach(function(token){
-        const t = String(token||'').trim();
-        if (!t) return;
-        const k = t.toUpperCase();
-        if (seen[k]) return;
-        if (out.length >= maxSlots) return;
-        seen[k] = true;
-        out.push(t);
-      });
-    });
-    return out.join(', ');
-  }
-
-  const newData = [desired];
-  for (let r=1; r<data.length; r++){
-    const row = data[r];
-    const valueByKey = {};
-    for (let c=1; c<oldHeaders.length; c++){
-      const key = keyByCol[c];
-      if (!key) continue;
-      const raw = String(row[c] || '').trim();
-      if (!raw) continue;
-      if (!valueByKey[key]) valueByKey[key] = [];
-      valueByKey[key].push(raw);
-    }
-
-    const outRow = [String(row[0] || '').trim()];
-    ADMIN_SERVING_POSITIONS.forEach(function(pos){
-      let merged = '';
-      if (pos === 'Worship_Singer'){
-        merged = mergedValue_((valueByKey['Worship_Singer'] || []).concat(valueByKey['Worship_Singer_1'] || [], valueByKey['Worship_Singer_2'] || []), Number(ADMIN_SERVING_POSITION_MAX[pos] || 1));
-      } else if (pos === 'Worship_Instrument'){
-        merged = mergedValue_((valueByKey['Worship_Instrument'] || []).concat(valueByKey['Worship_Instrument_1'] || [], valueByKey['Worship_Instrument_2'] || []), Number(ADMIN_SERVING_POSITION_MAX[pos] || 1));
-      } else {
-        merged = mergedValue_(valueByKey[pos] || [], Number(ADMIN_SERVING_POSITION_MAX[pos] || 1));
-      }
-      outRow.push(merged);
-    });
-    newData.push(outRow);
-  }
-
-  const targetCols = desired.length;
-  if (sh.getMaxColumns() < targetCols){
-    sh.insertColumnsAfter(sh.getMaxColumns(), targetCols - sh.getMaxColumns());
-  }
-  sh.getRange(1,1,Math.max(1, newData.length), targetCols).clearContent();
-  if (newData.length){
-    sh.getRange(1,1,newData.length,targetCols).setValues(newData);
-  } else {
-    sh.getRange(1,1,1,targetCols).setValues([desired]);
-  }
-  sh.getRange(1,1,1,targetCols).setFontWeight('bold');
-  const extraCols = sh.getLastColumn() - targetCols;
-  if (extraCols > 0){
-    sh.deleteColumns(targetCols + 1, extraCols);
-  }
+  // Do not migrate, reorder or delete existing columns during normal use.
+  // The save path reports a missing requested position without changing the sheet.
+  return admin_getServingMatrixHeaderMap_(sh);
 }
 function admin_ensureAwaySheet_(){
   const ss = admin_openSs_();
@@ -4217,7 +4164,7 @@ function admin_parseQrStrict_(raw){
   const parts = s.split('|');
   if (parts.length !== 2) return admin_err_('E416','QR 格式錯誤','Invalid QR format.');
 
-  const id = String(parts[0]||'').trim().toUpperCase();
+  const id = pgccCanonicalId_(parts[0]);
   const key = String(parts[1]||'').trim();
 
   if (!/^CCF\d{4}$/.test(id)) return admin_err_('E416','CCF ID 格式錯誤（需要 4 位數）','Invalid CCF ID format.');
