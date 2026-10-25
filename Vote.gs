@@ -75,24 +75,9 @@ function vote_open_ss_(){
 }
 
 function vote_ensure_sheet_(name,headers){
-  const ss = vote_open_ss_();
-  let sh = ss.getSheetByName(name);
-  if (!sh){
-    sh = ss.insertSheet(name);
-    sh.getRange(1,1,1,headers.length).setValues([headers]);
-    sh.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground('#e8eef8');
-    sh.setFrozenRows(1);
-    return sh;
-  }
-  const lastCol = Math.max(1,sh.getLastColumn());
-  const existing = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(v){ return String(v || '').trim(); });
-  headers.forEach(function(header){
-    if (existing.indexOf(header) >= 0) return;
-    const next = sh.getLastColumn() + 1;
-    sh.getRange(1,next).setValue(header).setFontWeight('bold').setBackground('#e8eef8');
-    existing.push(header);
-  });
-  sh.setFrozenRows(1);
+  const sh=pgccRequireSheet_(vote_open_ss_(),name);
+  const existing=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
+  if(headers.some(function(h){return existing.indexOf(h)<0;}))pgccSchemaApproval_('Missing Vote headers');
   return sh;
 }
 
@@ -244,73 +229,17 @@ function vote_legacy_record_fields_(sheetName,r){
 
 /* Split records created by vote3 before importing any older Vote_* tabs. */
 function vote_migrate_unified_vote_(){
-  const ss = vote_open_ss_(), sh = ss.getSheetByName(VOTE_SHEET);
-  if (!sh){ vote_ensure_data_sheet_(); vote_ensure_audit_sheet_(); return { migrated:0, removedRows:0, removedColumns:0 }; }
-  const rows = vote_sheet_records_(VOTE_SHEET);
-  const unknownRows = rows.filter(function(r){
-    const type = String(r.RecordType || '').trim().toUpperCase();
-    return !!type && !vote_is_config_record_type_(type) && !vote_is_runtime_record_type_(type);
-  });
-  if (unknownRows.length) throw new Error('Unsupported Vote record type at row(s): ' + unknownRows.map(function(r){ return r._rowNumber; }).join(', '));
-  const runtimeRows = rows.filter(function(r){
-    const type = String(r.RecordType || '').trim().toUpperCase();
-    return vote_is_runtime_record_type_(type);
-  });
-  const auditSheet = vote_ensure_audit_sheet_(), existingSources = {};
-  vote_audit_data_records_('').forEach(function(r){ if (r.LegacySource) existingSources[String(r.LegacySource)] = true; });
-  const expected = [];
-  runtimeRows.forEach(function(r){
-    const fields = {}, source = String(r.LegacySource || vote_legacy_source_(VOTE_SHEET,r._rowNumber));
-    VOTE_AUDIT_HEADERS.forEach(function(h){ if (Object.prototype.hasOwnProperty.call(r,h)) fields[h] = r[h]; });
-    fields.LegacySource = source;
-    expected.push(source);
-    if (!existingSources[source]){
-      auditSheet.appendRow(vote_audit_row_from_fields_(fields));
-      existingSources[source] = true;
-    }
-  });
-  const verified = {};
-  vote_audit_data_records_('').forEach(function(r){ if (r.LegacySource) verified[String(r.LegacySource)] = true; });
-  const missing = expected.filter(function(source){ return !verified[source]; });
-  if (missing.length) throw new Error('Vote split verification failed: ' + missing.join(', '));
-  runtimeRows.map(function(r){ return r._rowNumber; }).sort(function(a,b){ return b - a; }).forEach(function(rowNumber){ sh.deleteRow(rowNumber); });
-  vote_ensure_data_sheet_();
-  const headers = sh.getRange(1,1,1,Math.max(1,sh.getLastColumn())).getValues()[0].map(function(v){ return String(v || '').trim(); });
-  let removedColumns = 0;
-  for (let col=headers.length - 1;col>=0;col--){
-    if (VOTE_HEADERS.indexOf(headers[col]) >= 0) continue;
-    sh.deleteColumn(col + 1);
-    removedColumns++;
-  }
-  vote_ensure_data_sheet_();
-  return { migrated:runtimeRows.length, removedRows:runtimeRows.length, removedColumns:removedColumns };
+  const sh=vote_ensure_data_sheet_();
+  vote_ensure_audit_sheet_();
+  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
+  if(headers.some(function(h){return VOTE_HEADERS.indexOf(h)<0;}) || vote_sheet_records_(VOTE_SHEET).some(function(r){return r.RecordType && !vote_is_config_record_type_(String(r.RecordType).toUpperCase());}))
+    pgccSchemaApproval_('Legacy Vote migration requires review');
+  return {migrated:0,removedRows:0,removedColumns:0};
 }
-
 function vote_migrate_legacy_sheets_(){
-  const ss = vote_open_ss_(), split = vote_migrate_unified_vote_(), dataSheet = vote_ensure_data_sheet_(), auditSheet = vote_ensure_audit_sheet_(), existingSources = {};
-  vote_data_records_('').concat(vote_audit_data_records_('')).forEach(function(r){ if (r.LegacySource) existingSources[String(r.LegacySource)] = true; });
-  const expectedSources = [], legacySheets = [];
-  VOTE_LEGACY_SHEETS.forEach(function(name){
-    const sh = ss.getSheetByName(name);
-    if (!sh) return;
-    legacySheets.push(sh);
-    vote_sheet_records_(name).forEach(function(r){
-      const fields = vote_legacy_record_fields_(name,r);
-      if (!fields) return;
-      expectedSources.push(fields.LegacySource);
-      if (!existingSources[fields.LegacySource]){
-        const target = vote_is_config_record_type_(fields.RecordType) ? dataSheet : auditSheet;
-        target.appendRow(vote_is_config_record_type_(fields.RecordType) ? vote_row_from_fields_(fields) : vote_audit_row_from_fields_(fields));
-        existingSources[fields.LegacySource] = true;
-      }
-    });
-  });
-  const verified = {};
-  vote_data_records_('').concat(vote_audit_data_records_('')).forEach(function(r){ if (r.LegacySource) verified[String(r.LegacySource)] = true; });
-  const missing = expectedSources.filter(function(source){ return !verified[source]; });
-  if (missing.length) throw new Error('Vote migration verification failed: ' + missing.join(', '));
-  legacySheets.forEach(function(sh){ ss.deleteSheet(sh); });
-  return { migrated:expectedSources.length + split.migrated, removedSheets:legacySheets.length, splitRows:split.removedRows, removedColumns:split.removedColumns };
+  if(VOTE_LEGACY_SHEETS.some(function(name){return !!vote_open_ss_().getSheetByName(name);}))pgccSchemaApproval_('Legacy Vote tabs require review');
+  vote_migrate_unified_vote_();
+  return {migrated:0,removedSheets:0,splitRows:0,removedColumns:0};
 }
 
 function vote_norm_status_(value){ return String(value || '').trim().toUpperCase(); }

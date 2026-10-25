@@ -34,7 +34,7 @@
   }
 
   function validatedReturnUrl(){
-    if(returnMode !== 'post' || returnView !== 'mobileScan') return '';
+    if(returnMode !== 'post' || ['mobileScan','pgccScan'].indexOf(returnView) < 0) return '';
     try{
       var parsed = new URL(returnUrl);
       var validHost = parsed.protocol === 'https:' && parsed.hostname === 'script.google.com';

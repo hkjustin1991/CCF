@@ -1,7 +1,7 @@
 /***************************************
  * CCF Live Service Portal (stable + upgrades)
  * File: Code.gs
- * v2026-08-30.staff110
+ * v2026-10-04.staff111
  * CHANGELOG: prevent Live login E500 by chunking the member index cache and keeping login read-only.
  *
  * ============================================================
@@ -24,7 +24,7 @@
  *     Core check-in behaviour preserved.
  ***************************************/
 
-const APP_VERSION = '2026-08-30.staff110';
+const APP_VERSION = '2026-10-04.staff111';
 const SPREADSHEET_ID = '1hVeWUwt79qIXqQ0R0UTqvFXwOvkcQYDjmSePw5AenPA';
 
 const TZ = 'Europe/London';
@@ -139,6 +139,8 @@ function getWebMode_(e){
 
 function doGet(e) {
   const mode = getWebMode_(e);
+  if (mode === 'live-mobile') return renderPgccMobile_(pgccTakeTicket_(e,'live-mobile'));
+  if (mode === 'service-plan') return renderPgccServicePlan_(e);
 
   // Public health ping for uptime/deployment checks (NEW)
   if (mode === 'healthping') {
@@ -152,13 +154,14 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
 
-  if (mode === 'reg') return doGetReg_(e); // Reg.gs
-  if (mode === 'admin') return doGetAdmin_(e); // Admin.gs
-  if (mode === 'rota') return doGetRotaPublic_(e);
-  if (mode === 'vote') return doGetVote_(e); // Vote.gs
-  if (mode === 'vote-review') return doGetVoteReview_(e); // Vote.gs — restricted, unlinked exception route
+  // Set the parent browser-tab title here; changing the iframe's title is insufficient.
+  if (mode === 'reg') return doGetReg_(e).setTitle('普恩基督教會 · Member portal');
+  if (mode === 'admin') return doGetAdmin_(e).setTitle('普恩基督教會 · Admin');
+  if (mode === 'rota') return doGetRotaPublic_(e).setTitle('普恩基督教會 · Serving rota');
+  if (mode === 'vote') return doGetVote_(e).setTitle('普恩基督教會 · Member polls');
+  if (mode === 'vote-review') return doGetVoteReview_(e).setTitle('普恩基督教會 · Formal review'); // Restricted, unlinked exception route
 
-  return renderLivePortal_(null);
+  return renderLivePortal_(null,pgccTakeTicket_(e,'classic'),mode);
 }
 
 function getLiveWebAppUrl_(){
@@ -177,7 +180,7 @@ function safeInlineJson_(value){
     .replace(/\u2029/g, '\\u2029');
 }
 
-function renderLivePortal_(scannerReturn){
+function renderLivePortal_(scannerReturn,handoff,mode){
   const t = HtmlService.createTemplateFromFile('index');
   t.APP_VERSION = APP_VERSION;
   const scannerCfg = getExternalScannerConfig_();
@@ -186,8 +189,15 @@ function renderLivePortal_(scannerReturn){
   t.EXTERNAL_SCANNER_TIMEOUT_MS = scannerCfg.timeoutMs;
   t.WEB_APP_URL = getLiveWebAppUrl_();
   t.SCANNER_RETURN_JSON = safeInlineJson_(scannerReturn);
-  return t.evaluate()
-    .setTitle('CCF Live Service Portal')
+  t.PGCC_CONFIG = safeInlineJson_(Object.assign(pgccConfig_(false),{token:handoff?handoff.token:'',mode:mode||'',scannerReturn:!!scannerReturn}));
+  const output = t.evaluate();
+  // Keep the established classic portal direct and stable by default.  When the
+  // optional Script Property is enabled later, the entry page can choose the
+  // mobile interface for new phone visitors (while respecting local preference).
+  if (!scannerReturn && mode !== 'classic' && pgccConfig_().autoMobile) return renderPgccEntry_(output.getContent());
+  return output
+    .setTitle('普恩基督教會 · Live Portal')
+    .addMetaTag('viewport','width=device-width, initial-scale=1, viewport-fit=cover')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -393,6 +403,8 @@ function getExternalScannerConfig_(){
 
 function doPost(e) {
   try {
+    const mobileReturn = pgccScannerPost_(e);
+    if (mobileReturn) return mobileReturn;
     const scannerReturn = scannerReturnFromPost_(e);
     if (scannerReturn) return renderLivePortal_(scannerReturn);
 
@@ -435,7 +447,9 @@ function invokeRpcFunction_(fn, args){
     throw new Error('Function not found: ' + fn);
   }
 
-  return target.apply(null, args || []);
+  // Login parsers already accept both prefixes; leave configured bypass secrets untouched.
+  const loginSecret = ['api_login','api_login_internal','api_admin_login'].indexOf(fn) >= 0;
+  return target.apply(null, loginSecret ? (args || []) : (args || []).map(pgccNormalizeInput_));
 }
 
 /******** Helpers ********/
@@ -839,22 +853,9 @@ function clearMembersIndexCache_(){
 function ensureCheckinsSheetColumns_(sh) {
   const needCols = 14;
   const lastCol = sh.getLastColumn();
-  if (lastCol < needCols) sh.insertColumnsAfter(lastCol, needCols - lastCol);
-
-  const hdr = sh.getRange(1, 1, 1, needCols).getValues()[0];
-  const wanted = [
-    'Timestamp','EventKey',
-    'MemberId','MemberNameZh','MemberNameEn',
-    'Method',
-    'StaffId','StaffNameZh','StaffNameEn',
-    'ReceiptId',
-    'EmailTo','EmailStatus',
-    'DeviceId','UserAgent'
-  ];
-  for (let i = 0; i < wanted.length; i++) {
-    const v = String(hdr[i] || '').trim();
-    if (!v) sh.getRange(1, i + 1).setValue(wanted[i]);
-  }
+  // The live portal has historically read this established positional layout.
+  // Do not rename its headings or add columns during a check-in attempt.
+  if (lastCol < needCols) pgccSchemaApproval_('Checkins needs at least ' + needCols + ' existing columns');
 }
 
 function getCheckinsSheet_() {
@@ -864,18 +865,7 @@ function getCheckinsSheet_() {
   const cache = CacheService.getScriptCache();
 
   if (!sh) {
-    sh = ss.insertSheet(CHECKINS_SHEET_NAME_PRIMARY);
-    sh.getRange(1, 1, 1, 14).setValues([[
-      'Timestamp','EventKey',
-      'MemberId','MemberNameZh','MemberNameEn',
-      'Method',
-      'StaffId','StaffNameZh','StaffNameEn',
-      'ReceiptId',
-      'EmailTo','EmailStatus',
-      'DeviceId','UserAgent'
-    ]]);
-    sh.getRange(1, 1, 1, 14).setFontWeight('bold');
-    try{ cache.put(CHECKINS_SCHEMA_CACHE_KEY, '1', 6 * 60 * 60); }catch(e){}
+    pgccSchemaApproval_('Missing sheet: ' + CHECKINS_SHEET_NAME_PRIMARY);
   } else {
     let schemaReady = false;
     try{ schemaReady = cache.get(CHECKINS_SCHEMA_CACHE_KEY) === '1'; }catch(e){}
@@ -1214,7 +1204,7 @@ function parseQrPayloadStrict_(raw) {
   if (parts.length !== 2) {
     return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
   }
-  const id = String(parts[0] || '').trim().toUpperCase();
+  const id = pgccCanonicalId_(parts[0]);
   const key = String(parts[1] || '').trim();
 
   if (!id || !key) return { ok:false, code:'E416', zh:'QR 格式錯誤，請聯絡影音同工', en:'Invalid QR format. Please contact Media team.' };
@@ -1486,6 +1476,15 @@ function validateMemberForCheckin_(m, parsedKeyOrNull) {
 }
 
 /******** Email proof (check-in) ********/
+function checkinSermonPassage_(eventKey){
+  try{
+    const sermon = admin_getSermonRecordByEventKey_(eventKey) || {};
+    return String(sermon.sermonPassageRaw || sermon.sermonPassageCanonical || '').trim();
+  }catch(e){
+    // A receipt must never fail merely because sermon information is unavailable.
+    return '';
+  }
+}
 function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
   const emailTo = String(member.email || '').trim();
 
@@ -1506,22 +1505,39 @@ function maybeSendProofEmail_(member, eventKey, receiptId, ts) {
   const greetName = pref || nameEn || nameZh || 'there';
 
   const dtLine = fmtUk_(ts, 'yyyy-MM-dd HH:mm:ss');
+  const passage = checkinSermonPassage_(eventKey);
+  const passageEn = passage ? `\nToday’s Scripture passage: ${passage}\n` : '';
+  const passageZh = passage ? `\n今日分享經文：${passage}\n` : '';
 
-  const subject = `CCF Check-in proof / 簽到證明: ${eventKey} (Receipt ${receiptId})`;
+  const subject = `普恩基督教會 · Check-in confirmation / 簽到確認: ${eventKey}`;
   const body =
-`Hi ${greetName},
+`Dear ${greetName},
 
-This is your proof of check-in:
-Event: ${eventKey}
+Grace and peace to you.
+
+Thank you for joining us at Preston Grace Christian Church today. Your attendance has been recorded.
+
+Service: ${eventKey}
 Time (UK): ${dtLine}
 Receipt ID: ${receiptId}
+${passageEn}
+May the Lord bless you through our worship, fellowship and the sharing of His Word.
 
-${nameZh ? nameZh + '，' : ''}你好：
+With every blessing,
+Preston Grace Christian Church
 
-以下為你的簽到證明：
-活動：${eventKey}
+${nameZh || greetName} 平安：
+
+感謝你今天來到普恩基督教會參與主日崇拜；你的簽到已記錄。
+
+聚會：${eventKey}
 時間（英國）：${dtLine}
-Receipt ID：${receiptId}
+收據編號：${receiptId}
+${passageZh}
+願主藉著敬拜、團契和祂的話語賜福給你。
+
+主內平安，
+普恩基督教會
 `;
 
   try {
@@ -1768,7 +1784,7 @@ function api_search_members(token, query) {
   const auth = requireSession_(token);
   if (!auth.ok) return auth;
 
-  const q = String(query || '').trim();
+  const q = pgccCanonicalId_(query);
   if (!q) return { ok:true, results:[] };
 
   const byId = getMembersIndex_().byId;
@@ -1908,7 +1924,8 @@ function api_get_live_page(token, eventKeyOptional) {
     servingToday
   };
 
-  cache.put(cacheKey, JSON.stringify(payload), 15);
+  // Cache is an optimisation; an oversized live list must still be returned.
+  try{ cache.put(cacheKey, JSON.stringify(payload), 15); }catch(e){}
   return payload;
 }
 

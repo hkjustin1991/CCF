@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Service planning</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f6f8;color:#16364c;font:17px/1.5 system-ui,-apple-system,sans-serif}main{max-width:780px;margin:auto;padding:18px 18px 50px}header{display:flex;align-items:center;gap:12px}header img{width:70px;height:70px;object-fit:contain}header button{margin-left:auto}h1{font-size:28px;line-height:1.2}h2{font-size:21px;margin:0}h3{font-size:18px;margin:0 0 10px}p{margin:8px 0;overflow-wrap:anywhere}.muted,small{color:#536777;font-size:14px}.card{background:white;border:1px solid #dae4ea;border-radius:20px;padding:20px;margin:14px 0;overflow-wrap:anywhere}.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.row h2{flex:1}.entry{padding:14px 0;border-bottom:1px solid #e5ecef}.entry:last-child{border:0}button,input,textarea,select{font:inherit;min-height:48px;border:1px solid #b6c8d2;border-radius:12px;padding:10px 14px;background:white;color:inherit}button{cursor:pointer;font-weight:650}button.primary{background:#083d63;color:white;border-color:#083d63}button:disabled{opacity:.5;cursor:wait}input,textarea,select{width:100%}textarea{min-height:90px;resize:vertical}label{display:block;font-size:15px;font-weight:650;margin:12px 0 5px}.actions{display:flex;gap:10px;margin-top:18px}.actions>*{flex:1}#message:empty{display:none}#message{padding:14px;border-left:5px solid #087f8c;background:white;border-radius:10px;white-space:pre-line;margin:12px 0}#message.error{border-color:#a52934;color:#8a2430}.editor{border:2px solid #087f8c;padding:16px;border-radius:16px;margin-top:14px}.override{border:2px solid #bc8117;padding:16px;border-radius:16px}.override input[type=checkbox]{width:24px;min-height:24px;vertical-align:middle;margin-right:12px}a{color:#086e79}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #b98523;outline-offset:2px}@media(max-width:430px){main{padding:12px}.card{padding:16px}.row{align-items:flex-start}h1{font-size:24px}.row button{font-size:14px;padding:10px}}
+</style></head><body><main><header><img id="logo" alt="PGCC"><div><strong>Preston Grace</strong><br><small>崇拜安排 · Service planning</small></div><button id="back">返回 / Back</button></header><h1>崇拜安排</h1><label for="event">聚會日期 / Service date</label><select id="event" disabled></select><div id="message" role="status" aria-live="polite"></div><div id="content"></div></main>
+<script>
+const BOOT=<?!= BOOT ?>;
+const $=id=>document.getElementById(id),esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const display=v=>String(v||'').replace(/\bCCF(?=\d)/g,'PGCC');
+let session=BOOT.session, data=null, dirty=false, busy=false, editor=null;
+try{if(session)sessionStorage.setItem('pgcc_service_plan',JSON.stringify(session));else session=JSON.parse(sessionStorage.getItem('pgcc_service_plan')||'null');}catch(e){}
+$('logo').src=BOOT.config.logo;
+function api(fn,...args){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(r=>r&&r.ok?resolve(r):reject(r||{})).withFailureHandler(reject).api_rpc(fn,args));}
+function message(text,error){$('message').textContent=text||'';$('message').className=error?'error':'';}
+function err(e){return [e.zh,e.en,e.detail,e.code].filter(Boolean).join(' / ')||e.message||'Unable to complete / 暫時未能完成';}
+async function work(fn){if(busy)return;busy=true;document.querySelectorAll('button,input,select,textarea').forEach(b=>b.disabled=true);try{await fn();}catch(e){message(err(e),true);}finally{busy=false;document.querySelectorAll('button,input,select,textarea').forEach(b=>b.disabled=false);}}
+function mayLeave(){return !dirty||confirm('尚未儲存，要放棄更改？ / Discard unsaved changes?');}
+window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+$('back').onclick=()=>{if(!mayLeave())return;dirty=false;const a=document.createElement('a');a.href=BOOT.config.url+'?mode='+encodeURIComponent((session||{}).back||'live-mobile');a.target='_top';document.body.append(a);a.click();};
+$('event').onchange=()=>{const ev=$('event').value;if(!mayLeave()){$('event').value=data.eventKey;return;}load(ev);};
+async function load(ev){await work(async()=>{message('載入中… / Loading…');const next=await api('api_service_plan',session.token,ev||'','plan');data=next;dirty=false;editor=null;render();message('');});}
+const sections=[['WORSHIP_MAIN_1','敬拜 1 / Worship 1'],['WORSHIP_MAIN_2','敬拜 2 / Worship 2'],['WORSHIP_MAIN_3','敬拜 3 / Worship 3'],['WORSHIP_MAIN_4','敬拜 4 / Worship 4'],['WORSHIP_RESPONSE_1','回應 1 / Response 1'],['WORSHIP_RESPONSE_2','回應 2 / Response 2']];
+function memberNames(raw){return display(String(raw||'').replace(/CCF\d{4,}/g,id=>{const m=data.members.find(x=>x.id===id);return m?m.name+' ('+id+')':id;}));}
+function row(label,value){return '<p><small>'+label+'</small><br>'+esc(value||'—')+'</p>';}
+function editButton(type,key){return '<button data-edit="'+type+'" data-key="'+esc(key||'')+'">編輯 / Edit</button>';}
+function safeLink(url){try{const u=new URL(url);return ['https:','http:'].includes(u.protocol)?u.href:'';}catch(e){return '';}}
+function render(){
+ const events=data.events||[];if(!events.some(e=>e.eventKey===data.eventKey))events.unshift({eventKey:data.eventKey});
+ $('event').innerHTML=events.map(e=>'<option value="'+esc(e.eventKey)+'" '+(e.eventKey===data.eventKey?'selected':'')+'>'+esc(e.eventKey.replace('SundayService_',''))+'</option>').join('');
+ const s=data.sermon||{};
+ $('content').innerHTML='<section class="card"><div class="row"><h2>講道 / Sermon</h2>'+(data.canSermon?editButton('sermon'):'')+'</div>'+row('講員 / Speaker',s.speaker)+row('講題 / Title',s.sermonTitle)+row('經文 / Passage',s.sermonPassageRaw)+row('回應 / Response',s.responsePassageRaw)+row('回應講員 / Response speaker',s.responseSpeaker)+'<div id="edit-sermon"></div></section><section class="card"><h2>詩歌 / Songs</h2>'+sections.map(([key,label])=>{const x=data.songs[key]||{},url=safeLink(x.linkUrl);return '<div class="entry"><div class="row"><h3>'+label+'</h3>'+(data.canSongs?editButton('song',key):'')+'</div>'+row('歌名 / Title',x.songTitle)+'<p class="muted">'+esc([x.songKey&&'Key '+x.songKey,x.capo&&'Capo '+x.capo,x.versionNote].filter(Boolean).join(' · '))+'</p>'+(url?'<a target="_blank" rel="noopener noreferrer" href="'+esc(url)+'">'+esc(x.linkTitle||'歌曲連結 / Song link')+'</a>':'')+'<div id="edit-'+key+'"></div></div>';}).join('')+'</section><section class="card"><h2>事奉人員 / Serving team</h2>'+data.positions.map(p=>'<div class="entry"><div class="row"><div><small>'+esc(p.label)+'</small><p>'+esc(memberNames(p.value)||'尚未安排 / Unassigned')+'</p></div>'+(p.canEdit?editButton('rota',p.position):'')+'</div><div id="edit-'+p.position+'"></div></div>').join('')+'</section>';
+ document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.edit,b.dataset.key));
+}
+function field(key,label,value,multiline){return '<label for="f-'+key+'">'+label+'</label>'+(multiline?'<textarea id="f-'+key+'">'+esc(value||'')+'</textarea>':'<input id="f-'+key+'" value="'+esc(value||'')+'">');}
+function openEditor(type,key){if(!mayLeave())return;dirty=false;render();const host=$('edit-'+(key||'sermon'));let html='',fields=[],source;
+ if(type==='sermon'){source=data.sermon;fields=[['speaker','講員 / Speaker'],['sermonTitle','講題 / Title'],['sermonPassageRaw','講道經文 / Sermon passage'],['responsePassageRaw','回應經文 / Response passage'],['responseSpeaker','回應講員 / Response speaker']];}
+ if(type==='song'){source=data.songs[key]||{};fields=[['songTitle','歌名 / Song title'],['songKey','調 / Key'],['capo','Capo'],['versionNote','版本 / Version'],['linkUrl','連結 / Link'],['linkTitle','連結標題 / Link title']];}
+ if(type==='rota'){
+  source=data.positions.find(p=>p.position===key);fields=[['value','PGCC 號碼（多位用逗號分隔）或原有文字 / Member numbers, separated by commas, or existing text']];
+  const choices=data.members.filter(m=>m.groups.some(g=>String(g).toLowerCase()===source.group));
+  html='<p class="muted">'+esc(source.label)+'</p><label for="pick">尋找組員 / Find a team member</label><input id="pick" list="members" placeholder="姓名或號碼 / Name or number"><datalist id="members">'+choices.map(m=>'<option value="'+esc(display(m.id))+'">'+esc(m.name)+'</option>').join('')+'</datalist><button id="add" type="button">加入 / Add</button>';
+ }
+ html+=fields.map(([k,l])=>field(k,l,type==='rota'?display(source[k]):source[k])).join('');
+ host.innerHTML='<div class="editor">'+html+'<div class="actions"><button id="cancel">取消 / Cancel</button><button id="save" class="primary">儲存 / Save</button></div><div id="override"></div></div>';
+ editor={type,key,fields,source};host.querySelectorAll('input,textarea').forEach(x=>x.oninput=()=>{dirty=true;});
+ if($('add'))$('add').onclick=()=>{const id=$('pick').value.trim();if(!id)return;$('f-value').value=[$('f-value').value,id].filter(Boolean).join(', ');$('pick').value='';dirty=true;};
+ $('cancel').onclick=()=>{if(!mayLeave())return;dirty=false;editor=null;render();message('');};$('save').onclick=()=>save();host.scrollIntoView({block:'center',behavior:'smooth'});
+}
+async function save(override){await work(async()=>{const e=editor,p={};e.fields.forEach(([k])=>p[k]=$('f-'+k).value.trim());if(e.type==='song')p.songSection=e.key;if(e.type==='rota'){p.rows=[{position:e.key,value:p.value}];p.group=e.source.group;p.override=override||null;delete p.value;}
+ try{message('儲存中… / Saving…');const next=await api('api_service_plan_save',session.token,data.eventKey,data.revision,e.type,p,'plan');data=next;dirty=false;editor=null;render();message('已儲存 / Saved');}
+ catch(x){if(x.subCode==='DUPLICATE_ASSIGNMENT'&&x.canOverride){message('請核對重複安排 / Review duplicate allocation');$('override').innerHTML='<div class="override"><h3>確認例外安排 / Confirm exception</h3>'+(x.duplicates||[]).map(d=>'<p>'+esc(display(d.memberId)+' · '+(d.name||'')+' · '+d.dateYmd)+'</p>'+row('已安排 / Existing',(d.existingPositions||[]).join(', '))+row('嘗試安排 / Proposed',(d.attemptedPositions||[]).join(', '))).join('')+'<label for="reason">詳細原因 / Detailed reason</label><textarea id="reason"></textarea><label><input id="agree" type="checkbox">我已核對以上安排 / I have reviewed these assignments</label><button id="confirmOverride" class="primary">確認並儲存 / Confirm and save</button></div>';$('confirmOverride').onclick=()=>{const reason=$('reason').value.trim();if(!$('agree').checked||reason.length<10){message('請勾選確認並填寫至少 10 個字的原因。 / Confirm and enter a reason of at least 10 characters.',true);return;}save({confirmed:true,reason,conflictKey:x.conflictKey});};}else{if(x.code==='E409'&&!x.subCode){message(err(x)+'\n請保留所需內容後重新載入。 / Copy your changes before reloading.',true);}else message(err(x),true);}}
+ });}
+if(session&&session.token)load();else message('請從已登入的專頁開啟崇拜安排。 / Open service planning from a signed-in portal.',true);
+</script></body></html>
+<!-- ===== END OF ServicePlan.html (COMPLETE) ===== -->
